@@ -10,11 +10,11 @@
   <a href="docs/screenshots/6.png"><img src="docs/screenshots/6.png" width="65" alt="设置" /></a>
 </p>
 
-<h1 align="center"><a href="https://github.com/yancyuu/Hermit">Hermit</a></h1>
+<h1 align="center">Hermit</h1>
 
 <p align="center">
-  <strong>企业级 AI Agent 团队协作与管理工作台。</strong><br />
-  像管理真实工程组织一样管理数字员工：通过子 Agent 架构实现上下文隔离与成本优化，将团队、角色、任务、消息、审查、日志和知识资产沉淀在同一个本地优先控制面里。
+  <strong>企业级 AI Agent 团队协作与管理工作台</strong><br />
+  像管理真实工程组织一样管理数字员工：通过<strong>子 Agent 架构</strong>实现上下文隔离与成本优化，将团队、角色、任务、消息、审查、日志和知识资产沉淀在同一个本地优先控制面里。
 </p>
 
 <p align="center">
@@ -25,147 +25,129 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-arm64.dmg">
-    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-DMG-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载 macOS Apple Silicon DMG" />
-  </a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-x64.dmg">
-    <img src="https://img.shields.io/badge/macOS_Intel-DMG-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载 macOS Intel DMG" />
-  </a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-Setup.exe">
-    <img src="https://img.shields.io/badge/Windows-Setup.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="下载 Windows 安装包" />
-  </a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-arm64.dmg"><img src="https://img.shields.io/badge/macOS_Apple_Silicon-DMG-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载 macOS Apple Silicon DMG" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-x64.dmg"><img src="https://img.shields.io/badge/macOS_Intel-DMG-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载 macOS Intel DMG" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-Setup.exe"><img src="https://img.shields.io/badge/Windows-Setup.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="下载 Windows 安装包" /></a>
 </p>
-
 <p align="center">
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit.AppImage">
-    <img src="https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="下载 Linux AppImage" />
-  </a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-amd64.deb">
-    <img src="https://img.shields.io/badge/Linux-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="下载 Linux DEB" />
-  </a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-x86_64.rpm">
-    <img src="https://img.shields.io/badge/Linux-RPM-EE0000?style=for-the-badge&logo=redhat&logoColor=white" alt="下载 Linux RPM" />
-  </a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit.pacman">
-    <img src="https://img.shields.io/badge/Linux-pacman-1793D1?style=for-the-badge&logo=archlinux&logoColor=white" alt="下载 Linux pacman 包" />
-  </a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit.AppImage"><img src="https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="下载 Linux AppImage" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-amd64.deb"><img src="https://img.shields.io/badge/Linux-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="下载 Linux DEB" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest/download/Hermit-x86_64.rpm"><img src="https://img.shields.io/badge/Linux-RPM-EE0000?style=for-the-badge&logo=redhat&logoColor=white" alt="下载 Linux RPM" /></a>
 </p>
 
-> 如果稳定下载链接暂时不可用，请到 [Releases](https://github.com/yancyuu/Hermit/releases/latest) 页面选择对应平台资产。
+> 稳定下载链接如暂时不可用，请前往 [Releases](https://github.com/yancyuu/Hermit/releases/latest) 页面选择对应平台资产。
 
 <img width="1304" height="820" alt="Hermit 界面预览" src="docs/screenshots/hero.png" />
 
-## Hermit 是什么
+---
 
-Hermit 是一个面向软件工程场景的 AI Agent 工作台。它不重新发明模型，也不把自己做成云端代码托管平台，而是把已经很强的编程运行时（当前默认是官方 Claude Code / `claude` CLI）放进一个可管理的团队系统里。
+## ✨ 什么是 Hermit？
 
-在 Hermit 里，你创建的不是一次性的 prompt，而是一个团队：负责人理解目标、拆分任务、分配成员；成员在独立上下文中执行；看板记录进度；评论沉淀讨论；代码审查承接 diff；日志展示真实执行过程。**你像管理一个小型工程团队一样管理 AI Agent，从而获得单会话无法企及的成本优势与工程确定性。**
+Hermit 是一个面向软件工程场景的 **AI Agent 工作台**。它不重新发明模型底座，而是将目前最强的编程运行时（当前默认官方 Claude Code / `claude` CLI）接入到一个**可管理的团队协作系统**中。
 
-Hermit 基于 `claude_agent_teams_ui` 二次开发，保留本地优先的 Claude Code 团队协作能力，并强化中文体验、团队看板、代码审查、成员运行诊断、跨团队消息、运行时适配和仓库化团队资产方向。
+在 Hermit 里，你不再发送一次性的 Prompt，而是构建一个团队。你像管理真实工程团队一样管理 AI：分配任务、查看进度、审查代码。**Hermit 为你带来的，是单窗口聊天永远无法企及的成本优势与工程确定性。**
 
-## 为什么需要它
+---
 
-编程 Agent 越来越强之后，新的问题不是“能不能写代码”，而是“如何低成本地稳定交付”。
+## 🎯 核心痛点与解决方案 (Core Value)
 
-一个真实工程任务往往包含需求澄清、上下文收集、实现、测试、审查、返工、发布和复盘。把这些全部塞进单个聊天窗口，很快会面临**上下文爆炸（导致高昂的 Token 费用）**和**注意力丢失（导致代码破坏）**。
+随着编程 Agent 能力提升，“如何低成本稳定交付”成为最大痛点。单聊天窗口模式往往会导致**上下文爆炸**、**Token 费用失控**以及**代码破坏**。Hermit 通过结构化设计解决这些问题：
 
-Hermit 通过结构化系统解决这些隐性痛点：
+*   **📉 物理隔离防 Token 爆炸（省钱即正义）**
+    *   *痛点*：单会话随任务推进，会累积庞大的无效上下文，单次请求成本激增。
+    *   *解决*：采用「负责人-子成员」架构。任务被拆解至不同子 Agent，每个成员**仅加载与该任务相关的最小代码上下文**，大幅压降算力空耗。
+*   **🛡️ 拒绝黑盒，强制代码审查（工程确定性）**
+    *   *痛点*：Agent 直接修改文件，出现 Bug 难以排查。
+    *   *解决*：专属的 **Diff 代码审查视图**。每一行代码合入前，必须经过人类工程师或审查 Agent 的明确 Approve / Reject，确保代码库安全。
+*   **🗂️ 经验资产仓库化（复用与沉淀）**
+    *   *痛点*：优秀的排障流程和规范随着 Session 结束而流失。
+    *   *解决*：将角色、工作流、审查标准等沉淀为 **Skills 和团队模板**，支持通过 GitHub/企业 Git 版本化同步，让个人经验变成团队资产。
+*   **💻 绝对的本地优先（隐私与数据保护）**
+    *   *痛点*：SaaS 化 Agent 托管平台存在代码泄露风险。
+    *   *解决*：控制面与数据全在本地。Hermit 仅负责组织调度，代码执行发生在你信任的本地环境内。
 
-- **把长对话变成精准分工（极致省 Token）**：传统的单窗口对话会随着任务推进累积庞大的无效上下文。Hermit 引入「负责人-成员」架构，通过子 Agent 实现上下文物理隔离。每个成员只需加载与其所分配任务严格相关的代码和记录，从而以极低的 Token 成本完成深度的特定域任务。
-- **把目标变成任务（提高确定性）**：负责人把用户请求拆成看板任务，任务有状态、负责人、评论和审查记录，防止 Agent 在漫无目的的循环中空耗算力。
-- **把执行变成证据（防止黑盒合入）**：每个任务的消息、工具调用、代码变更和审查意见都能回看。强制的 Code Review 环节拦截不合格的 Diff。
-- **把经验变成资产（降低复用成本）**：团队模板和 Skills 可以通过 GitHub / 企业 Git 源版本化、审查、同步和复用。
-- **把运行时变成可替换底座**：Claude Code 是当前默认能力，Cursor CLI 作为可选运行时方向逐步探索。
+---
 
-## 产品理念
+## 🚀 核心功能模块
 
-### 关注组织架构带来的降本增效
-相比于给大模型喂更长的上下文，合理的团队协作拓扑才是复杂系统工程的解法。通过子任务分发机制，Hermit 从根本上规避了无脑消耗 Context Window 的陷阱，使并发执行和精细化控制成为可能。
+### 1. 敏捷看板与任务流闭环
+*   任务状态追踪（待办/进行中/审查/完成）。
+*   负责人解析需求，自动生成并分配看板任务给特定成员。
+*   执行结果、附件及讨论沉淀在任务详情内，不再散落于对话中。
+<a href="docs/screenshots/8.png"><img src="docs/screenshots/8.png" width="75" alt="任务详情" /></a>&nbsp;
 
-### 少造底座，多沉淀组织资产
-Hermit 不试图成为所有模型、消息平台和工具调用的总网关。模型和代码执行能力会持续进化，Hermit 更关注长期不该丢失的部分：任务事实、协作协议、审查标准、团队分工、运行记录和企业内部知识。
+### 2. 独立 Inbox 与消息总线
+*   负责人与子成员各自拥有独立的 Inbox。
+*   支持人类与指定成员直接对话、跨团队协作及任务卡片引用。
+<a href="docs/screenshots/3.png"><img src="docs/screenshots/3.png" width="75" alt="智能体评论" /></a>&nbsp;
 
-### 本地优先，不托管核心代码
-Hermit 运行在你的机器上，读取你选择的项目目录和本地 Claude 数据。真实代码执行发生在本地工作站或你信任的运行环境里。Hermit 负责组织、观察和记录，而不是把代码交给一个额外的中心控制面。
 
-### 仓库同步，而不是远程遥控
-多机协同的默认方向不是 SSH/SFTP 式分布式调度。每台机器安装 Hermit，连接同一组团队模板源和 Skills 源，通过 Git 分支、PR 和企业代码库完成协作。仓库就是跨机器和跨团队的边界。
+### 3. 执行诊断与全景日志
+*   保留所有 Claude CLI/Agent 的底层运行日志、工具调用（Tool Calls）及思考链（CoT）。
+*   可视化展示进程状态、权限阻塞及超时等诊断信息。
+ <a href="docs/screenshots/9.png"><img src="docs/screenshots/9.png" width="75" alt="执行日志" /></a>&nbsp;
 
-### 中文优先，专注开发者体验
-Hermit 默认面向中文用户。可见文案、团队创建、成员管理、任务评论、确认对话和错误提示都优先使用简体中文。针对国内或特定系统环境下，Windows 慢启动、权限阻塞等坑位做了深度调优和退让策略。
 
-## 核心能力
+### 4. 专为中文开发者调优
+*   界面与交互全链路汉化（支持中文团队、角色及确认指令）。
+*   针对 Windows 慢启动、杀毒软件拦截等坑位实施了弹性的并发控制与等待窗口。
+<a href="docs/screenshots/2.png"><img src="docs/screenshots/2.png" width="75" alt="团队视图" /></a>&nbsp;
 
-### Agent 团队分工调度
-- 创建负责人和多个成员组成的团队，隔离任务上下文。
-- 成员可以拥有不同角色、工作流、模型和运行方式。
-- 团队启动按小批次并发拉起成员，减少限流和慢机器误判。
+---
 
-### 看板任务流与代码审查
-- 任务从待办、进行中、审查到完成形成闭环。
-- 专属的代码审查视图：按任务查看文件变更和 diff，支持接受、拒绝或具体评论。
-- 彻底告别 Agent 写完直接强制保存的恐慌感，保留人类工程师的最终控制权。
+## 📊 与现有方案的区别
 
-### 消息与协作
-- 负责人和成员通过 Inbox 进行消息协作。
-- 支持用户直接给成员发消息、跨团队沟通和任务引用链接。
-- 沟通记录沉淀到任务级记忆中，避免对话流失。
+| 能力维度 | Hermit | 官方 Claude 单会话 | 通用 Chat/个人 Agent | 任务型 (OpenHands等) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Token 与上下文成本控制** | 🟢 **基于子 Agent 强隔离，极致省流** | 🔴 随对话长度线性爆炸 | 🟡 弱隔离 | 🟡 部分隔离 |
+| **代码审查 (Diff Review)** | 🟢 **内置审查视图，支持拒收/返工** | 🔴 黑盒直接覆盖文件 | 🔴 无 | 🟡 部分支持 |
+| **多角色团队看板调度** | 🟢 **支持** (负责人与执行者分离) | 🔴 否 | 🟡 部分支持 | 🟢 支持 |
+| **组织知识仓库化 (Skills)** | 🟢 **支持 Git 版本化同步 (规划中)** | 🔴 无持久化 | 🟡 本地配置 | 🔴 否 |
+| **本地代码资产零托管** | 🟢 **纯本地调度执行** | 🟢 本地执行 | 🟢 本地执行 | 🟡 部分云托管 |
 
-### 执行日志与诊断
-- 展示 Claude CLI / Agent 运行日志、工具调用、思考片段、消息和错误。
-- 提供底层的进程状态、启动超时、权限阻塞等诊断信息。
+---
 
-### Skills 与团队模板（规划中演进方向）
-- 支持配置多个 GitHub / 企业 Git 源。
-- 角色、工作流、审查标准、排障手册等非标准资产可通过代码仓库同步、版本化。
+## 🏁 快速开始
 
-## 和常见方案的区别
+1. **环境准备**：确保本机已安装并登录官方 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) (`claude` CLI)。
+2. **启动应用**：运行 Hermit 并选择你的目标代码目录。
+3. **构建团队**：创建一个包含“技术负责人”、“业务开发”、“测试”等角色的 AI 团队。
+4. **派发任务**：向负责人发送需求，如：“*重构本项目的用户鉴权模块，并补充单元测试*”。
+5. **看板协作**：观察看板任务拆解，通过消息跟进进度，并在“代码审查”面板合入最终代码。
 
-| 能力 | Hermit | 官方 Claude 单会话 | OpenClaw / 个人 Agent | Vibe Kanban / OpenHands |
-| --- | ---: | ---: | ---: | ---: |
-| **Token 与上下文成本控制** | **基于子 Agent 隔离，极度优化** | 随对话长度线性爆炸 | 部分隔离 | 部分隔离 |
-| 直接复用 Claude Code Runtime | 是 | 是 | 否 | 部分 |
-| 负责人 + 成员的团队模型 | 是 | 否 | 部分 | 部分 |
-| 看板任务闭环 | 是 | 否 | 否 | 是 |
-| 代码审查 / diff 审批拦截 | 是 | 否 | 否 | 部分 |
-| 本地优先，不托管核心代码 | 是 | 是 | 是 | 部分 |
-| Skills / 团队模板版本化 | 规划中 | 否 | 部分 | 否 |
+> *注：若 macOS 下提示找不到 `claude` 命令，请在设置中手动配置 CLI 路径（如 `~/.claude/local/bin` 或 NVM/Homebrew 路径）。*
 
-*Hermit 的核心取舍是：不重新发明 Agent 大脑，而是在强运行时之上，用团队分治和闭环流程压降成本，并带来确定性的工程交付。*
+---
 
-## 快速开始
-
-1. 安装并启动 Hermit。
-2. 确保本机已安装并登录官方 Claude Code / `claude` CLI。
-3. 选择一个项目目录。
-4. 创建团队，填写团队目标、成员、角色和工作方式。
-5. 启动团队，观察成员启动状态和看板任务。
-6. 在消息、任务详情、执行日志和代码审查中介入协作。
-
-*提示：如果 macOS 图形界面启动后找不到 `claude`，请确认 Claude Code 已安装，或在设置里配置 CLI 路径。常见路径包括 Homebrew、npm/nvm、`~/.claude/local/bin` 等。*
-
-## 架构概览
+## 🏗️ 架构概览
 
 ```text
-GitHub / 企业 Git 源
-        |
-        +--> Skills / 团队模板 / 运行时预设
-        |
-        v
-Hermit 本地工作台 (控制平面)
-        |
-        +--> 团队负责人 team-lead (解析需求 / 任务拆解分发 / 外部沟通)
-        |       |
-        |       +--> 【隔离区 A】成员 1：负责模块 A 开发 (低 Token 消耗)
-        |       +--> 【隔离区 B】成员 2：负责单元测试 (独立上下文)
-        |
-        +--> 状态中心：看板任务 / 跨成员消息总线 / 代码审查 Diff / 执行审计日志
-        |
-        +--> Agent Runtime (运行时)
-        |       |
-        |       +--> Claude Code / Cursor CLI ...
-        |
-        +--> 本地项目目录 / 用户可信执行环境
+远程 Git 源 (GitHub / 企业私有仓)
+        │
+        └──> [同步] 团队模板 / Skills 规范 / 预设工作流
+               │
+               ▼
+Hermit 控制平面 (本地优先)
+        │
+        ├──> 🧠 团队负责人 (Team Lead)
+        │       ├── 解析需求 / 拆解任务
+        │       └── 跨团队沟通 / 状态分发
+        │
+        ├──> 🚦 协作中枢
+        │       ├── 看板任务流 (Todo/Doing/Review/Done)
+        │       ├── 代码审查 Diff 面板
+        │       └── 消息 Inbox 总线
+        │
+        └──> 👷 子 Agent 集群 (上下文物理隔离)
+                ├── [成员A] 负责 UI 调整 (加载少量关联视图代码)
+                ├── [成员B] 负责 DB 迁移 (加载数据库 Schema)
+                │
+                ▼ (驱动底层运行时)
+Agent Runtime
+        └──> Claude Code (默认) / Cursor CLI (探索中)
+               │
+               ▼
+用户可信执行环境 (本地文件系统 / Terminal)
 ```
 
 关键原则：
