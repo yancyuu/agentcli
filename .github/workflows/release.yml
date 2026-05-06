@@ -139,20 +139,34 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          HAS_APPLE_SIGNING=0
           if [ -n "${CSC_LINK:-}" ] && \
              [ -n "${CSC_KEY_PASSWORD:-}" ] && \
              [ -n "${APPLE_ID:-}" ] && \
              [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && \
              [ -n "${APPLE_TEAM_ID:-}" ]; then
+            HAS_APPLE_SIGNING=1
+          fi
+
+          if [ "$HAS_APPLE_SIGNING" = "1" ]; then
             echo "Building signed and notarized macOS package"
             ${{ matrix.dist_command }} --publish never
+          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            echo "::error::Apple signing/notarization secrets are required for tagged macOS releases."
+            echo "::error::Configure CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID."
+            exit 1
           else
-            echo "Apple signing secrets are not configured; building unsigned macOS package"
+            echo "Apple signing secrets are not configured; building unsigned macOS package for non-release run"
             ${{ matrix.dist_command }} --publish never -c.mac.identity=null -c.mac.notarize=false
           fi
 
       - name: Validate packaged bundle (macOS ${{ matrix.arch }})
-        run: node ./scripts/electron-builder/verifyBundle.cjs "release/mac-${{ matrix.arch }}/Hermit.app" darwin ${{ matrix.arch }}
+        run: |
+          node ./scripts/electron-builder/verifyBundle.cjs "release/mac-${{ matrix.arch }}/Hermit.app" darwin ${{ matrix.arch }}
+          codesign --verify --deep --strict --verbose=2 "release/mac-${{ matrix.arch }}/Hermit.app"
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            spctl --assess --type execute --verbose=4 "release/mac-${{ matrix.arch }}/Hermit.app"
+          fi
 
       - name: Upload assets to release
         if: startsWith(github.ref, 'refs/tags/')
@@ -329,44 +343,12 @@ jobs:
               echo "WARNING: failed to upload $f, continuing..."
           done
 
-  upload-stable-links:
+  publish-updater-metadata:
     needs: [release-mac, release-win, release-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
-      - name: Upload stable-named assets for /latest/download links
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          REPO="${GITHUB_REPOSITORY}"
-          DOWNLOAD_BASE="https://github.com/${REPO}/releases/download/${TAG}"
-          TMP_DIR="$(mktemp -d)"
-          trap 'rm -rf "$TMP_DIR"' EXIT
-
-          declare -A FILES=(
-            ["Hermit-arm64.dmg"]="Hermit-${VERSION}-arm64.dmg"
-            ["Hermit-arm64-mac.zip"]="Hermit-${VERSION}-arm64-mac.zip"
-            ["Hermit-x64.dmg"]="Hermit-${VERSION}-x64.dmg"
-            ["Hermit-Setup.exe"]="Hermit.Setup.${VERSION}.exe"
-            ["Hermit.AppImage"]="Hermit-${VERSION}.AppImage"
-            ["Hermit-amd64.deb"]="hermit_${VERSION}_amd64.deb"
-            ["Hermit-x86_64.rpm"]="hermit-${VERSION}.x86_64.rpm"
-            ["Hermit.pacman"]="hermit-${VERSION}.pacman"
-          )
-
-          # Download versioned files and re-upload with stable names
-          for STABLE_NAME in "${!FILES[@]}"; do
-            VERSIONED_NAME="${FILES[$STABLE_NAME]}"
-            echo "Downloading ${VERSIONED_NAME} -> ${STABLE_NAME}"
-            curl -fSL -o "${TMP_DIR}/${VERSIONED_NAME}" "${DOWNLOAD_BASE}/${VERSIONED_NAME}"
-            cp "${TMP_DIR}/${VERSIONED_NAME}" "${TMP_DIR}/${STABLE_NAME}"
-            gh release upload "${TAG}" "${TMP_DIR}/${STABLE_NAME}" --repo "$REPO" --clobber
-          done
-
       - name: Publish canonical updater metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -393,31 +375,33 @@ jobs:
           }
 
           # Canonical Windows feed
-          download_asset "Hermit-Setup.exe"
-          WIN_SHA="$(sha512_base64 Hermit-Setup.exe)"
-          WIN_SIZE="$(file_size Hermit-Setup.exe)"
+          WIN_EXE="Hermit.Setup.${VERSION}.exe"
+          download_asset "$WIN_EXE"
+          WIN_SHA="$(sha512_base64 "$WIN_EXE")"
+          WIN_SIZE="$(file_size "$WIN_EXE")"
           cat > latest.yml <<EOF
           version: ${VERSION}
           files:
-            - url: Hermit-Setup.exe
+            - url: ${WIN_EXE}
               sha512: ${WIN_SHA}
               size: ${WIN_SIZE}
-          path: Hermit-Setup.exe
+          path: ${WIN_EXE}
           sha512: ${WIN_SHA}
           releaseDate: '${RELEASE_DATE}'
           EOF
 
           # Canonical Linux feed
-          download_asset "Hermit.AppImage"
-          LINUX_SHA="$(sha512_base64 Hermit.AppImage)"
-          LINUX_SIZE="$(file_size Hermit.AppImage)"
+          LINUX_APPIMAGE="Hermit-${VERSION}.AppImage"
+          download_asset "$LINUX_APPIMAGE"
+          LINUX_SHA="$(sha512_base64 "$LINUX_APPIMAGE")"
+          LINUX_SIZE="$(file_size "$LINUX_APPIMAGE")"
           cat > latest-linux.yml <<EOF
           version: ${VERSION}
           files:
-            - url: Hermit.AppImage
+            - url: ${LINUX_APPIMAGE}
               sha512: ${LINUX_SHA}
               size: ${LINUX_SIZE}
-          path: Hermit.AppImage
+          path: ${LINUX_APPIMAGE}
           sha512: ${LINUX_SHA}
           releaseDate: '${RELEASE_DATE}'
           EOF
@@ -426,22 +410,24 @@ jobs:
           # electron-updater on GitHub still consumes a single latest-mac.yml, so we
           # publish the Apple Silicon feed here and suppress Intel auto-update in-app
           # until we switch to universal packaging or an arch-aware provider.
-          download_asset "Hermit-arm64-mac.zip"
-          download_asset "Hermit-arm64.dmg"
-          MAC_ZIP_SHA="$(sha512_base64 Hermit-arm64-mac.zip)"
-          MAC_ZIP_SIZE="$(file_size Hermit-arm64-mac.zip)"
-          MAC_DMG_SHA="$(sha512_base64 Hermit-arm64.dmg)"
-          MAC_DMG_SIZE="$(file_size Hermit-arm64.dmg)"
+          MAC_ZIP="Hermit-${VERSION}-arm64-mac.zip"
+          MAC_DMG="Hermit-${VERSION}-arm64.dmg"
+          download_asset "$MAC_ZIP"
+          download_asset "$MAC_DMG"
+          MAC_ZIP_SHA="$(sha512_base64 "$MAC_ZIP")"
+          MAC_ZIP_SIZE="$(file_size "$MAC_ZIP")"
+          MAC_DMG_SHA="$(sha512_base64 "$MAC_DMG")"
+          MAC_DMG_SIZE="$(file_size "$MAC_DMG")"
           cat > latest-mac.yml <<EOF
           version: ${VERSION}
           files:
-            - url: Hermit-arm64-mac.zip
+            - url: ${MAC_ZIP}
               sha512: ${MAC_ZIP_SHA}
               size: ${MAC_ZIP_SIZE}
-            - url: Hermit-arm64.dmg
+            - url: ${MAC_DMG}
               sha512: ${MAC_DMG_SHA}
               size: ${MAC_DMG_SIZE}
-          path: Hermit-arm64-mac.zip
+          path: ${MAC_ZIP}
           sha512: ${MAC_ZIP_SHA}
           releaseDate: '${RELEASE_DATE}'
           EOF

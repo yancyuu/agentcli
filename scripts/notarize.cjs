@@ -13,7 +13,7 @@ exports.default = async function notarizing(context) {
 
   return await notarize({
     tool: 'notarytool',
-    appBundleId: 'com.agent-teams.app',
+    appBundleId: 'com.lazyagent.hermit',
     appPath: `${appOutDir}/${appName}.app`,
     appleId: process.env.APPLE_ID,
     appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
