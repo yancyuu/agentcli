@@ -111,16 +111,11 @@ export const ScheduleRunLogDialog = ({
       return;
     }
 
-    // Only fetch logs for completed/failed runs (not running/pending)
-    const hasLogs =
-      runStatus === 'completed' || runStatus === 'failed' || runStatus === 'failed_interrupted';
-    if (!hasLogs) return;
-
     let cancelled = false;
-    setLoading(true);
+    setLoading(logs == null);
     setError(null);
 
-    void (async () => {
+    const loadLogs = async (): Promise<void> => {
       try {
         const result = await api.schedules.getRunLogs(scheduleId, runId!);
         if (!cancelled) {
@@ -133,10 +128,21 @@ export const ScheduleRunLogDialog = ({
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+
+    void loadLogs();
+    const shouldPoll =
+      runStatus === 'running' ||
+      runStatus === 'warming_up' ||
+      runStatus === 'warm' ||
+      runStatus === 'pending';
+    const interval = shouldPoll ? window.setInterval(() => void loadLogs(), 1000) : null;
 
     return () => {
       cancelled = true;
+      if (interval) {
+        window.clearInterval(interval);
+      }
     };
   }, [open, runId, runStatus, scheduleId]);
 

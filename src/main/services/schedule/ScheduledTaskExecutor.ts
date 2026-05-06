@@ -121,6 +121,7 @@ export interface ExecutionRequest {
   config: ScheduleLaunchConfig;
   maxTurns: number;
   maxBudgetUsd?: number;
+  onOutput?: (output: { stdout: string; stderr: string }) => void | Promise<void>;
 }
 
 /**
@@ -183,7 +184,7 @@ export class ScheduledTaskExecutor {
     this.activeProcesses.set(request.runId, child);
 
     try {
-      const result = await this.waitForExit(child, request.runId);
+      const result = await this.waitForExit(child, request.runId, request.onOutput);
       const durationMs = Date.now() - startTime;
 
       return {
@@ -265,18 +266,44 @@ export class ScheduledTaskExecutor {
 
   private waitForExit(
     child: ChildProcess,
-    runId: string
+    runId: string,
+    onOutput?: (output: { stdout: string; stderr: string }) => void | Promise<void>
   ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
       let stdoutBytes = 0;
       let stderrBytes = 0;
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const snapshotOutput = (): { stdout: string; stderr: string } => ({
+        stdout: Buffer.concat(stdoutChunks).toString('utf8').slice(0, STDOUT_MAX_BYTES),
+        stderr: Buffer.concat(stderrChunks).toString('utf8').slice(0, STDERR_MAX_BYTES),
+      });
+
+      const flushOutput = (): void => {
+        flushTimer = null;
+        if (!onOutput) return;
+        void Promise.resolve(onOutput(snapshotOutput())).catch((error) => {
+          logger.warn(
+            `[${runId}] Failed to persist live schedule logs: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        });
+      };
+
+      const scheduleFlush = (): void => {
+        if (!onOutput || flushTimer) return;
+        flushTimer = setTimeout(flushOutput, 500);
+        flushTimer.unref?.();
+      };
 
       child.stdout?.on('data', (chunk: Buffer) => {
         if (stdoutBytes < STDOUT_MAX_BYTES) {
           stdoutChunks.push(chunk);
           stdoutBytes += chunk.length;
+          scheduleFlush();
         }
       });
 
@@ -284,6 +311,7 @@ export class ScheduledTaskExecutor {
         if (stderrBytes < STDERR_MAX_BYTES) {
           stderrChunks.push(chunk);
           stderrBytes += chunk.length;
+          scheduleFlush();
         }
       });
 
@@ -293,8 +321,11 @@ export class ScheduledTaskExecutor {
       });
 
       child.once('close', (code) => {
-        const stdout = Buffer.concat(stdoutChunks).toString('utf8').slice(0, STDOUT_MAX_BYTES);
-        const stderr = Buffer.concat(stderrChunks).toString('utf8').slice(0, STDERR_MAX_BYTES);
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        const { stdout, stderr } = snapshotOutput();
 
         logger.info(`[${runId}] Process exited with code ${code}`);
         resolve({ exitCode: code, stdout, stderr });

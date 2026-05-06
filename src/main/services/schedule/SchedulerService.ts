@@ -569,6 +569,8 @@ export class SchedulerService {
         config: launchConfig,
         maxTurns: schedule.maxTurns,
         maxBudgetUsd: schedule.maxBudgetUsd,
+        onOutput: (output) =>
+          this.repository.saveRunLogs(scheduleId, run.id, output.stdout, output.stderr),
       });
 
       if (result.exitCode === 0) {
