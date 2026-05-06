@@ -52,7 +52,7 @@ interface ScheduleListItemProps {
   onDelete: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
-  onTriggerNow: (id: string) => void;
+  onTriggerNow: (id: string) => Promise<ScheduleRun>;
   onTeamClick: (teamName: string) => void;
   teamColor: string;
 }
@@ -81,8 +81,17 @@ const ScheduleListItem = ({
     }
   }, [expanded, runs.length, runsLoading, fetchRunHistory, schedule.id]);
 
+  const handleTriggerNow = useCallback(() => {
+    void (async () => {
+      const run = await onTriggerNow(schedule.id);
+      setExpanded(true);
+      setSelectedRun(run);
+      void fetchRunHistory(schedule.id);
+    })();
+  }, [fetchRunHistory, onTriggerNow, schedule.id]);
+
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] font-sans">
       {/* Main row */}
       <div className="flex items-center gap-3 px-4 py-3">
         {/* Expand toggle */}
@@ -148,7 +157,7 @@ const ScheduleListItem = ({
                 variant="ghost"
                 size="sm"
                 className="size-7 p-0"
-                onClick={() => onTriggerNow(schedule.id)}
+                onClick={handleTriggerNow}
                 disabled={schedule.status !== 'active'}
               >
                 <Zap className="size-3.5" />
@@ -372,11 +381,8 @@ export const SchedulesView = (): React.JSX.Element => {
 
   const handleTriggerNow = useCallback(
     async (id: string) => {
-      try {
-        await triggerNow(id);
-      } catch (err) {
-        console.error('Failed to trigger schedule:', err);
-      }
+      const run = await triggerNow(id);
+      return run;
     },
     [triggerNow]
   );
@@ -548,7 +554,7 @@ export const SchedulesView = (): React.JSX.Element => {
                 onDelete={(id) => void handleDelete(id)}
                 onPause={(id) => void pauseSchedule(id)}
                 onResume={(id) => void resumeSchedule(id)}
-                onTriggerNow={(id) => void handleTriggerNow(id)}
+                onTriggerNow={handleTriggerNow}
                 onTeamClick={handleTeamClick}
                 teamColor={getTeamColor(schedule.teamName)}
               />

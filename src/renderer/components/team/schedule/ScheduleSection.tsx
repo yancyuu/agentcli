@@ -45,7 +45,7 @@ interface ScheduleRowProps {
   onDelete: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
-  onTriggerNow: (id: string) => void;
+  onTriggerNow: (id: string) => Promise<ScheduleRun>;
 }
 
 const ScheduleRow = ({
@@ -70,8 +70,17 @@ const ScheduleRow = ({
     }
   }, [expanded, runs.length, runsLoading, fetchRunHistory, schedule.id]);
 
+  const handleTriggerNow = useCallback(() => {
+    void (async () => {
+      const run = await onTriggerNow(schedule.id);
+      setExpanded(true);
+      setSelectedRun(run);
+      void fetchRunHistory(schedule.id);
+    })();
+  }, [fetchRunHistory, onTriggerNow, schedule.id]);
+
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] font-sans">
       {/* Header row */}
       <div className="flex items-center gap-2 px-3 py-2">
         {/* Expand toggle */}
@@ -115,7 +124,7 @@ const ScheduleRow = ({
                 variant="ghost"
                 size="sm"
                 className="size-7 p-0"
-                onClick={() => onTriggerNow(schedule.id)}
+                onClick={handleTriggerNow}
                 disabled={schedule.status !== 'active'}
               >
                 <Zap className="size-3.5" />
@@ -137,7 +146,7 @@ const ScheduleRow = ({
                 onClick={() => onEdit(schedule)}
               >
                 <Pencil className="mr-2 size-3.5" />
-                Edit
+                编辑
               </button>
               {schedule.status === 'active' ? (
                 <button
@@ -146,7 +155,7 @@ const ScheduleRow = ({
                   onClick={() => onPause(schedule.id)}
                 >
                   <Pause className="mr-2 size-3.5" />
-                  Pause
+                  暂停
                 </button>
               ) : (
                 <button
@@ -155,7 +164,7 @@ const ScheduleRow = ({
                   onClick={() => onResume(schedule.id)}
                 >
                   <Play className="mr-2 size-3.5" />
-                  Resume
+                  恢复
                 </button>
               )}
               <button
@@ -164,7 +173,7 @@ const ScheduleRow = ({
                 onClick={() => onDelete(schedule.id)}
               >
                 <Trash2 className="mr-2 size-3.5" />
-                Delete
+                删除
               </button>
             </PopoverContent>
           </Popover>
@@ -176,7 +185,7 @@ const ScheduleRow = ({
         <div className="border-t border-[var(--color-border)]">
           {runsLoading ? (
             <div className="flex items-center justify-center py-3 text-[11px] text-[var(--color-text-muted)]">
-              Loading run history...
+              正在加载运行历史...
             </div>
           ) : runs.length === 0 ? (
             <div className="flex items-center justify-center py-3 text-[11px] text-[var(--color-text-muted)]">
@@ -256,11 +265,8 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
 
   const handleTriggerNow = useCallback(
     async (id: string) => {
-      try {
-        await triggerNow(id);
-      } catch (err) {
-        console.error('Failed to trigger schedule:', err);
-      }
+      const run = await triggerNow(id);
+      return run;
     },
     [triggerNow]
   );
@@ -270,9 +276,7 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
       {/* Header with create button */}
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
-          {schedules.length > 0
-            ? `${schedules.length} schedule${schedules.length > 1 ? 's' : ''}`
-            : ''}
+          {schedules.length > 0 ? `${schedules.length} 个计划` : ''}
         </span>
         <Button
           variant="outline"
@@ -281,7 +285,7 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
           onClick={handleCreate}
         >
           <Plus className="size-3" />
-          Add Schedule
+          添加计划
         </Button>
       </div>
 
@@ -298,7 +302,7 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
               onDelete={(id) => void handleDelete(id)}
               onPause={(id) => void pauseSchedule(id)}
               onResume={(id) => void resumeSchedule(id)}
-              onTriggerNow={(id) => void handleTriggerNow(id)}
+              onTriggerNow={handleTriggerNow}
             />
           ))}
         </div>

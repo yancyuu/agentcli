@@ -34,12 +34,11 @@ function formatDuration(ms: number): string {
 
 function formatTime(isoString: string): string {
   try {
-    return new Date(isoString).toLocaleString('en-US', {
-      month: 'short',
+    return new Date(isoString).toLocaleString('zh-CN', {
+      month: '2-digit',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
     });
   } catch {
     return isoString;
@@ -52,7 +51,7 @@ function formatTime(isoString: string): string {
 
 export const ScheduleRunRow = ({ run, onClick }: ScheduleRunRowProps): React.JSX.Element => (
   <div
-    className={`flex items-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5 text-[11px]${
+    className={`flex items-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5 font-sans text-xs leading-normal${
       onClick ? 'cursor-pointer transition-colors hover:bg-[var(--color-surface-raised)]' : ''
     }`}
     onClick={onClick ? () => onClick(run) : undefined}

@@ -37,13 +37,12 @@ interface ScheduleRunLogDialogProps {
 
 function formatTime(isoString: string): string {
   try {
-    return new Date(isoString).toLocaleString('en-US', {
-      month: 'short',
+    return new Date(isoString).toLocaleString('zh-CN', {
+      month: '2-digit',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: false,
     });
   } catch {
     return isoString;
@@ -60,6 +59,22 @@ function formatDuration(ms: number): string {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return `${hours}h ${remainingMinutes}m`;
+}
+
+function looksLikeStreamJsonLogs(value: string | undefined): boolean {
+  const firstLine = value
+    ?.split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine?.startsWith('{')) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(firstLine) as { type?: unknown };
+    return typeof parsed.type === 'string';
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================
@@ -141,11 +156,11 @@ export const ScheduleRunLogDialog = ({
         if (!nextOpen) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto font-sans">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Terminal className="size-4" />
-            Run Log
+            运行日志
           </DialogTitle>
         </DialogHeader>
 
@@ -181,7 +196,7 @@ export const ScheduleRunLogDialog = ({
           {isRunning ? (
             <div className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-xs text-[var(--color-text-secondary)]">
               <Loader2 className="size-4 animate-spin" />
-              Task is still running...
+              任务仍在运行...
               {run.summary ? (
                 <span className="ml-2 truncate text-[var(--color-text-muted)]">{run.summary}</span>
               ) : null}
@@ -192,7 +207,7 @@ export const ScheduleRunLogDialog = ({
           {loading ? (
             <div className="flex items-center justify-center py-6 text-xs text-[var(--color-text-muted)]">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading logs...
+              正在加载日志...
             </div>
           ) : null}
 
@@ -204,14 +219,25 @@ export const ScheduleRunLogDialog = ({
             </div>
           ) : null}
 
-          {/* Stdout — rich stream-json view (falls back to plain text for old logs) */}
+          {/* Stdout */}
           {logs ? (
             <>
-              <CliLogsRichView
-                cliLogsTail={logs.stdout}
-                order="oldest-first"
-                className="max-h-[400px]"
-              />
+              {looksLikeStreamJsonLogs(logs.stdout) ? (
+                <CliLogsRichView
+                  cliLogsTail={logs.stdout}
+                  order="oldest-first"
+                  className="max-h-[400px]"
+                />
+              ) : logs.stdout.trim() ? (
+                <div>
+                  <div className="mb-1 text-[11px] font-medium text-[var(--color-text-muted)]">
+                    输出
+                  </div>
+                  <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                    {logs.stdout}
+                  </pre>
+                </div>
+              ) : null}
 
               {/* Stderr */}
               {hasStderr ? (
@@ -236,7 +262,7 @@ export const ScheduleRunLogDialog = ({
 
         <DialogFooter className="pt-2">
           <Button variant="outline" size="sm" onClick={onClose}>
-            Close
+            关闭
           </Button>
         </DialogFooter>
       </DialogContent>
