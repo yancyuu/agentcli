@@ -114,17 +114,10 @@ import {
   updateProviderCheck,
 } from './ProvisioningProviderStatusList';
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
-import {
-  buildLaunchExtraCliArgs,
-  buildTeammateModeCliArgs,
-  normalizeTeammateLaunchMode,
-} from './teammateLaunchMode';
-import {
-  analyzeTeammateRuntimeCompatibility,
-  useTmuxRuntimeReadiness,
-} from './teammateRuntimeCompatibility';
+import { buildLaunchExtraCliArgs, buildTeammateModeCliArgs } from './teammateLaunchMode';
+import { analyzeTeammateRuntimeCompatibility } from './teammateRuntimeCompatibility';
 import { TeammateRuntimeCompatibilityNotice } from './TeammateRuntimeCompatibilityNotice';
-import { computeEffectiveTeamModel } from './TeamModelSelector';
+import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 import { getNextSuggestedTeamName } from './teamNameSets';
 
 import type { MemberDraft } from '@renderer/components/team/members/MembersEditorSection';
@@ -458,9 +451,6 @@ export const CreateTeamDialog = ({
   const [worktreeEnabled, setWorktreeEnabledRaw] = useState(false);
   const [worktreeName, setWorktreeNameRaw] = useState('');
   const [customArgs, setCustomArgsRaw] = useState('');
-  const [teammateLaunchMode, setTeammateLaunchModeRaw] = useState(() =>
-    normalizeTeammateLaunchMode(localStorage.getItem('team:createTeammateLaunchMode'))
-  );
 
   useEffect(() => {
     migrateLegacyCreateTeamPreferences();
@@ -474,9 +464,6 @@ export const CreateTeamDialog = ({
     setWorktreeEnabledRaw(storedEnabled && Boolean(storedName));
     setWorktreeNameRaw(storedName);
     setCustomArgsRaw(localStorage.getItem(`team:lastCustomArgs:${advancedKey}`) ?? '');
-    setTeammateLaunchModeRaw(
-      normalizeTeammateLaunchMode(localStorage.getItem('team:createTeammateLaunchMode'))
-    );
   }, [advancedKey]);
 
   const setSelectedModel = (value: string): void => {
@@ -532,10 +519,6 @@ export const CreateTeamDialog = ({
     setCustomArgsRaw(value);
     localStorage.setItem(`team:lastCustomArgs:${advancedKey}`, value);
   };
-  const setTeammateLaunchMode = (value: typeof teammateLaunchMode): void => {
-    setTeammateLaunchModeRaw(value);
-    localStorage.setItem('team:createTeammateLaunchMode', value);
-  };
 
   const resetUIState = (): void => {
     setLocalError(null);
@@ -584,15 +567,16 @@ export const CreateTeamDialog = ({
   }, [open, clearProvisioningError, dialogTeamNameKey]);
 
   const effectiveMemberDrafts = useMemo(
-    () => (syncModelsWithLead ? members.map(clearMemberModelOverrides) : members),
-    [members, syncModelsWithLead]
+    () =>
+      (syncModelsWithLead ? members.map(clearMemberModelOverrides) : members).map((member) =>
+        member.providerId === selectedProviderId
+          ? member
+          : { ...member, providerId: selectedProviderId }
+      ),
+    [members, selectedProviderId, syncModelsWithLead]
   );
-  const tmuxRuntime = useTmuxRuntimeReadiness(open && canCreate);
 
   const selectedMemberProviders = useMemo<TeamProviderId[]>(() => {
-    if (!multimodelEnabled) {
-      return ['anthropic'];
-    }
     if (soloTeam || syncModelsWithLead) {
       return [selectedProviderId];
     }
@@ -604,7 +588,7 @@ export const CreateTeamDialog = ({
         ),
       ])
     );
-  }, [members, multimodelEnabled, selectedProviderId, soloTeam, syncModelsWithLead]);
+  }, [members, selectedProviderId, soloTeam, syncModelsWithLead]);
 
   const runtimeBackendSummaryByProvider = useMemo(() => {
     const entries: (readonly [TeamProviderId, string | null])[] = (
@@ -700,21 +684,6 @@ export const CreateTeamDialog = ({
       selectedProviderId,
     ]
   );
-
-  useEffect(() => {
-    if (multimodelEnabled) {
-      return;
-    }
-    if (selectedProviderId !== 'anthropic') {
-      setSelectedProviderIdRaw('anthropic');
-      setSelectedModelRaw(getStoredTeamModel('anthropic'));
-    }
-    const nextMembers = members.map((member) => normalizeMemberDraftForProviderMode(member, false));
-    const changed = nextMembers.some((member, index) => member !== members[index]);
-    if (changed) {
-      setMembers(nextMembers);
-    }
-  }, [members, multimodelEnabled, selectedProviderId, setMembers]);
 
   useEffect(() => {
     if (!open || cliStatus || cliStatusLoading) {
@@ -939,7 +908,7 @@ export const CreateTeamDialog = ({
         );
       } catch (error) {
         if (prepareRequestSeqRef.current !== requestSeq) return;
-        const failureMessage = error instanceof Error ? error.message : '预热 Claude CLI 环境失败';
+        const failureMessage = error instanceof Error ? error.message : '预热 Agent CLI 环境失败';
         setPrepareState('failed');
         setPrepareWarnings([]);
         setPrepareChecks(failIncompleteProviderChecks(checks, failureMessage));
@@ -1201,25 +1170,16 @@ export const CreateTeamDialog = ({
         leadProviderBackendId: selectedProviderBackendId,
         members: effectiveMemberDrafts,
         soloTeam: soloTeam || !canCreate,
-        extraCliArgs: launchTeam
-          ? buildLaunchExtraCliArgs(customArgs, teammateLaunchMode)
-          : undefined,
-        tmuxStatus: tmuxRuntime.status,
-        tmuxStatusLoading: tmuxRuntime.loading,
-        tmuxStatusError: tmuxRuntime.error,
+        extraCliArgs: launchTeam ? buildLaunchExtraCliArgs(customArgs) : undefined,
       }),
     [
       customArgs,
-      teammateLaunchMode,
       effectiveMemberDrafts,
       launchTeam,
       canCreate,
       selectedProviderBackendId,
       selectedProviderId,
       soloTeam,
-      tmuxRuntime.error,
-      tmuxRuntime.loading,
-      tmuxRuntime.status,
     ]
   );
   const anthropicRuntimeSelection = useMemo(
@@ -1333,9 +1293,7 @@ export const CreateTeamDialog = ({
       limitContext,
       skipPermissions,
       worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
-      extraCliArgs: launchTeam
-        ? buildLaunchExtraCliArgs(customArgs, teammateLaunchMode)
-        : undefined,
+      extraCliArgs: launchTeam ? buildLaunchExtraCliArgs(customArgs) : undefined,
     };
   }, [
     sanitizedTeamName,
@@ -1358,7 +1316,6 @@ export const CreateTeamDialog = ({
     worktreeName,
     customArgs,
     launchTeam,
-    teammateLaunchMode,
   ]);
   const requestValidation = useMemo(
     () => validateRequest(request, { requireCwd: launchTeam }),
@@ -1454,7 +1411,7 @@ export const CreateTeamDialog = ({
         : { fastMode: false };
       args.push('--settings', JSON.stringify(fastSettings));
     }
-    args.push(...buildTeammateModeCliArgs(teammateLaunchMode));
+    args.push(...buildTeammateModeCliArgs());
     return args;
   }, [
     anthropicFastModeResolution?.resolvedFastMode,
@@ -1463,7 +1420,6 @@ export const CreateTeamDialog = ({
     selectedEffort,
     selectedProviderId,
     skipPermissions,
-    teammateLaunchMode,
   ]);
 
   const launchOptionalSummary = useMemo(() => {
@@ -1477,9 +1433,7 @@ export const CreateTeamDialog = ({
         summary.push('快速默认');
       }
     }
-    summary.push(
-      teammateLaunchMode === 'in-process' ? 'Members: Claude 子 agent' : 'Members: tmux 独立进程'
-    );
+    summary.push('Members: 进程内子 agent');
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree：${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('自定义 CLI 参数');
     return summary;
@@ -1490,7 +1444,6 @@ export const CreateTeamDialog = ({
     selectedFastMode,
     selectedProviderId,
     skipPermissions,
-    teammateLaunchMode,
     worktreeEnabled,
     worktreeName,
   ]);
@@ -1599,7 +1552,10 @@ export const CreateTeamDialog = ({
             members: request.members,
             cwd: effectiveCwd || undefined,
             executionTarget: request.executionTarget,
+            providerId: request.providerId,
             providerBackendId: request.providerBackendId,
+            model: request.model,
+            effort: request.effort,
             fastMode: request.fastMode,
           });
           onOpenTeam(request.teamName, effectiveCwd || undefined);
@@ -1663,7 +1619,7 @@ export const CreateTeamDialog = ({
           <DialogDescription className="text-xs">
             {initialData
               ? '基于现有团队快速创建新团队。'
-              : '通过本地 Claude CLI 完成团队编排与启动。'}
+              : '通过本地 Agent CLI 完成团队编排与启动。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1761,6 +1717,28 @@ export const CreateTeamDialog = ({
           </div>
 
           <div className="md:col-span-2">
+            <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="mb-2">
+                <p className="text-xs font-medium text-[var(--color-text)]">团队运行时</p>
+                <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                  Provider 作用于整个团队；成员只选择模型，默认继承这里的 provider。
+                </p>
+              </div>
+              <TeamModelSelector
+                providerId={selectedProviderId}
+                onProviderChange={setSelectedProviderId}
+                value={selectedModel}
+                onValueChange={setSelectedModel}
+                id="create-team-provider-model"
+                disableGeminiOption={true}
+                modelIssueReasonByValue={
+                  selectedModel.trim() ? { [selectedModel.trim()]: leadModelIssueText } : undefined
+                }
+              />
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
             <TeamRosterEditorSection
               members={members}
               onMembersChange={setMembers}
@@ -1799,6 +1777,7 @@ export const CreateTeamDialog = ({
               teamName={sanitizedTeamName || teamName.trim()}
               memberWarningById={teammateRuntimeCompatibility.memberWarningById}
               memberModelIssueById={memberModelIssueById}
+              hideLeadProviderTabs
               headerTop={
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -1856,7 +1835,7 @@ export const CreateTeamDialog = ({
                       : 'var(--color-text-muted)',
                   }}
                 >
-                  创建完成后，立即通过本地 Claude CLI 启动团队。
+                  创建完成后，立即通过本地 Agent CLI 启动团队。
                 </p>
               </div>
             </div>
@@ -1944,8 +1923,6 @@ export const CreateTeamDialog = ({
                       onWorktreeNameChange={setWorktreeName}
                       customArgs={customArgs}
                       onCustomArgsChange={setCustomArgs}
-                      teammateLaunchMode={teammateLaunchMode}
-                      onTeammateLaunchModeChange={setTeammateLaunchMode}
                     />
                   </div>
                 </OptionalSettingsSection>

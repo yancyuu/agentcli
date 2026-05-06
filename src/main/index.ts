@@ -86,7 +86,6 @@ import { join } from 'path';
 import { cleanupEditorState, setEditorMainWindow } from './ipc/editor';
 import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { setReviewMainWindow } from './ipc/review';
-import { setTmuxMainWindow } from './ipc/tmux';
 import {
   ApiKeyService,
   createExtensionsRuntimeAdapter,
@@ -214,7 +213,7 @@ const suppressedSources = new Set(['user_sent']);
 async function createOpenCodeRuntimeAdapterRegistry(): Promise<TeamRuntimeAdapterRegistry> {
   // Claude Code only mode: OpenCode side lanes require the multimodel bridge,
   // which is intentionally disabled while the app targets the native claude CLI.
-  return new TeamRuntimeAdapterRegistry();
+  return new TeamRuntimeAdapterRegistry([]);
 }
 
 // --- Team display name cache (avoid listTeams() on every notification) ---
@@ -1672,7 +1671,6 @@ function createWindow(): void {
     if (cliInstallerService) {
       cliInstallerService.setMainWindow(null);
     }
-    setTmuxMainWindow(null);
     if (ptyTerminalService) {
       ptyTerminalService.setMainWindow(null);
     }
@@ -1710,7 +1708,6 @@ function createWindow(): void {
   if (cliInstallerService) {
     cliInstallerService.setMainWindow(mainWindow);
   }
-  setTmuxMainWindow(mainWindow);
   if (ptyTerminalService) {
     ptyTerminalService.setMainWindow(mainWindow);
   }

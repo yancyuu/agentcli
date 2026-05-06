@@ -76,8 +76,6 @@ import type {
   TeamTemplateSource,
   TeamTemplateSourcesSnapshot,
   TeamViewSnapshot,
-  TmuxAPI,
-  TmuxStatus,
   TriggerTestResult,
   UpdateKanbanPatch,
   UpdaterAPI,
@@ -1247,7 +1245,7 @@ export class HttpAPIClient implements ElectronAPI {
   cliInstaller: CliInstallerAPI = {
     getStatus: async () => ({
       flavor: 'claude',
-      displayName: 'Claude CLI',
+      displayName: 'Agent CLI',
       supportsSelfUpdate: true,
       showVersionDetails: true,
       showBinaryPath: true,
@@ -1356,63 +1354,6 @@ export class HttpAPIClient implements ElectronAPI {
       },
     }),
   };
-
-  tmux: TmuxAPI = {
-    getStatus: async (): Promise<TmuxStatus> => ({
-      platform: 'unknown',
-      nativeSupported: false,
-      checkedAt: new Date().toISOString(),
-      host: {
-        available: false,
-        version: null,
-        binaryPath: null,
-        error: null,
-      },
-      effective: {
-        available: false,
-        location: null,
-        version: null,
-        binaryPath: null,
-        runtimeReady: false,
-        detail: 'tmux diagnostics are not available in browser mode.',
-      },
-      error: null,
-      autoInstall: {
-        supported: false,
-        strategy: 'manual',
-        packageManagerLabel: null,
-        requiresTerminalInput: false,
-        requiresAdmin: false,
-        requiresRestart: false,
-        mayOpenExternalWindow: false,
-        reasonIfUnsupported: 'tmux installation is only available in Electron mode.',
-        manualHints: [],
-      },
-    }),
-    getInstallerSnapshot: async () => ({
-      phase: 'idle',
-      strategy: null,
-      message: null,
-      detail: 'tmux installer is not available in browser mode.',
-      error: null,
-      canCancel: false,
-      acceptsInput: false,
-      inputPrompt: null,
-      inputSecret: false,
-      logs: [],
-      updatedAt: new Date().toISOString(),
-    }),
-    install: async (): Promise<void> => {
-      throw new Error('tmux installer is not available in browser mode');
-    },
-    cancelInstall: async (): Promise<void> => {},
-    submitInstallerInput: async (): Promise<void> => {},
-    invalidateStatus: async (): Promise<void> => {},
-    onProgress: (): (() => void) => {
-      return () => {};
-    },
-  };
-
   // ---------------------------------------------------------------------------
   // Terminal (not available in browser mode)
   // ---------------------------------------------------------------------------

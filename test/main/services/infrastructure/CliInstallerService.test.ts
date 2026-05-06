@@ -146,8 +146,11 @@ describe('CliInstallerService', () => {
 
     await service.install();
 
-    expect(spawnCliMock).toHaveBeenCalledTimes(1);
-    const [command, args, options] = spawnCliMock.mock.calls[0] ?? [];
+    const npmInstallCall = spawnCliMock.mock.calls.find(([, args]) =>
+      Array.isArray(args) && args.includes('@anthropic-ai/claude-code@latest')
+    );
+    expect(npmInstallCall).toBeDefined();
+    const [command, args, options] = npmInstallCall ?? [];
     expect(command).toBe(npmPath);
     expect(args?.[0]).toBe('install');
     expect(args?.[1]).toBe('--prefix');
@@ -196,6 +199,7 @@ describe('CliInstallerService', () => {
         'codex',
         'gemini',
         'opencode',
+        'cursor',
       ]);
       expect(openCodeStatus).toMatchObject({
         displayName: 'OpenCode (75+ LLM providers)',

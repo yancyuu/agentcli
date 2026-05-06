@@ -46,9 +46,6 @@ export function getRuntimeMemorySourceLabel(
   if (!runtimeEntry?.pidSource) {
     return undefined;
   }
-  if (runtimeEntry.pidSource === 'tmux_pane') {
-    return 'RSS source: tmux pane shell';
-  }
   if (
     runtimeEntry.providerId === 'opencode' &&
     runtimeEntry.restartable === false &&
@@ -56,7 +53,7 @@ export function getRuntimeMemorySourceLabel(
   ) {
     return 'RSS source: shared OpenCode host';
   }
-  if (runtimeEntry.pidSource === 'tmux_child' || runtimeEntry.pidSource === 'agent_process_table') {
+  if (runtimeEntry.pidSource === 'agent_process_table') {
     return 'RSS source: runtime process';
   }
   if (runtimeEntry.pidSource === 'lead_process') {

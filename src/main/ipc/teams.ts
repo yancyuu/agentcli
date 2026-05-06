@@ -1221,7 +1221,10 @@ function parseOptionalMemberProviderId(
   if (isTeamProviderId(value)) {
     return { valid: true, value };
   }
-  return { valid: false, error: 'member providerId must be anthropic, codex, gemini, or opencode' };
+  return {
+    valid: false,
+    error: 'member providerId must be anthropic, codex, gemini, opencode, or cursor',
+  };
 }
 
 function parseOptionalProviderBackendId(
@@ -1567,9 +1570,11 @@ async function validateProvisioningRequest(
       ? 'codex'
       : payload.providerId === 'gemini'
         ? 'gemini'
-        : payload.providerId === 'anthropic'
-          ? 'anthropic'
-          : undefined;
+        : payload.providerId === 'cursor'
+          ? 'cursor'
+          : payload.providerId === 'anthropic'
+            ? 'anthropic'
+            : undefined;
   const providerId = explicitProviderId ?? 'anthropic';
 
   const seenNames = new Set<string>();
@@ -1851,9 +1856,11 @@ async function handleLaunchTeam(
       ? 'codex'
       : payload.providerId === 'gemini'
         ? 'gemini'
-        : payload.providerId === 'anthropic'
-          ? 'anthropic'
-          : undefined;
+        : payload.providerId === 'cursor'
+          ? 'cursor'
+          : payload.providerId === 'anthropic'
+            ? 'anthropic'
+            : undefined;
   const providerId = explicitProviderId ?? 'anthropic';
   const providerBackendValidation = parseOptionalProviderBackendId(
     payload.providerBackendId,
@@ -1884,13 +1891,15 @@ async function handleLaunchTeam(
     const members = membersMeta?.members ?? [];
 
     const resolvedProviderId =
-      providerId === 'codex' || providerId === 'gemini'
+      providerId === 'codex' || providerId === 'gemini' || providerId === 'cursor'
         ? providerId
         : meta?.providerId === 'codex'
           ? 'codex'
           : meta?.providerId === 'gemini'
             ? 'gemini'
-            : 'anthropic';
+            : meta?.providerId === 'cursor'
+              ? 'cursor'
+              : 'anthropic';
     const effortValidation = parseOptionalTeamEffort(payload.effort, resolvedProviderId);
     if (!effortValidation.valid) {
       return { success: false, error: effortValidation.error };
@@ -2075,7 +2084,10 @@ async function handlePrepareProvisioning(
   }
   if (providerId !== undefined) {
     if (!isTeamProviderId(providerId)) {
-      return { success: false, error: 'providerId must be anthropic, codex, gemini, or opencode' };
+      return {
+        success: false,
+        error: 'providerId must be anthropic, codex, gemini, opencode, or cursor',
+      };
     }
     validatedProviderId = providerId;
   }
@@ -2088,7 +2100,7 @@ async function handlePrepareProvisioning(
       if (!isTeamProviderId(entry)) {
         return {
           success: false,
-          error: 'providerIds entries must be anthropic, codex, gemini, or opencode',
+          error: 'providerIds entries must be anthropic, codex, gemini, opencode, or cursor',
         };
       }
       if (!normalized.includes(entry)) {
@@ -3238,9 +3250,20 @@ async function handleCreateConfig(
       : configCwd
         ? { type: 'local' as const, cwd: configCwd }
         : undefined;
-  const providerBackendValidation = parseOptionalProviderBackendId(payload.providerBackendId);
+  const providerId = isTeamProviderId(payload.providerId) ? payload.providerId : undefined;
+  const providerBackendValidation = parseOptionalProviderBackendId(
+    payload.providerBackendId,
+    providerId
+  );
   if (!providerBackendValidation.valid) {
     return { success: false, error: providerBackendValidation.error };
+  }
+  if (payload.model !== undefined && typeof payload.model !== 'string') {
+    return { success: false, error: 'model must be a string' };
+  }
+  const effortValidation = parseOptionalTeamEffort(payload.effort, providerId);
+  if (!effortValidation.valid) {
+    return { success: false, error: effortValidation.error };
   }
   const fastModeValidation = parseOptionalTeamFastMode(payload.fastMode);
   if (!fastModeValidation.valid) {
@@ -3312,7 +3335,10 @@ async function handleCreateConfig(
       members,
       cwd: configCwd,
       executionTarget,
+      providerId,
       providerBackendId: providerBackendValidation.value,
+      model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
+      effort: effortValidation.value,
       fastMode: fastModeValidation.value,
     })
   );

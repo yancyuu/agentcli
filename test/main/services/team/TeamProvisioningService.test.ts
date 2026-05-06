@@ -21,16 +21,15 @@ let tempTeamsBase = '';
 let tempTasksBase = '';
 let tempProjectsBase = '';
 
+const killTmuxPaneForCurrentPlatformSync = vi.fn();
+const listRuntimeProcessesForCurrentTmuxPlatform = vi.fn<
+  () => Promise<{ pid: number; ppid: number; command: string }[]>
+>(async () => []);
+const listTmuxPanePidsForCurrentPlatform = vi.fn(async () => new Map());
+const listTmuxPaneRuntimeInfoForCurrentPlatform = vi.fn(async () => new Map());
+
 vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
-}));
-
-vi.mock('@features/tmux-installer/main', () => ({
-  killTmuxPaneForCurrentPlatformSync: vi.fn(),
-  listRuntimeProcessesForCurrentTmuxPlatform: vi.fn(async () => []),
-  listTmuxPanePidsForCurrentPlatform: vi.fn(async () => new Map()),
-  listTmuxPaneRuntimeInfoForCurrentPlatform: vi.fn(async () => new Map()),
-  isTmuxRuntimeReadyForCurrentPlatform: vi.fn(async () => true),
 }));
 
 vi.mock('pidusage', () => {
@@ -146,12 +145,6 @@ import {
   AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
   AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
 } from 'agent-teams-controller';
-import {
-  killTmuxPaneForCurrentPlatformSync,
-  listRuntimeProcessesForCurrentTmuxPlatform,
-  listTmuxPanePidsForCurrentPlatform,
-  listTmuxPaneRuntimeInfoForCurrentPlatform,
-} from '@features/tmux-installer/main';
 import pidusage from 'pidusage';
 
 function allowConsoleLogs() {
@@ -557,8 +550,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@runtime-team',
-          tmuxPaneId: '%1',
-          backendType: 'tmux',
+          backendType: 'process',
         },
       ]);
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
@@ -661,8 +653,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@runtime-team',
-          tmuxPaneId: '%1',
-          backendType: 'tmux',
+          backendType: 'process',
         },
       ]);
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
@@ -701,7 +692,7 @@ describe('TeamProvisioningService', () => {
       expect(snapshot.members.alice?.rssBytes).toBe(456_000_000);
     });
 
-    it('falls back to direct agent process lookup when tmux pane pid lookup is unavailable', async () => {
+    it('falls back to direct agent process lookup when runtime shell pid lookup is unavailable', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -715,8 +706,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@nice-team',
-          tmuxPaneId: '%0',
-          backendType: 'tmux',
+          backendType: 'process',
         },
       ]);
       (svc as any).aliveRunByTeam.set('nice-team', 'run-1');
@@ -768,7 +758,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@nice-team',
-          backendType: 'tmux',
+          backendType: 'process',
         },
       ]);
       const run = createMemberSpawnRun({
@@ -833,8 +823,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@nice-team',
-          tmuxPaneId: '%0',
-          backendType: 'tmux',
+          backendType: 'process',
         },
       ]);
       (svc as any).aliveRunByTeam.set('nice-team', 'run-1');
@@ -1052,8 +1041,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'alice',
           agentId: 'alice@runtime-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%1',
+          backendType: 'process',
         },
       ]);
 
@@ -1073,16 +1061,14 @@ describe('TeamProvisioningService', () => {
               providerId: 'codex',
               model: 'gpt-5.4-mini',
               agentId: 'alice@signal-ops-6',
-              backendType: 'tmux',
-              tmuxPaneId: '%0',
+              backendType: 'process',
             },
             {
               name: 'atlas',
               providerId: 'codex',
               model: 'gpt-5.3-codex',
               agentId: 'atlas@signal-ops-6',
-              backendType: 'tmux',
-              tmuxPaneId: '%1',
+              backendType: 'process',
             },
           ],
         })),
@@ -1122,16 +1108,14 @@ describe('TeamProvisioningService', () => {
       expect(metadata.get('alice')).toMatchObject({
         alive: true,
         agentId: 'alice@signal-ops-6',
-        backendType: 'tmux',
-        tmuxPaneId: '%0',
+        backendType: 'process',
         pid: 17527,
         model: 'gpt-5.4-mini',
       });
       expect(metadata.get('atlas')).toMatchObject({
         alive: true,
         agentId: 'atlas@signal-ops-6',
-        backendType: 'tmux',
-        tmuxPaneId: '%1',
+        backendType: 'process',
         pid: 17528,
         model: 'gpt-5.3-codex',
       });
@@ -2309,7 +2293,7 @@ describe('TeamProvisioningService', () => {
       });
     });
 
-    it('waits for a killed tmux pane to disappear before sending a restart request', async () => {
+    it('waits for a killed runtime shell to disappear before sending a restart request', async () => {
       vi.useFakeTimers();
 
       const svc = new TeamProvisioningService();
@@ -2346,8 +2330,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'forge',
           agentId: 'forge@tmux-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%2',
+          backendType: 'process',
         },
       ]);
       (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
@@ -5769,7 +5752,7 @@ describe('TeamProvisioningService', () => {
       });
     });
 
-    it('fails early when the previous tmux pane does not exit before restart', async () => {
+    it('fails early when the previous runtime shell does not exit before restart', async () => {
       vi.useFakeTimers();
 
       const svc = new TeamProvisioningService();
@@ -5806,8 +5789,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'forge',
           agentId: 'forge@tmux-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%2',
+          backendType: 'process',
         },
       ]);
       (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
@@ -5819,7 +5801,7 @@ describe('TeamProvisioningService', () => {
       );
 
       const restartPromise = expect(svc.restartMember('tmux-team', 'forge')).rejects.toThrow(
-        'Restart for teammate "forge" is still waiting for the previous tmux pane to exit (%2).'
+        'Restart for teammate "forge" is still waiting for the previous runtime shell to exit (%2).'
       );
       await vi.advanceTimersByTimeAsync(1_500);
       await restartPromise;
@@ -5827,7 +5809,7 @@ describe('TeamProvisioningService', () => {
       expect(sendMessageToRun).not.toHaveBeenCalled();
     });
 
-    it('still verifies tmux pane exit when pane kill throws, and blocks restart if the pane remains alive', async () => {
+    it('still verifies runtime shell exit when pane kill throws, and blocks restart if the pane remains alive', async () => {
       vi.useFakeTimers();
 
       const svc = new TeamProvisioningService();
@@ -5864,8 +5846,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'forge',
           agentId: 'forge@tmux-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%2',
+          backendType: 'process',
         },
       ]);
       (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
@@ -5880,7 +5861,7 @@ describe('TeamProvisioningService', () => {
       );
 
       const restartPromise = expect(svc.restartMember('tmux-team', 'forge')).rejects.toThrow(
-        'Restart for teammate "forge" is still waiting for the previous tmux pane to exit (%2).'
+        'Restart for teammate "forge" is still waiting for the previous runtime shell to exit (%2).'
       );
       await vi.advanceTimersByTimeAsync(1_500);
       await restartPromise;
@@ -5888,7 +5869,7 @@ describe('TeamProvisioningService', () => {
       expect(sendMessageToRun).not.toHaveBeenCalled();
     });
 
-    it('does not treat tmux pane lookup failures as a successful restart precondition', async () => {
+    it('does not treat runtime shell lookup failures as a successful restart precondition', async () => {
       vi.useFakeTimers();
 
       const svc = new TeamProvisioningService();
@@ -5925,8 +5906,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'forge',
           agentId: 'forge@tmux-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%2',
+          backendType: 'process',
         },
       ]);
       (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
@@ -5938,7 +5918,7 @@ describe('TeamProvisioningService', () => {
       );
 
       const restartPromise = expect(svc.restartMember('tmux-team', 'forge')).rejects.toThrow(
-        'Restart for teammate "forge" could not verify that the previous tmux pane exited: tmux list-panes failed'
+        'Restart for teammate "forge" could not verify that the previous runtime shell exited: tmux list-panes failed'
       );
       await vi.advanceTimersByTimeAsync(1_500);
       await restartPromise;
@@ -5983,8 +5963,7 @@ describe('TeamProvisioningService', () => {
         {
           name: 'forge',
           agentId: 'forge@tmux-team',
-          backendType: 'tmux',
-          tmuxPaneId: '%2',
+          backendType: 'process',
         },
       ]);
       (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
@@ -6392,7 +6371,7 @@ describe('TeamProvisioningService', () => {
               {
                 alive: false,
                 livenessKind: 'shell_only',
-                runtimeDiagnostic: 'tmux pane foreground command is zsh',
+                runtimeDiagnostic: 'runtime shell foreground command is zsh',
                 runtimeDiagnosticSeverity: 'warning',
               },
             ],
@@ -6408,8 +6387,8 @@ describe('TeamProvisioningService', () => {
         livenessSource: undefined,
         bootstrapConfirmed: false,
         livenessKind: 'shell_only',
-        runtimeDiagnostic: 'tmux pane foreground command is zsh',
-        error: 'tmux pane foreground command is zsh',
+        runtimeDiagnostic: 'runtime shell foreground command is zsh',
+        error: 'runtime shell foreground command is zsh',
       });
     });
 
@@ -9185,7 +9164,7 @@ describe('TeamProvisioningService', () => {
             status: 'waiting',
             launchState: 'runtime_pending_bootstrap',
             livenessKind: 'shell_only',
-            runtimeDiagnostic: 'tmux pane foreground command is zsh; process table is unavailable',
+            runtimeDiagnostic: 'runtime shell foreground command is zsh; process table is unavailable',
           }),
         ],
       ]),
@@ -9207,7 +9186,7 @@ describe('TeamProvisioningService', () => {
           memberName: 'bob',
           code: 'process_table_unavailable',
           severity: 'warning',
-          detail: 'tmux pane foreground command is zsh; process table is unavailable',
+          detail: 'runtime shell foreground command is zsh; process table is unavailable',
         }),
       ])
     );

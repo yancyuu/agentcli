@@ -1327,8 +1327,18 @@ export class TeamDataService {
       );
     }
 
+    const launchMemberProviders = Object.values(launchSnapshot?.members ?? {}).map((member) =>
+      normalizeOptionalTeamProviderId(member.providerId)
+    );
+    const hasCursorLaunchReady =
+      (normalizeOptionalTeamProviderId(teamMeta?.providerId) === 'cursor' ||
+        launchMemberProviders.includes('cursor') ||
+        config.members?.some(
+          (member) => normalizeOptionalTeamProviderId(member.providerId) === 'cursor'
+        )) &&
+      (launchSnapshot?.teamLaunchState === 'clean_success' || !launchSnapshot);
     // Auto-track teams with alive processes for periodic health checks
-    const hasAlive = processes.some((p) => !p.stoppedAt);
+    const hasAlive = processes.some((p) => !p.stoppedAt) || hasCursorLaunchReady;
     if (hasAlive) {
       this.processHealthTeams.add(teamName);
     } else {
@@ -2813,7 +2823,10 @@ export class TeamDataService {
       color: request.color,
       cwd: request.cwd?.trim() || '',
       executionTarget: request.executionTarget,
+      providerId: normalizeOptionalTeamProviderId(request.providerId),
       providerBackendId: request.providerBackendId,
+      model: request.model?.trim() || undefined,
+      effort: isTeamEffortLevel(request.effort) ? request.effort : undefined,
       fastMode: request.fastMode,
       createdAt: joinedAt,
     });

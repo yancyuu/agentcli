@@ -175,9 +175,6 @@ export function getSpawnAwareDotClass(
   leadActivity?: LeadActivityState
 ): string {
   const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
-  if (isTeamAlive === false && !isTeamProvisioning) {
-    return STATUS_DOT_COLORS.terminated;
-  }
   if (spawnLaunchState === 'failed_to_start' || spawnStatus === 'error') {
     return SPAWN_DOT_COLORS.error;
   }
@@ -186,6 +183,12 @@ export function getSpawnAwareDotClass(
   }
   if (spawnLaunchState === 'runtime_pending_permission') {
     return 'bg-amber-400 animate-pulse';
+  }
+  if (spawnLaunchState === 'confirmed_alive') {
+    return SPAWN_DOT_COLORS.online;
+  }
+  if (isTeamAlive === false && !isTeamProvisioning) {
+    return STATUS_DOT_COLORS.terminated;
   }
   if (
     isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
@@ -225,9 +228,6 @@ export function getSpawnAwarePresenceLabel(
   leadActivity?: LeadActivityState
 ): string {
   const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
-  if (isTeamAlive === false && !isTeamProvisioning) {
-    return 'offline';
-  }
   if (spawnLaunchState === 'failed_to_start' || spawnStatus === 'error') {
     return SPAWN_PRESENCE_LABELS.error;
   }
@@ -236,6 +236,12 @@ export function getSpawnAwarePresenceLabel(
   }
   if (spawnLaunchState === 'runtime_pending_permission') {
     return 'connecting';
+  }
+  if (spawnLaunchState === 'confirmed_alive') {
+    return SPAWN_PRESENCE_LABELS.online;
+  }
+  if (isTeamAlive === false && !isTeamProvisioning) {
+    return 'offline';
   }
   if (
     isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
@@ -269,6 +275,9 @@ export function getSpawnCardClass(
   const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   if (isTeamAlive === false && !isTeamProvisioning) {
     return '';
+  }
+  if (spawnLaunchState === 'confirmed_alive') {
+    return spawnStatus === 'online' ? 'animate-[member-fade-in_0.4s_ease-out]' : '';
   }
   if (
     isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
@@ -677,8 +686,9 @@ export function buildMemberLaunchPresentation({
     } else if (runtimeEntry?.livenessKind === 'registered_only') {
       launchVisualState = 'registered_only';
     } else if (
-      runtimeEntry?.livenessKind === 'stale_metadata' ||
-      runtimeEntry?.livenessKind === 'not_found'
+      spawnLaunchState !== 'confirmed_alive' &&
+      (runtimeEntry?.livenessKind === 'stale_metadata' ||
+        runtimeEntry?.livenessKind === 'not_found')
     ) {
       launchVisualState = 'stale_runtime';
     } else if (

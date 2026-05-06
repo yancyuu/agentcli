@@ -96,7 +96,6 @@ import type {
   UpdateKanbanPatch,
 } from './team';
 import type { TerminalAPI } from './terminal';
-import type { TmuxAPI } from './tmux';
 import type { WaterfallData } from './visualization';
 import type { CodexAccountElectronApi } from '@features/codex-account/contracts';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
@@ -937,9 +936,6 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
 
   // Runtime nested provider management API
   runtimeProviderManagement: RuntimeProviderManagementApi;
-
-  // tmux runtime diagnostics API
-  tmux: TmuxAPI;
 
   // Embedded Terminal API (xterm.js + node-pty)
   terminal: TerminalAPI;

@@ -38,7 +38,9 @@ export interface CursorRuntimeRunRequest {
   model?: string | null;
   resumeSessionId?: string | null;
   force?: boolean;
+  approveMcps?: boolean;
   timeoutMs?: number;
+  idleAfterResultMs?: number;
   env?: NodeJS.ProcessEnv;
 }
 

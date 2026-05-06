@@ -102,8 +102,6 @@ function preservesStrongRuntimeAlive(
 
 function normalizePidSource(value: unknown): TeamAgentRuntimePidSource | undefined {
   return value === 'lead_process' ||
-    value === 'tmux_pane' ||
-    value === 'tmux_child' ||
     value === 'agent_process_table' ||
     value === 'opencode_bridge' ||
     value === 'runtime_bootstrap' ||

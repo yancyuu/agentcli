@@ -44,9 +44,13 @@ interface ProviderDef {
   id: TeamProviderId;
   label: string;
   comingSoon: boolean;
+  beta?: boolean;
 }
 
-const PROVIDERS: ProviderDef[] = [{ id: 'anthropic', label: 'Anthropic', comingSoon: false }];
+const PROVIDERS: ProviderDef[] = [
+  { id: 'anthropic', label: 'Claude Code', comingSoon: false },
+  { id: 'codex', label: 'Codex', comingSoon: false, beta: true },
+];
 
 export function getTeamModelLabel(model: string): string {
   return getCatalogTeamModelLabel(model) ?? model;
@@ -142,6 +146,7 @@ export interface TeamModelSelectorProps {
   providerDisabledReasonById?: Partial<Record<TeamProviderId, string | null | undefined>>;
   providerDisabledBadgeLabelById?: Partial<Record<TeamProviderId, string | null | undefined>>;
   modelIssueReasonByValue?: Partial<Record<string, string | null | undefined>>;
+  hideProviderTabs?: boolean;
 }
 
 export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
@@ -153,10 +158,11 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   providerDisabledReasonById,
   providerDisabledBadgeLabelById,
   modelIssueReasonByValue,
+  hideProviderTabs = false,
 }) => {
   const [modelQuery, setModelQuery] = useState('');
 
-  const effectiveProviderId: TeamProviderId = 'anthropic';
+  const effectiveProviderId: TeamProviderId = providerId;
   const { cliStatus: effectiveCliStatus, providerStatus: runtimeProviderStatus } =
     useEffectiveCliProviderStatus(effectiveProviderId);
   const runtimeProviderStatusById = useMemo(
@@ -208,7 +214,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
         `${getTeamProviderLabel(candidateProviderId)} 尚未连接。`
       );
     }
-    if (!providerStatus.capabilities.teamLaunch) {
+    if (candidateProviderId !== 'cursor' && !providerStatus.capabilities.teamLaunch) {
       return (
         providerStatus.detailMessage ??
         providerStatus.statusMessage ??
@@ -218,10 +224,6 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     return null;
   };
   const getProviderDisabledReason = (candidateProviderId: string): string | null => {
-    if (candidateProviderId !== 'anthropic') {
-      return '当前版本仅支持 Claude Code。';
-    }
-
     if (isTeamProviderId(candidateProviderId)) {
       const overrideReason = providerDisabledReasonById?.[candidateProviderId]?.trim();
       if (overrideReason) {
@@ -234,7 +236,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   const isProviderTemporarilyDisabled = (candidateProviderId: string): boolean =>
     getProviderDisabledReason(candidateProviderId) !== null;
   const isProviderSelectable = (candidateProviderId: string): boolean =>
-    candidateProviderId === 'anthropic' && !isProviderTemporarilyDisabled(candidateProviderId);
+    isTeamProviderId(candidateProviderId) && !isProviderTemporarilyDisabled(candidateProviderId);
   const activeProviderSelectable = isProviderSelectable(effectiveProviderId);
   const getProviderStatusBadge = (candidateProviderId: string): string | null => {
     if (isTeamProviderId(candidateProviderId)) {
@@ -321,54 +323,73 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
         }}
       >
         <div className="space-y-0">
-          <div className="-mb-px border-b border-[var(--color-border-subtle)]">
-            <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-none bg-transparent p-0">
-              {PROVIDERS.map((provider) => {
-                const providerDisabledReason = getProviderDisabledReason(provider.id);
-                const providerSelectable = isProviderSelectable(provider.id);
-                const statusBadge = getProviderStatusBadge(provider.id);
-                const statusBadgeLabel = getProviderStatusBadgeLabel(statusBadge);
+          {!hideProviderTabs ? (
+            <div className="-mb-px border-b border-[var(--color-border-subtle)]">
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-none bg-transparent p-0">
+                {PROVIDERS.map((provider) => {
+                  const providerDisabledReason = getProviderDisabledReason(provider.id);
+                  const providerSelectable = isProviderSelectable(provider.id);
+                  const statusBadge = getProviderStatusBadge(provider.id);
+                  const statusBadgeLabel = getProviderStatusBadgeLabel(statusBadge);
 
-                return (
-                  <TabsTrigger
-                    key={provider.id}
-                    value={provider.id}
-                    disabled={provider.comingSoon || !providerSelectable}
-                    title={providerDisabledReason ?? statusBadge ?? undefined}
-                    className={cn(
-                      "relative h-12 min-w-[128px] items-center justify-start gap-2 rounded-b-none border border-b-0 border-transparent px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] data-[state=active]:z-10 data-[state=active]:-mb-px data-[state=active]:border-[var(--color-border)] data-[state=active]:bg-[var(--color-surface)] data-[state=active]:text-[var(--color-text)] data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:inset-x-0 data-[state=active]:after:-bottom-px data-[state=active]:after:h-px data-[state=active]:after:bg-[var(--color-surface)] data-[state=active]:after:content-['']",
-                      !providerSelectable && 'opacity-50'
-                    )}
-                  >
-                    <ProviderBrandLogo providerId={provider.id} className="size-5 shrink-0" />
-                    <span
+                  return (
+                    <TabsTrigger
+                      key={provider.id}
+                      value={provider.id}
+                      disabled={provider.comingSoon || !providerSelectable}
+                      title={providerDisabledReason ?? statusBadge ?? undefined}
                       className={cn(
-                        'min-w-0 truncate text-sm font-medium',
-                        statusBadgeLabel && 'pr-9'
+                        "relative h-12 min-w-[128px] items-center justify-start gap-2 rounded-b-none border border-b-0 border-transparent px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] data-[state=active]:z-10 data-[state=active]:-mb-px data-[state=active]:border-[var(--color-border)] data-[state=active]:bg-[var(--color-surface)] data-[state=active]:text-[var(--color-text)] data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:inset-x-0 data-[state=active]:after:-bottom-px data-[state=active]:after:h-px data-[state=active]:after:bg-[var(--color-surface)] data-[state=active]:after:content-['']",
+                        !providerSelectable && 'opacity-50'
                       )}
                     >
-                      {provider.label}
-                    </span>
-                    {statusBadgeLabel ? (
+                      <ProviderBrandLogo providerId={provider.id} className="size-5 shrink-0" />
                       <span
-                        className="absolute right-2 top-1.5 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em]"
-                        style={{
-                          color: 'var(--color-text-muted)',
-                          backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        }}
-                        aria-label={statusBadge ?? undefined}
-                        title={statusBadge ?? undefined}
+                        className={cn(
+                          'min-w-0 truncate text-sm font-medium',
+                          statusBadgeLabel && 'pr-9'
+                        )}
                       >
-                        {statusBadgeLabel}
+                        {provider.label}
                       </span>
-                    ) : null}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-          </div>
+                      {provider.beta ? (
+                        <span
+                          className="rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none"
+                          style={{
+                            borderColor: 'rgba(251, 191, 36, 0.32)',
+                            backgroundColor: 'rgba(251, 191, 36, 0.12)',
+                            color: '#fbbf24',
+                          }}
+                        >
+                          beta
+                        </span>
+                      ) : null}
+                      {statusBadgeLabel ? (
+                        <span
+                          className="absolute right-2 top-1.5 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em]"
+                          style={{
+                            color: 'var(--color-text-muted)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                          }}
+                          aria-label={statusBadge ?? undefined}
+                          title={statusBadge ?? undefined}
+                        >
+                          {statusBadgeLabel}
+                        </span>
+                      ) : null}
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+            </div>
+          ) : null}
 
-          <div className="rounded-b-md border border-t-0 border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div
+            className={cn(
+              'border border-[var(--color-border)] bg-[var(--color-surface)]',
+              hideProviderTabs ? 'rounded-md' : 'rounded-b-md border-t-0'
+            )}
+          >
             <div className="p-3">
               {shouldAwaitRuntimeModelList ? (
                 <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">

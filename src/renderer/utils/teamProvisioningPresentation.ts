@@ -531,9 +531,14 @@ export function buildTeamProvisioningPresentation({
     return null;
   }
 
-  const isReady = progress.state === 'ready';
+  const snapshotComplete =
+    (memberSpawnSnapshot?.summary?.failedCount ?? 0) === 0 &&
+    (memberSpawnSnapshot?.summary?.skippedCount ?? 0) === 0 &&
+    (memberSpawnSnapshot?.summary?.pendingCount ?? 0) === 0 &&
+    (memberSpawnSnapshot?.summary?.confirmedCount ?? 0) > 0;
+  const isReady = progress.state === 'ready' || snapshotComplete;
   const isFailed = progress.state === 'failed';
-  const isActive = isProvisioningProgressActive(progress);
+  const isActive = isProvisioningProgressActive(progress) && !snapshotComplete;
   const canCancel =
     progress.state === 'spawning' ||
     progress.state === 'configuring' ||

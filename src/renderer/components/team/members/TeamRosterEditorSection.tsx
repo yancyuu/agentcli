@@ -46,6 +46,7 @@ interface TeamRosterEditorSectionProps {
   disableGeminiOption?: boolean;
   leadModelIssueText?: string | null;
   memberModelIssueById?: Record<string, string | null | undefined>;
+  hideLeadProviderTabs?: boolean;
   showWorktreeIsolationControls?: boolean;
   teammateWorktreeDefault?: boolean;
   onTeammateWorktreeDefaultChange?: (enabled: boolean) => void;
@@ -91,6 +92,7 @@ export const TeamRosterEditorSection = ({
   disableGeminiOption = false,
   leadModelIssueText,
   memberModelIssueById,
+  hideLeadProviderTabs = false,
   showWorktreeIsolationControls = false,
   teammateWorktreeDefault = false,
   onTeammateWorktreeDefaultChange,
@@ -143,6 +145,7 @@ export const TeamRosterEditorSection = ({
             disableGeminiOption={disableGeminiOption}
             modelIssueText={leadModelIssueText}
             teamName={teamName}
+            hideProviderTabs={hideLeadProviderTabs}
           />
           {headerBottom}
         </div>

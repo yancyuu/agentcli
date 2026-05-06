@@ -682,6 +682,17 @@ function areMemberSpawnSnapshotsSemanticallyEqual(
   );
 }
 
+function isCompleteMemberSpawnSnapshot(snapshot: MemberSpawnStatusesSnapshot): boolean {
+  return (
+    snapshot.teamLaunchState === 'clean_success' &&
+    snapshot.launchPhase === 'finished' &&
+    (snapshot.summary?.confirmedCount ?? 0) > 0 &&
+    (snapshot.summary?.pendingCount ?? 0) === 0 &&
+    (snapshot.summary?.failedCount ?? 0) === 0 &&
+    (snapshot.summary?.skippedCount ?? 0) === 0
+  );
+}
+
 function maybeLogMemberSpawnUiEqualSuppressed(
   teamName: string,
   runId: string | null | undefined
@@ -2352,14 +2363,20 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       const snapshot = await api.teams.getMemberSpawnStatuses(teamName);
       memberSpawnStatusesIpcBackoffUntilByTeam.delete(teamName);
       set((prev) => {
-        if (snapshot.runId != null && prev.ignoredRuntimeRunIds[snapshot.runId] === teamName) {
+        const completeSnapshot = isCompleteMemberSpawnSnapshot(snapshot);
+        if (
+          snapshot.runId != null &&
+          prev.ignoredRuntimeRunIds[snapshot.runId] === teamName &&
+          !completeSnapshot
+        ) {
           return {};
         }
 
         if (
           prev.currentRuntimeRunIdByTeam[teamName] == null &&
           prev.leadActivityByTeam[teamName] === 'offline' &&
-          snapshot.runId != null
+          snapshot.runId != null &&
+          !completeSnapshot
         ) {
           return {};
         }
@@ -2367,7 +2384,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         if (
           snapshot.runId != null &&
           prev.currentRuntimeRunIdByTeam[teamName] != null &&
-          prev.currentRuntimeRunIdByTeam[teamName] !== snapshot.runId
+          prev.currentRuntimeRunIdByTeam[teamName] !== snapshot.runId &&
+          !completeSnapshot
         ) {
           return {};
         }
@@ -4866,6 +4884,28 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
     const isCanonicalRun =
       get().currentProvisioningRunIdByTeam[progress.teamName] === progress.runId;
+
+    if (isCanonicalRun && progress.memberSpawnSnapshot) {
+      const snapshot = progress.memberSpawnSnapshot;
+      set((prev) => ({
+        currentRuntimeRunIdByTeam:
+          snapshot.runId == null
+            ? prev.currentRuntimeRunIdByTeam
+            : {
+                ...prev.currentRuntimeRunIdByTeam,
+                [progress.teamName]: snapshot.runId,
+              },
+        memberSpawnStatusesByTeam: {
+          ...prev.memberSpawnStatusesByTeam,
+          [progress.teamName]: snapshot.statuses,
+        },
+        memberSpawnSnapshotsByTeam: {
+          ...prev.memberSpawnSnapshotsByTeam,
+          [progress.teamName]: snapshot,
+        },
+      }));
+    }
+
     let hydratedVisibleTeam = false;
 
     if (isCanonicalRun && becameConfigReady) {
@@ -4923,6 +4963,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     }
 
     if (isCanonicalRun && (progress.state === 'ready' || progress.state === 'disconnected')) {
+      void get().fetchMemberSpawnStatuses(progress.teamName);
       void get().fetchTeams();
       if (hydratedVisibleTeam) {
         return;

@@ -888,7 +888,7 @@ export interface TeamViewSnapshot {
 }
 
 export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type TeamProviderId = 'anthropic' | 'codex' | 'gemini' | 'opencode';
+export type TeamProviderId = 'anthropic' | 'codex' | 'gemini' | 'opencode' | 'cursor';
 export type TeamProviderBackendId = 'auto' | 'adapter' | 'api' | 'cli-sdk' | 'codex-native';
 export type TeamFastMode = 'inherit' | 'on' | 'off';
 
@@ -1071,7 +1071,7 @@ export interface MemberSpawnStatusesSnapshot {
 
 export type MemberSpawnLivenessSource = 'heartbeat' | 'process';
 
-export type TeamAgentRuntimeBackendType = 'lead' | 'tmux' | 'iterm2' | 'in-process' | 'process';
+export type TeamAgentRuntimeBackendType = 'lead' | 'iterm2' | 'in-process' | 'process';
 
 export type TeamAgentRuntimeLivenessKind =
   | 'confirmed_bootstrap'
@@ -1085,8 +1085,6 @@ export type TeamAgentRuntimeLivenessKind =
 
 export type TeamAgentRuntimePidSource =
   | 'lead_process'
-  | 'tmux_pane'
-  | 'tmux_child'
   | 'agent_process_table'
   | 'opencode_bridge'
   | 'runtime_bootstrap'
@@ -1286,7 +1284,10 @@ export interface TeamCreateConfigRequest {
   members: TeamProvisioningMemberInput[];
   cwd?: string;
   executionTarget?: ExecutionTarget;
+  providerId?: TeamProviderId;
   providerBackendId?: TeamProviderBackendId;
+  model?: string;
+  effort?: EffortLevel;
   fastMode?: TeamFastMode;
 }
 
@@ -1358,6 +1359,8 @@ export interface TeamProvisioningProgress {
   configReady?: boolean;
   /** Bounded structured launch diagnostics for the progress UI. */
   launchDiagnostics?: TeamLaunchDiagnosticItem[];
+  /** Optional authoritative member launch snapshot emitted with runtime-adapter progress. */
+  memberSpawnSnapshot?: MemberSpawnStatusesSnapshot;
 }
 
 export interface TeamLaunchDiagnosticItem {
@@ -1368,7 +1371,7 @@ export interface TeamLaunchDiagnosticItem {
     | 'spawn_accepted'
     | 'runtime_process_detected'
     | 'runtime_process_candidate'
-    | 'tmux_shell_only'
+    | 'shell_only'
     | 'runtime_not_found'
     | 'permission_pending'
     | 'bootstrap_confirmed'

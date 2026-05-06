@@ -82,10 +82,10 @@ describe('boundLaunchDiagnostics', () => {
     const longDetail = `node runtime --token super-secret ${'x'.repeat(800)}`;
     const result = boundLaunchDiagnostics([
       {
-        id: 'bob:tmux_shell_only',
+        id: 'bob:shell_only',
         memberName: 'bob',
         severity: 'warning',
-        code: 'tmux_shell_only',
+        code: 'shell_only',
         label: 'bob - shell only --api-key abc123',
         detail: longDetail,
         observedAt: '2026-04-24T12:00:00.000Z',

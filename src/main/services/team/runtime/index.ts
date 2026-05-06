@@ -4,6 +4,7 @@ export type {
   OpenCodeTeamRuntimeMessageResult,
 } from './OpenCodeTeamRuntimeAdapter';
 export { OpenCodeTeamRuntimeAdapter } from './OpenCodeTeamRuntimeAdapter';
+export { CursorAgentTeamRuntimeAdapter } from './CursorAgentTeamRuntimeAdapter';
 export type {
   TeamLaunchRuntimeAdapter,
   TeamRuntimeLaunchInput,

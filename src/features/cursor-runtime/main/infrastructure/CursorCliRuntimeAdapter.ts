@@ -1,9 +1,10 @@
 import { killProcessTree, spawnCli } from '@main/utils/childProcess';
-import type { ChildProcessWithoutNullStreams } from 'child_process';
 import { randomUUID } from 'crypto';
 
-import type { CursorRuntimeAdapter } from '../../core/application';
 import { normalizeCursorStreamJson, summarizeCursorRuntimeEvents } from '../../core/domain';
+
+import { CursorCliResolver, type CursorCliResolveResult } from './CursorCliResolver';
+
 import type {
   CursorRuntimeCapabilitySummary,
   CursorRuntimeRunMode,
@@ -11,7 +12,8 @@ import type {
   CursorRuntimeRunResult,
   CursorRuntimeStatus,
 } from '../../contracts';
-import { CursorCliResolver, type CursorCliResolveResult } from './CursorCliResolver';
+import type { CursorRuntimeAdapter } from '../../core/application';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
 
 const DEFAULT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -57,10 +59,36 @@ function parseStatusJson(stdout: string): CursorStatusJson | null {
 }
 
 function normalizeModelList(stdout: string): string[] {
-  return stdout
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line && line !== 'No models available for this account.');
+  const seen = new Set<string>();
+  const models: string[] = [];
+  const normalizeModelId = (value: string): string => value.trim().replace(/\s+-\s+.*$/u, '');
+  const addModel = (value: string): void => {
+    const model = normalizeModelId(value);
+    if (
+      !model ||
+      model === 'Available models' ||
+      model === 'Available models:' ||
+      model === 'No models available for this account.' ||
+      seen.has(model)
+    ) {
+      return;
+    }
+    seen.add(model);
+    models.push(model);
+  };
+
+  for (const rawLine of stdout.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const inlineMatch = /^Available models:\s*(.+)$/iu.exec(line);
+    if (inlineMatch?.[1]) {
+      inlineMatch[1].split(',').forEach(addModel);
+      continue;
+    }
+    addModel(line.replace(/^[-*]\s+/u, ''));
+  }
+
+  return models;
 }
 
 function normalizeMode(mode: CursorRuntimeRunRequest['mode']): CursorRuntimeRunMode {
@@ -76,6 +104,9 @@ function buildRunArgs(request: CursorRuntimeRunRequest): string[] {
   if (request.force) {
     args.push('--force');
   }
+  if (request.approveMcps) {
+    args.push('--approve-mcps');
+  }
   if (request.model?.trim()) {
     args.push('--model', request.model.trim());
   }
@@ -88,29 +119,71 @@ function buildRunArgs(request: CursorRuntimeRunRequest): string[] {
 
 function collectProcessOutput(
   child: ChildProcessWithoutNullStreams,
-  timeoutMs: number
+  timeoutMs: number,
+  idleAfterResultMs?: number
 ): Promise<CursorProcessOutput> {
   return new Promise((resolve, reject) => {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let settled = false;
+    let idleAfterResultTimer: NodeJS.Timeout | null = null;
+    const buildOutput = (exitCode: number | null): CursorProcessOutput => ({
+      stdout: Buffer.concat(stdout).toString('utf8'),
+      stderr: Buffer.concat(stderr).toString('utf8'),
+      exitCode,
+    });
+    const clearTimers = (): void => {
+      clearTimeout(timeout);
+      if (idleAfterResultTimer) {
+        clearTimeout(idleAfterResultTimer);
+        idleAfterResultTimer = null;
+      }
+    };
+    const hasResultEvent = (): boolean =>
+      normalizeCursorStreamJson(Buffer.concat(stdout).toString('utf8')).some(
+        (event) => event.type === 'result' && Boolean(event.text)
+      );
+    const scheduleIdleAfterResult = (): void => {
+      if (!idleAfterResultMs || idleAfterResultMs <= 0 || !hasResultEvent()) {
+        return;
+      }
+      if (idleAfterResultTimer) {
+        clearTimeout(idleAfterResultTimer);
+      }
+      idleAfterResultTimer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimers();
+        killProcessTree(child, 'SIGTERM');
+        resolve(buildOutput(0));
+      }, idleAfterResultMs);
+    };
     const timeout = setTimeout(() => {
       if (settled) {
         return;
       }
       settled = true;
+      clearTimers();
       killProcessTree(child, 'SIGKILL');
       reject(new Error(`Cursor CLI timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout.push(chunk);
+      scheduleIdleAfterResult();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr.push(chunk);
+      scheduleIdleAfterResult();
+    });
     child.once('error', (error) => {
       if (settled) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      clearTimers();
       reject(error);
     });
     child.once('close', (exitCode) => {
@@ -118,12 +191,8 @@ function collectProcessOutput(
         return;
       }
       settled = true;
-      clearTimeout(timeout);
-      resolve({
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-        exitCode,
-      });
+      clearTimers();
+      resolve(buildOutput(exitCode));
     });
   });
 }
@@ -288,7 +357,11 @@ export class CursorCliRuntimeAdapter implements CursorRuntimeAdapter {
     this.activeRuns.set(runId, child);
 
     try {
-      const output = await collectProcessOutput(child, request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
+      const output = await collectProcessOutput(
+        child,
+        request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+        request.idleAfterResultMs
+      );
       const events = normalizeCursorStreamJson(output.stdout);
       const summary = summarizeCursorRuntimeEvents(events);
       return {

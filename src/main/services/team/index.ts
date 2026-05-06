@@ -46,6 +46,7 @@ export type {
 } from './runtime';
 export {
   isTeamRuntimeProviderId,
+  CursorAgentTeamRuntimeAdapter,
   OpenCodeTeamRuntimeAdapter,
   TEAM_RUNTIME_PROVIDER_IDS,
   TeamRuntimeAdapterRegistry,

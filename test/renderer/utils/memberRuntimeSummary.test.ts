@@ -229,18 +229,18 @@ describe('resolveMemberRuntimeSummary', () => {
 });
 
 describe('getRuntimeMemorySourceLabel', () => {
-  it('explains when RSS comes from a tmux pane shell', () => {
+  it('explains when RSS comes from a runtime shell shell', () => {
     expect(
       getRuntimeMemorySourceLabel({
         memberName: 'alice',
         alive: false,
         restartable: true,
         pid: 26676,
-        pidSource: 'tmux_pane',
+        pidSource: 'agent_process_table',
         rssBytes: 2 * 1024 * 1024,
         updatedAt: '2026-04-24T12:00:00.000Z',
       })
-    ).toBe('RSS source: tmux pane shell');
+    ).toBe('RSS source: runtime shell shell');
   });
 
   it('explains shared OpenCode host memory separately from member-owned runtime memory', () => {
@@ -265,7 +265,7 @@ describe('getRuntimeMemorySourceLabel', () => {
         alive: true,
         restartable: true,
         pid: 4242,
-        pidSource: 'tmux_child',
+        pidSource: 'agent_process_table',
         rssBytes: 256 * 1024 * 1024,
         updatedAt: '2026-04-24T12:00:00.000Z',
       })

@@ -50,7 +50,7 @@ export function createLoadingMultimodelCliStatus(): CliInstallationStatus {
 
   return {
     flavor: 'agent_teams_orchestrator',
-    displayName: '多模型运行时',
+    displayName: 'Agent CLI',
     supportsSelfUpdate: false,
     showVersionDetails: false,
     showBinaryPath: false,
@@ -213,6 +213,8 @@ function getProviderDisplayName(providerId: CliProviderId): string {
       return 'Gemini';
     case 'opencode':
       return 'OpenCode (75+ LLM providers)';
+    case 'cursor':
+      return 'Cursor Agent';
   }
 }
 

@@ -41,7 +41,7 @@ import {
 } from '@renderer/services/dashboardCliStatusBannerPreference';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
-import { filterMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
+import { getMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
 import { formatBytes } from '@renderer/utils/formatters';
 import { isMultimodelRuntimeStatus } from '@renderer/utils/multimodelProviderVisibility';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
@@ -268,7 +268,6 @@ interface InstalledBannerProps {
   providersCollapsed: boolean;
   isBusy: boolean;
   onInstall: () => void;
-  onRefresh: () => void;
   onToggleProvidersCollapsed: () => void;
   onProviderLogin: (providerId: CliProviderId) => void;
   onProviderLogout: (providerId: CliProviderId) => void;
@@ -282,13 +281,15 @@ interface InstalledBannerProps {
 function getProviderLabel(providerId: CliProviderId): string {
   switch (providerId) {
     case 'anthropic':
-      return 'Anthropic';
+      return 'Claude Code';
     case 'codex':
       return 'Codex';
     case 'gemini':
       return 'Gemini';
     case 'opencode':
       return 'OpenCode (75+ LLM providers)';
+    case 'cursor':
+      return 'Cursor Agent';
   }
 }
 
@@ -372,7 +373,7 @@ const ProviderDetailSkeleton = (): React.JSX.Element => {
   );
 };
 
-const OpenCodeBetaBadge = (): React.JSX.Element => {
+const ProviderBetaBadge = (): React.JSX.Element => {
   return (
     <span
       className="inline-flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold uppercase leading-none"
@@ -436,14 +437,7 @@ function getApiKeyActionRequiredProviders(
 function formatRuntimeLabel(
   cliStatus: NonNullable<ReturnType<typeof useCliInstaller>['cliStatus']>
 ): string | null {
-  if (cliStatus.flavor === 'agent_teams_orchestrator') {
-    return null;
-  }
-
-  const runtimeLabel = getHumanRuntimeDisplayName(cliStatus);
-  return cliStatus.showVersionDetails && cliStatus.installedVersion
-    ? `${runtimeLabel} v${cliStatus.installedVersion ?? 'unknown'}`
-    : runtimeLabel;
+  return 'Agent CLI';
 }
 
 function isCodexSubscriptionActive(
@@ -596,7 +590,6 @@ const InstalledBanner = ({
   providersCollapsed,
   isBusy,
   onInstall,
-  onRefresh,
   onToggleProvidersCollapsed,
   onProviderLogin,
   onProviderLogout,
@@ -608,10 +601,7 @@ const InstalledBanner = ({
 }: InstalledBannerProps): React.JSX.Element => {
   const openExtensionsTab = useStore((s) => s.openExtensionsTab);
   const styles = VARIANT_STYLES[variant];
-  const visibleProviders = useMemo(
-    () => filterMainScreenCliProviders(cliStatus.providers),
-    [cliStatus.providers]
-  );
+  const visibleProviders = useMemo(() => getMainScreenCliProviders(cliStatus), [cliStatus]);
   const canOpenExtensions = cliStatus.installed;
   const runtimeLabel = formatRuntimeLabel(cliStatus);
   const runtimeAuthSummary = formatRuntimeAuthSummary(cliStatus, visibleProviders);
@@ -652,29 +642,6 @@ const InstalledBanner = ({
                   {runtimeLabel}
                 </span>
               )}
-
-              {/* Update / Check for Updates — inline next to version */}
-              {cliStatus.supportsSelfUpdate && cliStatus.updateAvailable ? (
-                <button
-                  onClick={onInstall}
-                  disabled={isBusy}
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: '#3b82f6' }}
-                >
-                  <Download className="size-3" />
-                  更新到 v{cliStatus.latestVersion}
-                </button>
-              ) : cliStatus.supportsSelfUpdate ? (
-                <button
-                  onClick={onRefresh}
-                  disabled={cliStatusLoading}
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-white/5 disabled:opacity-50"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  <RefreshCw className={cliStatusLoading ? 'size-3 animate-spin' : 'size-3'} />
-                  {cliStatusLoading ? '正在检查...' : '检查更新'}
-                </button>
-              ) : null}
 
               {runtimeAuthSummary && (
                 <span className="text-xs" style={{ color: '#4ade80' }}>
@@ -786,7 +753,9 @@ const InstalledBanner = ({
                             ? getProviderLabel(provider.providerId)
                             : provider.displayName}
                         </span>
-                        {provider.providerId === 'opencode' ? <OpenCodeBetaBadge /> : null}
+                        {provider.providerId === 'opencode' || provider.providerId === 'codex' ? (
+                          <ProviderBetaBadge />
+                        ) : null}
                       </span>
                       <span
                         className="text-xs"
@@ -977,10 +946,27 @@ const InstalledBanner = ({
                         {getProviderConnectLabel(provider)}
                       </button>
                     ) : null}
+                    {provider.providerId === 'anthropic' &&
+                    cliStatus.supportsSelfUpdate &&
+                    cliStatus.updateAvailable ? (
+                      <button
+                        onClick={onInstall}
+                        disabled={isBusy}
+                        className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                        style={{
+                          borderColor: 'rgba(59, 130, 246, 0.45)',
+                          color: '#93c5fd',
+                        }}
+                        title={`更新 Claude Code 到 v${cliStatus.latestVersion ?? 'latest'}`}
+                      >
+                        <Download className="size-3" />
+                        更新
+                      </button>
+                    ) : null}
                     <button
                       onClick={() => onProviderRefresh(provider.providerId)}
                       disabled={providerLoading}
-                      className="flex items-center gap-1 rounded-md border px-1.5 py-[3px] text-[10px] transition-colors hover:bg-white/5 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
                       style={{
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text-secondary)',
@@ -990,6 +976,7 @@ const InstalledBanner = ({
                       <RefreshCw
                         className={providerLoading ? 'size-[11px] animate-spin' : 'size-[11px]'}
                       />
+                      检查更新
                     </button>
                   </div>
                 </div>
@@ -1079,22 +1066,22 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
   });
   const visibleCliProviders = useMemo(
     () =>
-      filterMainScreenCliProviders(loadingCliStatus?.providers ?? []).map((provider) =>
+      getMainScreenCliProviders(loadingCliStatus).map((provider) =>
         provider.providerId === 'codex'
           ? mergeCodexProviderStatusWithSnapshot(provider, codexAccount.snapshot)
           : provider
       ),
-    [loadingCliStatus?.providers, codexAccount.snapshot]
+    [loadingCliStatus, codexAccount.snapshot]
   );
   const loadingCliProviderMap = useMemo(
     () =>
       new Map(
-        filterMainScreenCliProviders(loadingCliStatus?.providers ?? []).map((provider) => [
+        getMainScreenCliProviders(loadingCliStatus).map((provider) => [
           provider.providerId,
           provider,
         ])
       ),
-    [loadingCliStatus?.providers]
+    [loadingCliStatus]
   );
   const codexSnapshotPending =
     codexAccount.loading &&
@@ -1406,7 +1393,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           providersCollapsed={providersCollapsed}
           isBusy={isBusy}
           onInstall={handleInstall}
-          onRefresh={handleRefresh}
           onToggleProvidersCollapsed={handleToggleProvidersCollapsed}
           onProviderLogin={handleProviderLogin}
           onProviderLogout={handleProviderLogout}
@@ -1423,7 +1409,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     return (
       <CliCheckingSpinner
         styles={styles}
-        label={multimodelEnabled ? '正在检查 AI 提供商...' : '正在检查 Claude CLI...'}
+        label={multimodelEnabled ? '正在检查 Agent CLI 提供商...' : '正在检查 Agent CLI...'}
       />
     );
   }
@@ -1628,7 +1614,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
             providersCollapsed={providersCollapsed}
             isBusy={isBusy}
             onInstall={handleInstall}
-            onRefresh={handleRefresh}
             onToggleProvidersCollapsed={handleToggleProvidersCollapsed}
             onProviderLogin={handleProviderLogin}
             onProviderLogout={handleProviderLogout}
@@ -1687,7 +1672,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           providersCollapsed={providersCollapsed}
           isBusy={isBusy}
           onInstall={handleInstall}
-          onRefresh={handleRefresh}
           onToggleProvidersCollapsed={handleToggleProvidersCollapsed}
           onProviderLogin={handleProviderLogin}
           onProviderLogout={handleProviderLogout}
@@ -1905,7 +1889,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
         providersCollapsed={providersCollapsed}
         isBusy={isBusy}
         onInstall={handleInstall}
-        onRefresh={handleRefresh}
         onToggleProvidersCollapsed={handleToggleProvidersCollapsed}
         onProviderLogin={handleProviderLogin}
         onProviderLogout={handleProviderLogout}

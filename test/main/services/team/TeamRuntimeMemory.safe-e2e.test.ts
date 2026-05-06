@@ -191,7 +191,7 @@ async function writeTeamFixture(params: {
             providerId: 'anthropic',
             model: 'claude-sonnet-4-6',
             agentId: params.agentId,
-            backendType: 'tmux',
+            backendType: 'process',
           },
         ],
       },

@@ -1,7 +1,6 @@
 import { createCodexAccountBridge } from '@features/codex-account/preload';
 import { createRecentProjectsBridge } from '@features/recent-projects/preload';
 import { createRuntimeProviderManagementBridge } from '@features/runtime-provider-management/preload';
-import { createTmuxInstallerBridge } from '@features/tmux-installer/preload';
 import { WINDOW_ZOOM_FACTOR_CHANGED_CHANNEL } from '@shared/constants';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
@@ -1565,9 +1564,6 @@ const electronAPI: ElectronAPI = {
       };
     },
   },
-
-  tmux: createTmuxInstallerBridge({ ipcRenderer, invokeIpcWithResult }),
-
   // ===== Terminal API =====
   terminal: {
     spawn: (options?: PtySpawnOptions) => invokeIpcWithResult<string>(TERMINAL_SPAWN, options),

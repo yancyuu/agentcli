@@ -1,15 +1,15 @@
 import { parseCliArgs } from '@shared/utils/cliArgsParser';
 
-export type TeammateLaunchMode = 'in-process' | 'tmux';
+export type TeammateLaunchMode = 'in-process';
 
 export const DEFAULT_TEAMMATE_LAUNCH_MODE: TeammateLaunchMode = 'in-process';
 
 export function normalizeTeammateLaunchMode(value: string | null | undefined): TeammateLaunchMode {
-  return value === 'tmux' || value === 'in-process' ? value : DEFAULT_TEAMMATE_LAUNCH_MODE;
+  return value === 'in-process' ? value : DEFAULT_TEAMMATE_LAUNCH_MODE;
 }
 
-export function buildTeammateModeCliArgs(mode: TeammateLaunchMode): string[] {
-  return ['--teammate-mode', mode];
+export function buildTeammateModeCliArgs(): string[] {
+  return ['--teammate-mode', DEFAULT_TEAMMATE_LAUNCH_MODE];
 }
 
 function stripTeammateModeArgs(tokens: string[]): string[] {
@@ -41,9 +41,9 @@ function quoteCliToken(token: string): string {
 
 export function buildLaunchExtraCliArgs(
   customArgs: string,
-  mode: TeammateLaunchMode
+  _mode: TeammateLaunchMode = DEFAULT_TEAMMATE_LAUNCH_MODE
 ): string | undefined {
   const customTokens = stripTeammateModeArgs(parseCliArgs(customArgs));
-  const tokens = [...buildTeammateModeCliArgs(mode), ...customTokens];
+  const tokens = [...buildTeammateModeCliArgs(), ...customTokens];
   return tokens.length > 0 ? tokens.map(quoteCliToken).join(' ') : undefined;
 }

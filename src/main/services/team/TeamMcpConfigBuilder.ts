@@ -13,6 +13,8 @@ export interface McpLaunchSpec {
 }
 
 const MCP_SERVER_NAME = 'agent-teams';
+const CURSOR_MCP_CONFIG_DIR = '.cursor';
+const CURSOR_MCP_CONFIG_FILE = 'mcp.json';
 const logger = createLogger('Service:TeamMcpConfigBuilder');
 const MCP_CONFIG_PREFIX = 'agent-teams-mcp-';
 const MCP_CONFIG_REMOVE_RETRY_DELAYS_MS = [25, 75, 150] as const;
@@ -25,6 +27,10 @@ const MCP_CONFIG_REMOVE_RETRY_DELAYS_MS = [25, 75, 150] as const;
 const MCP_CONFIG_STALE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type McpServerConfig = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function isPackagedApp(): boolean {
   try {
@@ -258,18 +264,22 @@ export async function resolveAgentTeamsMcpLaunchSpec(): Promise<McpLaunchSpec> {
 }
 
 export class TeamMcpConfigBuilder {
-  async writeConfigFile(_projectPath?: string): Promise<string> {
+  private async buildAgentTeamsServerConfig(): Promise<McpServerConfig> {
     const launchSpec = await resolveAgentTeamsMcpLaunchSpec();
+    return {
+      command: launchSpec.command,
+      args: launchSpec.args,
+    };
+  }
+
+  async writeConfigFile(_projectPath?: string): Promise<string> {
     const configDir = getMcpConfigsBasePath();
     const configPath = path.join(
       configDir,
       `${MCP_CONFIG_PREFIX}${process.pid}-${Date.now()}-${randomUUID()}.json`
     );
     const generatedServers: Record<string, McpServerConfig> = {
-      [MCP_SERVER_NAME]: {
-        command: launchSpec.command,
-        args: launchSpec.args,
-      },
+      [MCP_SERVER_NAME]: await this.buildAgentTeamsServerConfig(),
     };
 
     await fs.promises.mkdir(configDir, { recursive: true });
@@ -285,6 +295,43 @@ export class TeamMcpConfigBuilder {
     );
 
     return configPath;
+  }
+
+  async ensureCursorProjectMcpConfig(projectPath: string): Promise<string> {
+    const trimmedProjectPath = projectPath.trim();
+    if (!trimmedProjectPath) {
+      throw new Error('Project path is required to configure Cursor MCP.');
+    }
+
+    const cursorConfigDir = path.join(trimmedProjectPath, CURSOR_MCP_CONFIG_DIR);
+    const cursorConfigPath = path.join(cursorConfigDir, CURSOR_MCP_CONFIG_FILE);
+    let existingConfig: Record<string, unknown> = {};
+
+    try {
+      const raw = await fs.promises.readFile(cursorConfigPath, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (isRecord(parsed)) {
+        existingConfig = parsed;
+      }
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    const existingServers = isRecord(existingConfig.mcpServers) ? existingConfig.mcpServers : {};
+    const nextConfig = {
+      ...existingConfig,
+      mcpServers: {
+        ...existingServers,
+        [MCP_SERVER_NAME]: await this.buildAgentTeamsServerConfig(),
+      },
+    };
+
+    await fs.promises.mkdir(cursorConfigDir, { recursive: true });
+    await atomicWriteAsync(cursorConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+    return cursorConfigPath;
   }
 
   /** Delete a single MCP config file (best-effort). */

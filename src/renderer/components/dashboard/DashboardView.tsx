@@ -13,7 +13,6 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { CliStatusBanner } from './CliStatusBanner';
 import { DashboardUpdateBanner } from './DashboardUpdateBanner';
-import { TmuxStatusBanner } from './TmuxStatusBanner';
 import { WebPreviewBanner } from './WebPreviewBanner';
 
 interface CommandSearchProps {
@@ -115,7 +114,6 @@ export const DashboardView = (): React.JSX.Element => {
         <WebPreviewBanner />
         <DashboardUpdateBanner />
         <CliStatusBanner />
-        <TmuxStatusBanner />
 
         <div className="mb-12 flex items-center justify-center gap-3">
           <button

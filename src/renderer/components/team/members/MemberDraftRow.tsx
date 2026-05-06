@@ -484,6 +484,7 @@ export const MemberDraftRow = ({
                 }}
                 id={`member-${member.id}-model`}
                 disableGeminiOption={disableGeminiOption}
+                hideProviderTabs
                 modelIssueReasonByValue={
                   effectiveModel?.trim() ? { [effectiveModel.trim()]: modelIssueText } : undefined
                 }

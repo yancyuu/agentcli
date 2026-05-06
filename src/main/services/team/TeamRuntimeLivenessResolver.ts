@@ -1,4 +1,3 @@
-import type { RuntimeProcessTableRow, TmuxPaneRuntimeInfo } from '@features/tmux-installer/main';
 import type {
   MemberSpawnStatusEntry,
   TeamAgentRuntimeBackendType,
@@ -8,20 +7,24 @@ import type {
   TeamProviderId,
 } from '@shared/types';
 
+export interface RuntimeProcessTableRow {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
 export interface ResolveTeamMemberRuntimeLivenessInput {
   teamName: string;
   memberName: string;
   agentId?: string;
   backendType?: TeamAgentRuntimeBackendType;
   providerId?: TeamProviderId;
-  tmuxPaneId?: string;
   persistedRuntimePid?: number;
   persistedRuntimeSessionId?: string;
   trackedSpawnStatus?: MemberSpawnStatusEntry;
   runtimePid?: number;
   runtimePidAlive?: boolean;
   runtimeSessionId?: string;
-  pane?: TmuxPaneRuntimeInfo;
   processRows: readonly RuntimeProcessTableRow[];
   processTableAvailable: boolean;
   nowIso: string;
@@ -33,8 +36,6 @@ export interface ResolvedTeamMemberRuntimeLiveness {
   pidSource?: TeamAgentRuntimePidSource;
   pid?: number;
   metricsPid?: number;
-  panePid?: number;
-  paneCurrentCommand?: string;
   processCommand?: string;
   runtimeSessionId?: string;
   runtimeLastSeenAt?: string;
@@ -43,7 +44,7 @@ export interface ResolvedTeamMemberRuntimeLiveness {
   diagnostics: string[];
 }
 
-const SHELL_COMMAND_NAMES = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'login', 'tmux']);
+const SHELL_COMMAND_NAMES = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'login']);
 const SECRET_FLAG_PATTERN =
   /(--(?:api-key|token|password|secret|authorization|auth-token)(?:=|\s+))("[^"]*"|'[^']*'|\S+)/gi;
 
@@ -94,30 +95,6 @@ export function commandArgEquals(
   return extractCliArgValues(command, argName).some((value) => value === normalizedExpected);
 }
 
-function collectDescendants(
-  rows: readonly RuntimeProcessTableRow[],
-  rootPid: number
-): RuntimeProcessTableRow[] {
-  const childrenByParent = new Map<number, RuntimeProcessTableRow[]>();
-  for (const row of rows) {
-    const current = childrenByParent.get(row.ppid) ?? [];
-    current.push(row);
-    childrenByParent.set(row.ppid, current);
-  }
-
-  const descendants: RuntimeProcessTableRow[] = [];
-  const queue = [...(childrenByParent.get(rootPid) ?? [])];
-  const seen = new Set<number>();
-  while (queue.length > 0) {
-    const row = queue.shift();
-    if (!row || seen.has(row.pid)) continue;
-    seen.add(row.pid);
-    descendants.push(row);
-    queue.push(...(childrenByParent.get(row.pid) ?? []));
-  }
-  return descendants;
-}
-
 function isVerifiedRuntimeProcess(params: {
   row: RuntimeProcessTableRow;
   teamName: string;
@@ -136,7 +113,6 @@ function isOpenCodeRuntimeProcess(command: string | undefined): boolean {
 function hasPersistedEvidence(input: ResolveTeamMemberRuntimeLivenessInput): boolean {
   return Boolean(
     input.agentId?.trim() ||
-    input.tmuxPaneId?.trim() ||
     input.persistedRuntimePid ||
     input.runtimePid ||
     input.persistedRuntimeSessionId?.trim() ||
@@ -154,8 +130,6 @@ function result(params: {
   pidSource?: TeamAgentRuntimePidSource;
   pid?: number;
   metricsPid?: number;
-  panePid?: number;
-  paneCurrentCommand?: string;
   processCommand?: string;
   runtimeSessionId?: string;
   runtimeLastSeenAt?: string;
@@ -171,10 +145,6 @@ function result(params: {
     ...(typeof params.metricsPid === 'number' && params.metricsPid > 0
       ? { metricsPid: params.metricsPid }
       : {}),
-    ...(typeof params.panePid === 'number' && params.panePid > 0
-      ? { panePid: params.panePid }
-      : {}),
-    ...(params.paneCurrentCommand ? { paneCurrentCommand: params.paneCurrentCommand } : {}),
     ...(params.processCommand ? { processCommand: params.processCommand } : {}),
     ...(params.runtimeSessionId ? { runtimeSessionId: params.runtimeSessionId } : {}),
     ...(params.runtimeLastSeenAt ? { runtimeLastSeenAt: params.runtimeLastSeenAt } : {}),
@@ -279,68 +249,6 @@ export function resolveTeamMemberRuntimeLiveness(
       runtimeLastSeenAt: tracked.lastHeartbeatAt ?? tracked.updatedAt,
       runtimeDiagnostic: 'bootstrap confirmed',
       diagnostics: [...diagnostics, 'bootstrap confirmed'],
-    });
-  }
-
-  const pane = input.pane;
-  if (pane) {
-    const descendants = collectDescendants(input.processRows, pane.panePid);
-    const verifiedDescendant = descendants
-      .filter((row) =>
-        isVerifiedRuntimeProcess({ row, teamName: input.teamName, agentId: input.agentId })
-      )
-      .sort((left, right) => right.pid - left.pid)[0];
-    if (verifiedDescendant) {
-      return result({
-        alive: true,
-        livenessKind: 'runtime_process',
-        pidSource: 'tmux_child',
-        pid: verifiedDescendant.pid,
-        panePid: pane.panePid,
-        paneCurrentCommand: pane.currentCommand,
-        runtimeSessionId,
-        processCommand: sanitizeProcessCommandForDiagnostics(verifiedDescendant.command),
-        runtimeDiagnostic: 'verified tmux runtime child detected',
-        diagnostics: [...diagnostics, 'matched tmux descendant by team-name and agent-id'],
-      });
-    }
-
-    const candidate = descendants.find((row) => !isShellLikeCommand(row.command));
-    if (candidate) {
-      return result({
-        alive: false,
-        livenessKind: 'runtime_process_candidate',
-        pidSource: 'tmux_child',
-        pid: candidate.pid,
-        panePid: pane.panePid,
-        paneCurrentCommand: pane.currentCommand,
-        runtimeSessionId,
-        processCommand: sanitizeProcessCommandForDiagnostics(candidate.command),
-        runtimeDiagnostic: 'runtime process candidate detected',
-        runtimeDiagnosticSeverity: 'warning',
-        diagnostics: [...diagnostics, 'tmux descendant found without runtime identity match'],
-      });
-    }
-
-    const shellOnly = isShellLikeCommand(pane.currentCommand);
-    return result({
-      alive: false,
-      livenessKind: shellOnly ? 'shell_only' : 'runtime_process_candidate',
-      pidSource: 'tmux_pane',
-      pid: pane.panePid,
-      panePid: pane.panePid,
-      paneCurrentCommand: pane.currentCommand,
-      runtimeSessionId,
-      runtimeDiagnostic: shellOnly
-        ? `tmux pane foreground command is ${pane.currentCommand ?? 'a shell'}`
-        : 'tmux pane is alive, but runtime identity is not verified',
-      runtimeDiagnosticSeverity: shellOnly ? 'warning' : 'info',
-      diagnostics: [
-        ...diagnostics,
-        shellOnly
-          ? `tmux pane is alive, but foreground command is ${pane.currentCommand ?? 'a shell'}`
-          : 'tmux pane exists, but no verified runtime process was found',
-      ],
     });
   }
 

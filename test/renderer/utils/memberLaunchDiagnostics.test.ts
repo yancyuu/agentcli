@@ -21,7 +21,7 @@ describe('member launch diagnostics', () => {
         agentToolAccepted: true,
         livenessKind: 'shell_only',
         livenessSource: 'process',
-        runtimeDiagnostic: 'tmux pane foreground command is zsh',
+        runtimeDiagnostic: 'runtime shell foreground command is zsh',
         runtimeDiagnosticSeverity: 'warning',
         updatedAt: '2026-04-24T12:00:00.000Z',
       },
@@ -30,12 +30,12 @@ describe('member launch diagnostics', () => {
         alive: false,
         restartable: true,
         pid: 26676,
-        pidSource: 'tmux_pane',
+        pidSource: 'agent_process_table',
         paneId: '%42',
         panePid: 26676,
         paneCurrentCommand: 'zsh',
         processCommand: 'node runtime --token super-secret --team-name demo-team',
-        diagnostics: ['tmux pane foreground command is zsh', 'no runtime child found'],
+        diagnostics: ['runtime shell foreground command is zsh', 'no runtime child found'],
         updatedAt: '2026-04-24T12:00:01.000Z',
       },
     });
@@ -48,15 +48,15 @@ describe('member launch diagnostics', () => {
       spawnStatus: 'waiting',
       livenessKind: 'shell_only',
       pid: 26676,
-      pidSource: 'tmux_pane',
+      pidSource: 'agent_process_table',
       paneCurrentCommand: 'zsh',
-      runtimeDiagnostic: 'tmux pane foreground command is zsh',
+      runtimeDiagnostic: 'runtime shell foreground command is zsh',
       runtimeDiagnosticSeverity: 'warning',
     });
     expect(payload.processCommand).toContain('--token [redacted]');
     expect(payload.processCommand).not.toContain('super-secret');
     expect(payload.diagnostics).toEqual([
-      'tmux pane foreground command is zsh',
+      'runtime shell foreground command is zsh',
       'no runtime child found',
     ]);
     expect(hasMemberLaunchDiagnosticsDetails(payload)).toBe(true);

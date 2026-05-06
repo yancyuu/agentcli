@@ -8,23 +8,21 @@ import {
 const NOW = '2026-04-24T12:00:00.000Z';
 
 describe('resolveTeamMemberRuntimeLiveness', () => {
-  it('classifies tmux shell panes as weak shell-only evidence', () => {
+  it('ignores shell-only rows without runtime identity', () => {
     const result = resolveTeamMemberRuntimeLiveness({
       teamName: 'demo',
       memberName: 'bob',
       agentId: 'agent-bob',
-      backendType: 'tmux',
-      tmuxPaneId: '%1',
-      pane: { paneId: '%1', panePid: 100, currentCommand: 'zsh' },
+      backendType: 'process',
       processRows: [{ pid: 100, ppid: 1, command: 'zsh' }],
       processTableAvailable: true,
       nowIso: NOW,
     });
 
     expect(result.alive).toBe(false);
-    expect(result.livenessKind).toBe('shell_only');
-    expect(result.pidSource).toBe('tmux_pane');
-    expect(result.pid).toBe(100);
+    expect(result.livenessKind).toBe('registered_only');
+    expect(result.pidSource).toBeUndefined();
+    expect(result.pid).toBeUndefined();
   });
 
   it('promotes a verified team and agent process to strong runtime evidence', () => {
@@ -32,7 +30,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       teamName: 'demo',
       memberName: 'alice',
       agentId: 'agent-alice',
-      backendType: 'tmux',
+      backendType: 'process',
       processRows: [
         {
           pid: 222,
@@ -55,7 +53,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       teamName: 'demo',
       memberName: 'alice',
       agentId: 'agent-alice',
-      backendType: 'tmux',
+      backendType: 'process',
       trackedSpawnStatus: {
         status: 'online',
         launchState: 'confirmed_alive',
@@ -82,14 +80,12 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
     expect(result.pid).toBe(222);
   });
 
-  it('keeps a non-shell tmux descendant without identity as a candidate', () => {
+  it('does not infer runtime identity from an unrelated child process', () => {
     const result = resolveTeamMemberRuntimeLiveness({
       teamName: 'demo',
       memberName: 'jack',
       agentId: 'agent-jack',
-      backendType: 'tmux',
-      tmuxPaneId: '%2',
-      pane: { paneId: '%2', panePid: 300, currentCommand: 'zsh' },
+      backendType: 'process',
       processRows: [
         { pid: 300, ppid: 1, command: 'zsh' },
         { pid: 301, ppid: 300, command: 'node helper.js' },
@@ -99,9 +95,9 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
     });
 
     expect(result.alive).toBe(false);
-    expect(result.livenessKind).toBe('runtime_process_candidate');
-    expect(result.pidSource).toBe('tmux_child');
-    expect(result.pid).toBe(301);
+    expect(result.livenessKind).toBe('registered_only');
+    expect(result.pidSource).toBeUndefined();
+    expect(result.pid).toBeUndefined();
   });
 
   it('promotes a live OpenCode runtime pid only when process identity matches', () => {

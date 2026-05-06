@@ -46,6 +46,7 @@ const TEAM_PROVIDER_LABELS: Record<SupportedProviderId, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
+  cursor: 'Cursor Agent',
 };
 
 const ANTHROPIC_ALIAS_LABELS = {
@@ -133,6 +134,12 @@ const TEAM_PROVIDER_MODEL_OPTIONS: Record<SupportedProviderId, readonly TeamProv
       },
     ],
     opencode: [{ value: '', label: '默认', badgeLabel: '默认' }],
+    cursor: [
+      { value: '', label: '默认', badgeLabel: '默认' },
+      { value: 'auto', label: 'Auto', badgeLabel: 'Auto' },
+      { value: 'composer-2-fast', label: 'Composer 2 Fast', badgeLabel: 'C2 Fast' },
+      { value: 'composer-2', label: 'Composer 2', badgeLabel: 'C2' },
+    ],
   };
 
 const TEAM_PROVIDER_MODEL_ORDER: Record<SupportedProviderId, Map<string, number>> = {
@@ -142,6 +149,7 @@ const TEAM_PROVIDER_MODEL_ORDER: Record<SupportedProviderId, Map<string, number>
   opencode: new Map(
     TEAM_PROVIDER_MODEL_OPTIONS.opencode.map((option, index) => [option.value, index])
   ),
+  cursor: new Map(TEAM_PROVIDER_MODEL_OPTIONS.cursor.map((option, index) => [option.value, index])),
 };
 
 function getKnownTeamProviderModelOption(

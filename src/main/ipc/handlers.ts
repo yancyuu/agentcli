@@ -78,7 +78,6 @@ import {
   registerTerminalHandlers,
   removeTerminalHandlers,
 } from './terminal';
-import { registerTmuxHandlers, removeTmuxHandlers } from './tmux';
 import {
   initializeUpdaterHandlers,
   registerUpdaterHandlers,
@@ -267,7 +266,6 @@ export function initializeIpcHandlers(
   if (ptyTerminal) {
     registerTerminalHandlers(ipcMain);
   }
-  registerTmuxHandlers(ipcMain);
   if (httpServerDeps) {
     registerHttpServerHandlers(ipcMain);
   }
@@ -306,7 +304,6 @@ export function removeIpcHandlers(): void {
   removeScheduleHandlers(ipcMain);
   removeCliInstallerHandlers(ipcMain);
   removeTerminalHandlers(ipcMain);
-  removeTmuxHandlers(ipcMain);
   removeHttpServerHandlers(ipcMain);
   removeExtensionHandlers(ipcMain);
   removeSkillsHandlers(ipcMain);

@@ -24,6 +24,7 @@ import { buildEnrichedEnv } from '@main/utils/cliEnv';
 import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getClaudeBasePath, getHomeDir } from '@main/utils/pathDecoder';
 import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
+import { CursorCliRuntimeAdapter } from '@features/cursor-runtime/main';
 import {
   getCachedShellEnv,
   getShellPreferredHome,
@@ -363,6 +364,7 @@ function resetGatherDiag(diag: CliInstallerStatusRunDiag): void {
 export class CliInstallerService {
   private mainWindow: BrowserWindow | null = null;
   private installing = false;
+  private readonly cursorRuntimeAdapter = new CursorCliRuntimeAdapter();
   private readonly multimodelBridgeService = new ClaudeMultimodelBridgeService();
   private readonly modelAvailabilityService = new CliProviderModelAvailabilityService(
     (providerId, signature, snapshot) => {
@@ -486,7 +488,7 @@ export class CliInstallerService {
   private createInitialStatus(): CliInstallationStatus {
     const flavor = getConfiguredCliFlavor();
     const ui = getCliFlavorUiOptions(flavor);
-    const providers =
+    const providers: CliProviderStatus[] =
       flavor === 'agent_teams_orchestrator'
         ? (
             [
@@ -526,6 +528,25 @@ export class CliInstallerService {
             backend: null,
           }))
         : [];
+    providers.push({
+      providerId: 'cursor',
+      displayName: 'Cursor Agent',
+      supported: false,
+      authenticated: false,
+      authMethod: null,
+      verificationState: 'unknown',
+      modelVerificationState: 'idle',
+      statusMessage: 'Checking...',
+      models: [],
+      modelAvailability: [],
+      canLoginFromUi: false,
+      capabilities: {
+        teamLaunch: false,
+        oneShot: false,
+        extensions: createDefaultCliExtensionCapabilities(),
+      },
+      backend: null,
+    });
     return {
       flavor,
       displayName: ui.displayName,
@@ -620,6 +641,64 @@ export class CliInstallerService {
     provider: CliProviderStatus
   ): CliProviderStatus {
     return this.applyProviderModelAvailability(binaryPath, installedVersion, [provider])[0];
+  }
+
+  private async getCursorProviderStatus(): Promise<CliProviderStatus> {
+    const status = await this.cursorRuntimeAdapter.probeStatus();
+    const supported = status.state !== 'missing';
+    return {
+      providerId: 'cursor',
+      displayName: 'Cursor Agent',
+      supported,
+      authenticated: status.authenticated,
+      authMethod: status.authenticated ? 'cursor-login' : null,
+      verificationState:
+        status.state === 'ready'
+          ? 'verified'
+          : status.state === 'missing'
+            ? 'offline'
+            : status.state === 'needs-auth'
+              ? 'unknown'
+              : 'error',
+      modelVerificationState: 'idle',
+      statusMessage:
+        status.state === 'ready'
+          ? null
+          : status.authMessage || status.diagnostics[0] || 'Cursor Agent is not ready.',
+      detailMessage: status.diagnostics.join('\n') || null,
+      models: [...status.models],
+      modelAvailability: [],
+      canLoginFromUi: false,
+      capabilities: {
+        teamLaunch: status.state === 'ready',
+        oneShot: status.capabilities.oneShot.supported,
+        extensions: createDefaultCliExtensionCapabilities(),
+      },
+      backend: supported
+        ? {
+            kind: 'cursor-agent',
+            label: 'cursor-agent',
+            endpointLabel: status.command ?? null,
+            authMethodDetail: status.authenticated ? '本机 Cursor 登录态' : null,
+          }
+        : null,
+      externalRuntimeDiagnostics: status.diagnostics.map((diagnostic, index) => ({
+        id: `cursor-${index}`,
+        label: diagnostic,
+        detected: status.state !== 'missing',
+        statusMessage: diagnostic,
+      })),
+    };
+  }
+
+  private async applyCursorProviderStatus(result: CliInstallationStatus): Promise<void> {
+    const cursorStatus = await this.getCursorProviderStatus();
+    const hasCursorProvider = result.providers.some((provider) => provider.providerId === 'cursor');
+    result.providers = hasCursorProvider
+      ? result.providers.map((provider) =>
+          provider.providerId === 'cursor' ? cursorStatus : provider
+        )
+      : [...result.providers, cursorStatus];
   }
 
   private handleProviderModelAvailabilityUpdate(
@@ -729,6 +808,12 @@ export class CliInstallerService {
   async getProviderStatus(providerId: CliProviderId): Promise<CliProviderStatus | null> {
     await resolveInteractiveShellEnv();
 
+    if (providerId === 'cursor') {
+      const providerStatus = await this.getCursorProviderStatus();
+      this.updateLatestProviderStatus(providerStatus);
+      return providerStatus;
+    }
+
     const binaryPath = await ClaudeBinaryResolver.resolve();
     if (!binaryPath) {
       return null;
@@ -755,6 +840,10 @@ export class CliInstallerService {
 
   async verifyProviderModels(providerId: CliProviderId): Promise<CliProviderStatus | null> {
     await resolveInteractiveShellEnv();
+
+    if (providerId === 'cursor') {
+      return this.getProviderStatus(providerId);
+    }
 
     const binaryPath = await ClaudeBinaryResolver.resolve();
     if (!binaryPath) {
@@ -829,6 +918,7 @@ export class CliInstallerService {
         r.launchError = null;
         r.authStatusChecking = true;
         this.rememberHealthyStatus(r);
+        await this.applyCursorProviderStatus(r);
         this.publishStatusSnapshot(r);
 
         // Auth and GCS version check are independent — run in parallel.
@@ -848,6 +938,7 @@ export class CliInstallerService {
           Object.assign(r, recoveredHealthyStatus, {
             launchError: null,
           });
+          await this.applyCursorProviderStatus(r);
           this.publishStatusSnapshot(r);
           return;
         }
@@ -867,6 +958,7 @@ export class CliInstallerService {
         if (r.supportsSelfUpdate) {
           await this.fetchLatestVersion(r);
         }
+        await this.applyCursorProviderStatus(r);
         this.publishStatusSnapshot(r);
       }
     } else {
@@ -877,6 +969,7 @@ export class CliInstallerService {
       if (r.supportsSelfUpdate) {
         await this.fetchLatestVersion(r);
       }
+      await this.applyCursorProviderStatus(r);
       this.publishStatusSnapshot(r);
     }
   }

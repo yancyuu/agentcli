@@ -116,15 +116,8 @@ import {
   shouldHideProvisioningProviderStatusList,
   updateProviderCheck,
 } from './ProvisioningProviderStatusList';
-import {
-  buildLaunchExtraCliArgs,
-  buildTeammateModeCliArgs,
-  normalizeTeammateLaunchMode,
-} from './teammateLaunchMode';
-import {
-  analyzeTeammateRuntimeCompatibility,
-  useTmuxRuntimeReadiness,
-} from './teammateRuntimeCompatibility';
+import { buildLaunchExtraCliArgs, buildTeammateModeCliArgs } from './teammateLaunchMode';
+import { analyzeTeammateRuntimeCompatibility } from './teammateRuntimeCompatibility';
 import { TeammateRuntimeCompatibilityNotice } from './TeammateRuntimeCompatibilityNotice';
 import {
   computeEffectiveTeamModel,
@@ -425,11 +418,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [customArgs, setCustomArgsRaw] = useState(
     () => localStorage.getItem(`team:lastCustomArgs:${effectiveTeamName}`) ?? ''
   );
-  const [teammateLaunchMode, setTeammateLaunchModeRaw] = useState(() =>
-    normalizeTeammateLaunchMode(
-      localStorage.getItem(`team:lastTeammateLaunchMode:${effectiveTeamName}`)
-    )
-  );
 
   // ---------------------------------------------------------------------------
   // Relaunch-only state (saved request for rebuilding launch config)
@@ -440,7 +428,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     TeamCreateRequest['members']
   > | null>(null);
   const relaunchProjectPath = isRelaunch
-    ? ((props as LaunchDialogRelaunchMode).projectPath ?? props.defaultProjectPath ?? '')
+    ? (props.projectPath ?? props.defaultProjectPath ?? '')
     : '';
 
   // ---------------------------------------------------------------------------
@@ -456,23 +444,26 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [maxBudgetUsd, setMaxBudgetUsd] = useState('');
   const [scheduleHydrationKey, setScheduleHydrationKey] = useState<string | null>(null);
   const effectiveMemberDrafts = useMemo(
-    () => (syncModelsWithLead ? membersDrafts.map(clearMemberModelOverrides) : membersDrafts),
-    [membersDrafts, syncModelsWithLead]
+    () =>
+      (syncModelsWithLead ? membersDrafts.map(clearMemberModelOverrides) : membersDrafts).map(
+        (member) =>
+          member.providerId === selectedProviderId
+            ? member
+            : { ...member, providerId: selectedProviderId }
+      ),
+    [membersDrafts, selectedProviderId, syncModelsWithLead]
   );
-  const tmuxRuntime = useTmuxRuntimeReadiness(open && isLaunchMode);
   const selectedMemberProviders = useMemo<TeamProviderId[]>(
     () =>
-      !multimodelEnabled
-        ? ['anthropic']
-        : Array.from(
-            new Set([
-              selectedProviderId,
-              ...effectiveMemberDrafts.flatMap((member) =>
-                !member.removedAt && isTeamProviderId(member.providerId) ? [member.providerId] : []
-              ),
-            ])
+      Array.from(
+        new Set([
+          selectedProviderId,
+          ...effectiveMemberDrafts.flatMap((member) =>
+            !member.removedAt && isTeamProviderId(member.providerId) ? [member.providerId] : []
           ),
-    [effectiveMemberDrafts, multimodelEnabled, selectedProviderId]
+        ])
+      ),
+    [effectiveMemberDrafts, selectedProviderId]
   );
 
   const runtimeBackendSummaryByProvider = useMemo(() => {
@@ -531,25 +522,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   }, [membersDrafts, open, runtimeProviderStatusById, selectedProviderId]);
 
   useEffect(() => {
-    if (multimodelEnabled) {
-      return;
-    }
-    if (selectedProviderId !== 'anthropic') {
-      setSelectedProviderIdRaw('anthropic');
-      setSelectedModelRaw(getStoredTeamModel('anthropic'));
-    }
-    setMembersDrafts((prev) => {
-      let changed = false;
-      const next = prev.map((member) => {
-        const normalized = normalizeMemberDraftForProviderMode(member, false);
-        if (normalized !== member) changed = true;
-        return normalized;
-      });
-      return changed ? next : prev;
-    });
-  }, [multimodelEnabled, selectedProviderId]);
-
-  useEffect(() => {
     if (!open || cliStatus || cliStatusLoading) {
       return;
     }
@@ -583,10 +555,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const setCustomArgs = (value: string): void => {
     setCustomArgsRaw(value);
     localStorage.setItem(`team:lastCustomArgs:${effectiveTeamName}`, value);
-  };
-  const setTeammateLaunchMode = (value: typeof teammateLaunchMode): void => {
-    setTeammateLaunchModeRaw(value);
-    localStorage.setItem(`team:lastTeammateLaunchMode:${effectiveTeamName}`, value);
   };
 
   const setSelectedProviderId = (value: TeamProviderId): void => {
@@ -920,24 +888,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         leadProviderId: selectedProviderId,
         leadProviderBackendId: selectedProviderBackendId,
         members: isLaunchMode ? effectiveMemberDrafts : [],
-        extraCliArgs: isLaunchMode
-          ? buildLaunchExtraCliArgs(customArgs, teammateLaunchMode)
-          : undefined,
-        tmuxStatus: tmuxRuntime.status,
-        tmuxStatusLoading: tmuxRuntime.loading,
-        tmuxStatusError: tmuxRuntime.error,
+        extraCliArgs: isLaunchMode ? buildLaunchExtraCliArgs(customArgs) : undefined,
       }),
-    [
-      customArgs,
-      effectiveMemberDrafts,
-      isLaunchMode,
-      selectedProviderBackendId,
-      selectedProviderId,
-      teammateLaunchMode,
-      tmuxRuntime.error,
-      tmuxRuntime.loading,
-      tmuxRuntime.status,
-    ]
+    [customArgs, effectiveMemberDrafts, isLaunchMode, selectedProviderBackendId, selectedProviderId]
   );
   const anthropicRuntimeSelection = useMemo(
     () =>
@@ -1465,7 +1418,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         setPrepareWarnings(collectedWarnings);
       } catch (error) {
         if (prepareRequestSeqRef.current !== requestSeq) return;
-        const failureMessage = error instanceof Error ? error.message : '预热 Claude CLI 环境失败';
+        const failureMessage = error instanceof Error ? error.message : '预热 Agent CLI 环境失败';
         setPrepareState('failed');
         setPrepareWarnings([]);
         setPrepareChecks(failIncompleteProviderChecks(checks, failureMessage));
@@ -1632,7 +1585,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         : { fastMode: false };
       args.push('--settings', JSON.stringify(fastSettings));
     }
-    args.push(...buildTeammateModeCliArgs(teammateLaunchMode));
+    args.push(...buildTeammateModeCliArgs());
     if (!clearContext) args.push('--resume', '<previous>');
     return args;
   }, [
@@ -1644,7 +1597,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     limitContext,
     selectedEffort,
     selectedProviderId,
-    teammateLaunchMode,
     clearContext,
     runtimeProviderStatusById,
   ]);
@@ -1672,9 +1624,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     }
     if (selectedProviderId === 'anthropic' && limitContext) summary.push('上下文限制为 200K');
     if (skipPermissions) summary.push('自动批准工具');
-    summary.push(
-      teammateLaunchMode === 'in-process' ? 'Members: Claude 子 agent' : 'Members: tmux 独立进程'
-    );
+    summary.push('Members: 进程内子 agent');
     if (clearContext) summary.push('全新会话');
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree：${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('自定义 CLI 参数');
@@ -1690,7 +1640,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     anthropicProviderFastModeDefault,
     limitContext,
     skipPermissions,
-    teammateLaunchMode,
     clearContext,
     worktreeEnabled,
     worktreeName,
@@ -1982,7 +1931,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             clearContext: clearContext || undefined,
             skipPermissions,
             worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
-            extraCliArgs: buildLaunchExtraCliArgs(customArgs, teammateLaunchMode),
+            extraCliArgs: buildLaunchExtraCliArgs(customArgs),
           };
           await api.teams.replaceMembers(effectiveTeamName, {
             members: nextMembers,
@@ -2108,8 +2057,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       </>
     ) : (
       <>
-        通过 Claude CLI 启动团队 <span className="font-mono font-medium">{effectiveTeamName}</span>
-        。
+        通过 Agent CLI 启动团队 <span className="font-mono font-medium">{effectiveTeamName}</span>。
       </>
     )
   ) : isEditing ? (
@@ -2433,6 +2381,26 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               projectsError={projectsError}
             />
 
+            <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="mb-2">
+                <p className="text-xs font-medium text-[var(--color-text)]">团队运行时</p>
+                <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                  Provider 作用于整个团队；成员只选择模型，默认继承这里的 provider。
+                </p>
+              </div>
+              <TeamModelSelector
+                providerId={selectedProviderId}
+                onProviderChange={setSelectedProviderId}
+                value={selectedModel}
+                onValueChange={setSelectedModel}
+                id="launch-team-provider-model"
+                disableGeminiOption={true}
+                modelIssueReasonByValue={
+                  selectedModel.trim() ? { [selectedModel.trim()]: leadModelIssueText } : undefined
+                }
+              />
+            </div>
+
             {/* ═══════════════════════════════════════════════════════════════════
               Launch: optional settings
               Schedule: prompt + execution defaults
@@ -2502,6 +2470,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     memberWarningById={combinedMemberRuntimeWarningById}
                     leadModelIssueText={leadModelIssueText}
                     memberModelIssueById={memberModelIssueById}
+                    hideLeadProviderTabs
                     softDeleteMembers
                     disableGeminiOption={true}
                   />
@@ -2601,8 +2570,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     onWorktreeNameChange={setWorktreeName}
                     customArgs={customArgs}
                     onCustomArgsChange={setCustomArgs}
-                    teammateLaunchMode={teammateLaunchMode}
-                    onTeammateLaunchModeChange={setTeammateLaunchMode}
                   />
                 </div>
               </OptionalSettingsSection>

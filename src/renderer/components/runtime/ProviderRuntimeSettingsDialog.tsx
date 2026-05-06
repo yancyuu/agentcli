@@ -134,6 +134,8 @@ function getConnectionDescription(provider: CliProviderStatus): string {
       return '配置可选 API 访问。CLI SDK 和 ADC 仍会自动发现。';
     case 'opencode':
       return 'OpenCode 认证和提供商清单由 OpenCode 运行时管理。';
+    case 'cursor':
+      return 'Cursor Agent 使用本机 Cursor 登录态，认证由 cursor-agent 管理。';
   }
 }
 
@@ -147,6 +149,8 @@ function getRuntimeDescription(provider: CliProviderStatus): string {
       return '选择多模型运行时应使用哪个 Gemini 后端。';
     case 'opencode':
       return 'OpenCode 使用自己的托管运行时宿主。桌面端当前仅显示状态。';
+    case 'cursor':
+      return 'Cursor Agent 使用本机 cursor-agent CLI。';
   }
 }
 

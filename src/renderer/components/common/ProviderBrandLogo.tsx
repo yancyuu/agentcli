@@ -189,6 +189,16 @@ const OpenCodeBrandLogo = ({ className }: BrandLogoProps): React.JSX.Element => 
   );
 };
 
+const CursorBrandLogo = ({ className }: BrandLogoProps): React.JSX.Element => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <rect x="2" y="2" width="20" height="20" rx="5.5" fill="#edecec" />
+    <path
+      d="M6.1 4.65 18.45 12 13.55 13.18 11.92 18.98 9.67 18.38 11.13 13.12 6.98 15.72 5.82 13.86 9.95 11.28 6.1 4.65Z"
+      fill="#26251e"
+    />
+  </svg>
+);
+
 export const ProviderBrandLogo = ({
   providerId,
   className,
@@ -202,5 +212,7 @@ export const ProviderBrandLogo = ({
       return <GeminiBrandLogo className={className} />;
     case 'opencode':
       return <OpenCodeBrandLogo className={className} />;
+    case 'cursor':
+      return <CursorBrandLogo className={className} />;
   }
 };

@@ -55,13 +55,13 @@ import { PluginsPanel } from './plugins/PluginsPanel';
 import { SkillsPanel } from './skills/SkillsPanel';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
-import type { CliProviderStatus } from '@shared/types';
+import type { CliProviderId, CliProviderStatus } from '@shared/types';
 
 const ProviderCapabilityCardSkeleton = ({
   providerId,
   displayName,
 }: {
-  providerId: 'anthropic' | 'codex' | 'gemini' | 'opencode';
+  providerId: CliProviderId;
   displayName: string;
 }): React.JSX.Element => (
   <div className="rounded-md border border-border bg-surface-raised px-3 py-2">

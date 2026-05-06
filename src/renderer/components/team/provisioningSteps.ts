@@ -217,6 +217,16 @@ export function getLaunchJoinMilestonesFromMembers({
       failedSpawnCount: snapshotSummary.failedCount,
       skippedSpawnCount: snapshotSummary.skippedCount ?? 0,
     };
+    const snapshotAllExpectedConfirmed =
+      expectedTeammateCount > 0 &&
+      snapshotMilestones.failedSpawnCount === 0 &&
+      snapshotMilestones.skippedSpawnCount === 0 &&
+      snapshotMilestones.pendingSpawnCount === 0 &&
+      snapshotMilestones.heartbeatConfirmedCount >= expectedTeammateCount;
+
+    if (snapshotAllExpectedConfirmed) {
+      return snapshotMilestones;
+    }
 
     const snapshotAccountedFor =
       snapshotMilestones.heartbeatConfirmedCount +

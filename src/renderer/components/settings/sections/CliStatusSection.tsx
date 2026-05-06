@@ -31,6 +31,7 @@ import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
+import { getMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
 import { formatBytes } from '@renderer/utils/formatters';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
@@ -76,6 +77,19 @@ const ProviderDetailSkeleton = (): React.JSX.Element => {
   );
 };
 
+const ProviderBetaBadge = (): React.JSX.Element => (
+  <span
+    className="inline-flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold uppercase leading-none"
+    style={{
+      borderColor: 'rgba(251, 191, 36, 0.32)',
+      backgroundColor: 'rgba(251, 191, 36, 0.12)',
+      color: '#fbbf24',
+    }}
+  >
+    beta
+  </span>
+);
+
 function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boolean): boolean {
   return (
     providerLoading ||
@@ -117,13 +131,15 @@ function getProviderStatusColor(statusText: string, authenticated: boolean): str
 function getProviderLabel(providerId: CliProviderId): string {
   switch (providerId) {
     case 'anthropic':
-      return 'Anthropic';
+      return 'Claude Code';
     case 'codex':
       return 'Codex';
     case 'gemini':
       return 'Gemini';
     case 'opencode':
       return 'OpenCode (75+ LLM providers)';
+    case 'cursor':
+      return 'Cursor Agent';
   }
 }
 
@@ -256,6 +272,10 @@ export const CliStatusSection = (): React.JSX.Element | null => {
       ),
     [loadingCliStatus?.providers]
   );
+  const visibleProviders = useMemo(
+    () => getMainScreenCliProviders(effectiveCliStatus),
+    [effectiveCliStatus]
+  );
   const canOpenExtensions = effectiveCliStatus?.installed === true;
   const showInstalledControls =
     effectiveCliStatus !== null && (installerState === 'idle' || installerState === 'completed');
@@ -359,14 +379,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
   if (!isElectron) return null;
 
   const runtimeDisplayName = getRuntimeDisplayName(effectiveCliStatus, multimodelEnabled);
-  const runtimeLabel =
-    effectiveCliStatus?.flavor === 'agent_teams_orchestrator'
-      ? null
-      : effectiveCliStatus &&
-          effectiveCliStatus.showVersionDetails &&
-          effectiveCliStatus.installedVersion
-        ? `${runtimeDisplayName} v${effectiveCliStatus.installedVersion ?? 'unknown'}`
-        : runtimeDisplayName;
+  const runtimeLabel = 'Agent CLI';
 
   const activeTerminalProvider = providerTerminal
     ? (effectiveCliStatus?.providers.find(
@@ -391,7 +404,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-muted)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            {multimodelEnabled ? '正在检查 AI 供应商...' : '正在检查 Claude CLI...'}
+            {multimodelEnabled ? '正在检查 Agent CLI 提供商...' : '正在检查 Agent CLI...'}
           </div>
         )}
 
@@ -416,40 +429,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       多模型
                     </span>
                   </div>
-                  {/* Inline action buttons */}
-                  {effectiveCliStatus.supportsSelfUpdate && effectiveCliStatus.updateAvailable ? (
-                    <button
-                      onClick={handleInstall}
-                      disabled={isBusy}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium text-white transition-colors disabled:opacity-50"
-                      style={{ backgroundColor: '#3b82f6' }}
-                    >
-                      <Download className="size-3.5" />
-                      更新
-                    </button>
-                  ) : effectiveCliStatus.supportsSelfUpdate ? (
-                    <button
-                      onClick={handleRefresh}
-                      disabled={cliStatusLoading}
-                      className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                      style={{
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)',
-                      }}
-                    >
-                      {cliStatusLoading ? (
-                        <>
-                          <Loader2 className="size-3.5 animate-spin" />
-                          检查中...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="size-3.5" />
-                          检查更新
-                        </>
-                      )}
-                    </button>
-                  ) : null}
                   {/* Extensions button — right-aligned */}
                   {canOpenExtensions && (
                     <button
@@ -475,19 +454,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                     {effectiveCliStatus.binaryPath}
                   </p>
                 )}
-                {effectiveCliStatus.supportsSelfUpdate &&
-                  effectiveCliStatus.updateAvailable &&
-                  effectiveCliStatus.latestVersion && (
-                    <div className="ml-6 flex items-center gap-2">
-                      <span className="text-xs" style={{ color: '#60a5fa' }}>
-                        v{effectiveCliStatus.installedVersion} &rarr; v
-                        {effectiveCliStatus.latestVersion}
-                      </span>
-                    </div>
-                  )}
-                {effectiveCliStatus.providers.length > 0 && (
+                {visibleProviders.length > 0 && (
                   <div className="ml-6 mt-3 space-y-2">
-                    {effectiveCliStatus.providers.map((provider) => (
+                    {visibleProviders.map((provider) => (
                       <div
                         key={provider.providerId}
                         className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
@@ -542,6 +511,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                       >
                                         {provider.displayName}
                                       </span>
+                                      {provider.providerId === 'codex' ? (
+                                        <ProviderBetaBadge />
+                                      ) : null}
                                     </span>
                                     <span
                                       style={{
@@ -582,6 +554,22 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                   ) : null}
                                 </div>
                                 <div className="flex shrink-0 items-start gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void fetchCliProviderStatus(provider.providerId)}
+                                    disabled={providerLoading}
+                                    className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                                    style={{
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text-secondary)',
+                                    }}
+                                    title={`重新检查 ${provider.displayName}`}
+                                  >
+                                    <RefreshCw
+                                      className={providerLoading ? 'size-3 animate-spin' : 'size-3'}
+                                    />
+                                    检查更新
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleProviderManage(provider.providerId)}
@@ -630,6 +618,24 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                       {getProviderConnectLabel(provider)}
                                     </button>
                                   ) : null}
+                                  {provider.providerId === 'anthropic' &&
+                                  effectiveCliStatus.supportsSelfUpdate &&
+                                  effectiveCliStatus.updateAvailable ? (
+                                    <button
+                                      type="button"
+                                      onClick={handleInstall}
+                                      disabled={isBusy}
+                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                                      style={{
+                                        borderColor: 'rgba(59, 130, 246, 0.45)',
+                                        color: '#93c5fd',
+                                      }}
+                                      title={`更新 Claude Code 到 v${effectiveCliStatus.latestVersion ?? 'latest'}`}
+                                    >
+                                      <Download className="size-3" />
+                                      更新
+                                    </button>
+                                  ) : null}
                                 </div>
                               </div>
                               {!effectiveShowSkeleton && provider.models.length > 0 && (
@@ -652,7 +658,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                 <ProviderRuntimeSettingsDialog
                   open={manageDialogOpen}
                   onOpenChange={setManageDialogOpen}
-                  providers={effectiveCliStatus.providers}
+                  providers={visibleProviders}
                   projectPath={selectedProjectPath}
                   initialProviderId={manageProviderId}
                   providerStatusLoading={cliProviderStatusLoading}

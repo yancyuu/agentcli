@@ -14,13 +14,6 @@ import {
   type TeamRuntimeLanePlan,
 } from '@features/team-runtime-lanes';
 import { createTeamRuntimeLaneCoordinator } from '@features/team-runtime-lanes/main';
-import {
-  killTmuxPaneForCurrentPlatformSync,
-  listRuntimeProcessesForCurrentTmuxPlatform,
-  listTmuxPanePidsForCurrentPlatform,
-  listTmuxPaneRuntimeInfoForCurrentPlatform,
-  type TmuxPaneRuntimeInfo,
-} from '@features/tmux-installer/main';
 import { SkillProjectionService } from '@main/services/extensions/skills/SkillProjectionService';
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import { NotificationManager } from '@main/services/infrastructure/NotificationManager';
@@ -192,11 +185,6 @@ import {
   buildProgressLogsTail,
 } from './progressPayload';
 import {
-  applyDesktopTeammateModeDecisionToEnv,
-  buildDesktopTeammateModeCliArgs,
-  resolveDesktopTeammateModeDecision,
-} from './runtimeTeammateMode';
-import {
   choosePreferredLaunchSnapshot,
   clearBootstrapState,
   readBootstrapLaunchSnapshot,
@@ -223,6 +211,7 @@ import {
   isStrongRuntimeEvidence,
   resolveTeamMemberRuntimeLiveness,
   sanitizeProcessCommandForDiagnostics,
+  type RuntimeProcessTableRow,
 } from './TeamRuntimeLivenessResolver';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
@@ -237,6 +226,7 @@ import type {
   TeamRuntimeLaunchResult,
   TeamRuntimeMemberLaunchEvidence,
   TeamRuntimePrepareResult,
+  TeamRuntimeProviderId,
   TeamRuntimeStopInput,
 } from './runtime';
 import type { SshConnectionManager } from '@main/services/infrastructure/SshConnectionManager';
@@ -306,7 +296,6 @@ function buildRelayInboxView(messages: RelayInboxMessage[]): RelayInboxMessageVi
 interface PersistedRuntimeMemberLike {
   name?: string;
   agentId?: string;
-  tmuxPaneId?: string;
   backendType?: string;
   providerId?: string;
   cwd?: string;
@@ -1112,6 +1101,26 @@ function isPureOpenCodeProvisioningRequest(request: {
   });
 }
 
+function isPureCursorProvisioningRequest(request: { providerId?: unknown }): boolean {
+  return normalizeOptionalTeamProviderId(request.providerId) === 'cursor';
+}
+
+function sanitizeCursorRuntimeModel(model: string | undefined): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return undefined;
+  return inferTeamProviderIdFromModel(trimmed) === 'anthropic' ? undefined : trimmed;
+}
+
+function sanitizeCursorRuntimeMember(
+  member: TeamCreateRequest['members'][number]
+): TeamCreateRequest['members'][number] {
+  return {
+    ...member,
+    providerId: 'cursor',
+    model: sanitizeCursorRuntimeModel(member.model),
+  };
+}
+
 export function getOpenCodeMixedProviderProvisioningError(): string {
   return (
     'This OpenCode mixed-team request is outside the current support scope. ' +
@@ -1632,7 +1641,6 @@ interface LiveTeamAgentRuntimeMetadata {
   pid?: number;
   metricsPid?: number;
   model?: string;
-  tmuxPaneId?: string;
   livenessKind?: TeamAgentRuntimeLivenessKind;
   pidSource?: TeamAgentRuntimePidSource;
   processCommand?: string;
@@ -1698,14 +1706,6 @@ function isConfigRegistrationFailureReason(reason?: string): boolean {
   return (
     reason?.trim() ===
     'Teammate was not registered in config.json during launch. Persistent spawn failed.'
-  );
-}
-
-function isTmuxNoServerRunningError(error: unknown): boolean {
-  const text = error instanceof Error ? error.message : String(error ?? '');
-  return (
-    /no server running on /i.test(text) ||
-    /error connecting to .*no such file or directory/i.test(text)
   );
 }
 
@@ -1821,10 +1821,30 @@ function normalizeTeamAgentRuntimeBackendType(
 ): TeamAgentRuntimeBackendType | undefined {
   if (isLead) return 'lead';
   const normalized = value?.trim().toLowerCase();
-  if (normalized === 'tmux' || normalized === 'iterm2' || normalized === 'in-process') {
+  if (normalized === 'iterm2' || normalized === 'in-process') {
     return normalized;
   }
   return normalized ? 'process' : undefined;
+}
+
+function parseInProcessTeamExtraCliArgs(rawExtraCliArgs: string | undefined): string[] {
+  const result: string[] = [];
+  let skipNext = false;
+  for (const token of parseCliArgs(rawExtraCliArgs)) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (token === '--teammate-mode') {
+      skipNext = true;
+      continue;
+    }
+    if (token.startsWith('--teammate-mode=')) {
+      continue;
+    }
+    result.push(token);
+  }
+  return result;
 }
 
 function matchesMemberNameOrBase(candidateName: string, memberName: string): boolean {
@@ -2007,6 +2027,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parsePosixProcessTable(output: string): RuntimeProcessTableRow[] {
+  const rows: RuntimeProcessTableRow[] = [];
+  for (const line of output.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const pid = Number.parseInt(match[1] ?? '', 10);
+    const ppid = Number.parseInt(match[2] ?? '', 10);
+    const command = match[3]?.trim() ?? '';
+    if (Number.isFinite(pid) && Number.isFinite(ppid) && command) {
+      rows.push({ pid, ppid, command });
+    }
+  }
+  return rows;
+}
+
+async function listTeamRuntimeProcessTable(): Promise<RuntimeProcessTableRow[]> {
+  if (process.platform === 'win32') {
+    return listWindowsProcessTable();
+  }
+  const output = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,command='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return parsePosixProcessTable(output);
+}
+
 async function waitForPidsToExit(
   pids: readonly number[],
   opts: { timeoutMs: number; pollMs: number }
@@ -2026,44 +2072,6 @@ async function waitForPidsToExit(
   }
 
   return remainingPids;
-}
-
-async function waitForTmuxPanesToExit(
-  paneIds: readonly string[],
-  opts: { timeoutMs: number; pollMs: number }
-): Promise<string[]> {
-  const normalizedPaneIds = [...new Set(paneIds.map((paneId) => paneId.trim()).filter(Boolean))];
-  if (normalizedPaneIds.length === 0) {
-    return [];
-  }
-
-  const deadline = Date.now() + opts.timeoutMs;
-  let remainingPaneIds = normalizedPaneIds;
-  let lastError: unknown = null;
-  while (Date.now() < deadline) {
-    let livePanePidById: Map<string, number>;
-    try {
-      livePanePidById = await listTmuxPanePidsForCurrentPlatform(remainingPaneIds);
-      lastError = null;
-    } catch (error) {
-      if (isTmuxNoServerRunningError(error)) {
-        return [];
-      }
-      lastError = error;
-      await sleep(opts.pollMs);
-      continue;
-    }
-    remainingPaneIds = remainingPaneIds.filter((paneId) => livePanePidById.has(paneId));
-    if (remainingPaneIds.length === 0) {
-      return [];
-    }
-    await sleep(opts.pollMs);
-  }
-
-  if (lastError) {
-    throw lastError instanceof Error ? lastError : new Error(getErrorMessage(lastError));
-  }
-  return remainingPaneIds;
 }
 
 async function waitForChildProcessToExit(
@@ -3533,10 +3541,10 @@ function buildLaunchDiagnosticsFromRun(
     }
     if (entry.livenessKind === 'shell_only') {
       items.push({
-        id: `${memberName}:tmux_shell_only`,
+        id: `${memberName}:shell_only`,
         memberName,
         severity: 'warning',
-        code: 'tmux_shell_only',
+        code: 'shell_only',
         label: `${memberName} - shell only`,
         detail: entry.runtimeDiagnostic,
         observedAt,
@@ -4104,9 +4112,6 @@ export class TeamProvisioningService {
       this.membersMetaStore
     );
     this.transcriptProjectResolver = new TeamTranscriptProjectResolver(this.configReader);
-    setTimeout(() => {
-      this.killEmptyOrphanedClaudeSwarmTmuxServers('startup');
-    }, 5_000).unref?.();
   }
 
   setRuntimeAdapterRegistry(registry: TeamRuntimeAdapterRegistry | null): void {
@@ -4180,7 +4185,7 @@ export class TeamProvisioningService {
       ...(request.model ? ['--model', request.model] : []),
       ...(request.effort ? ['--effort', request.effort] : []),
       ...(request.skipPermissions !== false ? ['--dangerously-skip-permissions'] : []),
-      ...parseCliArgs(request.extraCliArgs),
+      ...parseInProcessTeamExtraCliArgs(request.extraCliArgs),
     ];
     return `claude ${args.map((arg) => this.shellQuote(arg)).join(' ')}`;
   }
@@ -4900,6 +4905,13 @@ export class TeamProvisioningService {
       return null;
     }
     return this.runtimeAdapterRegistry.get('opencode');
+  }
+
+  private getCursorRuntimeAdapter(): TeamLaunchRuntimeAdapter | null {
+    if (!this.runtimeAdapterRegistry?.has('cursor')) {
+      return null;
+    }
+    return this.runtimeAdapterRegistry.get('cursor');
   }
 
   private getOpenCodeRuntimeMessageAdapter():
@@ -6188,6 +6200,10 @@ export class TeamProvisioningService {
     members?: readonly { providerId?: TeamProviderId; provider?: TeamProviderId }[];
   }): boolean {
     return isPureOpenCodeProvisioningRequest(request) && this.getOpenCodeRuntimeAdapter() !== null;
+  }
+
+  private shouldRouteCursorToRuntimeAdapter(request: { providerId?: unknown }): boolean {
+    return isPureCursorProvisioningRequest(request) && this.getCursorRuntimeAdapter() !== null;
   }
 
   private planRuntimeLanesOrThrow(
@@ -8914,8 +8930,79 @@ export class TeamProvisioningService {
     summary?: PersistedTeamLaunchSummary;
     source?: 'live' | 'persisted' | 'merged';
   }> {
+    const buildSyntheticCursorStatuses = async (
+      resolvedRunId: string | null
+    ): Promise<{
+      statuses: Record<string, MemberSpawnStatusEntry>;
+      runId: string | null;
+      teamLaunchState: TeamLaunchAggregateState;
+      launchPhase: PersistedTeamLaunchPhase;
+      expectedMembers: string[];
+      updatedAt: string;
+      summary: PersistedTeamLaunchSummary;
+      source: 'persisted';
+    } | null> => {
+      const [config, teamMeta] = await Promise.all([
+        this.configReader.getConfig(teamName).catch(() => null),
+        this.teamMetaStore.getMeta(teamName).catch(() => null),
+      ]);
+      const isCursorTeam =
+        normalizeOptionalTeamProviderId(teamMeta?.providerId) === 'cursor' ||
+        (config?.members ?? []).some(
+          (member) => normalizeOptionalTeamProviderId(member.providerId) === 'cursor'
+        );
+      if (!config || !isCursorTeam) {
+        return null;
+      }
+      const now = nowIso();
+      const expectedMembers = (config.members ?? [])
+        .filter((member) => !isLeadMember(member))
+        .map((member) => member.name?.trim())
+        .filter((name): name is string => Boolean(name));
+      const effectiveMembers =
+        expectedMembers.length > 0 ? expectedMembers : [CANONICAL_LEAD_MEMBER_NAME];
+      const statuses = Object.fromEntries(
+        effectiveMembers.map((memberName) => [
+          memberName,
+          {
+            status: 'online' as const,
+            launchState: 'confirmed_alive' as const,
+            agentToolAccepted: true,
+            runtimeAlive: false,
+            bootstrapConfirmed: true,
+            hardFailure: false,
+            livenessSource: 'heartbeat' as const,
+            livenessKind: 'confirmed_bootstrap' as const,
+            runtimeDiagnostic: 'Cursor Agent one-shot team run is ready',
+            runtimeDiagnosticSeverity: 'info' as const,
+            firstSpawnAcceptedAt: now,
+            lastHeartbeatAt: now,
+            livenessLastCheckedAt: now,
+            updatedAt: now,
+          },
+        ])
+      );
+      const summary = summarizeMemberSpawnStatusRecord(effectiveMembers, statuses);
+      return {
+        statuses,
+        runId: resolvedRunId,
+        teamLaunchState: 'clean_success',
+        launchPhase: 'finished',
+        expectedMembers: effectiveMembers,
+        updatedAt: now,
+        summary,
+        source: 'persisted',
+      };
+    };
+
     const readPersistedStatuses = async (resolvedRunId: string | null) => {
       const { snapshot, statuses } = await this.reconcilePersistedLaunchState(teamName);
+      if (!snapshot) {
+        const syntheticCursorStatuses = await buildSyntheticCursorStatuses(resolvedRunId);
+        if (syntheticCursorStatuses) {
+          return syntheticCursorStatuses;
+        }
+      }
       const nextStatuses = await this.attachLiveRuntimeMetadataToStatuses(teamName, statuses);
       const expectedMembers = snapshot ? this.getPersistedLaunchMemberNames(snapshot) : undefined;
       const summary = expectedMembers
@@ -9174,7 +9261,6 @@ export class TeamProvisioningService {
         ...(liveRuntimeMember?.processCommand
           ? { processCommand: liveRuntimeMember.processCommand }
           : {}),
-        ...(liveRuntimeMember?.tmuxPaneId ? { paneId: liveRuntimeMember.tmuxPaneId } : {}),
         ...(liveRuntimeMember?.panePid ? { panePid: liveRuntimeMember.panePid } : {}),
         ...(liveRuntimeMember?.paneCurrentCommand
           ? { paneCurrentCommand: liveRuntimeMember.paneCurrentCommand }
@@ -9326,31 +9412,6 @@ export class TeamProvisioningService {
       );
     }
 
-    const tmuxPaneIdsToVerify: string[] = [];
-    for (const persistedRuntimeMember of persistedRuntimeMembers) {
-      const paneId =
-        typeof persistedRuntimeMember.tmuxPaneId === 'string'
-          ? persistedRuntimeMember.tmuxPaneId.trim()
-          : '';
-      const backendType = persistedRuntimeMember.backendType?.trim().toLowerCase();
-      if (!paneId || backendType !== 'tmux') {
-        continue;
-      }
-      tmuxPaneIdsToVerify.push(paneId);
-      try {
-        killTmuxPaneForCurrentPlatformSync(paneId);
-        logger.info(
-          `[${teamName}] Killed teammate pane ${memberName} (${paneId}) for manual restart`
-        );
-      } catch (error) {
-        logger.debug(
-          `[${teamName}] Failed to kill teammate pane ${memberName} (${paneId}) for manual restart: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
-    }
-
     for (const pid of livePids) {
       try {
         killProcessByPid(pid);
@@ -9371,27 +9432,6 @@ export class TeamProvisioningService {
       if (lingeringPids.length > 0) {
         throw new Error(
           `Restart for teammate "${memberName}" is still waiting for the previous process to exit (${lingeringPids.join(', ')}).`
-        );
-      }
-    }
-
-    if (tmuxPaneIdsToVerify.length > 0) {
-      let lingeringPaneIds: string[];
-      try {
-        lingeringPaneIds = await waitForTmuxPanesToExit(tmuxPaneIdsToVerify, {
-          timeoutMs: 1_500,
-          pollMs: 100,
-        });
-      } catch (error) {
-        throw new Error(
-          `Restart for teammate "${memberName}" could not verify that the previous tmux pane exited: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
-      if (lingeringPaneIds.length > 0) {
-        throw new Error(
-          `Restart for teammate "${memberName}" is still waiting for the previous tmux pane to exit (${lingeringPaneIds.join(', ')}).`
         );
       }
     }
@@ -9921,7 +9961,7 @@ export class TeamProvisioningService {
       ? buildRestartGraceTimeoutReason(memberName)
       : (runtimeDiagnostic ??
         (metadata?.livenessKind === 'shell_only'
-          ? 'Tmux pane is alive, but no teammate runtime process was found.'
+          ? 'Runtime shell is alive, but no teammate runtime process was found.'
           : 'Teammate did not join within the launch grace window.'));
     if (restartPending) {
       run.pendingMemberRestarts.delete(memberName);
@@ -11902,7 +11942,8 @@ export class TeamProvisioningService {
     request: TeamCreateRequest,
     onProgress: (progress: TeamProvisioningProgress) => void
   ): Promise<TeamCreateResponse> {
-    if (normalizeOptionalTeamProviderId(request.providerId) !== 'opencode') {
+    const providerId = normalizeOptionalTeamProviderId(request.providerId);
+    if (providerId !== 'opencode' && providerId !== 'cursor') {
       request = this.normalizeClaudeCodeOnlyRequest(request);
     }
     return this.withTeamLock(request.teamName, async () => {
@@ -12008,6 +12049,9 @@ export class TeamProvisioningService {
     this.teamSendBlockReasonByTeam.delete(request.teamName);
     const stopAllGenerationAtStart = this.stopAllTeamsGeneration;
     assertAppDeterministicBootstrapEnabled();
+    if (this.shouldRouteCursorToRuntimeAdapter(request)) {
+      return this.createCursorTeamThroughRuntimeAdapter(request, onProgress);
+    }
     if (this.shouldRouteOpenCodeToRuntimeAdapter(request)) {
       return this.createOpenCodeTeamThroughRuntimeAdapter(request, onProgress);
     }
@@ -12183,10 +12227,9 @@ export class TeamProvisioningService {
       await this.clearPersistedLaunchState(request.teamName);
 
       const initialUserPrompt = request.prompt?.trim() ?? '';
-      const [feishuChannels, mcpConfigPathResult, teammateModeDecision] = await Promise.all([
+      const [feishuChannels, mcpConfigPathResult] = await Promise.all([
         readBoundFeishuChannels(request.teamName),
         this.mcpConfigBuilder.writeConfigFile(request.cwd),
-        resolveDesktopTeammateModeDecision(request.extraCliArgs),
       ]);
       _t('create:parallelPreSpawn');
       const nativeBootstrapPrompt = buildNativeCreateBootstrapPrompt(
@@ -12197,7 +12240,6 @@ export class TeamProvisioningService {
       );
       const promptSize = getPromptSizeSummary(nativeBootstrapPrompt);
       let child: ReturnType<typeof spawn>;
-      applyDesktopTeammateModeDecisionToEnv(shellEnv, teammateModeDecision);
       const mcpConfigPath = mcpConfigPathResult;
       run.mcpConfigPath = mcpConfigPath;
       // Start MCP validation concurrently — we'll await it after spawning the CLI
@@ -12249,8 +12291,9 @@ export class TeamProvisioningService {
         ...(launchIdentity.resolvedEffort ? ['--effort', launchIdentity.resolvedEffort] : []),
         ...providerFastModeArgs,
         ...(request.worktree ? ['--worktree', request.worktree] : []),
-        ...buildDesktopTeammateModeCliArgs(teammateModeDecision),
-        ...parseCliArgs(request.extraCliArgs),
+        '--teammate-mode',
+        'in-process',
+        ...parseInProcessTeamExtraCliArgs(request.extraCliArgs),
         ...providerArgs,
       ];
 
@@ -12463,6 +12506,349 @@ export class TeamProvisioningService {
       // Ensure the per-team lock doesn't get stuck on failures.
       if (this.provisioningRunByTeam.get(request.teamName) === pendingKey) {
         this.provisioningRunByTeam.delete(request.teamName);
+      }
+      throw error;
+    }
+  }
+
+  private async writeCursorTeamConfig(
+    request: Pick<
+      TeamCreateRequest,
+      'teamName' | 'displayName' | 'description' | 'color' | 'cwd' | 'model' | 'effort'
+    >,
+    members: TeamCreateRequest['members']
+  ): Promise<void> {
+    const configPath = path.join(getTeamsBasePath(), request.teamName, 'config.json');
+    const config: TeamConfig = {
+      name: request.displayName?.trim() || request.teamName,
+      description: request.description,
+      color: request.color,
+      projectPath: request.cwd,
+      members: [
+        {
+          name: CANONICAL_LEAD_MEMBER_NAME,
+          role: 'Team Lead',
+          agentType: CANONICAL_LEAD_MEMBER_NAME,
+          providerId: 'cursor',
+          model: request.model,
+          effort: request.effort,
+          cwd: request.cwd,
+        },
+        ...members.map((member) => ({
+          name: member.name,
+          role: member.role,
+          workflow: member.workflow,
+          isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
+          providerId: 'cursor' as const,
+          model: member.model,
+          effort: member.effort,
+          cwd: member.cwd?.trim() || request.cwd,
+        })),
+      ],
+    };
+    await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  }
+
+  private async createCursorTeamThroughRuntimeAdapter(
+    request: TeamCreateRequest,
+    onProgress: (progress: TeamProvisioningProgress) => void
+  ): Promise<TeamCreateResponse> {
+    const teamsBasePathsToProbe = getTeamsBasePathsToProbe();
+    for (const probe of teamsBasePathsToProbe) {
+      const configPath = path.join(probe.basePath, request.teamName, 'config.json');
+      if (await this.pathExists(configPath)) {
+        const suffix = probe.location === 'configured' ? '' : ` (found under ${probe.basePath})`;
+        throw new Error(`Team already exists${suffix}`);
+      }
+    }
+    await ensureCwdExists(request.cwd);
+    const effectiveMembers = buildEffectiveTeamMemberSpecs(
+      request.members.map(sanitizeCursorRuntimeMember),
+      {
+        providerId: 'cursor',
+        model: sanitizeCursorRuntimeModel(request.model),
+        effort: request.effort,
+      }
+    ).map((member) => ({
+      ...member,
+      providerId: 'cursor' as const,
+      model: sanitizeCursorRuntimeModel(member.model),
+      cwd: member.cwd?.trim() || request.cwd,
+    }));
+    const teamDir = path.join(getTeamsBasePath(), request.teamName);
+    const tasksDir = path.join(getTasksBasePath(), request.teamName);
+    await fs.promises.mkdir(teamDir, { recursive: true });
+    await fs.promises.mkdir(tasksDir, { recursive: true });
+    await this.teamMetaStore.writeMeta(request.teamName, {
+      displayName: request.displayName,
+      description: request.description,
+      color: request.color,
+      cwd: request.cwd,
+      executionTarget: request.executionTarget,
+      prompt: request.prompt,
+      providerId: 'cursor',
+      model: sanitizeCursorRuntimeModel(request.model),
+      effort: request.effort,
+      skipPermissions: request.skipPermissions,
+      worktree: request.worktree,
+      extraCliArgs: request.extraCliArgs,
+      limitContext: request.limitContext,
+      createdAt: Date.now(),
+    });
+    await this.membersMetaStore.writeMembers(
+      request.teamName,
+      this.buildMembersMetaWritePayload(effectiveMembers)
+    );
+    await this.writeCursorTeamConfig(
+      { ...request, model: sanitizeCursorRuntimeModel(request.model) },
+      effectiveMembers
+    );
+    return this.runCursorTeamRuntimeAdapterLaunch({
+      request: {
+        ...request,
+        providerId: 'cursor',
+        model: sanitizeCursorRuntimeModel(request.model),
+      },
+      members: effectiveMembers,
+      prompt: request.prompt?.trim() ?? '',
+      onProgress,
+    });
+  }
+
+  private async launchCursorTeamThroughRuntimeAdapter(
+    request: TeamLaunchRequest,
+    onProgress: (progress: TeamProvisioningProgress) => void
+  ): Promise<TeamLaunchResponse> {
+    const configPath = path.join(getTeamsBasePath(), request.teamName, 'config.json');
+    const configRaw = await tryReadRegularFileUtf8(configPath, {
+      timeoutMs: TEAM_JSON_READ_TIMEOUT_MS,
+      maxBytes: TEAM_CONFIG_MAX_BYTES,
+    });
+    if (!configRaw) {
+      throw new Error(`Team "${request.teamName}" not found — config.json does not exist`);
+    }
+    const metaMembers = await this.membersMetaStore.getMembers(request.teamName).catch(() => []);
+    const sourceMembers =
+      metaMembers.length > 0
+        ? metaMembers
+            .filter((member) => !member.removedAt && !isLeadMemberName(member.name))
+            .map((member) => ({
+              name: member.name,
+              role: member.role,
+              workflow: member.workflow,
+              isolation: member.isolation,
+              providerId: 'cursor' as const,
+              model: member.model,
+              effort: member.effort,
+              cwd: member.cwd,
+            }))
+        : this.extractMembersFromConfig(configRaw);
+    const effectiveMembers = buildEffectiveTeamMemberSpecs(
+      sourceMembers.map(sanitizeCursorRuntimeMember),
+      {
+        providerId: 'cursor',
+        model: sanitizeCursorRuntimeModel(request.model),
+        effort: request.effort,
+      }
+    ).map((member) => ({
+      ...member,
+      providerId: 'cursor' as const,
+      model: sanitizeCursorRuntimeModel(member.model),
+      cwd: member.cwd?.trim() || request.cwd,
+    }));
+    const existingMeta = await this.teamMetaStore.getMeta(request.teamName).catch(() => null);
+    const cursorModel = sanitizeCursorRuntimeModel(request.model) ?? existingMeta?.model;
+    await this.teamMetaStore.writeMeta(request.teamName, {
+      displayName: existingMeta?.displayName,
+      description: existingMeta?.description,
+      color: existingMeta?.color,
+      cwd: request.cwd,
+      executionTarget: request.executionTarget ?? existingMeta?.executionTarget,
+      prompt: request.prompt ?? existingMeta?.prompt,
+      providerId: 'cursor',
+      providerBackendId: request.providerBackendId,
+      model: cursorModel,
+      effort: request.effort,
+      fastMode: request.fastMode,
+      skipPermissions: request.skipPermissions,
+      worktree: request.worktree,
+      extraCliArgs: request.extraCliArgs,
+      limitContext: request.limitContext,
+      workflow: existingMeta?.workflow,
+      createdAt: existingMeta?.createdAt ?? Date.now(),
+    });
+    await this.writeCursorTeamConfig({ ...request, model: cursorModel }, effectiveMembers);
+    return this.runCursorTeamRuntimeAdapterLaunch({
+      request: { ...request, providerId: 'cursor', model: cursorModel },
+      members: effectiveMembers,
+      prompt: request.prompt?.trim() ?? '',
+      onProgress,
+    });
+  }
+
+  private extractMembersFromConfig(configRaw: string): TeamCreateRequest['members'] {
+    try {
+      const parsed = JSON.parse(configRaw) as TeamConfig;
+      return (parsed.members ?? [])
+        .filter((member) => !isLeadMemberName(member.name))
+        .map((member) => ({
+          name: member.name,
+          role: member.role,
+          workflow: member.workflow,
+          isolation: member.isolation,
+          providerId: 'cursor' as const,
+          model: member.model,
+          effort: member.effort,
+          cwd: member.cwd,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private async runCursorTeamRuntimeAdapterLaunch(input: {
+    request: TeamCreateRequest | TeamLaunchRequest;
+    members: TeamCreateRequest['members'];
+    prompt: string;
+    onProgress: (progress: TeamProvisioningProgress) => void;
+  }): Promise<TeamLaunchResponse> {
+    const adapter = this.getCursorRuntimeAdapter();
+    if (!adapter) {
+      throw new Error('Cursor Agent runtime adapter is not registered');
+    }
+    const runId = randomUUID();
+    const startedAt = nowIso();
+    this.provisioningRunByTeam.set(input.request.teamName, runId);
+    const initialProgress = this.setRuntimeAdapterProgress(
+      {
+        runId,
+        teamName: input.request.teamName,
+        state: 'validating',
+        message: 'Validating Cursor Agent team launch',
+        startedAt,
+        updatedAt: startedAt,
+      },
+      input.onProgress
+    );
+    this.resetTeamScopedTransientStateForNewRun(input.request.teamName);
+    const previousLaunchState = await this.launchStateStore.read(input.request.teamName);
+    await this.clearPersistedLaunchState(input.request.teamName);
+    const cursorMcpConfigPath = await this.mcpConfigBuilder.ensureCursorProjectMcpConfig(
+      input.request.cwd
+    );
+    const cursorMembers =
+      input.members.length > 0
+        ? input.members
+        : [
+            {
+              name: CANONICAL_LEAD_MEMBER_NAME,
+              role: 'Team Lead',
+              providerId: 'cursor' as const,
+              model: sanitizeCursorRuntimeModel(input.request.model),
+              effort: input.request.effort,
+              cwd: input.request.cwd,
+            },
+          ];
+    const launchInput: TeamRuntimeLaunchInput = {
+      runId,
+      laneId: 'primary',
+      teamName: input.request.teamName,
+      cwd: input.request.cwd,
+      prompt: input.prompt,
+      providerId: 'cursor',
+      model: sanitizeCursorRuntimeModel(input.request.model),
+      effort: input.request.effort,
+      skipPermissions: input.request.skipPermissions !== false,
+      expectedMembers: cursorMembers.map((member) => ({
+        name: member.name,
+        role: member.role,
+        workflow: member.workflow,
+        isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
+        providerId: 'cursor',
+        model:
+          sanitizeCursorRuntimeModel(member.model) ??
+          sanitizeCursorRuntimeModel(input.request.model),
+        effort: member.effort ?? input.request.effort,
+        cwd: member.cwd?.trim() || input.request.cwd,
+      })),
+      previousLaunchState,
+    };
+    const launching = this.setRuntimeAdapterProgress(
+      {
+        ...initialProgress,
+        state: 'spawning',
+        message: 'Starting Cursor Agent team',
+        updatedAt: nowIso(),
+        cliLogsTail: `Cursor MCP config: ${cursorMcpConfigPath}`,
+      },
+      input.onProgress
+    );
+    try {
+      const result = await adapter.launch(launchInput);
+      const persistedLaunchSnapshot = await this.persistRuntimeAdapterLaunchResult(
+        result,
+        launchInput
+      );
+      this.runtimeAdapterRunByTeam.set(input.request.teamName, {
+        runId,
+        providerId: 'cursor',
+        cwd: input.request.cwd,
+        members: result.members,
+      });
+      const success = result.teamLaunchState === 'clean_success';
+      this.setRuntimeAdapterProgress(
+        {
+          ...launching,
+          state: success ? 'ready' : 'failed',
+          message: success
+            ? 'Cursor Agent team launch is ready'
+            : 'Cursor Agent team launch failed',
+          updatedAt: nowIso(),
+          warnings: result.warnings.length > 0 ? result.warnings : undefined,
+          error: success
+            ? undefined
+            : result.diagnostics.join('\n') || 'Cursor Agent launch failed',
+          cliLogsTail: result.diagnostics.join('\n') || undefined,
+          configReady: true,
+          memberSpawnSnapshot: {
+            statuses: snapshotToMemberSpawnStatuses(persistedLaunchSnapshot),
+            runId,
+            teamLaunchState: persistedLaunchSnapshot.teamLaunchState,
+            launchPhase: persistedLaunchSnapshot.launchPhase,
+            expectedMembers: persistedLaunchSnapshot.expectedMembers,
+            updatedAt: persistedLaunchSnapshot.updatedAt,
+            summary: persistedLaunchSnapshot.summary,
+            source: 'persisted',
+          },
+        },
+        input.onProgress
+      );
+      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
+        this.provisioningRunByTeam.delete(input.request.teamName);
+      }
+      this.teamChangeEmitter?.({
+        type: 'process',
+        teamName: input.request.teamName,
+        runId,
+        detail: result.teamLaunchState,
+      });
+      return { runId };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setRuntimeAdapterProgress(
+        {
+          ...launching,
+          state: 'failed',
+          message: 'Cursor Agent team launch failed',
+          messageSeverity: 'error',
+          updatedAt: nowIso(),
+          error: message,
+          cliLogsTail: message,
+        },
+        input.onProgress
+      );
+      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
+        this.provisioningRunByTeam.delete(input.request.teamName);
       }
       throw error;
     }
@@ -12691,7 +13077,7 @@ export class TeamProvisioningService {
         await this.clearOpenCodeRuntimeAdapterPrimaryLaneIfOwned(input.request.teamName, runId);
         return { runId };
       }
-      await this.persistOpenCodeRuntimeAdapterLaunchResult(result, launchInput);
+      await this.persistRuntimeAdapterLaunchResult(result, launchInput);
       const success = result.teamLaunchState === 'clean_success';
       const pending = result.teamLaunchState === 'partial_pending';
       const failed = result.teamLaunchState === 'partial_failure';
@@ -12815,14 +13201,18 @@ export class TeamProvisioningService {
     await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
   }
 
-  private async persistOpenCodeRuntimeAdapterLaunchResult(
+  private async persistRuntimeAdapterLaunchResult(
     result: TeamRuntimeLaunchResult,
     input: TeamRuntimeLaunchInput
   ): Promise<PersistedTeamLaunchSnapshot> {
     const members: Record<string, PersistedTeamLaunchMemberState> = {};
     for (const member of input.expectedMembers) {
       const evidence = result.members[member.name];
-      members[member.name] = this.toOpenCodePersistedLaunchMember(member, evidence);
+      members[member.name] = this.toRuntimeAdapterPersistedLaunchMember(
+        input.providerId,
+        member,
+        evidence
+      );
     }
     const snapshot = createPersistedLaunchSnapshot({
       teamName: input.teamName,
@@ -12836,7 +13226,8 @@ export class TeamProvisioningService {
     return snapshot;
   }
 
-  private toOpenCodePersistedLaunchMember(
+  private toRuntimeAdapterPersistedLaunchMember(
+    providerId: TeamRuntimeProviderId,
     member: TeamRuntimeLaunchInput['expectedMembers'][number],
     evidence: TeamRuntimeMemberLaunchEvidence | undefined
   ): PersistedTeamLaunchMemberState {
@@ -12844,14 +13235,14 @@ export class TeamProvisioningService {
     const launchState = evidence?.launchState ?? 'failed_to_start';
     return {
       name: member.name,
-      providerId: 'opencode',
+      providerId,
       providerBackendId: undefined,
       model: member.model?.trim() || undefined,
       effort: member.effort,
       cwd: member.cwd?.trim() || undefined,
       laneId: 'primary',
       laneKind: 'primary',
-      laneOwnerProviderId: 'opencode',
+      laneOwnerProviderId: providerId,
       launchState,
       agentToolAccepted: evidence?.agentToolAccepted === true,
       runtimeAlive: evidence?.runtimeAlive === true,
@@ -12884,7 +13275,10 @@ export class TeamProvisioningService {
     request: TeamLaunchRequest,
     onProgress: (progress: TeamProvisioningProgress) => void
   ): Promise<TeamLaunchResponse> {
-    request = this.normalizeClaudeCodeOnlyRequest(request);
+    const providerId = normalizeOptionalTeamProviderId(request.providerId);
+    if (providerId !== 'opencode' && providerId !== 'cursor') {
+      request = this.normalizeClaudeCodeOnlyRequest(request);
+    }
     return this.withTeamLock(request.teamName, async () => {
       if (this.isRemoteExecutionTarget(request.executionTarget)) {
         return this.runRemoteTeam(request, onProgress, 'launch') as Promise<TeamLaunchResponse>;
@@ -12904,6 +13298,9 @@ export class TeamProvisioningService {
     this.teamSendBlockReasonByTeam.delete(request.teamName);
     const stopAllGenerationAtStart = this.stopAllTeamsGeneration;
     assertAppDeterministicBootstrapEnabled();
+    if (this.shouldRouteCursorToRuntimeAdapter(request)) {
+      return this.launchCursorTeamThroughRuntimeAdapter(request, onProgress);
+    }
     if (this.shouldRouteOpenCodeToRuntimeAdapter(request)) {
       return this.launchOpenCodeTeamThroughRuntimeAdapter(request, onProgress);
     }
@@ -13315,29 +13712,26 @@ export class TeamProvisioningService {
       }
 
       // Parallelize independent pre-spawn operations to reduce launch latency
-      const [existingTasksResult, feishuChannels2, mcpConfigPathResult, teammateModeDecision] =
-        await Promise.all([
-          // Read existing tasks for teammate work resumption prompts
-          new Promise<TeamTask[]>((resolve) => {
-            const taskReader = new TeamTaskReader();
-            taskReader
-              .getTasks(request.teamName)
-              .then(resolve)
-              .catch((error: unknown) => {
-                logger.warn(
-                  `[${request.teamName}] Failed to read tasks for launch prompt: ${String(error)}`
-                );
-                resolve([]);
-              });
-          }),
-          // Read bound Feishu channel credentials
-          readBoundFeishuChannels(request.teamName),
-          // Write MCP config file
-          this.mcpConfigBuilder.writeConfigFile(request.cwd),
-          // Resolve teammate mode (tmux check)
-          resolveDesktopTeammateModeDecision(request.extraCliArgs),
-        ]);
-      _t('parallelPreSpawn (tasks+feishu+mcp+tmux)');
+      const [existingTasksResult, feishuChannels2, mcpConfigPathResult] = await Promise.all([
+        // Read existing tasks for teammate work resumption prompts
+        new Promise<TeamTask[]>((resolve) => {
+          const taskReader = new TeamTaskReader();
+          taskReader
+            .getTasks(request.teamName)
+            .then(resolve)
+            .catch((error: unknown) => {
+              logger.warn(
+                `[${request.teamName}] Failed to read tasks for launch prompt: ${String(error)}`
+              );
+              resolve([]);
+            });
+        }),
+        // Read bound Feishu channel credentials
+        readBoundFeishuChannels(request.teamName),
+        // Write MCP config file
+        this.mcpConfigBuilder.writeConfigFile(request.cwd),
+      ]);
+      _t('parallelPreSpawn (tasks+feishu+mcp)');
       const existingTasks = existingTasksResult;
       const prompt = buildDeterministicLaunchHydrationPrompt(
         request,
@@ -13348,7 +13742,6 @@ export class TeamProvisioningService {
       );
       const promptSize = getPromptSizeSummary(prompt);
       let child: ReturnType<typeof spawn>;
-      applyDesktopTeammateModeDecisionToEnv(shellEnv, teammateModeDecision);
       const mcpConfigPath = mcpConfigPathResult;
       run.mcpConfigPath = mcpConfigPath;
       // Start MCP validation concurrently — we'll await it after spawning the CLI
@@ -13412,8 +13805,8 @@ export class TeamProvisioningService {
       if (request.worktree) {
         launchArgs.push('--worktree', request.worktree);
       }
-      launchArgs.push(...buildDesktopTeammateModeCliArgs(teammateModeDecision));
-      launchArgs.push(...parseCliArgs(request.extraCliArgs));
+      launchArgs.push('--teammate-mode', 'in-process');
+      launchArgs.push(...parseInProcessTeamExtraCliArgs(request.extraCliArgs));
       launchArgs.push(...providerArgs);
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
@@ -16140,8 +16533,6 @@ export class TeamProvisioningService {
         providerId: normalizeOptionalTeamProviderId(member.providerId),
         agentId:
           typeof member.agentId === 'string' ? member.agentId.trim() || undefined : undefined,
-        tmuxPaneId:
-          typeof member.tmuxPaneId === 'string' ? member.tmuxPaneId.trim() || undefined : undefined,
         ...(normalizeRuntimePositiveInteger(member.runtimePid)
           ? { metricsPid: normalizeRuntimePositiveInteger(member.runtimePid) }
           : {}),
@@ -16167,10 +16558,6 @@ export class TeamProvisioningService {
         typeof configuredRuntimeMember.agentId === 'string'
           ? configuredRuntimeMember.agentId.trim()
           : '';
-      const configuredTmuxPaneId =
-        typeof configuredRuntimeMember.tmuxPaneId === 'string'
-          ? configuredRuntimeMember.tmuxPaneId.trim()
-          : '';
       const configuredBackendType =
         typeof configuredRuntimeMember.backendType === 'string'
           ? configuredRuntimeMember.backendType
@@ -16182,7 +16569,6 @@ export class TeamProvisioningService {
       upsertMetadata(memberName, {
         ...(runtimeModel ? { model: runtimeModel } : {}),
         ...(configuredAgentId ? { agentId: configuredAgentId } : {}),
-        ...(configuredTmuxPaneId ? { tmuxPaneId: configuredTmuxPaneId } : {}),
         ...(normalizeOptionalTeamProviderId(member.providerId)
           ? { providerId: normalizeOptionalTeamProviderId(member.providerId) }
           : {}),
@@ -16297,26 +16683,10 @@ export class TeamProvisioningService {
       });
     }
 
-    const paneIds = [...metadataByMember.values()]
-      .map((metadata) => metadata.tmuxPaneId?.trim() ?? '')
-      .filter((paneId) => paneId.length > 0);
-    let paneInfoById = new Map<string, TmuxPaneRuntimeInfo>();
-    if (paneIds.length > 0) {
-      try {
-        paneInfoById = await listTmuxPaneRuntimeInfoForCurrentPlatform(paneIds);
-      } catch (error) {
-        logger.debug(
-          `[${teamName}] Failed to read tmux pane info for runtime snapshot: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
-    }
-
-    let processRows: Awaited<ReturnType<typeof listRuntimeProcessesForCurrentTmuxPlatform>> = [];
+    let processRows: RuntimeProcessTableRow[] = [];
     let processTableAvailable = true;
     try {
-      processRows = await listRuntimeProcessesForCurrentTmuxPlatform();
+      processRows = await listTeamRuntimeProcessTable();
     } catch (error) {
       processTableAvailable = false;
       logger.debug(
@@ -16346,7 +16716,6 @@ export class TeamProvisioningService {
     };
 
     for (const [memberName, metadata] of metadataByMember.entries()) {
-      const paneId = metadata.tmuxPaneId?.trim() ?? '';
       const launchMember = persistedLaunchSnapshot?.members[memberName];
       const adapterEvidence = currentRuntimeAdapterRun?.members?.[memberName];
       const adapterStatus: MemberSpawnStatusEntry | undefined = adapterEvidence
@@ -16407,14 +16776,12 @@ export class TeamProvisioningService {
         agentId: metadata.agentId,
         backendType: metadata.backendType,
         providerId: metadata.providerId ?? launchMember?.providerId,
-        tmuxPaneId: metadata.tmuxPaneId,
         persistedRuntimePid: runtimePid,
         persistedRuntimeSessionId: launchMember?.runtimeSessionId ?? metadata.runtimeSessionId,
         trackedSpawnStatus: status,
         runtimePid: metadata.metricsPid,
         runtimePidAlive,
         runtimeSessionId: metadata.runtimeSessionId,
-        pane: paneId ? paneInfoById.get(paneId) : undefined,
         processRows: memberProcessRows,
         processTableAvailable: memberProcessTableAvailable,
         nowIso: nowIso(),
@@ -16431,8 +16798,6 @@ export class TeamProvisioningService {
         livenessKind: resolved.livenessKind,
         ...(resolved.pidSource ? { pidSource: resolved.pidSource } : {}),
         ...(resolved.processCommand ? { processCommand: resolved.processCommand } : {}),
-        ...(resolved.panePid ? { panePid: resolved.panePid } : {}),
-        ...(resolved.paneCurrentCommand ? { paneCurrentCommand: resolved.paneCurrentCommand } : {}),
         ...(resolved.runtimeSessionId ? { runtimeSessionId: resolved.runtimeSessionId } : {}),
         ...(resolved.runtimeLastSeenAt ? { runtimeLastSeenAt: resolved.runtimeLastSeenAt } : {}),
         runtimeDiagnostic: resolved.runtimeDiagnostic,
@@ -18960,82 +19325,7 @@ export class TeamProvisioningService {
   }
 
   private stopPersistentTeamMembers(teamName: string): void {
-    const members = this.readPersistedRuntimeMembers(teamName);
-    if (members.length > 0) {
-      this.killPersistedPaneMembers(teamName, members);
-    }
     this.killOrphanedTeamAgentProcesses(teamName);
-  }
-
-  private killEmptyOrphanedClaudeSwarmTmuxServers(reason: string): void {
-    if (process.platform === 'win32') {
-      return;
-    }
-
-    let output = '';
-    try {
-      output = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,command='], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-    } catch {
-      return;
-    }
-
-    const servers: { pid: number; socketName: string }[] = [];
-    for (const line of output.split('\n')) {
-      const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-      if (!match) continue;
-      const pid = Number.parseInt(match[1] ?? '', 10);
-      const ppid = Number.parseInt(match[2] ?? '', 10);
-      const command = match[3] ?? '';
-      if (!Number.isFinite(pid) || !Number.isFinite(ppid) || ppid !== 1) {
-        continue;
-      }
-      const socketMatch = /\btmux\s+-L\s+(claude-swarm-[^\s]+)\s+new-session\b/.exec(command);
-      if (socketMatch?.[1]) {
-        servers.push({ pid, socketName: socketMatch[1] });
-      }
-    }
-
-    for (const server of servers) {
-      if (this.tmuxServerHasSessions(server.socketName)) {
-        continue;
-      }
-      try {
-        execFileSync('tmux', ['-L', server.socketName, 'kill-server'], {
-          stdio: 'ignore',
-        });
-        logger.info(
-          `Killed empty orphaned Claude swarm tmux server ${server.socketName} (${server.pid}) during ${reason}`
-        );
-      } catch {
-        try {
-          killProcessByPid(server.pid);
-          logger.info(
-            `Killed empty orphaned Claude swarm tmux process ${server.socketName} (${server.pid}) during ${reason}`
-          );
-        } catch (error) {
-          logger.debug(
-            `Failed to kill empty orphaned Claude swarm tmux server ${server.socketName} (${server.pid}): ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-        }
-      }
-    }
-  }
-
-  private tmuxServerHasSessions(socketName: string): boolean {
-    try {
-      const sessions = execFileSync('tmux', ['-L', socketName, 'list-sessions'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      return sessions.trim().length > 0;
-    } catch {
-      return false;
-    }
   }
 
   private readPersistedTeamProjectPath(teamName: string): string | null {
@@ -19075,28 +19365,6 @@ export class TeamProvisioningService {
         .filter((name) => name.length > 0);
     } catch {
       return [];
-    }
-  }
-
-  private killPersistedPaneMembers(teamName: string, members: PersistedRuntimeMemberLike[]): void {
-    for (const member of members) {
-      const name = typeof member.name === 'string' ? member.name.trim() : '';
-      const paneId = typeof member.tmuxPaneId === 'string' ? member.tmuxPaneId.trim() : '';
-      const backendType =
-        typeof member.backendType === 'string' ? member.backendType.trim().toLowerCase() : '';
-      if (!name || isLeadMemberName(name) || !paneId || backendType !== 'tmux') {
-        continue;
-      }
-      try {
-        killTmuxPaneForCurrentPlatformSync(paneId);
-        logger.info(`[${teamName}] Killed teammate pane ${name} (${paneId}) during stop`);
-      } catch (error) {
-        logger.debug(
-          `[${teamName}] Failed to kill teammate pane ${name} (${paneId}) during stop: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
     }
   }
 
@@ -19190,7 +19458,6 @@ export class TeamProvisioningService {
         this.stopPersistentTeamMembers(teamName);
       }
     }
-    this.killEmptyOrphanedClaudeSwarmTmuxServers('shutdown');
   }
 
   /**

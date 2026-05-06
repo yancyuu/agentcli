@@ -132,6 +132,16 @@ function getFallbackTeamProviderModels(providerId: SupportedProviderId): string[
   );
 }
 
+function normalizeCursorRuntimeModelId(model: string): string {
+  return model.trim().replace(/\s+-\s+.*$/u, '');
+}
+
+function isKnownFallbackTeamProviderModel(providerId: SupportedProviderId, model: string): boolean {
+  const normalizedModel =
+    providerId === 'cursor' ? normalizeCursorRuntimeModelId(model) : model.trim();
+  return getFallbackTeamProviderModels(providerId).includes(normalizedModel);
+}
+
 function getFallbackTeamProviderModelOptions(
   providerId: SupportedProviderId,
   providerStatus?: TeamModelRuntimeProviderStatus | null
@@ -227,6 +237,14 @@ function getRuntimeSelectorModels(
   providerId: SupportedProviderId,
   providerStatus?: TeamModelRuntimeProviderStatus | null
 ): string[] {
+  if (providerId === 'cursor') {
+    const fallbackModels = getFallbackTeamProviderModels(providerId);
+    const runtimeModels = providerStatus
+      ? sortTeamProviderModels(providerId, providerStatus.models.map(normalizeCursorRuntimeModelId))
+      : [];
+    return [...new Set([...fallbackModels, ...runtimeModels])];
+  }
+
   if (!providerStatus) {
     return [];
   }
@@ -398,6 +416,10 @@ export function isTeamModelAvailableForUi(
     return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';
   }
 
+  if (providerId === 'cursor' && isKnownFallbackTeamProviderModel(providerId, trimmed)) {
+    return true;
+  }
+
   if (isTeamProviderModelVerificationPending(providerId, providerStatus)) {
     return true;
   }
@@ -430,6 +452,10 @@ export function normalizeTeamModelForUi(
 
   if (providerId === 'anthropic') {
     return isTeamModelAvailableForUi(providerId, trimmed, providerStatus) ? normalized : '';
+  }
+
+  if (providerId === 'cursor' && isKnownFallbackTeamProviderModel(providerId, trimmed)) {
+    return normalized;
   }
 
   if (!providerStatus) {
@@ -468,6 +494,10 @@ export function getTeamModelSelectionError(
     return isTeamModelAvailableForUi(providerId, trimmed, providerStatus)
       ? null
       : `模型“${trimmed}”不适用于当前 ${getTeamProviderLabel(providerId) ?? providerId} 运行时。请选择列表中的模型，或使用默认模型。`;
+  }
+
+  if (providerId === 'cursor' && isKnownFallbackTeamProviderModel(providerId, trimmed)) {
+    return null;
   }
 
   if (!providerStatus) {

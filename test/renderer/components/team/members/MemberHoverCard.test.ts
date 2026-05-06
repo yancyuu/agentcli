@@ -320,7 +320,7 @@ describe('MemberHoverCard spawn-aware presence', () => {
       updatedAt: '2026-04-09T10:00:00.000Z',
       runtimeAlive: false,
       livenessKind: 'shell_only',
-      runtimeDiagnostic: 'tmux pane foreground command is zsh',
+      runtimeDiagnostic: 'runtime shell foreground command is zsh',
       runtimeDiagnosticSeverity: 'warning',
     };
     storeState.teamAgentRuntimeByTeam['northstar-core'] = {
@@ -331,7 +331,7 @@ describe('MemberHoverCard spawn-aware presence', () => {
           alive: false,
           restartable: true,
           livenessKind: 'shell_only',
-          pidSource: 'tmux_pane',
+          pidSource: 'agent_process_table',
           paneCurrentCommand: 'zsh',
           processCommand: 'node runtime --token secret',
           updatedAt: '2026-04-09T10:00:01.000Z',

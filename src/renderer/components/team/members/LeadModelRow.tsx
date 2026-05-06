@@ -39,6 +39,7 @@ interface LeadModelRowProps {
   disableGeminiOption?: boolean;
   modelIssueText?: string | null;
   teamName?: string;
+  hideProviderTabs?: boolean;
 }
 
 export const LeadModelRow = ({
@@ -56,6 +57,7 @@ export const LeadModelRow = ({
   disableGeminiOption = false,
   modelIssueText,
   teamName,
+  hideProviderTabs = false,
 }: LeadModelRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const [modelExpanded, setModelExpanded] = useState(false);
@@ -168,6 +170,7 @@ export const LeadModelRow = ({
             onValueChange={onModelChange}
             id="lead-model"
             disableGeminiOption={disableGeminiOption}
+            hideProviderTabs={hideProviderTabs}
             modelIssueReasonByValue={model.trim() ? { [model.trim()]: modelIssueText } : undefined}
           />
           <EffortLevelSelector

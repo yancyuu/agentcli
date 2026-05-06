@@ -89,12 +89,12 @@ describe('ProvisioningProgressBlock', () => {
           cliLogsTail: 'tail line',
           launchDiagnostics: [
             {
-              id: 'bob:tmux_shell_only',
+              id: 'bob:shell_only',
               memberName: 'bob',
               severity: 'warning',
-              code: 'tmux_shell_only',
+              code: 'shell_only',
               label: 'bob - shell only',
-              detail: 'tmux pane foreground command is zsh',
+              detail: 'runtime shell foreground command is zsh',
               observedAt: '2026-04-24T12:00:00.000Z',
             },
             {
@@ -135,7 +135,7 @@ describe('ProvisioningProgressBlock', () => {
     });
 
     expect(host.textContent).toContain('bob - shell only');
-    expect(host.textContent).toContain('tmux pane foreground command is zsh');
+    expect(host.textContent).toContain('runtime shell foreground command is zsh');
     expect(host.textContent).toContain('tom - no runtime found');
     expect(host.textContent).toContain('registered runtime metadata without live process');
     expect(host.textContent).toContain('jack - process table unavailable');

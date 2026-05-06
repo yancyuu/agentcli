@@ -53,6 +53,11 @@ const PROVIDER_CAPABILITIES: Record<
     supportsApiKey: false,
     configurableAuthModes: [],
   },
+  cursor: {
+    supportsOAuth: false,
+    supportsApiKey: false,
+    configurableAuthModes: [],
+  },
 };
 
 const PROVIDER_API_KEY_ENV_VARS: Partial<Record<CliProviderId, string>> = {
