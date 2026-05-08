@@ -214,7 +214,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
         `${getTeamProviderLabel(candidateProviderId)} 尚未连接。`
       );
     }
-    if (candidateProviderId !== 'cursor' && !providerStatus.capabilities.teamLaunch) {
+    if (!providerStatus.capabilities.teamLaunch) {
       return (
         providerStatus.detailMessage ??
         providerStatus.statusMessage ??

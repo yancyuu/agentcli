@@ -5,6 +5,24 @@ function stripOneMillionSuffix(model: string): string {
   return model.replace(/(?:\[1m\])+$/i, '');
 }
 
+function supportsOneMillionContext(model: string): boolean {
+  const normalized = stripOneMillionSuffix(model.trim().toLowerCase());
+  return (
+    normalized === 'opus' ||
+    normalized === 'sonnet' ||
+    normalized.startsWith('claude-opus-') ||
+    normalized.startsWith('claude-sonnet-')
+  );
+}
+
+function getOneMillionLaunchModel(model: string, limitContext: boolean | undefined): string {
+  const baseModel = stripOneMillionSuffix(model.trim());
+  if (!baseModel || limitContext || !supportsOneMillionContext(baseModel)) {
+    return baseModel;
+  }
+  return `${baseModel}[1m]`;
+}
+
 function normalizeAvailableLaunchModels(
   availableLaunchModels: Iterable<string> | undefined
 ): Set<string> {
@@ -47,7 +65,8 @@ export function resolveAnthropicLaunchModel(params: {
   if (!selectedModel || isDefaultProviderModelSelection(selectedModel)) {
     const staticDefault = getAnthropicDefaultTeamModel(params.limitContext);
     const runtimeDefault = params.defaultLaunchModel?.trim() || null;
-    const preferredDefault = stripOneMillionSuffix(staticDefault) || staticDefault;
+    const preferredDefault = getOneMillionLaunchModel(staticDefault, params.limitContext);
+    const runtimeDefaultBase = runtimeDefault ? stripOneMillionSuffix(runtimeDefault) : null;
     if (availableModels.size === 0) {
       return preferredDefault;
     }
@@ -55,7 +74,8 @@ export function resolveAnthropicLaunchModel(params: {
     return (
       chooseAvailableModel(availableModels, [
         preferredDefault,
-        stripOneMillionSuffix(runtimeDefault || preferredDefault),
+        runtimeDefault ? getOneMillionLaunchModel(runtimeDefault, params.limitContext) : '',
+        runtimeDefaultBase ?? '',
         staticDefault,
         stripOneMillionSuffix(staticDefault),
       ]) ?? preferredDefault
@@ -67,5 +87,10 @@ export function resolveAnthropicLaunchModel(params: {
     return null;
   }
 
-  return baseModel;
+  const preferredModel = getOneMillionLaunchModel(baseModel, params.limitContext);
+  if (availableModels.size === 0) {
+    return preferredModel;
+  }
+
+  return chooseAvailableModel(availableModels, [preferredModel, baseModel]) ?? preferredModel;
 }

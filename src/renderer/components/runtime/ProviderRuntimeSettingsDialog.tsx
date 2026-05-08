@@ -40,6 +40,7 @@ import {
 } from '@renderer/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import { useStore } from '@renderer/store';
+import { getProviderScopedTeamModelLabel } from '@renderer/utils/teamModelCatalog';
 import { AlertTriangle, Key, Link2, Loader2, Trash2 } from 'lucide-react';
 
 import {
@@ -134,8 +135,6 @@ function getConnectionDescription(provider: CliProviderStatus): string {
       return '配置可选 API 访问。CLI SDK 和 ADC 仍会自动发现。';
     case 'opencode':
       return 'OpenCode 认证和提供商清单由 OpenCode 运行时管理。';
-    case 'cursor':
-      return 'Cursor Agent 使用本机 Cursor 登录态，认证由 cursor-agent 管理。';
   }
 }
 
@@ -149,8 +148,6 @@ function getRuntimeDescription(provider: CliProviderStatus): string {
       return '选择多模型运行时应使用哪个 Gemini 后端。';
     case 'opencode':
       return 'OpenCode 使用自己的托管运行时宿主。桌面端当前仅显示状态。';
-    case 'cursor':
-      return 'Cursor Agent 使用本机 cursor-agent CLI。';
   }
 }
 
@@ -411,6 +408,140 @@ const CodexRateLimitWindowCard = ({
     </div>
   );
 };
+
+function getAnthropicAuthState(provider: CliProviderStatus): {
+  label: string;
+  detail: string;
+  color: string;
+  backgroundColor: string;
+} {
+  const configuredAuthMode = provider.connection?.configuredAuthMode ?? 'auto';
+  const hasSubscriptionSession =
+    provider.authMethod === 'oauth_token' || provider.authMethod === 'claude.ai';
+
+  if (configuredAuthMode === 'api_key') {
+    return provider.connection?.apiKeyConfigured
+      ? {
+          label: 'API 密钥已就绪',
+          detail: provider.connection.apiKeySourceLabel ?? '使用 ANTHROPIC_API_KEY',
+          color: '#86efac',
+          backgroundColor: 'rgba(74, 222, 128, 0.14)',
+        }
+      : {
+          label: '缺少 API 密钥',
+          detail: '当前已选择 API 密钥模式，但还没有可用的 ANTHROPIC_API_KEY。',
+          color: '#fbbf24',
+          backgroundColor: 'rgba(245, 158, 11, 0.14)',
+        };
+  }
+
+  if (configuredAuthMode === 'oauth') {
+    return hasSubscriptionSession && provider.authenticated
+      ? {
+          label: 'Claude 订阅已连接',
+          detail: '使用本机 Claude Code / Anthropic 登录态启动团队。',
+          color: '#86efac',
+          backgroundColor: 'rgba(74, 222, 128, 0.14)',
+        }
+      : {
+          label: '需要登录 Claude',
+          detail: '当前强制使用 Anthropic 订阅模式，请重新连接本机登录态。',
+          color: '#fbbf24',
+          backgroundColor: 'rgba(245, 158, 11, 0.14)',
+        };
+  }
+
+  if (provider.authenticated) {
+    return {
+      label: `自动模式 · ${formatProviderAuthMethodLabelForProvider(
+        provider.providerId,
+        provider.authMethod
+      )}`,
+      detail: 'Claude Code 会按本机运行时默认顺序解析订阅或环境凭据。',
+      color: '#86efac',
+      backgroundColor: 'rgba(74, 222, 128, 0.14)',
+    };
+  }
+
+  return {
+    label: '自动模式待连接',
+    detail: provider.statusMessage ?? '等待 Claude Code 报告可用的本机凭据。',
+    color: 'var(--color-text-muted)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  };
+}
+
+function formatAnthropicCatalogStatus(provider: CliProviderStatus): string {
+  const catalog = provider.modelCatalog;
+  if (!catalog) {
+    return '模型目录：未加载';
+  }
+
+  const sourceLabel =
+    catalog.source === 'anthropic-models-api'
+      ? 'Anthropic Models API'
+      : catalog.source === 'app-server'
+        ? 'App server'
+        : '静态回退';
+  const statusLabel =
+    catalog.status === 'ready'
+      ? 'ready'
+      : catalog.status === 'stale'
+        ? 'stale'
+        : catalog.status === 'degraded'
+          ? 'degraded'
+          : 'unavailable';
+  return `模型目录：${sourceLabel} · ${statusLabel}`;
+}
+
+function getAnthropicDefaultModelLabel(provider: CliProviderStatus): string {
+  const defaultLaunchModel =
+    provider.modelCatalog?.defaultLaunchModel?.trim() ||
+    provider.modelCatalog?.defaultModelId?.trim() ||
+    'opus';
+  return getProviderScopedTeamModelLabel('anthropic', defaultLaunchModel) ?? defaultLaunchModel;
+}
+
+function getAnthropicVisibleModelLabels(provider: CliProviderStatus): string[] {
+  const catalogModels = provider.modelCatalog?.models ?? [];
+  const sourceModels =
+    catalogModels.length > 0
+      ? catalogModels.filter((model) => !model.hidden).map((model) => model.launchModel)
+      : provider.models;
+  return Array.from(
+    new Set(
+      sourceModels
+        .map((model) => getProviderScopedTeamModelLabel('anthropic', model) ?? model.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function getAnthropicReasoningEffortSummary(provider: CliProviderStatus): string {
+  const configuredValues = provider.runtimeCapabilities?.reasoningEffort?.values ?? [];
+  const catalogValues =
+    provider.modelCatalog?.models.flatMap((model) => model.supportedReasoningEfforts) ?? [];
+  const values = Array.from(new Set([...configuredValues, ...catalogValues])).filter(Boolean);
+  return values.length > 0 ? values.join(', ') : '未报告';
+}
+
+function getAnthropicDiagnosticLines(provider: CliProviderStatus): string[] {
+  const lines: string[] = [];
+  const catalog = provider.modelCatalog;
+  if (catalog?.diagnostics.message) {
+    lines.push(catalog.diagnostics.message);
+  }
+  if (catalog?.diagnostics.configReadState) {
+    lines.push(`配置读取：${catalog.diagnostics.configReadState}`);
+  }
+  if (catalog?.diagnostics.appServerState) {
+    lines.push(`运行时探测：${catalog.diagnostics.appServerState}`);
+  }
+  if (provider.runtimeCapabilities?.fastMode?.reason) {
+    lines.push(`Fast mode：${provider.runtimeCapabilities.fastMode.reason}`);
+  }
+  return lines;
+}
 
 function getConnectionMethodCardOptions(
   provider: CliProviderStatus
@@ -738,7 +869,7 @@ export const ProviderRuntimeSettingsDialog = ({
   const showApiKeySection = Boolean(
     apiKeyConfig &&
     (selectedProvider?.providerId === 'anthropic'
-      ? configuredAuthMode === 'api_key' || selectedProvider.connection?.apiKeyConfigured
+      ? true
       : selectedProvider?.providerId !== 'codex' || !selectedProvider.connection?.supportsOAuth)
   );
   const connectionAlert = selectedProvider ? getConnectionAlert(selectedProvider) : null;
@@ -763,6 +894,28 @@ export const ProviderRuntimeSettingsDialog = ({
     (anthropicFastModeSupported
       ? '此 Anthropic 运行时当前无法使用 Fast mode。'
       : '此 Anthropic 运行时未提供 Fast mode。');
+  const anthropicAuthState =
+    selectedProvider?.providerId === 'anthropic' ? getAnthropicAuthState(selectedProvider) : null;
+  const anthropicDefaultModelLabel =
+    selectedProvider?.providerId === 'anthropic'
+      ? getAnthropicDefaultModelLabel(selectedProvider)
+      : null;
+  const anthropicVisibleModelLabels =
+    selectedProvider?.providerId === 'anthropic'
+      ? getAnthropicVisibleModelLabels(selectedProvider)
+      : [];
+  const anthropicReasoningEffortSummary =
+    selectedProvider?.providerId === 'anthropic'
+      ? getAnthropicReasoningEffortSummary(selectedProvider)
+      : null;
+  const anthropicDiagnosticLines =
+    selectedProvider?.providerId === 'anthropic'
+      ? getAnthropicDiagnosticLines(selectedProvider)
+      : [];
+  const anthropicCatalogStatus =
+    selectedProvider?.providerId === 'anthropic'
+      ? formatAnthropicCatalogStatus(selectedProvider)
+      : null;
   const connectionMethodCardsHint = selectedProvider
     ? getConnectionMethodCardsHint(selectedProvider)
     : null;
@@ -967,6 +1120,7 @@ export const ProviderRuntimeSettingsDialog = ({
             authMode: nextAuthMode,
           },
         });
+        setActiveApiKeyFormProviderId(nextAuthMode === 'api_key' ? 'anthropic' : null);
       } else if (nextAuthMode !== 'oauth') {
         await updateConfig('providerConnections', {
           codex: {
@@ -1316,47 +1470,213 @@ export const ProviderRuntimeSettingsDialog = ({
 
                 {selectedProvider.providerId === 'anthropic' ? (
                   <div
-                    className="space-y-2 rounded-md border p-3"
-                    style={{ borderColor: 'var(--color-border-subtle)' }}
+                    className="space-y-3 rounded-md border p-3"
+                    style={{
+                      borderColor: 'rgba(125, 211, 252, 0.18)',
+                      background:
+                        'linear-gradient(135deg, rgba(125, 211, 252, 0.055), rgba(255, 255, 255, 0.015) 42%, rgba(74, 222, 128, 0.035))',
+                    }}
                   >
-                    <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-                      Fast mode 默认值
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                          Claude Code
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                          管理 Claude Code 的账号、模型上下文和启动能力。
+                        </div>
+                      </div>
+                      {anthropicAuthState ? (
+                        <span
+                          className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          style={{
+                            color: anthropicAuthState.color,
+                            backgroundColor: anthropicAuthState.backgroundColor,
+                          }}
+                        >
+                          {anthropicAuthState.label}
+                        </span>
+                      ) : null}
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                      当解析后的模型和运行时允许时，新建 Anthropic 团队启动默认应用 Claude Code Fast
-                      mode。
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div
+                        className="rounded-lg border px-3 py-2.5"
+                        style={{
+                          borderColor: 'var(--color-border-subtle)',
+                          backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                        }}
+                      >
+                        <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                          账号与认证
+                        </div>
+                        <div
+                          className="mt-1 text-sm font-medium"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {anthropicAuthState?.label ?? '状态未知'}
+                        </div>
+                        <div
+                          className="mt-1 text-[11px] leading-relaxed"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          {anthropicAuthState?.detail ?? '等待 Claude Code 状态刷新。'}
+                        </div>
+                      </div>
+
+                      <div
+                        className="rounded-lg border px-3 py-2.5"
+                        style={{
+                          borderColor: 'var(--color-border-subtle)',
+                          backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                        }}
+                      >
+                        <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                          默认模型
+                        </div>
+                        <div
+                          className="mt-1 text-sm font-medium"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {anthropicDefaultModelLabel ?? 'Opus'}
+                        </div>
+                        <div
+                          className="mt-1 text-[11px] leading-relaxed"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          默认保留 1M context；启用 200K 限制时会去掉 `[1m]`。1M 模型不支持 effort
+                          参数。
+                        </div>
+                      </div>
                     </div>
-                    {anthropicFastModeSupported ? (
-                      <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
-                        {[
-                          { enabled: false, label: '默认关闭' },
-                          { enabled: true, label: '优先 Fast' },
-                        ].map((option) => (
-                          <button
-                            key={option.label}
-                            type="button"
-                            className={`rounded-[3px] px-3 py-1 text-xs font-medium transition-colors ${
-                              anthropicFastModeEnabled === option.enabled
-                                ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
-                                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                            }`}
-                            disabled={connectionBusy || !anthropicFastModeAvailable}
-                            onClick={() =>
-                              void handleAnthropicFastModeDefaultChange(option.enabled)
-                            }
+
+                    <div
+                      className="rounded-lg border px-3 py-2.5"
+                      style={{
+                        borderColor: 'var(--color-border-subtle)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                      }}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>
+                          模型与能力
+                        </div>
+                        <span className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                          {anthropicCatalogStatus}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(anthropicVisibleModelLabels.length > 0
+                          ? anthropicVisibleModelLabels.slice(0, 6)
+                          : ['Opus', 'Sonnet', 'Haiku']
+                        ).map((modelLabel) => (
+                          <span
+                            key={modelLabel}
+                            className="rounded-full border px-2 py-0.5 text-[11px]"
+                            style={{
+                              borderColor: 'var(--color-border-subtle)',
+                              color: 'var(--color-text-secondary)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.035)',
+                            }}
                           >
-                            {option.label}
-                          </button>
+                            {modelLabel}
+                          </span>
                         ))}
+                        {anthropicVisibleModelLabels.length > 6 ? (
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[11px]"
+                            style={{
+                              color: 'var(--color-text-muted)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.035)',
+                            }}
+                          >
+                            +{anthropicVisibleModelLabels.length - 6}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div
+                        className="mt-2 text-[11px]"
+                        style={{ color: 'var(--color-text-muted)' }}
+                      >
+                        推理强度：{anthropicReasoningEffortSummary ?? '未报告'}
+                      </div>
+                    </div>
+
+                    <div
+                      className="space-y-2 rounded-lg border px-3 py-2.5"
+                      style={{
+                        borderColor: 'var(--color-border-subtle)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                      }}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div
+                            className="text-xs font-medium"
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            Fast mode 默认值
+                          </div>
+                          <div
+                            className="mt-0.5 text-[11px]"
+                            style={{ color: 'var(--color-text-muted)' }}
+                          >
+                            当解析后的模型和运行时允许时，新建 Claude Code 团队启动默认应用 Fast
+                            mode。
+                          </div>
+                        </div>
+                        {anthropicFastModeSupported ? (
+                          <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+                            {[
+                              { enabled: false, label: '默认关闭' },
+                              { enabled: true, label: '优先 Fast' },
+                            ].map((option) => (
+                              <button
+                                key={option.label}
+                                type="button"
+                                className={`rounded-[3px] px-3 py-1 text-xs font-medium transition-colors ${
+                                  anthropicFastModeEnabled === option.enabled
+                                    ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                                }`}
+                                disabled={connectionBusy || !anthropicFastModeAvailable}
+                                onClick={() =>
+                                  void handleAnthropicFastModeDefaultChange(option.enabled)
+                                }
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                        {anthropicFastModeSupported && anthropicFastModeAvailable
+                          ? anthropicFastModeEnabled
+                            ? '当解析后的模型支持时，新的 Claude Code 启动会默认请求 Fast mode。'
+                            : '除非团队明确启用 Fast mode，新的 Claude Code 启动会保持普通速度。'
+                          : anthropicFastModeDisabledReason}
+                      </div>
+                    </div>
+
+                    {anthropicDiagnosticLines.length > 0 ? (
+                      <div
+                        className="rounded-md border px-3 py-2 text-[11px]"
+                        style={{
+                          borderColor: 'var(--color-border-subtle)',
+                          color: 'var(--color-text-secondary)',
+                        }}
+                      >
+                        <div className="mb-1 font-medium" style={{ color: 'var(--color-text)' }}>
+                          诊断
+                        </div>
+                        <div className="space-y-0.5">
+                          {anthropicDiagnosticLines.map((line) => (
+                            <div key={line}>{line}</div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
-                    <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                      {anthropicFastModeSupported && anthropicFastModeAvailable
-                        ? anthropicFastModeEnabled
-                          ? '当解析后的模型支持时，新的 Anthropic 启动会默认请求 Fast mode。'
-                          : '除非团队明确启用 Fast mode，新的 Anthropic 启动会保持普通速度。'
-                        : anthropicFastModeDisabledReason}
-                    </div>
                   </div>
                 ) : null}
 

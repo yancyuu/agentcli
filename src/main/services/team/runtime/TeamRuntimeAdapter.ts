@@ -9,13 +9,7 @@ import type {
   TeamLaunchAggregateState,
 } from '@shared/types';
 
-export const TEAM_RUNTIME_PROVIDER_IDS = [
-  'anthropic',
-  'codex',
-  'gemini',
-  'opencode',
-  'cursor',
-] as const;
+export const TEAM_RUNTIME_PROVIDER_IDS = ['anthropic', 'codex', 'gemini', 'opencode'] as const;
 
 export type TeamRuntimeProviderId = (typeof TEAM_RUNTIME_PROVIDER_IDS)[number];
 
@@ -166,13 +160,7 @@ export interface TeamLaunchRuntimeAdapter {
 }
 
 export function isTeamRuntimeProviderId(value: unknown): value is TeamRuntimeProviderId {
-  return (
-    value === 'anthropic' ||
-    value === 'codex' ||
-    value === 'gemini' ||
-    value === 'opencode' ||
-    value === 'cursor'
-  );
+  return value === 'anthropic' || value === 'codex' || value === 'gemini' || value === 'opencode';
 }
 
 export class TeamRuntimeAdapterRegistry {

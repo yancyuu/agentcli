@@ -2,6 +2,7 @@ import * as Lark from '@larksuiteoapi/node-sdk';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { CANONICAL_LEAD_MEMBER_NAME, isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG: LeadChannelConfig = {
 
 const CHANNEL_EVENT_LEDGER_MAX_ENTRIES = 2000;
 const CHANNEL_EVENT_PROCESSING_STALE_MS = 10 * 60 * 1000;
+const FEISHU_REPLY_DEDUPE_TTL_MS = 2 * 60 * 1000;
 const GLOBAL_CHANNEL_STATUS_OWNER = '__global__';
 
 interface LeadChannelEventLedgerEntry {
@@ -106,13 +108,19 @@ function normalizeConfig(input: unknown): LeadChannelConfig {
     appId: typeof feishu.appId === 'string' ? feishu.appId.trim() : '',
     appSecret: typeof feishu.appSecret === 'string' ? feishu.appSecret.trim() : '',
   };
+  const seenChannelIds = new Set<string>();
   const channels: LeadChannelDefinition[] = Array.isArray(parsed.channels)
     ? parsed.channels
         .map((channel): LeadChannelDefinition | null => {
           if (!channel || typeof channel !== 'object') return null;
           const row = channel as Partial<LeadChannelConfig['channels'][number]>;
           const provider = row.provider === 'webhook' ? 'webhook' : 'feishu';
-          const id = typeof row.id === 'string' && row.id.trim() ? row.id.trim() : provider;
+          const rawId = typeof row.id === 'string' && row.id.trim() ? row.id.trim() : provider;
+          let id = rawId;
+          for (let suffix = 2; seenChannelIds.has(id); suffix += 1) {
+            id = `${rawId}-${suffix}`;
+          }
+          seenChannelIds.add(id);
           const name =
             typeof row.name === 'string' && row.name.trim()
               ? row.name.trim()
@@ -134,8 +142,12 @@ function normalizeConfig(input: unknown): LeadChannelConfig {
         .filter((channel): channel is LeadChannelDefinition => channel !== null)
     : [];
   if (channels.length === 0 && (legacyFeishu.appId || legacyFeishu.appSecret)) {
+    const legacyId = seenChannelIds.has('feishu-default')
+      ? `feishu-default-${seenChannelIds.size + 1}`
+      : 'feishu-default';
+    seenChannelIds.add(legacyId);
     channels.push({
-      id: 'feishu-default',
+      id: legacyId,
       name: '飞书长连接',
       provider: 'feishu',
       enabled: legacyFeishu.enabled !== false,
@@ -182,17 +194,64 @@ function assertFeishuApiResponseOk(response: unknown, action: string): string | 
   return typeof row.data?.message_id === 'string' ? row.data.message_id : null;
 }
 
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+function getStringAtPath(value: unknown, pathParts: string[]): string | null {
+  let current = value;
+  for (const part of pathParts) {
+    if (!current || typeof current !== 'object') {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === 'string' && current.trim() ? current.trim() : null;
+}
+
+function buildFeishuInboundMessageId(input: {
+  channelId: string;
+  event: unknown;
+  chatId: string;
+  senderId: string;
+  text: string;
+}): string {
+  const directMessageId =
+    getStringAtPath(input.event, ['message', 'message_id']) ??
+    getStringAtPath(input.event, ['event', 'message', 'message_id']);
+  if (directMessageId) {
+    return `${input.channelId}:${directMessageId}`;
+  }
+
+  const eventId =
+    getStringAtPath(input.event, ['event_id']) ??
+    getStringAtPath(input.event, ['header', 'event_id']);
+  if (eventId) {
+    return `${input.channelId}:event:${eventId}`;
+  }
+
+  const createTime =
+    getStringAtPath(input.event, ['message', 'create_time']) ??
+    getStringAtPath(input.event, ['event', 'message', 'create_time']);
+  const timeBucket = createTime || String(Math.floor(Date.now() / (5 * 60 * 1000)));
+  return `${input.channelId}:fallback:${shortHash(
+    [input.chatId, input.senderId, timeBucket, input.text].join('\n')
+  )}`;
+}
+
 export class LeadChannelListenerService {
   private readonly inboxWriter = new TeamInboxWriter();
   private readonly configReader = new TeamConfigReader();
   private readonly wsClientByChannel = new Map<string, InstanceType<typeof Lark.WSClient>>();
   private readonly apiClientByChannel = new Map<string, InstanceType<typeof Lark.Client>>();
+  private readonly channelConfigSignatureByKey = new Map<string, string>();
   private readonly senderNameCache = new Map<string, { name: string; fetchedAt: number }>();
   private static readonly SENDER_CACHE_TTL = 30 * 60 * 1000; // 30 min
   private readonly channelBindings = new Map<string, Set<string>>();
   private readonly statusByTeamChannel = new Map<string, Map<string, LeadChannelStatus>>();
   private readonly connectingHintTimerByTeamChannel = new Map<string, NodeJS.Timeout>();
   private readonly recentFeishuTargetByTeam = new Map<string, RecentFeishuTarget>();
+  private readonly feishuReplyDedupe = new Map<string, number>();
   private inboundMessageHandler:
     | ((teamName: string, message: LeadChannelInboundMessage) => boolean | Promise<boolean>)
     | null = null;
@@ -224,6 +283,7 @@ export class LeadChannelListenerService {
     request: SaveLeadChannelConfigRequest
   ): Promise<GlobalLeadChannelSnapshot> {
     const config = normalizeConfig(request);
+    await this.stopRemovedOrReconfiguredFeishuChannels(config.channels);
     const configPath = getGlobalLeadChannelConfigPath();
     await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
     await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -295,8 +355,12 @@ export class LeadChannelListenerService {
     }
 
     const key = this.getChannelKey(channelId);
+    const configSignature = this.buildFeishuChannelConfigSignature(channel, appId, appSecret);
     if (this.wsClientByChannel.has(key)) {
-      return boundTeam ? this.getSnapshot(boundTeam) : null;
+      if (this.channelConfigSignatureByKey.get(key) === configSignature) {
+        return boundTeam ? this.getSnapshot(boundTeam) : null;
+      }
+      this.closeFeishuChannelRuntime(key);
     }
 
     this.clearConnectingHint(statusOwner, channel.id);
@@ -356,21 +420,26 @@ export class LeadChannelListenerService {
       'im.message.receive_v1': async (data: unknown) => {
         const text = extractFeishuText(data);
         const event = data as {
-          message?: { chat_id?: string; message_id?: string };
+          message?: { chat_id?: string; message_id?: string; create_time?: string };
           sender?: { sender_id?: Record<string, string> };
         };
         const chatId = event.message?.chat_id ?? 'unknown-chat';
         const senderId =
           event.sender?.sender_id?.open_id ?? event.sender?.sender_id?.user_id ?? 'unknown-sender';
+        const messageId = buildFeishuInboundMessageId({
+          channelId: channel.id,
+          event: data,
+          chatId,
+          senderId,
+          text,
+        });
         const inboundMessage: LeadChannelInboundMessage = {
           channelId: channel.id,
           channelName: channel.name,
           provider: 'feishu',
           chatId,
           senderId,
-          messageId: event.message?.message_id
-            ? `${channel.id}:${event.message.message_id}`
-            : undefined,
+          messageId,
           text,
           from: `${channel.name}:${senderId}`,
         };
@@ -464,27 +533,47 @@ export class LeadChannelListenerService {
 
     this.wsClientByChannel.set(key, wsClient);
     this.apiClientByChannel.set(key, apiClient);
+    this.channelConfigSignatureByKey.set(key, configSignature);
     await wsClient.start({ eventDispatcher });
     return boundTeam ? this.getSnapshot(boundTeam) : null;
   }
 
-  async sendFeishuReply(channelId: string, chatId: string, text: string): Promise<void> {
+  async sendFeishuReply(
+    channelId: string,
+    chatId: string,
+    text: string,
+    options: { dedupeKey?: string } = {}
+  ): Promise<void> {
+    const normalizedText = text.trim();
+    const dedupeKey =
+      options.dedupeKey?.trim() || `${channelId}:${chatId}:text:${shortHash(normalizedText)}`;
+    if (this.isRecentDuplicateFeishuReply(dedupeKey)) {
+      logger.warn(`[${channelId}] skipped duplicate Feishu reply key=${dedupeKey}`);
+      return;
+    }
+
     const client = await this.getFeishuApiClient(channelId);
     const globalConfig = await this.readGlobalConfig();
     const channel = globalConfig.channels.find((c) => c.id === channelId);
     const boundTeam = channel?.boundTeam;
     const statusOwner = boundTeam ?? GLOBAL_CHANNEL_STATUS_OWNER;
-    const response = await client.im.message.create({
-      params: {
-        receive_id_type: 'chat_id',
-      },
-      data: {
-        receive_id: chatId,
-        content: JSON.stringify({ text }),
-        msg_type: 'text',
-      },
-    });
-    const messageId = assertFeishuApiResponseOk(response, 'send Feishu reply');
+    let messageId: string | null = null;
+    try {
+      const response = await client.im.message.create({
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: chatId,
+          content: JSON.stringify({ text: normalizedText }),
+          msg_type: 'text',
+        },
+      });
+      messageId = assertFeishuApiResponseOk(response, 'send Feishu reply');
+    } catch (error) {
+      this.feishuReplyDedupe.delete(dedupeKey);
+      throw error;
+    }
     logger.info(
       `[${statusOwner}/${channelId}] Feishu reply sent to chat ${chatId}${
         messageId ? ` (messageId=${messageId})` : ''
@@ -511,6 +600,40 @@ export class LeadChannelListenerService {
     this.recentFeishuTargetByTeam.set(teamName, target);
   }
 
+  private async stopRemovedOrReconfiguredFeishuChannels(
+    nextChannels: readonly LeadChannelDefinition[]
+  ): Promise<void> {
+    const nextChannelIds = new Set(
+      nextChannels
+        .filter((channel) => channel.provider === 'feishu' && channel.enabled !== false)
+        .map((channel) => this.getChannelKey(channel.id))
+    );
+    for (const key of Array.from(this.wsClientByChannel.keys())) {
+      if (nextChannelIds.has(key)) {
+        continue;
+      }
+      this.closeFeishuChannelRuntime(key);
+      this.clearConnectingHint(GLOBAL_CHANNEL_STATUS_OWNER, key);
+    }
+  }
+
+  private isRecentDuplicateFeishuReply(dedupeKey: string): boolean {
+    const now = Date.now();
+    for (const [key, timestamp] of this.feishuReplyDedupe.entries()) {
+      if (now - timestamp > FEISHU_REPLY_DEDUPE_TTL_MS) {
+        this.feishuReplyDedupe.delete(key);
+      }
+    }
+
+    const existing = this.feishuReplyDedupe.get(dedupeKey);
+    if (existing && now - existing <= FEISHU_REPLY_DEDUPE_TTL_MS) {
+      return true;
+    }
+
+    this.feishuReplyDedupe.set(dedupeKey, now);
+    return false;
+  }
+
   async stopFeishu(channelId?: string): Promise<LeadChannelSnapshot | null> {
     const globalConfig = await this.readGlobalConfig();
     if (!channelId) {
@@ -518,6 +641,7 @@ export class LeadChannelListenerService {
         wsClient.close({ force: true });
         this.wsClientByChannel.delete(key);
         this.apiClientByChannel.delete(key);
+        this.channelConfigSignatureByKey.delete(key);
         const id = key;
         const channel = globalConfig.channels.find((c) => c.id === id);
         const statusOwner = channel?.boundTeam ?? GLOBAL_CHANNEL_STATUS_OWNER;
@@ -538,6 +662,7 @@ export class LeadChannelListenerService {
       this.wsClientByChannel.delete(key);
     }
     this.apiClientByChannel.delete(key);
+    this.channelConfigSignatureByKey.delete(key);
     const channel = globalConfig.channels.find((c) => c.id === channelId);
     const boundTeam = channel?.boundTeam;
     const statusOwner = boundTeam ?? GLOBAL_CHANNEL_STATUS_OWNER;
@@ -612,6 +737,31 @@ export class LeadChannelListenerService {
 
   private getChannelKey(channelId: string): string {
     return channelId;
+  }
+
+  private buildFeishuChannelConfigSignature(
+    channel: LeadChannelDefinition,
+    appId: string,
+    appSecret: string
+  ): string {
+    return shortHash(
+      JSON.stringify({
+        id: channel.id,
+        provider: channel.provider,
+        appId,
+        appSecret,
+        boundTeam: channel.boundTeam ?? null,
+        enabled: channel.enabled !== false,
+      })
+    );
+  }
+
+  private closeFeishuChannelRuntime(key: string): void {
+    const wsClient = this.wsClientByChannel.get(key);
+    wsClient?.close({ force: true });
+    this.wsClientByChannel.delete(key);
+    this.apiClientByChannel.delete(key);
+    this.channelConfigSignatureByKey.delete(key);
   }
 
   private async resolveLeadName(teamName: string): Promise<string> {

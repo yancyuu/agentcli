@@ -690,7 +690,7 @@ export class TeamConfigReader {
           providerId: updates.leadProviderId ?? meta.providerId,
           model: updates.leadModel ?? meta.model,
           effort: updates.leadEffort ?? meta.effort,
-          workflow: updates.leadWorkflow ?? meta.workflow,
+          workflow: updates.leadWorkflow !== undefined ? updates.leadWorkflow : meta.workflow,
         });
       }
     }

@@ -47,16 +47,32 @@ function createFeishuDraft(): FeishuChannelDraft {
   };
 }
 
+function makeUniqueFeishuChannelId(baseId: string, seenIds: Set<string>): string {
+  const fallback = `feishu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const root = baseId.trim() || fallback;
+  let nextId = root;
+  for (let suffix = 2; seenIds.has(nextId); suffix += 1) {
+    nextId = `${root}-${suffix}`;
+  }
+  seenIds.add(nextId);
+  return nextId;
+}
+
 function normalizeFeishuChannels(channels: FeishuChannelDraft[]): FeishuChannelDraft[] {
-  return channels.map((channel) => ({
-    ...channel,
-    name: channel.name.trim() || '飞书长连接',
-    feishu: {
-      enabled: channel.enabled,
-      appId: channel.feishu.appId.trim(),
-      appSecret: channel.feishu.appSecret.trim(),
-    },
-  }));
+  const seenIds = new Set<string>();
+  return channels.map((channel) => {
+    const id = makeUniqueFeishuChannelId(channel.id, seenIds);
+    return {
+      ...channel,
+      id,
+      name: channel.name.trim() || '飞书长连接',
+      feishu: {
+        enabled: channel.enabled,
+        appId: channel.feishu.appId.trim(),
+        appSecret: channel.feishu.appSecret.trim(),
+      },
+    };
+  });
 }
 
 function getStatusLabel(status?: LeadChannelStatus): string {
@@ -168,8 +184,9 @@ export const ChannelsSection = (): React.JSX.Element => {
             feishu: channel.feishu,
           }));
         if (channels.length > 0) {
-          setFeishuChannels(channels);
-          void refreshStatuses(channels);
+          const normalizedChannels = normalizeFeishuChannels(channels);
+          setFeishuChannels(normalizedChannels);
+          void refreshStatuses(normalizedChannels);
           return;
         }
         if (snapshot.config.feishu.appId || snapshot.config.feishu.appSecret) {
@@ -182,8 +199,9 @@ export const ChannelsSection = (): React.JSX.Element => {
               feishu: snapshot.config.feishu,
             },
           ];
-          setFeishuChannels(legacyChannels);
-          void refreshStatuses(legacyChannels);
+          const normalizedLegacyChannels = normalizeFeishuChannels(legacyChannels);
+          setFeishuChannels(normalizedLegacyChannels);
+          void refreshStatuses(normalizedLegacyChannels);
         }
       })
       .catch((error) => {
@@ -207,6 +225,12 @@ export const ChannelsSection = (): React.JSX.Element => {
       await api.teams.saveGlobalLeadChannel({
         channels,
         feishu: firstFeishu,
+      });
+      setStatusesByChannel((prev) => {
+        const validIds = new Set(channels.map((channel) => channel.id));
+        return Object.fromEntries(
+          Object.entries(prev).filter(([channelId]) => validIds.has(channelId))
+        );
       });
       setFeishuChannels(channels);
       if (options.showMessage) {

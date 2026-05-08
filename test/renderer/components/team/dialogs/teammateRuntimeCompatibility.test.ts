@@ -17,7 +17,7 @@ describe('analyzeTeammateRuntimeCompatibility', () => {
   it('allows mixed-provider member drafts because launch inherits the team provider', () => {
     const result = analyzeTeammateRuntimeCompatibility({
       leadProviderId: 'anthropic',
-      members: [{ id: 'bob', name: 'bob', providerId: 'cursor' }],
+      members: [{ id: 'bob', name: 'bob', providerId: 'codex' }],
     });
 
     expect(result.blocksSubmission).toBe(false);
@@ -27,8 +27,8 @@ describe('analyzeTeammateRuntimeCompatibility', () => {
 
   it('ignores teammate runtime requirements for solo teams', () => {
     const result = analyzeTeammateRuntimeCompatibility({
-      leadProviderId: 'cursor',
-      members: [{ id: 'jack', name: 'jack', providerId: 'cursor' }],
+      leadProviderId: 'codex',
+      members: [{ id: 'jack', name: 'jack', providerId: 'codex' }],
       soloTeam: true,
     });
 

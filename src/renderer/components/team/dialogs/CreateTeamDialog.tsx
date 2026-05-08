@@ -200,6 +200,12 @@ export interface TeamCopyData {
   description?: string;
   color?: string;
   members: TeamProvisioningMemberInput[];
+  providerId?: TeamProviderId;
+  model?: string;
+  effort?: EffortLevel;
+  fastMode?: TeamFastMode;
+  limitContext?: boolean;
+  skipPermissions?: boolean;
 }
 
 export interface ActiveTeamRef {
@@ -1001,6 +1007,29 @@ export const CreateTeamDialog = ({
       setTeamName(initialData.teamName);
       descriptionDraft.setValue(initialData.description ?? '');
       setTeamColor(initialData.color ?? '');
+      const initialProviderId = normalizeLeadProviderForMode(
+        initialData.providerId ?? 'anthropic',
+        multimodelEnabled
+      );
+      setSelectedProviderIdRaw(initialProviderId);
+      setSelectedModelRaw(
+        normalizeExplicitTeamModelForUi(
+          initialProviderId,
+          initialData.model ?? getStoredTeamModel(initialProviderId)
+        )
+      );
+      setSelectedEffortRaw(initialData.effort ?? getStoredCreateTeamEffort());
+      setSelectedFastModeRaw(initialData.fastMode ?? getStoredTeamFastMode());
+      if (typeof initialData.limitContext === 'boolean') {
+        setLimitContextRaw(initialData.limitContext);
+      } else if (initialProviderId !== 'anthropic') {
+        setLimitContextRaw(false);
+      } else {
+        setLimitContextRaw(getStoredCreateTeamLimitContext());
+      }
+      if (typeof initialData.skipPermissions === 'boolean') {
+        setSkipPermissionsRaw(initialData.skipPermissions);
+      }
       setMembers(
         initialData.members.map((m) => {
           const presetRoles: readonly string[] = PRESET_ROLES;

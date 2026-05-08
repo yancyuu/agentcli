@@ -46,7 +46,6 @@ const TEAM_PROVIDER_LABELS: Record<SupportedProviderId, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
-  cursor: 'Cursor Agent',
 };
 
 const ANTHROPIC_ALIAS_LABELS = {
@@ -55,9 +54,14 @@ const ANTHROPIC_ALIAS_LABELS = {
   haiku: 'Haiku',
 } as const;
 
-const ANTHROPIC_VISIBLE_MODEL_FALLBACKS = ['opus', 'sonnet', 'haiku'] as const;
+const ANTHROPIC_VISIBLE_MODEL_FALLBACKS = [
+  'claude-opus-4-7[1m]',
+  'opus',
+  'sonnet',
+  'haiku',
+] as const;
 
-const ANTHROPIC_MODEL_ORDER = ['haiku', 'opus', 'sonnet'] as const;
+const ANTHROPIC_MODEL_ORDER = ['claude-opus-4-7[1m]', 'haiku', 'opus', 'sonnet'] as const;
 
 function normalizeAnthropicModelAlias(model: string): string {
   const normalized = splitOneMillionContextSuffix(model.trim().toLowerCase()).baseModel;
@@ -76,6 +80,7 @@ function normalizeAnthropicModelAlias(model: string): string {
 const TEAM_MODEL_LABEL_OVERRIDES: Record<string, string> = {
   default: '默认',
   ...ANTHROPIC_ALIAS_LABELS,
+  'claude-opus-4-7[1m]': 'Opus 4.7 (1M context)',
   'gpt-5.4': 'GPT-5.4',
   'gpt-5.4-mini': 'GPT-5.4 Mini',
   'gpt-5.3-codex': 'GPT-5.3 Codex',
@@ -93,6 +98,11 @@ const TEAM_PROVIDER_MODEL_OPTIONS: Record<SupportedProviderId, readonly TeamProv
   {
     anthropic: [
       { value: '', label: '默认', badgeLabel: '默认' },
+      {
+        value: 'claude-opus-4-7[1m]',
+        label: 'Opus 4.7 (1M context)',
+        badgeLabel: 'Opus 4.7 1M',
+      },
       { value: 'opus', label: 'Opus', badgeLabel: 'Opus' },
       { value: 'sonnet', label: 'Sonnet', badgeLabel: 'Sonnet' },
       { value: 'haiku', label: 'Haiku', badgeLabel: 'Haiku' },
@@ -134,12 +144,6 @@ const TEAM_PROVIDER_MODEL_OPTIONS: Record<SupportedProviderId, readonly TeamProv
       },
     ],
     opencode: [{ value: '', label: '默认', badgeLabel: '默认' }],
-    cursor: [
-      { value: '', label: '默认', badgeLabel: '默认' },
-      { value: 'auto', label: 'Auto', badgeLabel: 'Auto' },
-      { value: 'composer-2-fast', label: 'Composer 2 Fast', badgeLabel: 'C2 Fast' },
-      { value: 'composer-2', label: 'Composer 2', badgeLabel: 'C2' },
-    ],
   };
 
 const TEAM_PROVIDER_MODEL_ORDER: Record<SupportedProviderId, Map<string, number>> = {
@@ -149,7 +153,6 @@ const TEAM_PROVIDER_MODEL_ORDER: Record<SupportedProviderId, Map<string, number>
   opencode: new Map(
     TEAM_PROVIDER_MODEL_OPTIONS.opencode.map((option, index) => [option.value, index])
   ),
-  cursor: new Map(TEAM_PROVIDER_MODEL_OPTIONS.cursor.map((option, index) => [option.value, index])),
 };
 
 function getKnownTeamProviderModelOption(
@@ -462,8 +465,13 @@ export function normalizeTeamModelForUi(
   providerId: SupportedProviderId | undefined,
   model: string | undefined
 ): string {
+  const trimmed = model?.trim() ?? '';
   const normalizedModel =
-    providerId === 'anthropic' && model ? normalizeAnthropicModelAlias(model) : (model ?? '');
+    providerId && getKnownTeamProviderModelOption(providerId, trimmed)
+      ? trimmed
+      : providerId === 'anthropic' && model
+        ? normalizeAnthropicModelAlias(model)
+        : (model ?? '');
   return isTeamModelUiDisabled(providerId, normalizedModel) ? '' : normalizedModel;
 }
 

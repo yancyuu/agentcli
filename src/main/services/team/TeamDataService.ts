@@ -1327,18 +1327,8 @@ export class TeamDataService {
       );
     }
 
-    const launchMemberProviders = Object.values(launchSnapshot?.members ?? {}).map((member) =>
-      normalizeOptionalTeamProviderId(member.providerId)
-    );
-    const hasCursorLaunchReady =
-      (normalizeOptionalTeamProviderId(teamMeta?.providerId) === 'cursor' ||
-        launchMemberProviders.includes('cursor') ||
-        config.members?.some(
-          (member) => normalizeOptionalTeamProviderId(member.providerId) === 'cursor'
-        )) &&
-      (launchSnapshot?.teamLaunchState === 'clean_success' || !launchSnapshot);
     // Auto-track teams with alive processes for periodic health checks
-    const hasAlive = processes.some((p) => !p.stoppedAt) || hasCursorLaunchReady;
+    const hasAlive = processes.some((p) => !p.stoppedAt);
     if (hasAlive) {
       this.processHealthTeams.add(teamName);
     } else {

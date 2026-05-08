@@ -53,7 +53,14 @@ export class TeamInboxWriter {
       await withInboxLock(inboxPath, async () => {
         for (let attempt = 0; attempt < 3; attempt++) {
           const list = await this.readInbox(inboxPath);
-          list.push(payload);
+          const existingIndex = list.findIndex(
+            (msg) => typeof msg.messageId === 'string' && msg.messageId.trim() === messageId
+          );
+          if (existingIndex >= 0) {
+            list[existingIndex] = { ...list[existingIndex], ...payload };
+          } else {
+            list.push(payload);
+          }
           await atomicWriteAsync(inboxPath, JSON.stringify(list, null, 2));
           const written = await this.readInbox(inboxPath);
           if (written.some((msg) => msg.messageId === messageId)) {

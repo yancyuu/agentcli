@@ -68,4 +68,19 @@ describe('resolveAnthropicLaunchModel', () => {
       'opus[1m]'
     );
   });
+
+  it('keeps explicit Opus 4.7 1M selections when no runtime catalog is available', () => {
+    expect(
+      resolveAnthropicLaunchModel({
+        selectedModel: 'claude-opus-4-7[1m]',
+        limitContext: false,
+      })
+    ).toBe('claude-opus-4-7[1m]');
+    expect(
+      resolveAnthropicLaunchModel({
+        selectedModel: 'claude-opus-4-7[1m]',
+        limitContext: true,
+      })
+    ).toBe('claude-opus-4-7');
+  });
 });

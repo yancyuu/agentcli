@@ -24,16 +24,17 @@ describe('teamModelCatalog', () => {
     ]);
   });
 
-  it('keeps only the three Anthropic team aliases visible', () => {
+  it('keeps the curated Anthropic team models visible', () => {
     expect(
       getVisibleTeamProviderModels('anthropic', [
+        'claude-opus-4-7[1m]',
         'claude-haiku-4-5-20251001',
         'claude-opus-4-6',
         'claude-opus-4-6[1m]',
         'claude-sonnet-4-6',
         'claude-sonnet-4-6[1m]',
       ])
-    ).toEqual(['haiku', 'opus', 'sonnet']);
+    ).toEqual(['claude-opus-4-7[1m]', 'haiku', 'opus', 'sonnet']);
   });
 
   it('normalizes legacy Anthropic model ids to the three team aliases', () => {

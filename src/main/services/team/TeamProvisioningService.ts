@@ -1101,26 +1101,6 @@ function isPureOpenCodeProvisioningRequest(request: {
   });
 }
 
-function isPureCursorProvisioningRequest(request: { providerId?: unknown }): boolean {
-  return normalizeOptionalTeamProviderId(request.providerId) === 'cursor';
-}
-
-function sanitizeCursorRuntimeModel(model: string | undefined): string | undefined {
-  const trimmed = model?.trim();
-  if (!trimmed) return undefined;
-  return inferTeamProviderIdFromModel(trimmed) === 'anthropic' ? undefined : trimmed;
-}
-
-function sanitizeCursorRuntimeMember(
-  member: TeamCreateRequest['members'][number]
-): TeamCreateRequest['members'][number] {
-  return {
-    ...member,
-    providerId: 'cursor',
-    model: sanitizeCursorRuntimeModel(member.model),
-  };
-}
-
 export function getOpenCodeMixedProviderProvisioningError(): string {
   return (
     'This OpenCode mixed-team request is outside the current support scope. ' +
@@ -2173,12 +2153,21 @@ function indentMultiline(text: string, indent: string): string {
     .join('\n');
 }
 
+const MAX_MEMBER_WORKFLOW_PROMPT_CHARS = 12_000;
+
 function formatWorkflowBlock(workflow: string, indent: string): string {
   const trimmed = workflow.trim();
   if (trimmed.length === 0) return '';
-  const body = indentMultiline(trimmed, indent);
+  const truncated = trimmed.length > MAX_MEMBER_WORKFLOW_PROMPT_CHARS;
+  const safeWorkflow = truncated
+    ? `${trimmed.slice(0, MAX_MEMBER_WORKFLOW_PROMPT_CHARS).trimEnd()}\n\n[Workflow truncated for Agent tool input validation. Call member_briefing for the full persisted workflow before acting.]`
+    : trimmed;
+  const body = indentMultiline(safeWorkflow, indent);
   return `\n${indent}---BEGIN WORKFLOW---\n${body}\n${indent}---END WORKFLOW---`;
 }
+
+const AGENT_SPAWN_SUBAGENT_TYPE_RULE =
+  '关键：Agent 工具的 subagent_type 必须固定为 "general-purpose"。不要把成员名、角色名（例如 researcher/developer/reviewer）或 workflow 名称填入 subagent_type。角色只放在 prompt 中。';
 
 type TeamMemberInput = TeamCreateRequest['members'][number];
 
@@ -2741,6 +2730,7 @@ export function buildAddMemberSpawnMessage(
 
   return (
     `新成员 "${member.name}"${roleHint} 已添加到团队。` +
+    `${AGENT_SPAWN_SUBAGENT_TYPE_RULE}\n` +
     `请立即使用 **Agent** 工具启动该成员，参数为 team_name="${teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}，并使用下面的精确 prompt：${workflowHint}\n\n` +
     `重要：Agent 工具返回只代表 spawn 请求已被 runtime 接受，不代表成员已完成注册。` +
     `在看到该成员完成 member_briefing/check-in 之前，不要对用户或其他成员说 "${member.name}" 已成功启动，也不要把阻塞性任务分配给他。\n\n` +
@@ -2781,6 +2771,7 @@ export function buildRestartMemberSpawnMessage(
 
   return (
     `成员 "${member.name}"${roleHint} 已从 UI 发起重启。` +
+    `${AGENT_SPAWN_SUBAGENT_TYPE_RULE}\n` +
     `请立即使用 **Agent** 工具重新启动该成员，参数为 team_name="${teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}，并使用下面的精确 prompt。` +
     `这是现有持久成员的重启，不是新增成员。` +
     `如果 Agent 工具返回 duplicate_skipped 且 reason 为 bootstrap_pending，请将其视为重启待完成，并等待成员 check-in。` +
@@ -2813,6 +2804,7 @@ function buildNativeCreateBootstrapPrompt(
         needsBatches
           ? `重要：按小批次启动成员/员工，每批最多 ${batchSize} 个。可以并行启动同一批成员；等当前批次的 Agent 工具全部返回后，再启动下一批。不要一次性并行启动所有成员，否则可能导致 API 频率限制。`
           : '启动成员/员工。为该成员发起一个 Agent 工具调用。',
+        AGENT_SPAWN_SUBAGENT_TYPE_RULE,
         ...effectiveMembers.map((member) => {
           const prompt = buildMemberSpawnPrompt(member, displayName, request.teamName, leadName);
           const agentArgs = buildAgentToolArgsSuffix(member);
@@ -3010,11 +3002,18 @@ function buildFeishuCredentialsBlock(channels: readonly BoundFeishuChannel[]): s
   return `飞书应用凭据（用于 Feishu CLI / Lark SDK 认证）：\n${lines.join('\n')}`;
 }
 
+function buildLeadWorkflowBlock(leadWorkflow: string | undefined): string {
+  const trimmed = leadWorkflow?.trim();
+  if (!trimmed) return '';
+  return `\n\n负责人工作流（必须遵守）：${formatWorkflowBlock(trimmed, '')}`;
+}
+
 function buildBootstrapLeadContext(opts: {
   teamName: string;
   leadName: string;
   isSolo: boolean;
   members: TeamCreateRequest['members'];
+  leadWorkflow?: string;
   feishuChannels?: readonly BoundFeishuChannel[];
 }): string {
   const memberNames = opts.members.map((member) => member.name).join(', ') || '(none)';
@@ -3041,7 +3040,7 @@ function buildBootstrapLeadContext(opts: {
 - Keep visible task references as plain #<short-id>; do not hand-write task:// markdown links.
 - Never hand-write [#abcd1234](task://...) in visible text.
 - Review is a state transition on the existing task: review_request, review_start, review_approve, review_request_changes.
-- Internal/tool instructions that should be hidden from humans must be wrapped in ${AGENT_BLOCK_OPEN} / ${AGENT_BLOCK_CLOSE} blocks.${opts.isSolo ? '\n- SOLO MODE: no teammates exist; do not use team_name Agent calls until members are added.' : ''}${feishuBlock}`;
+- Internal/tool instructions that should be hidden from humans must be wrapped in ${AGENT_BLOCK_OPEN} / ${AGENT_BLOCK_CLOSE} blocks.${opts.isSolo ? '\n- SOLO MODE: no teammates exist; do not use team_name Agent calls until members are added.' : ''}${buildLeadWorkflowBlock(opts.leadWorkflow)}${feishuBlock}`;
 }
 
 async function readBoundFeishuChannels(teamName: string): Promise<BoundFeishuChannel[]> {
@@ -3071,12 +3070,14 @@ function buildPersistentLeadContext(opts: {
   leadName: string;
   isSolo: boolean;
   members: TeamCreateRequest['members'];
+  /** Persisted workflow/instructions for the lead process itself. */
+  leadWorkflow?: string;
   /** When true, emit a compact roster (name + role only, no workflows). Used for post-compact reminders. */
   compact?: boolean;
   /** Feishu channels bound to this team, used to inject CLI credentials. */
   feishuChannels?: readonly BoundFeishuChannel[];
 }): string {
-  const { teamName, leadName, isSolo, members, compact, feishuChannels } = opts;
+  const { teamName, leadName, isSolo, members, leadWorkflow, compact, feishuChannels } = opts;
   const languageInstruction = getAgentLanguageInstruction();
   const agentBlockPolicy = buildAgentBlockUsagePolicy();
   const teamCtlOps = buildTeamCtlOpsInstructions(teamName, leadName, members);
@@ -3177,7 +3178,9 @@ ${teamCtlOps}
 ${getVisibleTaskReferenceFormattingRule()}
 ${agentBlockPolicy}
 
-${feishuChannels?.length ? buildFeishuCredentialsBlock(feishuChannels) + '\n\n' : ''}${membersFooter}`;
+${buildLeadWorkflowBlock(leadWorkflow)}${feishuChannels?.length ? '\n\n' + buildFeishuCredentialsBlock(feishuChannels) : ''}
+
+${membersFooter}`;
 }
 
 function buildAgentBlockUsagePolicy(): string {
@@ -3278,7 +3281,8 @@ function buildDeterministicLaunchHydrationPrompt(
   members: TeamCreateRequest['members'],
   tasks: TeamTask[],
   isResume: boolean,
-  feishuChannels: readonly BoundFeishuChannel[] = []
+  feishuChannels: readonly BoundFeishuChannel[] = [],
+  leadWorkflow?: string
 ): string {
   const leadName =
     members.find((member) => member.role?.toLowerCase().includes('lead'))?.name ||
@@ -3296,6 +3300,7 @@ function buildDeterministicLaunchHydrationPrompt(
     leadName,
     isSolo,
     members,
+    leadWorkflow,
     feishuChannels,
   });
   const batchSize = MEMBER_BOOTSTRAP_PARALLEL_WINDOW;
@@ -3305,6 +3310,7 @@ function buildDeterministicLaunchHydrationPrompt(
         needsBatches
           ? `重要：按小批次重新连接成员/员工，每批最多 ${batchSize} 个。可以并行重新连接同一批成员；等当前批次的 Agent 工具全部返回后，再重新连接下一批。不要一次性并行重新连接所有成员，否则可能导致 API 频率限制。`
           : '重新连接成员/员工。为该成员发起一个 Agent 工具调用。',
+        AGENT_SPAWN_SUBAGENT_TYPE_RULE,
         ...members.map((member) => {
           const prompt = buildMemberSpawnPrompt(
             member,
@@ -4907,13 +4913,6 @@ export class TeamProvisioningService {
     return this.runtimeAdapterRegistry.get('opencode');
   }
 
-  private getCursorRuntimeAdapter(): TeamLaunchRuntimeAdapter | null {
-    if (!this.runtimeAdapterRegistry?.has('cursor')) {
-      return null;
-    }
-    return this.runtimeAdapterRegistry.get('cursor');
-  }
-
   private getOpenCodeRuntimeMessageAdapter():
     | (TeamLaunchRuntimeAdapter & {
         sendMessageToMember(
@@ -6200,10 +6199,6 @@ export class TeamProvisioningService {
     members?: readonly { providerId?: TeamProviderId; provider?: TeamProviderId }[];
   }): boolean {
     return isPureOpenCodeProvisioningRequest(request) && this.getOpenCodeRuntimeAdapter() !== null;
-  }
-
-  private shouldRouteCursorToRuntimeAdapter(request: { providerId?: unknown }): boolean {
-    return isPureCursorProvisioningRequest(request) && this.getCursorRuntimeAdapter() !== null;
   }
 
   private planRuntimeLanesOrThrow(
@@ -8502,7 +8497,7 @@ export class TeamProvisioningService {
       run.memberSpawnToolUseIds.delete(toolUseId);
       const pendingRestart = run.pendingMemberRestarts.get(spawnedMemberName);
       if (isError) {
-        const resultPreview = extractToolResultPreview(resultContent);
+        const resultPreview = extractToolResultPreview(resultContent, 500);
         this.handleMemberSpawnFailure(run, spawnedMemberName, resultPreview);
       } else if (active.toolName === 'Agent') {
         const parsedStatus = parseAgentToolResultStatus(resultContent);
@@ -8930,78 +8925,9 @@ export class TeamProvisioningService {
     summary?: PersistedTeamLaunchSummary;
     source?: 'live' | 'persisted' | 'merged';
   }> {
-    const buildSyntheticCursorStatuses = async (
-      resolvedRunId: string | null
-    ): Promise<{
-      statuses: Record<string, MemberSpawnStatusEntry>;
-      runId: string | null;
-      teamLaunchState: TeamLaunchAggregateState;
-      launchPhase: PersistedTeamLaunchPhase;
-      expectedMembers: string[];
-      updatedAt: string;
-      summary: PersistedTeamLaunchSummary;
-      source: 'persisted';
-    } | null> => {
-      const [config, teamMeta] = await Promise.all([
-        this.configReader.getConfig(teamName).catch(() => null),
-        this.teamMetaStore.getMeta(teamName).catch(() => null),
-      ]);
-      const isCursorTeam =
-        normalizeOptionalTeamProviderId(teamMeta?.providerId) === 'cursor' ||
-        (config?.members ?? []).some(
-          (member) => normalizeOptionalTeamProviderId(member.providerId) === 'cursor'
-        );
-      if (!config || !isCursorTeam) {
-        return null;
-      }
-      const now = nowIso();
-      const expectedMembers = (config.members ?? [])
-        .filter((member) => !isLeadMember(member))
-        .map((member) => member.name?.trim())
-        .filter((name): name is string => Boolean(name));
-      const effectiveMembers =
-        expectedMembers.length > 0 ? expectedMembers : [CANONICAL_LEAD_MEMBER_NAME];
-      const statuses = Object.fromEntries(
-        effectiveMembers.map((memberName) => [
-          memberName,
-          {
-            status: 'online' as const,
-            launchState: 'confirmed_alive' as const,
-            agentToolAccepted: true,
-            runtimeAlive: false,
-            bootstrapConfirmed: true,
-            hardFailure: false,
-            livenessSource: 'heartbeat' as const,
-            livenessKind: 'confirmed_bootstrap' as const,
-            runtimeDiagnostic: 'Cursor Agent one-shot team run is ready',
-            runtimeDiagnosticSeverity: 'info' as const,
-            firstSpawnAcceptedAt: now,
-            lastHeartbeatAt: now,
-            livenessLastCheckedAt: now,
-            updatedAt: now,
-          },
-        ])
-      );
-      const summary = summarizeMemberSpawnStatusRecord(effectiveMembers, statuses);
-      return {
-        statuses,
-        runId: resolvedRunId,
-        teamLaunchState: 'clean_success',
-        launchPhase: 'finished',
-        expectedMembers: effectiveMembers,
-        updatedAt: now,
-        summary,
-        source: 'persisted',
-      };
-    };
-
     const readPersistedStatuses = async (resolvedRunId: string | null) => {
       const { snapshot, statuses } = await this.reconcilePersistedLaunchState(teamName);
       if (!snapshot) {
-        const syntheticCursorStatuses = await buildSyntheticCursorStatuses(resolvedRunId);
-        if (syntheticCursorStatuses) {
-          return syntheticCursorStatuses;
-        }
       }
       const nextStatuses = await this.attachLiveRuntimeMetadataToStatuses(teamName, statuses);
       const expectedMembers = snapshot ? this.getPersistedLaunchMemberNames(snapshot) : undefined;
@@ -11943,7 +11869,7 @@ export class TeamProvisioningService {
     onProgress: (progress: TeamProvisioningProgress) => void
   ): Promise<TeamCreateResponse> {
     const providerId = normalizeOptionalTeamProviderId(request.providerId);
-    if (providerId !== 'opencode' && providerId !== 'cursor') {
+    if (providerId !== 'opencode') {
       request = this.normalizeClaudeCodeOnlyRequest(request);
     }
     return this.withTeamLock(request.teamName, async () => {
@@ -12049,9 +11975,6 @@ export class TeamProvisioningService {
     this.teamSendBlockReasonByTeam.delete(request.teamName);
     const stopAllGenerationAtStart = this.stopAllTeamsGeneration;
     assertAppDeterministicBootstrapEnabled();
-    if (this.shouldRouteCursorToRuntimeAdapter(request)) {
-      return this.createCursorTeamThroughRuntimeAdapter(request, onProgress);
-    }
     if (this.shouldRouteOpenCodeToRuntimeAdapter(request)) {
       return this.createOpenCodeTeamThroughRuntimeAdapter(request, onProgress);
     }
@@ -12511,349 +12434,6 @@ export class TeamProvisioningService {
     }
   }
 
-  private async writeCursorTeamConfig(
-    request: Pick<
-      TeamCreateRequest,
-      'teamName' | 'displayName' | 'description' | 'color' | 'cwd' | 'model' | 'effort'
-    >,
-    members: TeamCreateRequest['members']
-  ): Promise<void> {
-    const configPath = path.join(getTeamsBasePath(), request.teamName, 'config.json');
-    const config: TeamConfig = {
-      name: request.displayName?.trim() || request.teamName,
-      description: request.description,
-      color: request.color,
-      projectPath: request.cwd,
-      members: [
-        {
-          name: CANONICAL_LEAD_MEMBER_NAME,
-          role: 'Team Lead',
-          agentType: CANONICAL_LEAD_MEMBER_NAME,
-          providerId: 'cursor',
-          model: request.model,
-          effort: request.effort,
-          cwd: request.cwd,
-        },
-        ...members.map((member) => ({
-          name: member.name,
-          role: member.role,
-          workflow: member.workflow,
-          isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
-          providerId: 'cursor' as const,
-          model: member.model,
-          effort: member.effort,
-          cwd: member.cwd?.trim() || request.cwd,
-        })),
-      ],
-    };
-    await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-  }
-
-  private async createCursorTeamThroughRuntimeAdapter(
-    request: TeamCreateRequest,
-    onProgress: (progress: TeamProvisioningProgress) => void
-  ): Promise<TeamCreateResponse> {
-    const teamsBasePathsToProbe = getTeamsBasePathsToProbe();
-    for (const probe of teamsBasePathsToProbe) {
-      const configPath = path.join(probe.basePath, request.teamName, 'config.json');
-      if (await this.pathExists(configPath)) {
-        const suffix = probe.location === 'configured' ? '' : ` (found under ${probe.basePath})`;
-        throw new Error(`Team already exists${suffix}`);
-      }
-    }
-    await ensureCwdExists(request.cwd);
-    const effectiveMembers = buildEffectiveTeamMemberSpecs(
-      request.members.map(sanitizeCursorRuntimeMember),
-      {
-        providerId: 'cursor',
-        model: sanitizeCursorRuntimeModel(request.model),
-        effort: request.effort,
-      }
-    ).map((member) => ({
-      ...member,
-      providerId: 'cursor' as const,
-      model: sanitizeCursorRuntimeModel(member.model),
-      cwd: member.cwd?.trim() || request.cwd,
-    }));
-    const teamDir = path.join(getTeamsBasePath(), request.teamName);
-    const tasksDir = path.join(getTasksBasePath(), request.teamName);
-    await fs.promises.mkdir(teamDir, { recursive: true });
-    await fs.promises.mkdir(tasksDir, { recursive: true });
-    await this.teamMetaStore.writeMeta(request.teamName, {
-      displayName: request.displayName,
-      description: request.description,
-      color: request.color,
-      cwd: request.cwd,
-      executionTarget: request.executionTarget,
-      prompt: request.prompt,
-      providerId: 'cursor',
-      model: sanitizeCursorRuntimeModel(request.model),
-      effort: request.effort,
-      skipPermissions: request.skipPermissions,
-      worktree: request.worktree,
-      extraCliArgs: request.extraCliArgs,
-      limitContext: request.limitContext,
-      createdAt: Date.now(),
-    });
-    await this.membersMetaStore.writeMembers(
-      request.teamName,
-      this.buildMembersMetaWritePayload(effectiveMembers)
-    );
-    await this.writeCursorTeamConfig(
-      { ...request, model: sanitizeCursorRuntimeModel(request.model) },
-      effectiveMembers
-    );
-    return this.runCursorTeamRuntimeAdapterLaunch({
-      request: {
-        ...request,
-        providerId: 'cursor',
-        model: sanitizeCursorRuntimeModel(request.model),
-      },
-      members: effectiveMembers,
-      prompt: request.prompt?.trim() ?? '',
-      onProgress,
-    });
-  }
-
-  private async launchCursorTeamThroughRuntimeAdapter(
-    request: TeamLaunchRequest,
-    onProgress: (progress: TeamProvisioningProgress) => void
-  ): Promise<TeamLaunchResponse> {
-    const configPath = path.join(getTeamsBasePath(), request.teamName, 'config.json');
-    const configRaw = await tryReadRegularFileUtf8(configPath, {
-      timeoutMs: TEAM_JSON_READ_TIMEOUT_MS,
-      maxBytes: TEAM_CONFIG_MAX_BYTES,
-    });
-    if (!configRaw) {
-      throw new Error(`Team "${request.teamName}" not found — config.json does not exist`);
-    }
-    const metaMembers = await this.membersMetaStore.getMembers(request.teamName).catch(() => []);
-    const sourceMembers =
-      metaMembers.length > 0
-        ? metaMembers
-            .filter((member) => !member.removedAt && !isLeadMemberName(member.name))
-            .map((member) => ({
-              name: member.name,
-              role: member.role,
-              workflow: member.workflow,
-              isolation: member.isolation,
-              providerId: 'cursor' as const,
-              model: member.model,
-              effort: member.effort,
-              cwd: member.cwd,
-            }))
-        : this.extractMembersFromConfig(configRaw);
-    const effectiveMembers = buildEffectiveTeamMemberSpecs(
-      sourceMembers.map(sanitizeCursorRuntimeMember),
-      {
-        providerId: 'cursor',
-        model: sanitizeCursorRuntimeModel(request.model),
-        effort: request.effort,
-      }
-    ).map((member) => ({
-      ...member,
-      providerId: 'cursor' as const,
-      model: sanitizeCursorRuntimeModel(member.model),
-      cwd: member.cwd?.trim() || request.cwd,
-    }));
-    const existingMeta = await this.teamMetaStore.getMeta(request.teamName).catch(() => null);
-    const cursorModel = sanitizeCursorRuntimeModel(request.model) ?? existingMeta?.model;
-    await this.teamMetaStore.writeMeta(request.teamName, {
-      displayName: existingMeta?.displayName,
-      description: existingMeta?.description,
-      color: existingMeta?.color,
-      cwd: request.cwd,
-      executionTarget: request.executionTarget ?? existingMeta?.executionTarget,
-      prompt: request.prompt ?? existingMeta?.prompt,
-      providerId: 'cursor',
-      providerBackendId: request.providerBackendId,
-      model: cursorModel,
-      effort: request.effort,
-      fastMode: request.fastMode,
-      skipPermissions: request.skipPermissions,
-      worktree: request.worktree,
-      extraCliArgs: request.extraCliArgs,
-      limitContext: request.limitContext,
-      workflow: existingMeta?.workflow,
-      createdAt: existingMeta?.createdAt ?? Date.now(),
-    });
-    await this.writeCursorTeamConfig({ ...request, model: cursorModel }, effectiveMembers);
-    return this.runCursorTeamRuntimeAdapterLaunch({
-      request: { ...request, providerId: 'cursor', model: cursorModel },
-      members: effectiveMembers,
-      prompt: request.prompt?.trim() ?? '',
-      onProgress,
-    });
-  }
-
-  private extractMembersFromConfig(configRaw: string): TeamCreateRequest['members'] {
-    try {
-      const parsed = JSON.parse(configRaw) as TeamConfig;
-      return (parsed.members ?? [])
-        .filter((member) => !isLeadMemberName(member.name))
-        .map((member) => ({
-          name: member.name,
-          role: member.role,
-          workflow: member.workflow,
-          isolation: member.isolation,
-          providerId: 'cursor' as const,
-          model: member.model,
-          effort: member.effort,
-          cwd: member.cwd,
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  private async runCursorTeamRuntimeAdapterLaunch(input: {
-    request: TeamCreateRequest | TeamLaunchRequest;
-    members: TeamCreateRequest['members'];
-    prompt: string;
-    onProgress: (progress: TeamProvisioningProgress) => void;
-  }): Promise<TeamLaunchResponse> {
-    const adapter = this.getCursorRuntimeAdapter();
-    if (!adapter) {
-      throw new Error('Cursor Agent runtime adapter is not registered');
-    }
-    const runId = randomUUID();
-    const startedAt = nowIso();
-    this.provisioningRunByTeam.set(input.request.teamName, runId);
-    const initialProgress = this.setRuntimeAdapterProgress(
-      {
-        runId,
-        teamName: input.request.teamName,
-        state: 'validating',
-        message: 'Validating Cursor Agent team launch',
-        startedAt,
-        updatedAt: startedAt,
-      },
-      input.onProgress
-    );
-    this.resetTeamScopedTransientStateForNewRun(input.request.teamName);
-    const previousLaunchState = await this.launchStateStore.read(input.request.teamName);
-    await this.clearPersistedLaunchState(input.request.teamName);
-    const cursorMcpConfigPath = await this.mcpConfigBuilder.ensureCursorProjectMcpConfig(
-      input.request.cwd
-    );
-    const cursorMembers =
-      input.members.length > 0
-        ? input.members
-        : [
-            {
-              name: CANONICAL_LEAD_MEMBER_NAME,
-              role: 'Team Lead',
-              providerId: 'cursor' as const,
-              model: sanitizeCursorRuntimeModel(input.request.model),
-              effort: input.request.effort,
-              cwd: input.request.cwd,
-            },
-          ];
-    const launchInput: TeamRuntimeLaunchInput = {
-      runId,
-      laneId: 'primary',
-      teamName: input.request.teamName,
-      cwd: input.request.cwd,
-      prompt: input.prompt,
-      providerId: 'cursor',
-      model: sanitizeCursorRuntimeModel(input.request.model),
-      effort: input.request.effort,
-      skipPermissions: input.request.skipPermissions !== false,
-      expectedMembers: cursorMembers.map((member) => ({
-        name: member.name,
-        role: member.role,
-        workflow: member.workflow,
-        isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
-        providerId: 'cursor',
-        model:
-          sanitizeCursorRuntimeModel(member.model) ??
-          sanitizeCursorRuntimeModel(input.request.model),
-        effort: member.effort ?? input.request.effort,
-        cwd: member.cwd?.trim() || input.request.cwd,
-      })),
-      previousLaunchState,
-    };
-    const launching = this.setRuntimeAdapterProgress(
-      {
-        ...initialProgress,
-        state: 'spawning',
-        message: 'Starting Cursor Agent team',
-        updatedAt: nowIso(),
-        cliLogsTail: `Cursor MCP config: ${cursorMcpConfigPath}`,
-      },
-      input.onProgress
-    );
-    try {
-      const result = await adapter.launch(launchInput);
-      const persistedLaunchSnapshot = await this.persistRuntimeAdapterLaunchResult(
-        result,
-        launchInput
-      );
-      this.runtimeAdapterRunByTeam.set(input.request.teamName, {
-        runId,
-        providerId: 'cursor',
-        cwd: input.request.cwd,
-        members: result.members,
-      });
-      const success = result.teamLaunchState === 'clean_success';
-      this.setRuntimeAdapterProgress(
-        {
-          ...launching,
-          state: success ? 'ready' : 'failed',
-          message: success
-            ? 'Cursor Agent team launch is ready'
-            : 'Cursor Agent team launch failed',
-          updatedAt: nowIso(),
-          warnings: result.warnings.length > 0 ? result.warnings : undefined,
-          error: success
-            ? undefined
-            : result.diagnostics.join('\n') || 'Cursor Agent launch failed',
-          cliLogsTail: result.diagnostics.join('\n') || undefined,
-          configReady: true,
-          memberSpawnSnapshot: {
-            statuses: snapshotToMemberSpawnStatuses(persistedLaunchSnapshot),
-            runId,
-            teamLaunchState: persistedLaunchSnapshot.teamLaunchState,
-            launchPhase: persistedLaunchSnapshot.launchPhase,
-            expectedMembers: persistedLaunchSnapshot.expectedMembers,
-            updatedAt: persistedLaunchSnapshot.updatedAt,
-            summary: persistedLaunchSnapshot.summary,
-            source: 'persisted',
-          },
-        },
-        input.onProgress
-      );
-      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
-        this.provisioningRunByTeam.delete(input.request.teamName);
-      }
-      this.teamChangeEmitter?.({
-        type: 'process',
-        teamName: input.request.teamName,
-        runId,
-        detail: result.teamLaunchState,
-      });
-      return { runId };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.setRuntimeAdapterProgress(
-        {
-          ...launching,
-          state: 'failed',
-          message: 'Cursor Agent team launch failed',
-          messageSeverity: 'error',
-          updatedAt: nowIso(),
-          error: message,
-          cliLogsTail: message,
-        },
-        input.onProgress
-      );
-      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
-        this.provisioningRunByTeam.delete(input.request.teamName);
-      }
-      throw error;
-    }
-  }
-
   private async createOpenCodeTeamThroughRuntimeAdapter(
     request: TeamCreateRequest,
     onProgress: (progress: TeamProvisioningProgress) => void
@@ -12953,13 +12533,17 @@ export class TeamProvisioningService {
         `[${request.teamName}] Failed to read tasks for OpenCode launch prompt: ${String(error)}`
       );
     }
-    const feishuChannels1 = await readBoundFeishuChannels(request.teamName);
+    const [feishuChannels1, teamMeta1] = await Promise.all([
+      readBoundFeishuChannels(request.teamName),
+      this.teamMetaStore.getMeta(request.teamName).catch(() => null),
+    ]);
     const prompt = buildDeterministicLaunchHydrationPrompt(
       request,
       effectiveMembers,
       existingTasks,
       false,
-      feishuChannels1
+      feishuChannels1,
+      teamMeta1?.workflow
     );
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
@@ -13276,7 +12860,7 @@ export class TeamProvisioningService {
     onProgress: (progress: TeamProvisioningProgress) => void
   ): Promise<TeamLaunchResponse> {
     const providerId = normalizeOptionalTeamProviderId(request.providerId);
-    if (providerId !== 'opencode' && providerId !== 'cursor') {
+    if (providerId !== 'opencode') {
       request = this.normalizeClaudeCodeOnlyRequest(request);
     }
     return this.withTeamLock(request.teamName, async () => {
@@ -13298,9 +12882,6 @@ export class TeamProvisioningService {
     this.teamSendBlockReasonByTeam.delete(request.teamName);
     const stopAllGenerationAtStart = this.stopAllTeamsGeneration;
     assertAppDeterministicBootstrapEnabled();
-    if (this.shouldRouteCursorToRuntimeAdapter(request)) {
-      return this.launchCursorTeamThroughRuntimeAdapter(request, onProgress);
-    }
     if (this.shouldRouteOpenCodeToRuntimeAdapter(request)) {
       return this.launchOpenCodeTeamThroughRuntimeAdapter(request, onProgress);
     }
@@ -13712,25 +13293,27 @@ export class TeamProvisioningService {
       }
 
       // Parallelize independent pre-spawn operations to reduce launch latency
-      const [existingTasksResult, feishuChannels2, mcpConfigPathResult] = await Promise.all([
-        // Read existing tasks for teammate work resumption prompts
-        new Promise<TeamTask[]>((resolve) => {
-          const taskReader = new TeamTaskReader();
-          taskReader
-            .getTasks(request.teamName)
-            .then(resolve)
-            .catch((error: unknown) => {
-              logger.warn(
-                `[${request.teamName}] Failed to read tasks for launch prompt: ${String(error)}`
-              );
-              resolve([]);
-            });
-        }),
-        // Read bound Feishu channel credentials
-        readBoundFeishuChannels(request.teamName),
-        // Write MCP config file
-        this.mcpConfigBuilder.writeConfigFile(request.cwd),
-      ]);
+      const [existingTasksResult, feishuChannels2, teamMeta2, mcpConfigPathResult] =
+        await Promise.all([
+          // Read existing tasks for teammate work resumption prompts
+          new Promise<TeamTask[]>((resolve) => {
+            const taskReader = new TeamTaskReader();
+            taskReader
+              .getTasks(request.teamName)
+              .then(resolve)
+              .catch((error: unknown) => {
+                logger.warn(
+                  `[${request.teamName}] Failed to read tasks for launch prompt: ${String(error)}`
+                );
+                resolve([]);
+              });
+          }),
+          // Read bound Feishu channel credentials
+          readBoundFeishuChannels(request.teamName),
+          this.teamMetaStore.getMeta(request.teamName).catch(() => null),
+          // Write MCP config file
+          this.mcpConfigBuilder.writeConfigFile(request.cwd),
+        ]);
       _t('parallelPreSpawn (tasks+feishu+mcp)');
       const existingTasks = existingTasksResult;
       const prompt = buildDeterministicLaunchHydrationPrompt(
@@ -13738,7 +13321,8 @@ export class TeamProvisioningService {
         effectiveMemberSpecs,
         existingTasks,
         Boolean(previousSessionId),
-        feishuChannels2
+        feishuChannels2,
+        teamMeta2?.workflow
       );
       const promptSize = getPromptSizeSummary(prompt);
       let child: ReturnType<typeof spawn>;
@@ -15904,6 +15488,23 @@ export class TeamProvisioningService {
       }
       // Only track spawns for this team
       if (teamName !== run.teamName) continue;
+
+      const subagentType =
+        typeof inp.subagent_type === 'string'
+          ? inp.subagent_type.trim()
+          : typeof inp.subagentType === 'string'
+            ? inp.subagentType.trim()
+            : '';
+      if (subagentType && subagentType !== 'general-purpose') {
+        logger.warn(
+          `[captureTeamSpawnEvents] Agent call for "${memberName}" used invalid subagent_type="${subagentType}"; expected "general-purpose"`
+        );
+        this.appendMemberBootstrapDiagnostic(
+          run,
+          memberName,
+          `invalid Agent subagent_type "${subagentType}" - expected "general-purpose"`
+        );
+      }
 
       // Lead can only spawn pre-configured members, not create new ones
       const resolvedName = this.resolveExpectedLaunchMemberName(run.expectedMembers, memberName);
@@ -20318,12 +19919,16 @@ export class TeamProvisioningService {
     const isSolo = currentMembers.length === 0;
 
     // Build persistent lead context.
-    const feishuChannels4 = await readBoundFeishuChannels(run.teamName);
+    const [feishuChannels4, teamMeta4] = await Promise.all([
+      readBoundFeishuChannels(run.teamName),
+      this.teamMetaStore.getMeta(run.teamName).catch(() => null),
+    ]);
     const persistentContext = buildPersistentLeadContext({
       teamName: run.teamName,
       leadName,
       isSolo,
       members: currentMembers,
+      leadWorkflow: teamMeta4?.workflow,
       compact: true,
       feishuChannels: feishuChannels4,
     });

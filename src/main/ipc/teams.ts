@@ -586,7 +586,14 @@ export function initializeTeamHandlers(
     if (!reply) {
       return false;
     }
-    await getLeadChannelListenerService().sendFeishuReply(message.channelId, message.chatId, reply);
+    await getLeadChannelListenerService().sendFeishuReply(
+      message.channelId,
+      message.chatId,
+      reply,
+      {
+        dedupeKey: message.messageId ? `${message.messageId}:lead-reply` : undefined,
+      }
+    );
     return true;
   });
   teamMemberLogsFinder = logsFinder ?? null;
@@ -1223,7 +1230,7 @@ function parseOptionalMemberProviderId(
   }
   return {
     valid: false,
-    error: 'member providerId must be anthropic, codex, gemini, opencode, or cursor',
+    error: 'member providerId must be anthropic, codex, gemini, or opencode',
   };
 }
 
@@ -1570,11 +1577,9 @@ async function validateProvisioningRequest(
       ? 'codex'
       : payload.providerId === 'gemini'
         ? 'gemini'
-        : payload.providerId === 'cursor'
-          ? 'cursor'
-          : payload.providerId === 'anthropic'
-            ? 'anthropic'
-            : undefined;
+        : payload.providerId === 'anthropic'
+          ? 'anthropic'
+          : undefined;
   const providerId = explicitProviderId ?? 'anthropic';
 
   const seenNames = new Set<string>();
@@ -1856,11 +1861,9 @@ async function handleLaunchTeam(
       ? 'codex'
       : payload.providerId === 'gemini'
         ? 'gemini'
-        : payload.providerId === 'cursor'
-          ? 'cursor'
-          : payload.providerId === 'anthropic'
-            ? 'anthropic'
-            : undefined;
+        : payload.providerId === 'anthropic'
+          ? 'anthropic'
+          : undefined;
   const providerId = explicitProviderId ?? 'anthropic';
   const providerBackendValidation = parseOptionalProviderBackendId(
     payload.providerBackendId,
@@ -1891,15 +1894,13 @@ async function handleLaunchTeam(
     const members = membersMeta?.members ?? [];
 
     const resolvedProviderId =
-      providerId === 'codex' || providerId === 'gemini' || providerId === 'cursor'
+      providerId === 'codex' || providerId === 'gemini'
         ? providerId
         : meta?.providerId === 'codex'
           ? 'codex'
           : meta?.providerId === 'gemini'
             ? 'gemini'
-            : meta?.providerId === 'cursor'
-              ? 'cursor'
-              : 'anthropic';
+            : 'anthropic';
     const effortValidation = parseOptionalTeamEffort(payload.effort, resolvedProviderId);
     if (!effortValidation.valid) {
       return { success: false, error: effortValidation.error };
@@ -2086,7 +2087,7 @@ async function handlePrepareProvisioning(
     if (!isTeamProviderId(providerId)) {
       return {
         success: false,
-        error: 'providerId must be anthropic, codex, gemini, opencode, or cursor',
+        error: 'providerId must be anthropic, codex, gemini, or opencode',
       };
     }
     validatedProviderId = providerId;
@@ -2100,7 +2101,7 @@ async function handlePrepareProvisioning(
       if (!isTeamProviderId(entry)) {
         return {
           success: false,
-          error: 'providerIds entries must be anthropic, codex, gemini, opencode, or cursor',
+          error: 'providerIds entries must be anthropic, codex, gemini, or opencode',
         };
       }
       if (!normalized.includes(entry)) {

@@ -7,6 +7,7 @@ import {
   GPT_5_1_CODEX_MINI_UI_DISABLED_REASON,
   GPT_5_2_CODEX_UI_DISABLED_REASON,
   GPT_5_3_CODEX_SPARK_UI_DISABLED_REASON,
+  normalizeExplicitTeamModelForUi,
   normalizeTeamModelForUi,
   type TeamModelRuntimeProviderStatus,
 } from '@renderer/utils/teamModelAvailability';
@@ -257,9 +258,19 @@ describe('teamModelAvailability', () => {
     expect(getTeamModelSelectionError('anthropic', 'opus')).toBeNull();
   });
 
-  it('keeps only the three Anthropic aliases in the fallback selector options', () => {
+  it('includes Opus 4.7 1M in the fallback Anthropic selector options', () => {
     const options = getAvailableTeamProviderModelOptions('anthropic');
-    expect(options.map((option) => option.value)).toEqual(['', 'opus', 'sonnet', 'haiku']);
+    expect(options.map((option) => option.value)).toEqual([
+      '',
+      'claude-opus-4-7[1m]',
+      'opus',
+      'sonnet',
+      'haiku',
+    ]);
+    expect(options.find((o) => o.value === 'claude-opus-4-7[1m]')).toMatchObject({
+      label: 'Opus 4.7 (1M context)',
+      availabilityStatus: 'available',
+    });
     expect(options.find((o) => o.value === 'opus')).toMatchObject({ availabilityStatus: 'available' });
     expect(options.find((o) => o.value === 'sonnet')).toMatchObject({ availabilityStatus: 'available' });
     expect(options.find((o) => o.value === 'haiku')).toMatchObject({ availabilityStatus: 'available' });
@@ -267,7 +278,12 @@ describe('teamModelAvailability', () => {
 
   it('normalizes known Anthropic full model ids to the three aliases', () => {
     expect(normalizeTeamModelForUi('anthropic', 'claude-opus-4-7')).toBe('opus');
-    expect(normalizeTeamModelForUi('anthropic', 'claude-opus-4-7[1m]')).toBe('opus');
+    expect(normalizeTeamModelForUi('anthropic', 'claude-opus-4-7[1m]')).toBe(
+      'claude-opus-4-7[1m]'
+    );
+    expect(normalizeExplicitTeamModelForUi('anthropic', 'claude-opus-4-7[1m]')).toBe(
+      'claude-opus-4-7[1m]'
+    );
     expect(normalizeTeamModelForUi('anthropic', 'claude-sonnet-4-6')).toBe('sonnet');
     expect(normalizeTeamModelForUi('anthropic', 'claude-haiku-4-5-20251001')).toBe('haiku');
     expect(getTeamModelSelectionError('anthropic', 'claude-opus-4-7')).toBeNull();

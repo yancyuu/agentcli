@@ -37,7 +37,6 @@ const PROVIDER_LABELS: Record<TeamProviderId, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
-  cursor: 'Cursor Agent',
 };
 
 function getProviderLabel(providerId: TeamProviderId): string {

@@ -147,7 +147,6 @@ export const EditTeamDialog = ({
   projectPath,
   onClose,
   onSaved,
-  onRestartTeam,
 }: EditTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const [name, setName] = useState(currentName);
@@ -188,7 +187,7 @@ export const EditTeamDialog = ({
       originalName: leadMember.name,
       roleSelection: '',
       customRole: '团队负责人',
-      workflow: leadWorkflow || leadMember.workflow,
+      workflow: leadWorkflow,
       providerId: leadProviderId,
       model: leadModel,
       effort: leadEffort,
@@ -315,7 +314,7 @@ export const EditTeamDialog = ({
       members.map((member) => [
         member.id,
         restartNames.has(member.name.trim().toLowerCase())
-          ? '保存后将重启该成员，以应用角色、工作流、worktree 隔离、提供商、模型或推理强度变更。'
+          ? '保存后需要重启该成员或团队，才能应用角色、工作流、worktree 隔离、提供商、模型或推理强度变更。'
           : null,
       ])
     );
@@ -376,7 +375,7 @@ export const EditTeamDialog = ({
           leadProviderId,
           leadModel: leadModel.trim() || undefined,
           leadEffort,
-          leadWorkflow: leadWorkflow.trim() || undefined,
+          leadWorkflow: leadWorkflow.trim(),
         });
         configSaved = true;
         for (const removedMemberName of liveRemovedExistingMembers) {
@@ -405,14 +404,6 @@ export const EditTeamDialog = ({
         await Promise.resolve(onSaved());
         setMembersPendingRestartRetry({});
         if (effectiveMembersToRestart.length > 0) {
-          if (onRestartTeam) {
-            setSaveOutcomeError(
-              `团队已保存，正在重启团队以应用 ${effectiveMembersToRestart.join(', ')} 的运行时变更...`
-            );
-            await Promise.resolve(onRestartTeam());
-            onClose();
-            return;
-          }
           setSaveOutcomeError(
             `团队已保存。请重启团队以应用 ${effectiveMembersToRestart.join(', ')} 的运行时变更。`
           );

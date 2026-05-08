@@ -888,7 +888,7 @@ export interface TeamViewSnapshot {
 }
 
 export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type TeamProviderId = 'anthropic' | 'codex' | 'gemini' | 'opencode' | 'cursor';
+export type TeamProviderId = 'anthropic' | 'codex' | 'gemini' | 'opencode';
 export type TeamProviderBackendId = 'auto' | 'adapter' | 'api' | 'cli-sdk' | 'codex-native';
 export type TeamFastMode = 'inherit' | 'on' | 'off';
 
@@ -1307,6 +1307,10 @@ export interface TeamTemplateMember {
   role?: string;
   workflow?: string;
   workflowFile?: string;
+  isolation?: 'worktree';
+  providerId?: TeamProviderId;
+  model?: string;
+  effort?: EffortLevel;
 }
 
 export interface TeamTemplateSummary {
@@ -1319,6 +1323,13 @@ export interface TeamTemplateSummary {
   members: TeamTemplateMember[];
   skillPaths?: string[];
   memoryPaths?: string[];
+  providerId?: TeamProviderId;
+  model?: string;
+  effort?: EffortLevel;
+  fastMode?: TeamFastMode;
+  limitContext?: boolean;
+  skipPermissions?: boolean;
+  color?: string;
 }
 
 export interface TeamTemplateSourcesSnapshot {

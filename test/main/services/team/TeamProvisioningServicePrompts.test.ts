@@ -668,6 +668,16 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       }),
       'utf8'
     );
+    fs.writeFileSync(
+      path.join(teamDir, 'team.meta.json'),
+      JSON.stringify({
+        version: 1,
+        cwd: process.cwd(),
+        workflow: 'Always triage incoming Feishu messages before delegating.',
+        createdAt: Date.now(),
+      }),
+      'utf8'
+    );
 
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/fake/claude');
     const { child, writeSpy } = createFakeChild();
@@ -705,6 +715,8 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     const prompt = extractPromptFromStreamJsonWrite(writeSpy);
     expect(prompt).toBeTruthy();
     expect(prompt.length).toBeGreaterThan(100);
+    expect(prompt).toContain('负责人工作流');
+    expect(prompt).toContain('Always triage incoming Feishu messages before delegating.');
 
     await svc.cancelProvisioning(runId);
   });

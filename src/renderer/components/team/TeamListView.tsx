@@ -827,10 +827,21 @@ export const TeamListView = (): React.JSX.Element => {
           teams.map((team) => team.teamName)
         ),
         description: template.description,
+        color: template.color,
+        providerId: template.providerId ?? 'anthropic',
+        model: template.model,
+        effort: template.effort,
+        fastMode: template.fastMode,
+        limitContext: template.limitContext,
+        skipPermissions: template.skipPermissions,
         members: template.members.map((member) => ({
           name: member.name,
           role: member.role,
           workflow: member.workflow,
+          isolation: member.isolation,
+          providerId: member.providerId,
+          model: member.model,
+          effort: member.effort,
         })),
       });
       setShowTemplateDialog(false);

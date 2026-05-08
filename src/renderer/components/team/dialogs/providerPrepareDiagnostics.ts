@@ -64,17 +64,6 @@ function getModelLabel(providerId: TeamProviderId, modelId: string): string {
   return getProviderScopedTeamModelLabel(providerId, modelId) ?? modelId;
 }
 
-function isTrustedCursorModel(modelId: string): boolean {
-  return modelId === 'auto' || modelId === 'composer-2-fast' || modelId === 'composer-2';
-}
-
-function shouldTrustModelWithoutDeepVerification(
-  providerId: TeamProviderId,
-  modelId: string
-): boolean {
-  return providerId === 'cursor' && isTrustedCursorModel(modelId);
-}
-
 export function buildProviderPrepareModelCheckingLine(
   providerId: TeamProviderId,
   modelId: string
@@ -658,16 +647,6 @@ export async function runProviderPrepareDiagnostics({
   for (const modelId of orderedModelIds) {
     const cachedResult = reusableModelResultsById[modelId];
     if (cachedResult) {
-      if (shouldTrustModelWithoutDeepVerification(providerId, modelId)) {
-        const line = buildModelAvailableLine(providerId, modelId);
-        modelResultsById.set(modelId, {
-          status: 'ready',
-          line,
-        });
-        modelLines.set(modelId, line);
-        completedCount += 1;
-        continue;
-      }
       modelResultsById.set(modelId, cachedResult);
       modelLines.set(modelId, cachedResult.line);
       completedCount += 1;
@@ -746,42 +725,7 @@ export async function runProviderPrepareDiagnostics({
       }
     };
 
-    if (
-      providerId === 'cursor' &&
-      uncachedModelIds.every((modelId) =>
-        shouldTrustModelWithoutDeepVerification(providerId, modelId)
-      )
-    ) {
-      const runtimeResult = await prepareProvisioning(
-        cwd,
-        providerId,
-        [providerId],
-        undefined,
-        limitContext
-      );
-      runtimeDetailLines = createRuntimeDetailLines(runtimeResult);
-      runtimeWarnings = [...(runtimeResult.warnings ?? [])];
-
-      if (!runtimeResult.ready) {
-        return {
-          status: 'failed',
-          details: [
-            ...runtimeDetailLines,
-            ...(runtimeResult.message ? [runtimeResult.message] : []),
-          ],
-          warnings: runtimeWarnings,
-          modelResultsById: {},
-        };
-      }
-
-      for (const modelId of uncachedModelIds) {
-        recordTerminalModelResult(modelId, {
-          status: 'ready',
-          line: buildModelAvailableLine(providerId, modelId),
-        });
-      }
-      emitProgress();
-    } else if (providerId === 'opencode') {
+    if (providerId === 'opencode') {
       const compatibilityPassedModelIds: string[] = [];
       try {
         const compatibilityResult = await prepareProvisioning(

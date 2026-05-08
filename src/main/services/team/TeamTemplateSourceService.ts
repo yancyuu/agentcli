@@ -7,10 +7,13 @@ import * as path from 'path';
 import { atomicWriteAsync } from './atomicWrite';
 
 import type {
+  EffortLevel,
+  TeamFastMode,
   TeamTemplateMember,
   TeamTemplateSource,
   TeamTemplateSourcesSnapshot,
   TeamTemplateSummary,
+  TeamProviderId,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamTemplateSource');
@@ -151,9 +154,35 @@ function parseMembers(rawMembers: unknown, templateDir: string): TeamTemplateMem
         role: typeof raw.role === 'string' && raw.role.trim() ? raw.role.trim() : undefined,
         workflow,
         workflowFile,
+        isolation: raw.isolation === 'worktree' ? 'worktree' : undefined,
+        providerId: parseTemplateProviderId(raw.providerId ?? raw.provider),
+        model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : undefined,
+        effort: parseTemplateEffort(raw.effort),
       },
     ];
   });
+}
+
+function parseTemplateProviderId(value: unknown): TeamProviderId | undefined {
+  return value === 'anthropic' || value === 'codex' || value === 'gemini' || value === 'opencode'
+    ? value
+    : undefined;
+}
+
+function parseTemplateEffort(value: unknown): EffortLevel | undefined {
+  return value === 'none' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+    ? value
+    : undefined;
+}
+
+function parseTemplateFastMode(value: unknown): TeamFastMode | undefined {
+  return value === 'inherit' || value === 'on' || value === 'off' ? value : undefined;
 }
 
 function parseStringArray(value: unknown): string[] | undefined {
@@ -203,6 +232,21 @@ function scanSourceTemplates(source: TeamTemplateSource): TeamTemplateSummary[] 
         members: parseMembers(manifest.members, templateDir),
         skillPaths: parseStringArray(manifest.skillPaths),
         memoryPaths: parseStringArray(manifest.memoryPaths),
+        providerId: parseTemplateProviderId(manifest.providerId ?? manifest.provider),
+        model:
+          typeof manifest.model === 'string' && manifest.model.trim()
+            ? manifest.model.trim()
+            : undefined,
+        effort: parseTemplateEffort(manifest.effort),
+        fastMode: parseTemplateFastMode(manifest.fastMode),
+        limitContext:
+          typeof manifest.limitContext === 'boolean' ? manifest.limitContext : undefined,
+        skipPermissions:
+          typeof manifest.skipPermissions === 'boolean' ? manifest.skipPermissions : undefined,
+        color:
+          typeof manifest.color === 'string' && manifest.color.trim()
+            ? manifest.color.trim()
+            : undefined,
       });
     } catch (error) {
       logger.warn(`Failed to read template manifest ${manifestPath}: ${String(error)}`);

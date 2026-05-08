@@ -24,12 +24,7 @@ function createClaudeCodeProviderFromCliStatus(status: CliInstallationStatus): C
     displayName: 'Claude Code',
     supported: status.installed,
     authenticated,
-    authMethod:
-      authenticated && status.authMethod !== 'cursor-login'
-        ? (status.authMethod ?? 'subscription')
-        : authenticated
-          ? 'subscription'
-          : null,
+    authMethod: authenticated ? (status.authMethod ?? 'subscription') : null,
     verificationState: status.installed ? (authenticated ? 'verified' : 'unknown') : 'offline',
     modelVerificationState: 'idle',
     statusMessage: status.authStatusChecking
@@ -104,9 +99,8 @@ export function getMainScreenCliProviders(
     const order: Record<CliProviderId, number> = {
       anthropic: 0,
       codex: 1,
-      cursor: 2,
-      gemini: 3,
-      opencode: 4,
+      gemini: 2,
+      opencode: 3,
     };
     return order[left.providerId] - order[right.providerId];
   });
