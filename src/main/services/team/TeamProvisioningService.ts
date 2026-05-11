@@ -40,10 +40,8 @@ import { isProcessAlive } from '@main/utils/processHealth';
 import { killProcessByPid } from '@main/utils/processKill';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
-import {
-  listWindowsProcessTable,
-  listWindowsProcessTableSync,
-} from '@main/utils/windowsProcessTable';
+import { listPosixHostProcesses } from '@main/utils/posixProcessTable';
+import { listWindowsHostProcesses } from '@main/utils/windowsProcessTable';
 import {
   AGENT_BLOCK_CLOSE,
   AGENT_BLOCK_OPEN,
@@ -101,7 +99,7 @@ import {
   parseAgentToolResultStatus,
 } from '@shared/utils/toolSummary';
 import * as agentTeamsControllerModule from 'agent-teams-controller';
-import { type ChildProcess, execFileSync, type spawn } from 'child_process';
+import { type ChildProcess, type spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -2008,30 +2006,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parsePosixProcessTable(output: string): RuntimeProcessTableRow[] {
-  const rows: RuntimeProcessTableRow[] = [];
-  for (const line of output.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (!match) continue;
-    const pid = Number.parseInt(match[1] ?? '', 10);
-    const ppid = Number.parseInt(match[2] ?? '', 10);
-    const command = match[3]?.trim() ?? '';
-    if (Number.isFinite(pid) && Number.isFinite(ppid) && command) {
-      rows.push({ pid, ppid, command });
-    }
-  }
-  return rows;
-}
-
 async function listTeamRuntimeProcessTable(): Promise<RuntimeProcessTableRow[]> {
   if (process.platform === 'win32') {
-    return listWindowsProcessTable();
+    return listWindowsHostProcesses();
   }
-  const output = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,command='], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  return parsePosixProcessTable(output);
+  return listPosixHostProcesses();
 }
 
 async function waitForPidsToExit(
@@ -16163,7 +16142,7 @@ export class TeamProvisioningService {
         return windowsHostProcessRows;
       }
       try {
-        windowsHostProcessRows = await listWindowsProcessTable();
+        windowsHostProcessRows = await listWindowsHostProcesses();
         windowsHostProcessTableAvailable = true;
       } catch (error) {
         windowsHostProcessRows = [];
@@ -18786,7 +18765,11 @@ export class TeamProvisioningService {
   }
 
   private stopPersistentTeamMembers(teamName: string): void {
-    this.killOrphanedTeamAgentProcesses(teamName);
+    // killOrphanedTeamAgentProcesses is async (process-table reads are fully
+    // non-blocking on both platforms now). Fire-and-forget here keeps the
+    // outer sync signature that stopTeam / stopAllTeams expect — they observe
+    // immediate side effects on the runs map and must not wait for the sweep.
+    void this.killOrphanedTeamAgentProcesses(teamName).catch(() => undefined);
   }
 
   private readPersistedTeamProjectPath(teamName: string): string | null {
@@ -18829,40 +18812,25 @@ export class TeamProvisioningService {
     }
   }
 
-  private killOrphanedTeamAgentProcesses(teamName: string): void {
+  private async killOrphanedTeamAgentProcesses(teamName: string): Promise<void> {
+    // Windows cannot reliably enumerate full command lines via tasklist (it
+    // only exposes the image name), so matching `--team-name` arg is
+    // impossible there. Falling back to image-name matching would risk killing
+    // unrelated node.exe processes. On Windows we skip the sweep and rely on
+    // the tracked ProvisioningRun.runs map killing known PIDs directly.
+    if (process.platform === 'win32') {
+      return;
+    }
     const currentRunPid = this.getTrackedRunId(teamName)
       ? this.runs.get(this.getTrackedRunId(teamName)!)?.child?.pid
       : undefined;
     const pids = new Set<number>();
-    const rows: { pid: number; command: string }[] = [];
 
-    if (process.platform === 'win32') {
-      try {
-        rows.push(
-          ...listWindowsProcessTableSync().map((row) => ({ pid: row.pid, command: row.command }))
-        );
-      } catch {
-        return;
-      }
-    } else {
-      let output = '';
-      try {
-        output = execFileSync('ps', ['-ax', '-o', 'pid=,command='], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        });
-      } catch {
-        return;
-      }
-
-      for (const line of output.split('\n')) {
-        const trimmed = line.trim();
-        const match = /^(\d+)\s+(.*)$/.exec(trimmed);
-        if (!match) continue;
-        const pid = Number.parseInt(match[1], 10);
-        if (!Number.isFinite(pid) || pid <= 0) continue;
-        rows.push({ pid, command: match[2] ?? '' });
-      }
+    let rows: { pid: number; command: string }[];
+    try {
+      rows = await listPosixHostProcesses();
+    } catch {
+      return;
     }
 
     for (const row of rows) {

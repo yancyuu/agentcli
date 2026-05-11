@@ -1,152 +1,112 @@
-import { execFile, execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import path from 'path';
 
-export interface WindowsProcessTableRow {
+export interface WindowsHostProcess {
   pid: number;
-  ppid: number;
   command: string;
 }
 
-interface RawWindowsProcessRow {
-  ProcessId?: number | string | null;
-  ParentProcessId?: number | string | null;
-  CommandLine?: string | null;
+const HOST_PROCESSES_CACHE_TTL_MS = 60_000;
+const DEFAULT_HOST_PROCESSES_TIMEOUT_MS = 4_000;
+
+let cachedHostProcesses: { expiresAtMs: number; rows: WindowsHostProcess[] } | null = null;
+let inFlightHostProcesses: Promise<WindowsHostProcess[]> | null = null;
+
+function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let buf = '';
+  let inQuotes = false;
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        buf += '"';
+        i += 2;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      i += 1;
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      fields.push(buf);
+      buf = '';
+      i += 1;
+      continue;
+    }
+    buf += ch;
+    i += 1;
+  }
+  fields.push(buf);
+  return fields;
 }
 
-const PROCESS_TABLE_SCRIPT = [
-  '$ErrorActionPreference = "Stop"',
-  'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress',
-].join('; ');
-
-const PROCESS_TABLE_ARGS = [
-  '-NoProfile',
-  '-NonInteractive',
-  '-ExecutionPolicy',
-  'Bypass',
-  '-Command',
-  PROCESS_TABLE_SCRIPT,
-];
-// Reading full Windows command lines requires spawning PowerShell + CIM, which is
-// visibly expensive when runtime status is polled. Keep this coarse-grained and
-// share one snapshot across all runtime liveness checks.
-const PROCESS_TABLE_CACHE_TTL_MS = 30_000;
-const PROCESS_TABLE_ERROR_CACHE_TTL_MS = 10_000;
-
-let cachedProcessTable: {
-  expiresAtMs: number;
-  rows: WindowsProcessTableRow[];
-} | null = null;
-let inFlightProcessTable: Promise<WindowsProcessTableRow[]> | null = null;
-
-function parsePositiveInteger(value: unknown): number | null {
-  const parsed =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string'
-        ? Number.parseInt(value, 10)
-        : Number.NaN;
+function parsePositivePid(value: string | undefined): number | null {
+  const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
-export function parseWindowsProcessTableJson(stdout: string): WindowsProcessTableRow[] {
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    return [];
+// tasklist `/v /fo csv /nh` columns:
+// "Image Name","PID","Session Name","Session#","Mem Usage","Status","User Name","CPU Time","Window Title"
+export function parseTasklistVerboseCsv(stdout: string): WindowsHostProcess[] {
+  const result: WindowsHostProcess[] = [];
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const fields = splitCsvLine(line);
+    if (fields.length < 2) continue;
+    const pid = parsePositivePid(fields[1]);
+    const command = fields[0]?.trim() ?? '';
+    if (!pid || !command) continue;
+    result.push({ pid, command });
   }
-
-  let parsed: RawWindowsProcessRow | RawWindowsProcessRow[];
-  try {
-    parsed = JSON.parse(trimmed) as RawWindowsProcessRow | RawWindowsProcessRow[];
-  } catch {
-    return [];
-  }
-
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  const result: WindowsProcessTableRow[] = [];
-
-  for (const row of rows) {
-    const pid = parsePositiveInteger(row?.ProcessId);
-    const ppid = parsePositiveInteger(row?.ParentProcessId) ?? 0;
-    const command = row?.CommandLine?.trim() ?? '';
-    if (!pid || !command) {
-      continue;
-    }
-    result.push({ pid, ppid, command });
-  }
-
   return result;
 }
 
-export async function listWindowsProcessTable(
-  timeoutMs = 4_000
-): Promise<WindowsProcessTableRow[]> {
-  const now = Date.now();
-  if (cachedProcessTable && cachedProcessTable.expiresAtMs > now) {
-    return cachedProcessTable.rows;
-  }
-  if (inFlightProcessTable) {
-    return inFlightProcessTable;
-  }
-
-  const nextRead = new Promise<WindowsProcessTableRow[]>((resolve, reject) => {
+function runTasklist(args: readonly string[], timeoutMs: number): Promise<string> {
+  const bin = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tasklist.exe');
+  return new Promise((resolve, reject) => {
     execFile(
-      'powershell.exe',
-      PROCESS_TABLE_ARGS,
+      bin,
+      [...args],
       {
         encoding: 'utf8',
         timeout: timeoutMs,
         windowsHide: true,
         maxBuffer: 8 * 1024 * 1024,
       },
-      (error, stdout, stderr) => {
+      (error, stdout) => {
         if (error) {
-          cachedProcessTable = {
-            expiresAtMs: Date.now() + PROCESS_TABLE_ERROR_CACHE_TTL_MS,
-            rows: [],
-          };
-          reject(error);
+          reject(
+            error instanceof Error ? error : new Error(`tasklist failed: ${JSON.stringify(error)}`)
+          );
           return;
         }
-        if (stderr?.trim()) {
-          cachedProcessTable = {
-            expiresAtMs: Date.now() + PROCESS_TABLE_ERROR_CACHE_TTL_MS,
-            rows: [],
-          };
-          reject(new Error(stderr.trim()));
-          return;
-        }
-        const rows = parseWindowsProcessTableJson(String(stdout));
-        cachedProcessTable = {
-          expiresAtMs: Date.now() + PROCESS_TABLE_CACHE_TTL_MS,
-          rows,
-        };
-        resolve(rows);
+        resolve(String(stdout ?? ''));
       }
     );
-  }).finally(() => {
-    inFlightProcessTable = null;
   });
-  inFlightProcessTable = nextRead;
-
-  return nextRead;
 }
 
-export function listWindowsProcessTableSync(timeoutMs = 4_000): WindowsProcessTableRow[] {
+export async function listWindowsHostProcesses(
+  timeoutMs = DEFAULT_HOST_PROCESSES_TIMEOUT_MS
+): Promise<WindowsHostProcess[]> {
   const now = Date.now();
-  if (cachedProcessTable && cachedProcessTable.expiresAtMs > now) {
-    return cachedProcessTable.rows;
+  if (cachedHostProcesses && cachedHostProcesses.expiresAtMs > now) {
+    return cachedHostProcesses.rows;
   }
+  if (inFlightHostProcesses) return inFlightHostProcesses;
 
-  const stdout = execFileSync('powershell.exe', PROCESS_TABLE_ARGS, {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    windowsHide: true,
-    maxBuffer: 8 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const rows = parseWindowsProcessTableJson(String(stdout));
-  cachedProcessTable = {
-    expiresAtMs: Date.now() + PROCESS_TABLE_CACHE_TTL_MS,
-    rows,
-  };
-  return rows;
+  const next = runTasklist(['/v', '/fo', 'csv', '/nh'], timeoutMs)
+    .then((stdout) => {
+      const rows = parseTasklistVerboseCsv(stdout);
+      cachedHostProcesses = { expiresAtMs: Date.now() + HOST_PROCESSES_CACHE_TTL_MS, rows };
+      return rows;
+    })
+    .finally(() => {
+      inFlightHostProcesses = null;
+    });
+  inFlightHostProcesses = next;
+  return next;
 }

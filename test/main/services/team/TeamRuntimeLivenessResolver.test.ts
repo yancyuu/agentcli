@@ -14,7 +14,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       memberName: 'bob',
       agentId: 'agent-bob',
       backendType: 'process',
-      processRows: [{ pid: 100, ppid: 1, command: 'zsh' }],
+      processRows: [{ pid: 100, command: 'zsh' }],
       processTableAvailable: true,
       nowIso: NOW,
     });
@@ -34,7 +34,6 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       processRows: [
         {
           pid: 222,
-          ppid: 1,
           command: 'node runtime --team-name demo --agent-id agent-alice',
         },
       ],
@@ -66,7 +65,6 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       processRows: [
         {
           pid: 222,
-          ppid: 1,
           command: 'node runtime --team-name demo --agent-id agent-alice',
         },
       ],
@@ -87,8 +85,8 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       agentId: 'agent-jack',
       backendType: 'process',
       processRows: [
-        { pid: 300, ppid: 1, command: 'zsh' },
-        { pid: 301, ppid: 300, command: 'node helper.js' },
+        { pid: 300, command: 'zsh' },
+        { pid: 301, command: 'node helper.js' },
       ],
       processTableAvailable: true,
       nowIso: NOW,
@@ -107,7 +105,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       providerId: 'opencode',
       persistedRuntimePid: 404,
       persistedRuntimeSessionId: 'session-bob',
-      processRows: [{ pid: 404, ppid: 1, command: 'opencode runtime host' }],
+      processRows: [{ pid: 404, command: 'opencode runtime host' }],
       processTableAvailable: true,
       nowIso: NOW,
     });
@@ -125,7 +123,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       providerId: 'opencode',
       persistedRuntimePid: 404,
       persistedRuntimeSessionId: 'session-bob',
-      processRows: [{ pid: 404, ppid: 1, command: 'node unrelated-worker.js' }],
+      processRows: [{ pid: 404, command: 'node unrelated-worker.js' }],
       processTableAvailable: true,
       nowIso: NOW,
     });
@@ -143,7 +141,7 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
       teamName: 'demo',
       memberName: 'tom',
       persistedRuntimePid: 444,
-      processRows: [{ pid: 555, ppid: 1, command: 'node other.js' }],
+      processRows: [{ pid: 555, command: 'node other.js' }],
       processTableAvailable: true,
       nowIso: NOW,
     });

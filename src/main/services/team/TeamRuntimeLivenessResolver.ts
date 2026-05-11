@@ -9,7 +9,6 @@ import type {
 
 export interface RuntimeProcessTableRow {
   pid: number;
-  ppid: number;
   command: string;
 }
 
