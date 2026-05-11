@@ -2206,11 +2206,13 @@ export function isTeamProvisioningActive(
 function loadAllLaunchParams(): Record<string, TeamLaunchParams> {
   const result: Record<string, TeamLaunchParams> = {};
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
+    const ls = localStorage;
+    if (!ls) return result;
+    for (let i = 0; i < ls.length; i++) {
+      const key = ls.key(i);
       if (key?.startsWith(LAUNCH_PARAMS_PREFIX)) {
         const teamName = key.slice(LAUNCH_PARAMS_PREFIX.length);
-        const parsed = JSON.parse(localStorage.getItem(key)!) as TeamLaunchParams;
+        const parsed = JSON.parse(ls.getItem(key)!) as TeamLaunchParams;
         if (parsed && typeof parsed === 'object') {
           result[teamName] = parsed;
         }
@@ -2224,7 +2226,7 @@ function loadAllLaunchParams(): Record<string, TeamLaunchParams> {
 
 function saveLaunchParams(teamName: string, params: TeamLaunchParams): void {
   try {
-    localStorage.setItem(LAUNCH_PARAMS_PREFIX + teamName, JSON.stringify(params));
+    localStorage?.setItem?.(LAUNCH_PARAMS_PREFIX + teamName, JSON.stringify(params));
   } catch {
     // ignore — best-effort persist
   }
@@ -2274,12 +2276,14 @@ function parseToolApprovalSettings(raw: string | null): ToolApprovalSettings {
 }
 
 function loadToolApprovalSettingsForTeam(teamName: string): ToolApprovalSettings {
-  return parseToolApprovalSettings(localStorage.getItem(TOOL_APPROVAL_PREFIX + teamName));
+  return parseToolApprovalSettings(
+    localStorage?.getItem?.(TOOL_APPROVAL_PREFIX + teamName) ?? null
+  );
 }
 
 function saveToolApprovalSettingsForTeam(teamName: string, settings: ToolApprovalSettings): void {
   try {
-    localStorage.setItem(TOOL_APPROVAL_PREFIX + teamName, JSON.stringify(settings));
+    localStorage?.setItem?.(TOOL_APPROVAL_PREFIX + teamName, JSON.stringify(settings));
   } catch {
     // best-effort
   }
@@ -2287,7 +2291,7 @@ function saveToolApprovalSettingsForTeam(teamName: string, settings: ToolApprova
 
 /** Load global settings (legacy fallback for first load / no team selected). */
 function loadToolApprovalSettings(): ToolApprovalSettings {
-  return parseToolApprovalSettings(localStorage.getItem('team:toolApprovalSettings'));
+  return parseToolApprovalSettings(localStorage?.getItem?.('team:toolApprovalSettings') ?? null);
 }
 
 export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, get) => ({
@@ -5007,7 +5011,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     if (teamName) {
       saveToolApprovalSettingsForTeam(teamName, merged);
     } else {
-      localStorage.setItem('team:toolApprovalSettings', JSON.stringify(merged));
+      try {
+        localStorage?.setItem?.('team:toolApprovalSettings', JSON.stringify(merged));
+      } catch {
+        /* best-effort */
+      }
     }
     try {
       await api.teams.updateToolApprovalSettings(teamName ?? '__global__', merged);

@@ -56,7 +56,7 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
   updateError: null,
   showUpdateDialog: false,
   showUpdateBanner: false,
-  dismissedUpdateVersion: localStorage.getItem(DISMISSED_VERSION_KEY),
+  dismissedUpdateVersion: localStorage?.getItem?.(DISMISSED_VERSION_KEY) ?? null,
 
   checkForUpdates: () => {
     set({ updateStatus: 'checking', updateError: null });

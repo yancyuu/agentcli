@@ -46,7 +46,7 @@ describe('resolveMemberRuntimeSummary', () => {
     const spawnEntry = createSpawnEntry({ runtimeModel: 'claude-opus-4-7', runtimeAlive: true });
 
     expect(resolveMemberRuntimeSummary(member, undefined, spawnEntry)).toBe(
-      'Anthropic · Opus 4.7 · Medium · Codex'
+      'Anthropic · Opus 4.7 · 中 · Codex'
     );
   });
 
@@ -55,7 +55,7 @@ describe('resolveMemberRuntimeSummary', () => {
     const spawnEntry = createSpawnEntry();
 
     expect(resolveMemberRuntimeSummary(member, undefined, spawnEntry)).toBe(
-      '5.4 Mini · Medium · Codex'
+      '5.4 Mini · 中 · Codex'
     );
   });
 
@@ -76,7 +76,7 @@ describe('resolveMemberRuntimeSummary', () => {
     });
 
     expect(resolveMemberRuntimeSummary(member, undefined, spawnEntry)).toBe(
-      '5.4 Mini · Medium · Codex'
+      '5.4 Mini · 中 · Codex'
     );
   });
 
@@ -93,7 +93,7 @@ describe('resolveMemberRuntimeSummary', () => {
     };
 
     expect(resolveMemberRuntimeSummary(member, undefined, undefined, runtimeEntry)).toBe(
-      '5.4 Mini · Medium · Codex · 256.0 MB'
+      '5.4 Mini · 中 · Codex · 256.0 MB'
     );
   });
 
@@ -110,7 +110,7 @@ describe('resolveMemberRuntimeSummary', () => {
     };
 
     expect(resolveMemberRuntimeSummary(member, undefined, spawnEntry, runtimeEntry as never)).toBe(
-      '5.4 Mini · Medium · Codex · 256.0 MB'
+      '5.4 Mini · 中 · Codex · 256.0 MB'
     );
   });
 
@@ -129,7 +129,7 @@ describe('resolveMemberRuntimeSummary', () => {
         },
         undefined
       )
-    ).toBe('5.4 Mini · Medium · Codex');
+    ).toBe('5.4 Mini · 中 · Codex');
   });
 
   it('normalizes persisted legacy Codex lanes to the native runtime summary', () => {
@@ -147,7 +147,7 @@ describe('resolveMemberRuntimeSummary', () => {
         },
         undefined
       )
-    ).toBe('5.4 Mini · Medium · Codex');
+    ).toBe('5.4 Mini · 中 · Codex');
   });
 
   it('does not leak the lead backend label into OpenCode side-lane members', () => {
@@ -170,7 +170,7 @@ describe('resolveMemberRuntimeSummary', () => {
         },
         undefined
       )
-    ).toBe('nemotron-3-super-free · via OpenCode');
+    ).toBe('nemotron-3-super-free · 经由 OpenCode');
   });
 
   it('infers OpenCode from an OpenCode model when member provider metadata is missing', () => {
@@ -193,7 +193,7 @@ describe('resolveMemberRuntimeSummary', () => {
         },
         undefined
       )
-    ).toBe('minimax-m2.5-free · via OpenCode');
+    ).toBe('minimax-m2.5-free · 经由 OpenCode');
   });
 
   it('appends memory for OpenCode side-lane runtime snapshots without adding Codex backend text', () => {
@@ -224,7 +224,7 @@ describe('resolveMemberRuntimeSummary', () => {
           updatedAt: '2026-04-18T18:00:00.000Z',
         }
       )
-    ).toBe('minimax-m2.5-free · via OpenCode · 183.9 MB');
+    ).toBe('minimax-m2.5-free · 经由 OpenCode · 183.9 MB');
   });
 });
 
@@ -240,7 +240,7 @@ describe('getRuntimeMemorySourceLabel', () => {
         rssBytes: 2 * 1024 * 1024,
         updatedAt: '2026-04-24T12:00:00.000Z',
       })
-    ).toBe('RSS source: runtime shell shell');
+    ).toBe('RSS source: runtime process');
   });
 
   it('explains shared OpenCode host memory separately from member-owned runtime memory', () => {

@@ -65,6 +65,21 @@ describe('TeamMemberResolver', () => {
     expect(names).toContain('alice');
   });
 
+  it('applies persisted lead workflow to an explicit config lead member', () => {
+    const resolver = new TeamMemberResolver();
+    const config: TeamConfig = {
+      name: 'Team',
+      members: [{ name: 'lead', agentType: 'lead', role: 'lead' }],
+    };
+
+    const members = resolver.resolveMembers(config, [], [], [], {
+      leadWorkflow: 'Always triage inbound Feishu messages first.',
+    });
+    const lead = members.find((member) => member.name === 'lead');
+
+    expect(lead?.workflow).toBe('Always triage inbound Feishu messages first.');
+  });
+
   it('ignores qualified external inbox names unless explicitly configured', () => {
     const resolver = new TeamMemberResolver();
     const config: TeamConfig = {
@@ -282,22 +297,22 @@ describe('TeamMemberResolver', () => {
     expect(bob?.currentTaskId).toBeNull();
   });
 
-  it('merges inbox-derived "lead" alias into canonical "lead"', () => {
+  it('merges inbox-derived "lead" alias into canonical "team-lead"', () => {
     const resolver = new TeamMemberResolver();
     const config: TeamConfig = {
       name: 'Team',
       members: [
-        { name: 'lead', agentType: 'lead', role: 'lead' },
+        { name: 'team-lead', agentType: 'lead', role: 'lead' },
         { name: 'alice', agentType: 'general-purpose' },
       ],
     };
-    // Teammates sometimes send messages to "lead" instead of "lead",
+    // Teammates sometimes send messages to "lead" instead of "team-lead",
     // creating a separate inbox file that the resolver picks up.
-    const inboxNames = ['lead', 'lead', 'alice'];
+    const inboxNames = ['lead', 'team-lead', 'alice'];
     const members = resolver.resolveMembers(config, [], inboxNames, []);
     const names = members.map((m) => m.name);
 
-    expect(names).toContain('lead');
+    expect(names).toContain('team-lead');
     expect(names).not.toContain('lead');
     expect(names).toContain('alice');
   });

@@ -4141,6 +4141,8 @@ describe('teamSlice actions', () => {
       hoisted.getMemberSpawnStatuses.mockResolvedValue(
         createMemberSpawnSnapshot({
           runId: 'runtime-old',
+          launchPhase: 'spawning',
+          summary: { confirmedCount: 0, pendingCount: 1, failedCount: 0, runtimeAlivePendingCount: 0 },
         })
       );
 

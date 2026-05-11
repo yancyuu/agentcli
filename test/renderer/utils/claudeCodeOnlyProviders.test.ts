@@ -6,7 +6,7 @@ import {
 } from '@renderer/utils/claudeCodeOnlyProviders';
 
 describe('claudeCodeOnlyProviders', () => {
-  it('shows only Anthropic on provider status surfaces', () => {
+  it('shows Anthropic and Codex on provider status surfaces', () => {
     expect(
       filterMainScreenCliProviders([
         { providerId: 'anthropic', label: 'Anthropic' },
@@ -14,12 +14,15 @@ describe('claudeCodeOnlyProviders', () => {
         { providerId: 'gemini', label: 'Gemini' },
         { providerId: 'opencode', label: 'OpenCode' },
       ])
-    ).toEqual([{ providerId: 'anthropic', label: 'Anthropic' }]);
+    ).toEqual([
+      { providerId: 'anthropic', label: 'Anthropic' },
+      { providerId: 'codex', label: 'Codex' },
+    ]);
   });
 
-  it('normalizes all create and launch provider values to Anthropic', () => {
+  it('keeps codex and normalizes others to anthropic', () => {
     expect(normalizeCreateLaunchProviderForUi('anthropic', true)).toBe('anthropic');
-    expect(normalizeCreateLaunchProviderForUi('codex', true)).toBe('anthropic');
+    expect(normalizeCreateLaunchProviderForUi('codex', true)).toBe('codex');
     expect(normalizeCreateLaunchProviderForUi('gemini', true)).toBe('anthropic');
     expect(normalizeCreateLaunchProviderForUi('opencode', true)).toBe('anthropic');
   });

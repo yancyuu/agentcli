@@ -199,7 +199,6 @@ describe('CliInstallerService', () => {
         'codex',
         'gemini',
         'opencode',
-        'cursor',
       ]);
       expect(openCodeStatus).toMatchObject({
         displayName: 'OpenCode (75+ LLM providers)',

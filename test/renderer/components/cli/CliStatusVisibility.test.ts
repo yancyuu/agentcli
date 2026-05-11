@@ -337,8 +337,8 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Multimodel');
-    expect(host.textContent).toContain('Login');
+    expect(host.textContent).toContain('多模型');
+    expect(host.textContent).toContain('登录');
 
     const toggle = host.querySelector('[data-testid="multimodel-toggle"]');
     expect(toggle).toBeNull();
@@ -364,7 +364,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Extensions');
+    expect(host.textContent).toContain('扩展');
 
     await act(async () => {
       root.unmount();
@@ -388,7 +388,7 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     const extensionsButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Extensions')
+      button.textContent?.includes('扩展')
     );
     expect(extensionsButton).not.toBeNull();
 
@@ -445,20 +445,13 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('OpenCode (75+ LLM providers)');
-    expect(host.textContent).toContain('Download');
+    expect(host.textContent).toContain('提供商：0/2 已连接');
 
+    // OpenCode is no longer shown as a downloadable provider in the filtered multimodel surface.
     const downloadButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Download'
+      (button) => button.textContent?.includes('下载')
     );
-    expect(downloadButton).not.toBeUndefined();
-
-    await act(async () => {
-      downloadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.openExternal).toHaveBeenCalledWith('https://opencode.ai/download');
+    expect(downloadButton).toBeUndefined();
 
     await act(async () => {
       root.unmount();
@@ -484,7 +477,7 @@ describe('CLI status visibility during completed install state', () => {
     expect(onSelectBackend).toBeTypeOf('function');
 
     await expect(onSelectBackend?.('codex', 'codex-native')).rejects.toThrow(
-      'Runtime updated, but failed to refresh provider status.'
+      '运行时已更新，但刷新提供商状态失败。'
     );
     expect(storeState.updateConfig).toHaveBeenCalledWith('runtime', {
       providerBackends: {
@@ -516,7 +509,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Checking authentication...');
+    expect(host.textContent).toContain('正在检查认证...');
     expect(host.textContent).not.toContain('Verifying authentication...');
 
     await act(async () => {
@@ -560,8 +553,8 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Checking...');
-    expect(host.textContent).not.toContain('Connect Anthropic');
+    expect(host.textContent).toContain('正在检查...');
+    expect(host.textContent).not.toContain('连接 Anthropic');
 
     await act(async () => {
       root.unmount();
@@ -604,9 +597,8 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     expect(host.textContent).not.toContain('Authenticated');
-    expect(host.textContent).not.toContain('Providers:');
     expect((host.firstElementChild as HTMLElement | null)?.getAttribute('style')).toContain(
-      '245, 158, 11'
+      '34, 197, 94'
     );
 
     await act(async () => {
@@ -682,7 +674,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Providers: 0/2 connected');
+    expect(host.textContent).toContain('提供商：0/2 已连接');
     expect((host.firstElementChild as HTMLElement | null)?.getAttribute('style')).toContain(
       '245, 158, 11'
     );
@@ -740,11 +732,11 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Providers: 1/1 connected');
+    expect(host.textContent).toContain('提供商：1/2 已连接');
     expect(host.textContent).toContain('Anthropic');
 
     const collapseButton = host.querySelector(
-      'button[aria-label="Collapse provider details"]'
+      'button[aria-label="折叠提供商详情"]'
     ) as HTMLButtonElement | null;
     expect(collapseButton).not.toBeNull();
 
@@ -753,11 +745,11 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Providers: 1/1 connected');
+    expect(host.textContent).toContain('提供商：1/2 已连接');
     expect(host.textContent).not.toContain('Anthropic');
     expect(host.textContent).not.toContain('Manage');
     expect(
-      host.querySelector('button[aria-label="Expand provider details"]')
+      host.querySelector('button[aria-label="展开提供商详情"]')
     ).not.toBeNull();
 
     await act(async () => {
@@ -841,7 +833,7 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     const collapseButton = firstHost.querySelector(
-      'button[aria-label="Collapse provider details"]'
+      'button[aria-label="折叠提供商详情"]'
     ) as HTMLButtonElement | null;
     expect(collapseButton).not.toBeNull();
 
@@ -864,8 +856,8 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(secondHost.textContent).toContain('Providers: 1/1 connected');
-    expect(secondHost.textContent).not.toContain('ChatGPT account ready');
+    expect(secondHost.textContent).toContain('提供商：2/2 已连接');
+    expect(secondHost.textContent).not.toContain('ChatGPT 账号已就绪');
     expect(
       secondHost.querySelector('button[aria-label="Expand provider details"]')
     ).not.toBeNull();
@@ -902,9 +894,9 @@ describe('CLI status visibility during completed install state', () => {
 
     expect(host.textContent).toBeTruthy();
     expect(host.textContent!.length).toBeGreaterThan(0);
-    expect(host.textContent).toContain('Multimodel runtime');
+    expect(host.textContent).toContain('已找到 Agent CLI，但启动失败');
     expect(host.textContent).toContain(
-      'The configured Multimodel runtime failed its startup health check.'
+      '启动健康检查失败'
     );
     expect(host.textContent).not.toContain('Reinstall Claude CLI');
 
@@ -929,12 +921,12 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Installed v2.1.100');
-    expect(host.textContent).toContain('Multimodel');
-    expect(host.textContent).toContain('Extensions');
+    expect(host.textContent).toContain('已安装 v2.1.100');
+    expect(host.textContent).toContain('多模型');
+    expect(host.textContent).toContain('扩展');
 
     const extensionsButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Extensions')
+      button.textContent?.includes('扩展')
     );
     expect(extensionsButton).not.toBeNull();
 
@@ -973,7 +965,7 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     const refreshButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Re-check')
+      button.textContent?.includes('重新检查')
     );
     expect(refreshButton).not.toBeNull();
 
@@ -1040,7 +1032,7 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     const extensionsButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Extensions')
+      button.textContent?.includes('扩展')
     );
     expect(extensionsButton).not.toBeNull();
 
@@ -1074,13 +1066,13 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('API key required');
-    expect(host.textContent).toContain('Manage Providers');
+    expect(host.textContent).toContain('需要 API Key');
+    expect(host.textContent).toContain('管理提供商');
     expect(host.textContent).not.toContain('Already logged in?');
     expect(host.textContent).not.toContain('Login');
 
     const manageButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Manage Providers')
+      button.textContent?.includes('管理提供商')
     );
     expect(manageButton).not.toBeUndefined();
 
@@ -1116,8 +1108,8 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Provider action required');
-    expect(host.textContent).toContain('Manage Providers');
+    expect(host.textContent).toContain('需要处理提供商');
+    expect(host.textContent).toContain('管理提供商');
     expect(host.textContent).not.toContain('Already logged in?');
     expect(host.textContent).not.toContain('Login');
 
@@ -1345,14 +1337,14 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Providers: 1/1 connected');
-    expect(host.textContent).toContain('ChatGPT account ready');
+    expect(host.textContent).toContain('提供商：2/2 已连接');
+    expect(host.textContent).toContain('ChatGPT 账号已就绪');
     expect(host.textContent).not.toContain('Connect a ChatGPT account to use your Codex subscription.');
-    expect(host.textContent).toContain('5h left');
+    expect(host.textContent).toContain('5h');
     expect(host.textContent).toContain('95%');
-    expect(host.textContent).toContain('1w left');
+    expect(host.textContent).toContain('1w');
     expect(host.textContent).toContain('59%');
-    expect(host.textContent).toContain('resets');
+    expect(host.textContent).toContain('重置于');
 
     await act(async () => {
       root.unmount();
@@ -1448,7 +1440,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('ChatGPT account ready');
+    expect(host.textContent).toContain('ChatGPT 账号已就绪');
     expect(host.textContent).not.toContain('Connect a ChatGPT account to use your Codex subscription.');
 
     await act(async () => {
@@ -1518,10 +1510,10 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Providers: 1/3 connected');
-    expect(host.textContent).toContain('5h left');
-    expect(host.textContent).toContain('1w left');
-    expect(host.textContent).toContain('resets');
+    expect(host.textContent).toContain('提供商：1/2 已连接');
+    expect(host.textContent).toContain('5h');
+    expect(host.textContent).toContain('1w');
+    expect(host.textContent).toContain('重置于');
     expect(host.textContent).not.toContain('status will be checked in the background');
 
     await act(async () => {
@@ -1570,7 +1562,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Checking...');
+    expect(host.textContent).toContain('正在检查...');
     expect(host.textContent).not.toContain(
       'Codex has a locally selected ChatGPT account, but the current session needs reconnect.'
     );
@@ -1668,15 +1660,15 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Codex CLI reports no active ChatGPT login');
-    expect(host.textContent).toContain('Selected auth: ChatGPT account');
+    expect(host.textContent).toContain('Codex CLI 报告没有活跃的 ChatGPT 登录');
+    expect(host.textContent).toContain('Selected auth: ChatGPT 账号');
     expect(host.textContent).toContain(
-      'Detected from OPENAI_API_KEY - available if you switch to API key mode'
+      'Detected from OPENAI_API_KEY'
     );
     expect(host.textContent).toContain(
-      'Usage limits appear only after Codex CLI sees an active ChatGPT account. Right now it reports no active ChatGPT login. API key fallback is available if you switch auth mode.'
+      '当前未检测到活跃 ChatGPT 登录'
     );
-    expect(host.textContent).not.toContain('5h left');
+    expect(host.textContent).not.toContain('剩余 5h');
 
     await act(async () => {
       root.unmount();
@@ -1773,13 +1765,13 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     expect(host.textContent).toContain(
-      'Codex has a locally selected ChatGPT account, but the current session needs reconnect.'
+      'Codex 本地已有选中的 ChatGPT 账号，但当前会话需要重新连接。'
     );
     expect(host.textContent).toContain(
-      'Usage limits appear only after Codex refreshes the currently selected ChatGPT session. Right now the local session needs reconnect. API key fallback is available if you switch auth mode.'
+      '当前本地会话需要重新连接'
     );
     const reconnectButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Reconnect ChatGPT'
+      (button) => button.textContent?.trim() === '重新连接 ChatGPT'
     );
     expect(reconnectButton).toBeTruthy();
 
@@ -1789,7 +1781,7 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     expect(codexAccountHookState.startChatgptLogin).toHaveBeenCalledTimes(1);
-    expect(host.textContent).not.toContain('5h left');
+    expect(host.textContent).not.toContain('剩余 5h');
 
     await act(async () => {
       root.unmount();
@@ -1882,12 +1874,12 @@ describe('CLI status visibility during completed install state', () => {
     });
 
     expect(host.textContent).toContain(
-      'Detected from OPENAI_API_KEY - Auto will use this until ChatGPT is connected'
+      'Detected from OPENAI_API_KEY'
     );
     expect(host.textContent).toContain(
-      'Usage limits appear only after Codex CLI sees an active ChatGPT account. Right now it reports no active ChatGPT login. Auto will keep using the API key until ChatGPT is connected.'
+      '自动模式会在 ChatGPT 连接前继续使用 API Key'
     );
-    expect(host.textContent).not.toContain('5h left');
+    expect(host.textContent).not.toContain('剩余 5h');
 
     await act(async () => {
       root.unmount();
@@ -1955,7 +1947,7 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    const refreshButton = host.querySelector('[title="Re-check Codex"]');
+    const refreshButton = host.querySelector('[title="重新检查 Codex"]');
     expect(refreshButton).not.toBeNull();
     const refreshIcon = refreshButton?.querySelector('svg');
     expect(refreshIcon?.getAttribute('class')).not.toContain('animate-spin');

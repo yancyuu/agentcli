@@ -1260,6 +1260,7 @@ export class TeamDataService {
           migrateProviderBackendId(teamMeta?.providerId, teamMeta?.providerBackendId) ??
           undefined,
         leadFastMode: teamMeta?.launchIdentity?.selectedFastMode ?? teamMeta?.fastMode ?? undefined,
+        leadWorkflow: teamMeta?.workflow,
         leadResolvedFastMode:
           typeof teamMeta?.launchIdentity?.resolvedFastMode === 'boolean'
             ? teamMeta.launchIdentity.resolvedFastMode

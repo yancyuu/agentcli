@@ -75,6 +75,25 @@ function normalizeFeishuChannels(channels: FeishuChannelDraft[]): FeishuChannelD
   });
 }
 
+function findSavedFeishuChannel(
+  savedChannels: readonly FeishuChannelDraft[],
+  original: FeishuChannelDraft | undefined,
+  originalId: string
+): FeishuChannelDraft | undefined {
+  return (
+    savedChannels.find((channel) => channel.id === originalId) ??
+    (original
+      ? savedChannels.find(
+          (channel) =>
+            channel.name === (original.name.trim() || '飞书长连接') &&
+            channel.feishu.appId === original.feishu.appId.trim() &&
+            channel.feishu.appSecret === original.feishu.appSecret.trim() &&
+            channel.boundTeam === original.boundTeam
+        )
+      : undefined)
+  );
+}
+
 function getStatusLabel(status?: LeadChannelStatus): string {
   if (!status) return '未连接';
   if (status.message) return status.message;
@@ -265,20 +284,21 @@ export const ChannelsSection = (): React.JSX.Element => {
     }
     try {
       const savedChannels = await save(feishuChannels);
-      const snapshot = await api.teams.startFeishuLeadChannel(channelId);
-      const savedChannel = savedChannels.find((channel) => channel.id === channelId);
+      const savedChannel = findSavedFeishuChannel(savedChannels, targetChannel, channelId);
+      const effectiveChannelId = savedChannel?.id ?? channelId;
+      const snapshot = await api.teams.startFeishuLeadChannel(effectiveChannelId);
       const nextStatus =
-        snapshot?.statusesByChannel?.[channelId] ??
+        snapshot?.statusesByChannel?.[effectiveChannelId] ??
         (savedChannel
           ? await api.teams
               .getGlobalLeadChannel()
-              .then((globalSnapshot) => globalSnapshot.statusesByChannel?.[channelId])
+              .then((globalSnapshot) => globalSnapshot.statusesByChannel?.[effectiveChannelId])
               .catch(() => undefined)
           : undefined);
       if (nextStatus) {
-        setStatusesByChannel((prev) => ({ ...prev, [channelId]: nextStatus }));
+        setStatusesByChannel((prev) => ({ ...prev, [effectiveChannelId]: nextStatus }));
       } else {
-        const channel = savedChannels.find((item) => item.id === channelId);
+        const channel = savedChannels.find((item) => item.id === effectiveChannelId);
         if (channel) await refreshChannelStatus(channel);
       }
       setMessage('已保存并连接渠道。');

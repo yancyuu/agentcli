@@ -17,29 +17,29 @@ import {
 describe('formatTeamModelSummary', () => {
   it('shows cross-provider Anthropic models as backend-routed instead of brand-mismatched', () => {
     expect(formatTeamModelSummary('codex', 'claude-opus-4-6', 'medium')).toBe(
-      'Opus 4.6 · via Codex · Medium'
+      'Opus 4.6 · 经由 Codex · 中'
     );
   });
 
   it('formats current Anthropic Opus model ids with the latest 4.7 label', () => {
     expect(formatTeamModelSummary('anthropic', 'claude-opus-4-7', 'high')).toBe(
-      'Anthropic · Opus 4.7 · High'
+      'Anthropic · Opus 4.7 · 高'
     );
     expect(formatTeamModelSummary('codex', 'claude-opus-4-7', 'medium')).toBe(
-      'Opus 4.7 · via Codex · Medium'
+      'Opus 4.7 · 经由 Codex · 中'
     );
   });
 
   it('keeps native Codex-family models branded normally', () => {
-    expect(formatTeamModelSummary('codex', 'gpt-5.4', 'medium')).toBe('5.4 · Medium');
+    expect(formatTeamModelSummary('codex', 'gpt-5.4', 'medium')).toBe('5.4 · 中');
   });
 
   it('formats OpenCode models with source-aware summaries while preserving opaque ids', () => {
     expect(formatTeamModelSummary('opencode', 'openai/gpt-5.4', 'medium')).toBe(
-      'GPT-5.4 · via OpenAI · Medium'
+      'GPT-5.4 · 经由 OpenAI · 中'
     );
     expect(formatTeamModelSummary('opencode', 'openrouter/moonshotai/kimi-k2', 'low')).toBe(
-      'moonshotai/kimi-k2 · via OpenRouter · Low'
+      'moonshotai/kimi-k2 · 经由 OpenRouter · 低'
     );
   });
 

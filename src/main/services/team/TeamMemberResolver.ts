@@ -1,5 +1,6 @@
 import { buildPlannedMemberLaneIdentity } from '@features/team-runtime-lanes';
 import { getMemberColorByName } from '@shared/constants/memberColors';
+import { isLeadMember } from '@shared/utils/leadDetection';
 import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
 import {
@@ -76,6 +77,7 @@ export class TeamMemberResolver {
       leadProviderBackendId?: TeamProviderBackendId | null;
       leadFastMode?: TeamMember['fastMode'];
       leadResolvedFastMode?: boolean | null;
+      leadWorkflow?: string;
     }
   ): TeamMemberSnapshot[] {
     const names = new Set<string>();
@@ -292,6 +294,9 @@ export class TeamMemberResolver {
       const configMember = configMemberMap.get(name);
       const metaMember = metaMemberMap.get(name);
       const launchMember = launchMemberMap.get(name);
+      const isLead =
+        isLeadMember({ name, agentType: configMember?.agentType ?? metaMember?.agentType }) ||
+        name.trim().toLowerCase() === 'team-lead';
       const effectiveProviderId =
         launchMember?.providerId ??
         configMember?.providerId ??
@@ -320,7 +325,9 @@ export class TeamMemberResolver {
         color: configMember?.color ?? metaMember?.color ?? getMemberColorByName(name),
         agentType: configMember?.agentType ?? metaMember?.agentType,
         role: configMember?.role ?? metaMember?.role,
-        workflow: configMember?.workflow ?? metaMember?.workflow,
+        workflow: isLead
+          ? (options?.leadWorkflow ?? configMember?.workflow ?? metaMember?.workflow)
+          : (configMember?.workflow ?? metaMember?.workflow),
         isolation: configMember?.isolation ?? metaMember?.isolation,
         providerId: effectiveProviderId,
         providerBackendId,

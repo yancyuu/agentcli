@@ -587,7 +587,7 @@ describe('extensionsSlice', () => {
       const tabs = store.getState().paneLayout.panes.flatMap((p) => p.tabs);
       const extTab = tabs.find((t) => t.type === 'extensions');
       expect(extTab).toBeDefined();
-      expect(extTab!.label).toBe('Extensions');
+      expect(extTab!.label).toBe('扩展');
     });
 
     it('seeds projectId from activeProjectId when selectedProjectId is null', () => {

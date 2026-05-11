@@ -9,6 +9,21 @@ import * as path from 'path';
 
 import { afterEach, beforeEach, expect, vi } from 'vitest';
 
+// Polyfill localStorage for happy-dom 20.x which exposes an empty object
+// instead of a Storage instance in the vitest environment.
+if (!globalThis.localStorage?.getItem) {
+  const store: Record<string, string> = {};
+  const storage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value; },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+    get length() { return Object.keys(store).length; },
+    key: (i: number) => Object.keys(store)[i] ?? null,
+  };
+  Object.defineProperty(globalThis, 'localStorage', { value: storage, writable: true });
+}
+
 // Mock Sentry Electron SDK — it requires the real `electron` package at import
 // time which is unavailable in the vitest/happy-dom environment.
 const sentryNoOp = {

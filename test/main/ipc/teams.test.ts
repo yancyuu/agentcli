@@ -257,6 +257,8 @@ describe('ipc teams handlers', () => {
     stopTeam: vi.fn(() => Promise.resolve()),
     reattachOpenCodeOwnedMemberLane: vi.fn(async () => undefined),
     detachOpenCodeOwnedMemberLane: vi.fn(async () => undefined),
+    getLeadUserSendBlockReason: vi.fn(() => null as string | null),
+    markLiveMemberSpawnQueueFailed: vi.fn(async () => undefined),
   };
   const boardTaskActivityService = {
     getTaskActivity: vi.fn<() => Promise<BoardTaskActivityEntry[]>>(async () => []),

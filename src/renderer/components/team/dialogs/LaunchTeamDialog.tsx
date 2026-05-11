@@ -754,6 +754,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         setSelectedEffortRaw(savedRequest?.effort ?? '');
         setSelectedFastModeRaw(savedRequest?.fastMode ?? getStoredTeamFastMode());
         setSkipPermissionsRaw(savedRequest?.skipPermissions ?? true);
+        setClearContext(true);
       })();
       return () => {
         cancelled = true;
@@ -2126,6 +2127,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   <p className="opacity-80">
                     系统会停止当前团队进程，并使用以下运行时配置重新启动。
                     如需修改成员或工作流，请先在团队编辑面板中修改。
+                    默认使用全新会话，避免恢复大上下文时触发 API 频率限制。
                   </p>
                 </div>
               </div>
@@ -2181,6 +2183,19 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                 清空上下文（新会话）
               </Label>
             </div>
+            {!clearContext && (
+              <div
+                className="rounded-md border px-3 py-2 text-xs"
+                style={{
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  borderColor: 'rgba(245, 158, 11, 0.25)',
+                  color: '#fbbf24',
+                }}
+              >
+                恢复上次会话会带上旧上下文；当上下文较大或模型处于冷却时，重启更容易触发 API
+                频率限制。
+              </div>
+            )}
             {clearContext && (
               <div
                 className="rounded-md border px-3 py-2 text-xs"

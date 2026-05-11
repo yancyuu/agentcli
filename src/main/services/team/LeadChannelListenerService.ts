@@ -66,6 +66,17 @@ export interface LeadChannelInboundMessage {
   from: string;
 }
 
+interface FeishuMessageEventRow {
+  message?: {
+    content?: string;
+    message_type?: string;
+    chat_id?: string;
+    message_id?: string;
+    create_time?: string;
+  };
+  sender?: { sender_id?: Record<string, string> };
+}
+
 function cloneDefaultConfig(): LeadChannelConfig {
   return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as LeadChannelConfig;
 }
@@ -157,11 +168,20 @@ function normalizeConfig(input: unknown): LeadChannelConfig {
   return { channels, feishu: legacyFeishu };
 }
 
+function getFeishuEventRow(event: unknown): FeishuMessageEventRow {
+  const root = event && typeof event === 'object' ? (event as Record<string, unknown>) : {};
+  const nested = root.event;
+  if (nested && typeof nested === 'object') {
+    const nestedRow = nested as FeishuMessageEventRow;
+    if (nestedRow.message || nestedRow.sender) {
+      return nestedRow;
+    }
+  }
+  return root as FeishuMessageEventRow;
+}
+
 function extractFeishuText(event: unknown): string {
-  const row = event as {
-    message?: { content?: string; message_type?: string; chat_id?: string };
-    sender?: { sender_id?: Record<string, string> };
-  };
+  const row = getFeishuEventRow(event);
   const rawContent = row.message?.content;
   if (typeof rawContent !== 'string' || rawContent.trim().length === 0) {
     return `[飞书事件] 收到 ${row.message?.message_type ?? '未知'} 类型消息。`;
@@ -239,6 +259,24 @@ function buildFeishuInboundMessageId(input: {
   )}`;
 }
 
+function buildFeishuLeadMessageText(input: {
+  channelName: string;
+  channelId: string;
+  chatId: string;
+  senderId: string;
+  text: string;
+}): string {
+  return [
+    '【飞书消息】负责人请处理这条来自飞书的外部消息。',
+    `渠道：${input.channelName} (${input.channelId})`,
+    `飞书会话：${input.chatId}`,
+    `飞书用户ID：${input.senderId}`,
+    `发送者：${input.senderId}`,
+    '',
+    input.text,
+  ].join('\n');
+}
+
 export class LeadChannelListenerService {
   private readonly inboxWriter = new TeamInboxWriter();
   private readonly configReader = new TeamConfigReader();
@@ -283,7 +321,7 @@ export class LeadChannelListenerService {
     request: SaveLeadChannelConfigRequest
   ): Promise<GlobalLeadChannelSnapshot> {
     const config = normalizeConfig(request);
-    await this.stopRemovedOrReconfiguredFeishuChannels(config.channels);
+    await this.stopRemovedOrReconfiguredFeishuChannels(config);
     const configPath = getGlobalLeadChannelConfigPath();
     await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
     await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -419,16 +457,20 @@ export class LeadChannelListenerService {
     const eventDispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data: unknown) => {
         const text = extractFeishuText(data);
-        const event = data as {
-          message?: { chat_id?: string; message_id?: string; create_time?: string };
-          sender?: { sender_id?: Record<string, string> };
-        };
+        const event = getFeishuEventRow(data);
         const chatId = event.message?.chat_id ?? 'unknown-chat';
         const senderId =
           event.sender?.sender_id?.open_id ?? event.sender?.sender_id?.user_id ?? 'unknown-sender';
         const messageId = buildFeishuInboundMessageId({
           channelId: channel.id,
           event: data,
+          chatId,
+          senderId,
+          text,
+        });
+        const leadMessageText = buildFeishuLeadMessageText({
+          channelName: channel.name,
+          channelId: channel.id,
           chatId,
           senderId,
           text,
@@ -440,7 +482,7 @@ export class LeadChannelListenerService {
           chatId,
           senderId,
           messageId,
-          text,
+          text: leadMessageText,
           from: `${channel.name}:${senderId}`,
         };
         const eventClaim = await this.claimInboundEvent(statusOwner, channel.id, inboundMessage);
@@ -505,7 +547,7 @@ export class LeadChannelListenerService {
             member: leadName,
             to: leadName,
             from: 'user',
-            text,
+            text: leadMessageText,
             messageId: inboundMessage.messageId,
             source: 'inbox',
             externalChannel: {
@@ -545,6 +587,10 @@ export class LeadChannelListenerService {
     options: { dedupeKey?: string } = {}
   ): Promise<void> {
     const normalizedText = text.trim();
+    if (!normalizedText) {
+      logger.warn(`[${channelId}] skipped empty Feishu reply to chat ${chatId}`);
+      return;
+    }
     const dedupeKey =
       options.dedupeKey?.trim() || `${channelId}:${chatId}:text:${shortHash(normalizedText)}`;
     if (this.isRecentDuplicateFeishuReply(dedupeKey)) {
@@ -601,15 +647,28 @@ export class LeadChannelListenerService {
   }
 
   private async stopRemovedOrReconfiguredFeishuChannels(
-    nextChannels: readonly LeadChannelDefinition[]
+    nextConfig: LeadChannelConfig
   ): Promise<void> {
-    const nextChannelIds = new Set(
-      nextChannels
+    const nextChannelsByKey = new Map(
+      nextConfig.channels
         .filter((channel) => channel.provider === 'feishu' && channel.enabled !== false)
-        .map((channel) => this.getChannelKey(channel.id))
+        .map((channel) => [this.getChannelKey(channel.id), channel] as const)
     );
     for (const key of Array.from(this.wsClientByChannel.keys())) {
-      if (nextChannelIds.has(key)) {
+      const nextChannel = nextChannelsByKey.get(key);
+      if (!nextChannel) {
+        this.closeFeishuChannelRuntime(key);
+        this.clearConnectingHint(GLOBAL_CHANNEL_STATUS_OWNER, key);
+        continue;
+      }
+      const feishuConfig = nextChannel.feishu ?? nextConfig.feishu;
+      const appId = feishuConfig.appId.trim();
+      const appSecret = feishuConfig.appSecret.trim();
+      const nextSignature =
+        appId && appSecret
+          ? this.buildFeishuChannelConfigSignature(nextChannel, appId, appSecret)
+          : '';
+      if (nextSignature && this.channelConfigSignatureByKey.get(key) === nextSignature) {
         continue;
       }
       this.closeFeishuChannelRuntime(key);

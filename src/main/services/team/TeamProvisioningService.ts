@@ -418,6 +418,7 @@ const RUN_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 15_000;
 const MCP_PREFLIGHT_INITIALIZE_TIMEOUT_MS = 45_000;
 const MEMBER_BOOTSTRAP_PARALLEL_WINDOW = 3;
+const LAZY_NATIVE_MEMBER_BOOTSTRAP = true;
 
 // MCP preflight is process-global: agent-teams server is bundled with the app,
 // so one successful validation covers all subsequent team launches.
@@ -2153,14 +2154,16 @@ function indentMultiline(text: string, indent: string): string {
     .join('\n');
 }
 
-const MAX_MEMBER_WORKFLOW_PROMPT_CHARS = 12_000;
+// Keep bootstrap prompts light. Full workflows are persisted and available via member_briefing.
+const MAX_MEMBER_WORKFLOW_PROMPT_CHARS = 1_200;
+const EMBED_WORKFLOW_IN_SPAWN_PROMPT = false;
 
 function formatWorkflowBlock(workflow: string, indent: string): string {
   const trimmed = workflow.trim();
   if (trimmed.length === 0) return '';
   const truncated = trimmed.length > MAX_MEMBER_WORKFLOW_PROMPT_CHARS;
   const safeWorkflow = truncated
-    ? `${trimmed.slice(0, MAX_MEMBER_WORKFLOW_PROMPT_CHARS).trimEnd()}\n\n[Workflow truncated for Agent tool input validation. Call member_briefing for the full persisted workflow before acting.]`
+    ? `${trimmed.slice(0, MAX_MEMBER_WORKFLOW_PROMPT_CHARS).trimEnd()}\n\n[Workflow shortened for faster team startup. Call member_briefing for the full persisted workflow before acting.]`
     : trimmed;
   const body = indentMultiline(safeWorkflow, indent);
   return `\n${indent}---BEGIN WORKFLOW---\n${body}\n${indent}---END WORKFLOW---`;
@@ -2168,6 +2171,10 @@ function formatWorkflowBlock(workflow: string, indent: string): string {
 
 const AGENT_SPAWN_SUBAGENT_TYPE_RULE =
   '关键：Agent 工具的 subagent_type 必须固定为 "general-purpose"。不要把成员名、角色名（例如 researcher/developer/reviewer）或 workflow 名称填入 subagent_type。角色只放在 prompt 中。';
+
+function buildWorkflowBriefingInstruction(memberName: string): string {
+  return `Workflow is stored in the team config. Do not rely on this launch prompt for full workflow details; your first member_briefing call for memberName="${memberName}" will return the complete workflow before you act.`;
+}
 
 type TeamMemberInput = TeamCreateRequest['members'][number];
 
@@ -2222,68 +2229,6 @@ function buildEffectiveTeamMemberSpecs(
   }
 ): TeamCreateRequest['members'] {
   return members.map((member) => buildEffectiveTeamMemberSpec(member, defaults));
-}
-
-function shouldSkipResumeForProviderRuntimeChange(
-  request: Pick<TeamLaunchRequest, 'providerId' | 'providerBackendId' | 'model'>,
-  config: Record<string, unknown>,
-  persistedProviderBackendId?: string | null
-): { skip: boolean; reason?: string } {
-  const providerId = normalizeTeamMemberProviderId(request.providerId);
-  if (providerId !== 'gemini' && providerId !== 'codex') {
-    return { skip: false };
-  }
-
-  const requestedBackendId =
-    migrateProviderBackendId(providerId, request.providerBackendId?.trim()) || null;
-  const previousBackendId =
-    migrateProviderBackendId(providerId, persistedProviderBackendId?.trim()) || null;
-  if (requestedBackendId && previousBackendId && requestedBackendId !== previousBackendId) {
-    return {
-      skip: true,
-      reason: `runtime backend changed (${previousBackendId} -> ${requestedBackendId})`,
-    };
-  }
-
-  const members = Array.isArray(config.members)
-    ? (config.members as Record<string, unknown>[])
-    : [];
-  const lead =
-    members.find((member) => isLeadMember(member)) ??
-    members.find((member) => {
-      const name = typeof member?.name === 'string' ? member.name.trim().toLowerCase() : '';
-      return isLeadMemberName(name);
-    });
-  if (!lead) {
-    return { skip: false };
-  }
-
-  const currentLeadProviderId =
-    normalizeTeamMemberProviderId(
-      typeof lead.providerId === 'string'
-        ? lead.providerId
-        : typeof lead.provider === 'string'
-          ? lead.provider
-          : providerId
-    ) ?? providerId;
-  const requestedModel = request.model?.trim() || '';
-  const currentLeadModel = typeof lead.model === 'string' ? lead.model.trim() : '';
-
-  if (currentLeadProviderId !== providerId) {
-    return {
-      skip: true,
-      reason: `provider changed (${currentLeadProviderId} -> ${providerId})`,
-    };
-  }
-
-  if (requestedModel && currentLeadModel && requestedModel !== currentLeadModel) {
-    return {
-      skip: true,
-      reason: `model changed (${currentLeadModel} -> ${requestedModel})`,
-    };
-  }
-
-  return { skip: false };
 }
 
 function buildMembersPrompt(members: TeamCreateRequest['members']): string {
@@ -2611,12 +2556,14 @@ function buildMemberSpawnPrompt(
     ? `\nModel override for this teammate: ${member.model.trim()}.`
     : '';
   const effortLine = member.effort ? `\nEffort override for this teammate: ${member.effort}.` : '';
-  const workflowBlock = member.workflow?.trim()
-    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
-    : '';
+  const workflowBlock =
+    EMBED_WORKFLOW_IN_SPAWN_PROMPT && member.workflow?.trim()
+      ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
+      : '';
   return `You are ${member.name}, the ${role} on team "${displayName}" (${teamName}).${providerLine}${modelLine}${effortLine}${workflowBlock}
 
 Language: reply to users and teammates in Chinese.
+${buildWorkflowBriefingInstruction(member.name)}
 First action: call the MCP tool member_briefing with { teamName: "${teamName}", memberName: "${member.name}" }.
 Call member_briefing yourself. Do not use another Agent/subagent for that step.
 If member_briefing is temporarily unavailable, retry tool discovery once. If it is still unavailable, use these embedded rules and stay quiet when there is no task.
@@ -2656,9 +2603,10 @@ function buildReconnectMemberSpawnPrompt(
   const effortLine = member.effort
     ? `\n     Effort override for this teammate: ${member.effort}.`
     : '';
-  const workflowBlock = member.workflow?.trim()
-    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '     ')}`
-    : '';
+  const workflowBlock =
+    EMBED_WORKFLOW_IN_SPAWN_PROMPT && member.workflow?.trim()
+      ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '     ')}`
+      : '';
   const providerArgLine =
     member.providerId && member.providerId !== 'anthropic'
       ? `   - provider: "${member.providerId}"\n`
@@ -2670,6 +2618,7 @@ ${providerArgLine}${modelArgLine}${effortArgLine}   - prompt:
      You are ${member.name}, the ${role} on team "${teamName}" (${teamName}).${providerLine}${modelLine}${effortLine}${workflowBlock}
      Language: reply to users and teammates in Chinese.
      This is a reconnect after restart. ${hasTasks ? 'You may have existing tasks from the prior session.' : 'You currently have no assigned tasks.'}
+     ${buildWorkflowBriefingInstruction(member.name)}
      First action: call member_briefing with { teamName: "${teamName}", memberName: "${member.name}" }.
      Call member_briefing yourself; do not delegate this bootstrap step.
      If member_briefing is unavailable after one retry, use these embedded rules and stay quiet when there is no task.
@@ -2784,7 +2733,8 @@ function buildNativeCreateBootstrapPrompt(
   request: TeamCreateRequest,
   effectiveMembers: TeamCreateRequest['members'],
   initialUserPrompt: string,
-  feishuChannels: readonly BoundFeishuChannel[] = []
+  feishuChannels: readonly BoundFeishuChannel[] = [],
+  lazyMemberBootstrap = false
 ): string {
   const leadName = CANONICAL_LEAD_MEMBER_NAME;
   const displayName = request.displayName?.trim() || request.teamName;
@@ -2799,19 +2749,28 @@ function buildNativeCreateBootstrapPrompt(
   });
   const batchSize = MEMBER_BOOTSTRAP_PARALLEL_WINDOW;
   const needsBatches = effectiveMembers.length > batchSize;
-  const spawnInstructions = effectiveMembers.length
-    ? [
-        needsBatches
-          ? `重要：按小批次启动成员/员工，每批最多 ${batchSize} 个。可以并行启动同一批成员；等当前批次的 Agent 工具全部返回后，再启动下一批。不要一次性并行启动所有成员，否则可能导致 API 频率限制。`
-          : '启动成员/员工。为该成员发起一个 Agent 工具调用。',
-        AGENT_SPAWN_SUBAGENT_TYPE_RULE,
-        ...effectiveMembers.map((member) => {
-          const prompt = buildMemberSpawnPrompt(member, displayName, request.teamName, leadName);
-          const agentArgs = buildAgentToolArgsSuffix(member);
-          return `Spawn teammate "${member.name}" with the Agent tool using team_name="${request.teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}, and this exact prompt:\n${indentMultiline(prompt, '  ')}`;
-        }),
-      ].join('\n\n')
-    : '该团队未配置成员。不要启动成员。';
+  const spawnInstructions = lazyMemberBootstrap
+    ? effectiveMembers.length
+      ? [
+          '成员采用按需启动模式。本轮不要启动成员，不要调用带 team_name 的 Agent。',
+          '成员名单已写入团队 roster。后续如果要把任务分配给某个成员，或需要给某个成员发送消息，而该成员尚未在线，请先使用 Agent 工具启动该成员：team_name 必须是当前团队名，name 必须是成员名单中的真实成员名，subagent_type 必须是 "general-purpose"。',
+          '启动成员后再通过任务看板或 SendMessage 分派具体工作。',
+          AGENT_SPAWN_SUBAGENT_TYPE_RULE,
+        ].join('\n')
+      : '该团队未配置成员。不要启动成员。'
+    : effectiveMembers.length
+      ? [
+          needsBatches
+            ? `重要：按小批次启动成员/员工，每批最多 ${batchSize} 个。可以并行启动同一批成员；等当前批次的 Agent 工具全部返回后，再启动下一批。不要一次性并行启动所有成员，否则可能导致 API 频率限制。`
+            : '启动成员/员工。为该成员发起一个 Agent 工具调用。',
+          AGENT_SPAWN_SUBAGENT_TYPE_RULE,
+          ...effectiveMembers.map((member) => {
+            const prompt = buildMemberSpawnPrompt(member, displayName, request.teamName, leadName);
+            const agentArgs = buildAgentToolArgsSuffix(member);
+            return `Spawn teammate "${member.name}" with the Agent tool using team_name="${request.teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}, and this exact prompt:\n${indentMultiline(prompt, '  ')}`;
+          }),
+        ].join('\n\n')
+      : '该团队未配置成员。不要启动成员。';
   const userPromptBlock = initialUserPrompt.trim()
     ? `\nbootstrap 稳定后的初始用户请求：\n${initialUserPrompt.trim()}\n`
     : '';
@@ -2825,7 +2784,11 @@ ${getAgentLanguageInstruction()}${userPromptBlock}
 现在执行 bootstrap：
 ${spawnInstructions}
 
-配置的成员启动完成后：
+成员启动策略：
+- 当前使用按需启动；团队 ready 不代表所有成员已经启动。
+- 给成员分配任务或发送消息前，如成员尚未在线，请先启动该成员。
+
+bootstrap 完成后：
 - 如果存在初始用户请求，请创建/更新可见看板任务，并委派给合适的成员。solo 模式下由你自己创建/开始任务。
 - 如果没有初始用户请求，bootstrap 后保持安静，除非存在真实阻塞。
 
@@ -3005,7 +2968,7 @@ function buildFeishuCredentialsBlock(channels: readonly BoundFeishuChannel[]): s
 function buildLeadWorkflowBlock(leadWorkflow: string | undefined): string {
   const trimmed = leadWorkflow?.trim();
   if (!trimmed) return '';
-  return `\n\n负责人工作流（必须遵守）：${formatWorkflowBlock(trimmed, '')}`;
+  return `\n\n负责人工作流：完整内容已保存在团队配置中。启动后请通过 lead_briefing/看板上下文获取最新规则；为加快启动，这里只注入前 ${MAX_MEMBER_WORKFLOW_PROMPT_CHARS} 字符摘要。${formatWorkflowBlock(trimmed, '')}`;
 }
 
 function buildBootstrapLeadContext(opts: {
@@ -3282,7 +3245,8 @@ function buildDeterministicLaunchHydrationPrompt(
   tasks: TeamTask[],
   isResume: boolean,
   feishuChannels: readonly BoundFeishuChannel[] = [],
-  leadWorkflow?: string
+  leadWorkflow?: string,
+  lazyMemberBootstrap = false
 ): string {
   const leadName =
     members.find((member) => member.role?.toLowerCase().includes('lead'))?.name ||
@@ -3305,24 +3269,32 @@ function buildDeterministicLaunchHydrationPrompt(
   });
   const batchSize = MEMBER_BOOTSTRAP_PARALLEL_WINDOW;
   const needsBatches = members.length > batchSize;
-  const spawnInstructions = members.length
-    ? [
-        needsBatches
-          ? `重要：按小批次重新连接成员/员工，每批最多 ${batchSize} 个。可以并行重新连接同一批成员；等当前批次的 Agent 工具全部返回后，再重新连接下一批。不要一次性并行重新连接所有成员，否则可能导致 API 频率限制。`
-          : '重新连接成员/员工。为该成员发起一个 Agent 工具调用。',
-        AGENT_SPAWN_SUBAGENT_TYPE_RULE,
-        ...members.map((member) => {
-          const prompt = buildMemberSpawnPrompt(
-            member,
-            request.teamName,
-            request.teamName,
-            leadName
-          );
-          const agentArgs = buildAgentToolArgsSuffix(member);
-          return `Reconnect teammate "${member.name}" with the Agent tool using team_name="${request.teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}, and this exact prompt:\n${indentMultiline(prompt, '  ')}`;
-        }),
-      ].join('\n\n')
-    : '';
+  const spawnInstructions = lazyMemberBootstrap
+    ? members.length
+      ? [
+          '成员采用按需启动模式。本轮不要重新连接/启动成员，不要调用带 team_name 的 Agent。',
+          '后续如果要把任务分配给某个成员，或需要给某个成员发送消息，而该成员尚未在线，请先使用 Agent 工具启动该成员：team_name 必须是当前团队名，name 必须是成员名单中的真实成员名，subagent_type 必须是 "general-purpose"。',
+          AGENT_SPAWN_SUBAGENT_TYPE_RULE,
+        ].join('\n')
+      : ''
+    : members.length
+      ? [
+          needsBatches
+            ? `重要：按小批次重新连接成员/员工，每批最多 ${batchSize} 个。可以并行重新连接同一批成员；等当前批次的 Agent 工具全部返回后，再重新连接下一批。不要一次性并行重新连接所有成员，否则可能导致 API 频率限制。`
+            : '重新连接成员/员工。为该成员发起一个 Agent 工具调用。',
+          AGENT_SPAWN_SUBAGENT_TYPE_RULE,
+          ...members.map((member) => {
+            const prompt = buildMemberSpawnPrompt(
+              member,
+              request.teamName,
+              request.teamName,
+              leadName
+            );
+            const agentArgs = buildAgentToolArgsSuffix(member);
+            return `Reconnect teammate "${member.name}" with the Agent tool using team_name="${request.teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs}, and this exact prompt:\n${indentMultiline(prompt, '  ')}`;
+          }),
+        ].join('\n\n')
+      : '';
   const nextSteps = isSolo
     ? `本次 reconnect/bootstrap 步骤已经由 runtime 确定性完成。
 不要调用 TeamCreate。
@@ -3334,7 +3306,19 @@ ${
     ? '本轮不要创建或更新任何新任务，请等到下一次正常运行回合再把这些指令转换为看板工作。'
     : '本轮不要创建、分配或委派任何新任务。如果看板为空，请保持安静并等待新的用户指令。'
 }`
-    : `桌面应用已初始化负责人配置，但成员必须在本轮重新连接。
+    : lazyMemberBootstrap
+      ? `桌面应用已初始化负责人配置，成员采用按需启动模式。
+不要调用 TeamCreate、TeamDelete、TodoWrite 或任何清理工具。
+本轮不要重新连接/启动所有成员。
+${spawnInstructions}
+
+请查看当前看板快照。成员只有在被分配任务或需要接收消息时才启动。
+${
+  hasOriginalUserPrompt
+    ? '如果存在用户请求，请创建/更新可见看板任务并选择合适 owner；如该 owner 尚未在线，启动该成员后再分派。'
+    : '本轮不要创建、分配或委派新任务。如果看板为空，请保持安静并等待新的用户指令。'
+}`
+      : `桌面应用已初始化负责人配置，但成员必须在本轮重新连接。
 不要调用 TeamCreate、TeamDelete、TodoWrite 或任何清理工具。
 现在重新连接已配置成员：
 ${spawnInstructions}
@@ -12040,6 +12024,7 @@ export class TeamProvisioningService {
       const effectiveMemberSpecs = allEffectiveMemberSpecs.filter((member) =>
         primaryMemberNames.has(member.name)
       );
+      const bootstrapMemberSpecs = LAZY_NATIVE_MEMBER_BOOTSTRAP ? [] : effectiveMemberSpecs;
       const launchIdentity = await this.resolveAndValidateLaunchIdentity({
         claudePath,
         cwd: request.cwd,
@@ -12072,10 +12057,10 @@ export class TeamProvisioningService {
         timeoutHandle: null,
         fsMonitorHandle: null,
         onProgress,
-        expectedMembers: effectiveMemberSpecs.map((member) => member.name),
+        expectedMembers: bootstrapMemberSpecs.map((member) => member.name),
         request,
         allEffectiveMembers: allEffectiveMemberSpecs,
-        effectiveMembers: effectiveMemberSpecs,
+        effectiveMembers: bootstrapMemberSpecs,
         launchIdentity,
         mixedSecondaryLanes: this.createMixedSecondaryLaneStates(lanePlan),
         lastLogProgressAt: 0,
@@ -12123,7 +12108,7 @@ export class TeamProvisioningService {
         geminiPostLaunchHydrationSent: false,
         suppressGeminiPostLaunchHydrationOutput: false,
         memberSpawnStatuses: new Map(
-          effectiveMemberSpecs.map((member) => [member.name, createInitialMemberSpawnStatusEntry()])
+          bootstrapMemberSpecs.map((member) => [member.name, createInitialMemberSpawnStatusEntry()])
         ),
         memberSpawnToolUseIds: new Map(),
         pendingMemberRestarts: new Map(),
@@ -12159,7 +12144,8 @@ export class TeamProvisioningService {
         request,
         effectiveMemberSpecs,
         initialUserPrompt,
-        feishuChannels
+        feishuChannels,
+        LAZY_NATIVE_MEMBER_BOOTSTRAP
       );
       const promptSize = getPromptSizeSummary(nativeBootstrapPrompt);
       let child: ReturnType<typeof spawn>;
@@ -12227,7 +12213,7 @@ export class TeamProvisioningService {
       const bootstrapSpec = {
         mode: 'create' as const,
         team: { name: request.teamName, cwd: request.cwd },
-        members: effectiveMemberSpecs.map((member) => ({
+        members: bootstrapMemberSpecs.map((member) => ({
           name: member.name,
           agentType: 'agent-teams-member',
           description: member.role || member.name,
@@ -12248,12 +12234,12 @@ export class TeamProvisioningService {
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
         promptSize,
-        expectedMembersCount: effectiveMemberSpecs.length,
+        expectedMembersCount: bootstrapMemberSpecs.length,
       });
       logRuntimeLaunchSnapshot(request.teamName, claudePath, spawnArgs, request, shellEnv, {
         geminiRuntimeAuth,
         promptSize,
-        expectedMembersCount: effectiveMemberSpecs.length,
+        expectedMembersCount: bootstrapMemberSpecs.length,
         launchIdentity,
       });
       try {
@@ -12264,6 +12250,9 @@ export class TeamProvisioningService {
         await fs.promises.mkdir(teamDir, { recursive: true });
         await fs.promises.mkdir(tasksDir, { recursive: true });
         const membersToWrite = this.buildMembersMetaWritePayload(allEffectiveMemberSpecs);
+        const existingTeamMeta = await this.teamMetaStore
+          .getMeta(request.teamName)
+          .catch(() => null);
         await Promise.all([
           this.writeNativeClaudeLeadConfig(request),
           this.teamMetaStore.writeMeta(request.teamName, {
@@ -12282,6 +12271,7 @@ export class TeamProvisioningService {
             worktree: request.worktree,
             extraCliArgs: request.extraCliArgs,
             limitContext: request.limitContext,
+            workflow: existingTeamMeta?.workflow,
             launchIdentity,
             createdAt: Date.now(),
           }),
@@ -12477,6 +12467,7 @@ export class TeamProvisioningService {
       worktree: request.worktree,
       extraCliArgs: request.extraCliArgs,
       limitContext: request.limitContext,
+      workflow: (await this.teamMetaStore.getMeta(request.teamName).catch(() => null))?.workflow,
       createdAt: Date.now(),
     });
     const membersToWrite = this.buildMembersMetaWritePayload(effectiveMembers);
@@ -12959,134 +12950,25 @@ export class TeamProvisioningService {
         }
       }
 
-      const [membersResult, persistedLaunchState] = await Promise.all([
-        this.resolveLaunchExpectedMembers(request.teamName, configRaw, request.providerId),
-        request.clearContext
-          ? Promise.resolve(null)
-          : this.launchStateStore.read(request.teamName).catch(() => null),
-      ]);
+      const membersResult = await this.resolveLaunchExpectedMembers(
+        request.teamName,
+        configRaw,
+        request.providerId
+      );
       const { members: expectedMemberSpecs, source, warning } = membersResult;
       _t('resolveLaunchExpectedMembers+launchState');
       assertOpenCodeNotLaunchedThroughLegacyProvisioning({
         providerId: request.providerId,
         members: expectedMemberSpecs,
       });
-      // Extract leadSessionId for session resume on reconnect.
-      // If a valid JSONL file exists for the previous session, we can resume it
-      // so the lead retains full context of prior work.
-      // When clearContext is true, skip resume entirely to start a fresh session.
+      // Start team launches from a fresh lead session by default.
+      // The durable source of truth is board/config/members metadata; resuming old
+      // transcripts makes startup slower and can trigger provider rate limits once
+      // historical context grows large. Old transcripts remain on disk for review.
       let previousSessionId: string | undefined;
-      let skipResume = false;
-      if (request.clearContext) {
-        skipResume = true;
-        logger.info(
-          `[${request.teamName}] clearContext requested — skipping session resume, starting fresh`
-        );
-      } else {
-        // Check persisted launch state: if the previous launch ended with no teammates
-        // ever spawned (all in 'starting' state), resuming would reconnect the lead but
-        // the CLI's deterministic bootstrap won't re-spawn dead teammates in reconnect
-        // mode. Skip resume so the CLI creates a fresh session that fully bootstraps.
-        if (persistedLaunchState) {
-          const {
-            expectedMembers: prevExpected,
-            members: prevMembers,
-            launchPhase,
-          } = persistedLaunchState;
-          const teammateWasNeverSpawned = (
-            member:
-              | {
-                  agentToolAccepted?: boolean;
-                  firstSpawnAcceptedAt?: string;
-                  runtimeAlive?: boolean;
-                  bootstrapConfirmed?: boolean;
-                }
-              | undefined
-          ): boolean => {
-            if (!member) return true;
-            const hasAcceptedSpawn =
-              member.agentToolAccepted === true ||
-              (typeof member.firstSpawnAcceptedAt === 'string' &&
-                member.firstSpawnAcceptedAt.trim().length > 0);
-            return (
-              !hasAcceptedSpawn &&
-              member.runtimeAlive !== true &&
-              member.bootstrapConfirmed !== true
-            );
-          };
-          const allTeammatesNeverSpawned =
-            launchPhase !== 'active' &&
-            prevExpected.length > 0 &&
-            prevExpected.every((name) => teammateWasNeverSpawned(prevMembers[name]));
-          if (allTeammatesNeverSpawned) {
-            skipResume = true;
-            logger.info(
-              `[${request.teamName}] Previous launch had no teammates successfully spawned — ` +
-                `skipping session resume to allow full bootstrap`
-            );
-          }
-        }
-      }
-      if (!skipResume) {
-        try {
-          const configParsed = JSON.parse(configRaw) as Record<string, unknown>;
-          const persistedTeamMeta = await this.teamMetaStore
-            .getMeta(request.teamName)
-            .catch(() => null);
-          const resumeGuard = shouldSkipResumeForProviderRuntimeChange(
-            request,
-            configParsed,
-            persistedTeamMeta?.providerBackendId ?? null
-          );
-          if (resumeGuard.skip) {
-            logger.info(
-              `[${request.teamName}] Skipping session resume — ${resumeGuard.reason ?? 'runtime changed'}`
-            );
-          } else if (
-            typeof configParsed.leadSessionId === 'string' &&
-            configParsed.leadSessionId.trim().length > 0
-          ) {
-            const candidateId = configParsed.leadSessionId.trim();
-            const storedProjectPath =
-              typeof configParsed.projectPath === 'string' &&
-              configParsed.projectPath.trim().length > 0
-                ? configParsed.projectPath.trim()
-                : null;
-
-            // Sessions are stored per-project (~/.claude/projects/{encodePath(cwd)}/).
-            // If the project path changed, the old session JSONL won't be found by the CLI
-            // at the new project directory. Skip resume to avoid passing an invalid --resume arg.
-            if (
-              storedProjectPath &&
-              path.resolve(storedProjectPath) !== path.resolve(request.cwd)
-            ) {
-              logger.info(
-                `[${request.teamName}] Project path changed: ${storedProjectPath} → ${request.cwd}. ` +
-                  `Skipping session resume — sessions are per-project.`
-              );
-            } else {
-              const resumeProjectPath = storedProjectPath ?? request.cwd;
-              const projectId = encodePath(resumeProjectPath);
-              const baseDir = extractBaseDir(projectId);
-              const jsonlPath = path.join(getProjectsBasePath(), baseDir, `${candidateId}.jsonl`);
-              if (await this.pathExists(jsonlPath)) {
-                previousSessionId = candidateId;
-                logger.info(
-                  `[${request.teamName}] Found previous session JSONL for resume: ${candidateId}`
-                );
-              } else {
-                logger.info(
-                  `[${request.teamName}] Previous session JSONL not found at ${jsonlPath}, starting fresh`
-                );
-              }
-            }
-          }
-        } catch {
-          logger.debug(
-            `[${request.teamName}] Failed to extract leadSessionId from config for resume`
-          );
-        }
-      }
+      logger.info(
+        `[${request.teamName}] Starting fresh lead session; board/config provide context`
+      );
 
       // IMPORTANT: The CLI auto-suffixes teammate names when they already exist in config.json.
       // Normalize config.json to keep only the lead before spawning the CLI, so we get stable names.
@@ -13147,13 +13029,14 @@ export class TeamProvisioningService {
       const effectiveMemberSpecs = allEffectiveMemberSpecs.filter((member) =>
         primaryMemberNames.has(member.name)
       );
-      const expectedMembers = effectiveMemberSpecs.map((member) => member.name);
+      const bootstrapMemberSpecs = LAZY_NATIVE_MEMBER_BOOTSTRAP ? [] : effectiveMemberSpecs;
+      const expectedMembers = bootstrapMemberSpecs.map((member) => member.name);
       const launchIdentity = await this.resolveAndValidateLaunchIdentity({
         claudePath,
         cwd: request.cwd,
         env: shellEnv,
         request,
-        effectiveMembers: effectiveMemberSpecs,
+        effectiveMembers: bootstrapMemberSpecs,
       });
       _t('validateLaunchIdentity');
 
@@ -13209,7 +13092,7 @@ export class TeamProvisioningService {
         expectedMembers,
         request: syntheticRequest,
         allEffectiveMembers: allEffectiveMemberSpecs,
-        effectiveMembers: effectiveMemberSpecs,
+        effectiveMembers: bootstrapMemberSpecs,
         launchIdentity,
         mixedSecondaryLanes: this.createMixedSecondaryLaneStates(lanePlan),
         lastLogProgressAt: 0,
@@ -13322,7 +13205,8 @@ export class TeamProvisioningService {
         existingTasks,
         Boolean(previousSessionId),
         feishuChannels2,
-        teamMeta2?.workflow
+        teamMeta2?.workflow,
+        LAZY_NATIVE_MEMBER_BOOTSTRAP
       );
       const promptSize = getPromptSizeSummary(prompt);
       let child: ReturnType<typeof spawn>;
@@ -13395,12 +13279,12 @@ export class TeamProvisioningService {
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
         promptSize,
-        expectedMembersCount: effectiveMemberSpecs.length,
+        expectedMembersCount: bootstrapMemberSpecs.length,
       });
       logRuntimeLaunchSnapshot(request.teamName, claudePath, launchArgs, request, shellEnv, {
         geminiRuntimeAuth,
         promptSize,
-        expectedMembersCount: effectiveMemberSpecs.length,
+        expectedMembersCount: bootstrapMemberSpecs.length,
         launchIdentity,
       });
       // --resume is added above when a valid previous session JSONL exists.
@@ -13422,6 +13306,7 @@ export class TeamProvisioningService {
           worktree: syntheticRequest.worktree,
           extraCliArgs: syntheticRequest.extraCliArgs,
           limitContext: syntheticRequest.limitContext,
+          workflow: teamMeta2?.workflow,
           launchIdentity,
           createdAt: Date.now(),
         }),
@@ -13922,16 +13807,19 @@ export class TeamProvisioningService {
       messageId: input.messageId,
     });
     const message = [
-      `你收到了一条来自外部渠道的直接消息。`,
+      `你收到了一条来自飞书的外部渠道直接消息。`,
       `重要：你在这里的文本响应会发回该渠道，并显示在 Messages 面板。当发送者期待回复时，始终包含简短的人类可读回复。不要只用 agent-only 块响应。`,
       ``,
       `External channel: ${input.provider} / ${input.channelName} / chat ${input.chatId}`,
       `From: ${input.from}`,
+      ...(input.senderId ? [`Feishu user id: ${input.senderId}`] : []),
       ...(input.messageId ? [`MessageId: ${input.messageId}`] : []),
       `To: ${leadName}`,
       ``,
       `Message:`,
       input.text,
+      ``,
+      `请记住：上面的 Message 是飞书发来的，不是 Hermit UI 普通消息。Feishu user id 是发送者的飞书用户 ID，后续如需说明回复对象或定向跟进，请保留这个 ID。回复时按飞书上下文给出可读答复。`,
     ].join('\n');
 
     const captureTimeoutMs = 15_000;
@@ -15507,7 +15395,11 @@ export class TeamProvisioningService {
       }
 
       // Lead can only spawn pre-configured members, not create new ones
-      const resolvedName = this.resolveExpectedLaunchMemberName(run.expectedMembers, memberName);
+      const configuredMemberNames =
+        run.expectedMembers.length > 0
+          ? run.expectedMembers
+          : run.allEffectiveMembers.map((member) => member.name);
+      const resolvedName = this.resolveExpectedLaunchMemberName(configuredMemberNames, memberName);
       if (!resolvedName) {
         this.setMemberSpawnStatus(
           run,
@@ -15516,6 +15408,12 @@ export class TeamProvisioningService {
           `Member "${memberName}" is not in the configured roster — lead cannot create new teammates, only assign existing ones`
         );
         continue;
+      }
+      if (!run.expectedMembers.some((name) => matchesExactTeamMemberName(name, resolvedName))) {
+        run.expectedMembers.push(resolvedName);
+      }
+      if (!run.memberSpawnStatuses.has(resolvedName)) {
+        run.memberSpawnStatuses.set(resolvedName, createInitialMemberSpawnStatusEntry());
       }
 
       const existing = run.memberSpawnStatuses.get(resolvedName);
