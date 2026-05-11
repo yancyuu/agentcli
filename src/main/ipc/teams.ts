@@ -573,7 +573,7 @@ export function initializeTeamHandlers(
   teamProvisioningService = provisioningService;
   initializeAutoResumeService(provisioningService);
   getLeadChannelListenerService().setInboundMessageHandler(async (teamName, message) => {
-    const reply = await provisioningService.deliverExternalChannelMessageToLead(teamName, {
+    const queued = await provisioningService.enqueueExternalChannelMessageForLead(teamName, {
       channelName: message.channelName,
       provider: message.provider,
       channelId: message.channelId,
@@ -583,17 +583,8 @@ export function initializeTeamHandlers(
       senderId: message.senderId,
       messageId: message.messageId,
     });
-    if (!reply) {
-      return false;
-    }
-    await getLeadChannelListenerService().sendFeishuReply(
-      message.channelId,
-      message.chatId,
-      reply,
-      {
-        dedupeKey: message.messageId ? `${message.messageId}:lead-reply` : undefined,
-      }
-    );
+    if (!queued) return false;
+    provisioningService.scheduleLeadInboxRelay(teamName, 250);
     return true;
   });
   teamMemberLogsFinder = logsFinder ?? null;
@@ -2572,12 +2563,10 @@ async function handleSendMessage(
         : isLeadRecipientAlias(memberName, leadName);
     const actionMode = payload.actionMode;
 
-    if (isLeadRecipient) {
-      const sendBlockReason = provisioning.getLeadUserSendBlockReason(tn);
-      if (sendBlockReason) {
-        throw new Error(sendBlockReason);
-      }
-    }
+    const leadSendBlockReason = isLeadRecipient
+      ? provisioning.getLeadUserSendBlockReason(tn)
+      : null;
+    const shouldQueueLeadMessage = isLeadRecipient && Boolean(leadSendBlockReason);
 
     // Attachments only supported for live lead (stdin content blocks)
     if (validatedAttachments?.length && (!isLeadRecipient || !isAlive)) {
@@ -2585,9 +2574,12 @@ async function handleSendMessage(
         'Attachments are only supported when sending to the team lead while the team is online'
       );
     }
+    if (validatedAttachments?.length && shouldQueueLeadMessage) {
+      throw new Error('负责人正在处理上一条消息。带附件的消息暂不支持排队，请稍后再发送。');
+    }
 
     // Smart routing: lead + alive → stdin direct, else → inbox
-    if (isLeadRecipient && isAlive) {
+    if (isLeadRecipient && isAlive && !shouldQueueLeadMessage) {
       const resolvedLeadName = leadName ?? CANONICAL_LEAD_MEMBER_NAME;
       const teammateRoster = await getDurableLeadTeammateRoster(tn, resolvedLeadName);
       const rosterContextBlock = buildLeadRosterContextBlock(tn, resolvedLeadName, teammateRoster);
@@ -2713,7 +2705,7 @@ async function handleSendMessage(
       }
     }
 
-    // Inbox path: offline lead or regular members (no attachment support)
+    // Inbox path: offline/busy lead or regular members (no attachment support)
     const baseText = payload.text!.trim();
     const replyRecipient =
       typeof payload.from === 'string' && payload.from.trim().length > 0
@@ -2739,6 +2731,12 @@ async function handleSendMessage(
       source: 'user_sent',
       taskRefs: validatedTaskRefs.value,
     });
+    if (shouldQueueLeadMessage) {
+      logger.info(
+        `[teams:sendMessage] queued message for busy lead "${deliveryMemberName}" in team "${tn}": ${leadSendBlockReason}`
+      );
+      provisioning.scheduleLeadInboxRelay(tn, 800);
+    }
 
     // Teammate inbox relay DISABLED (2026-03-23).
     // Codex/Claude teammates read their own inbox files directly via fs.watch.

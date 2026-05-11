@@ -2156,7 +2156,7 @@ function indentMultiline(text: string, indent: string): string {
 
 // Keep bootstrap prompts light. Full workflows are persisted and available via member_briefing.
 const MAX_MEMBER_WORKFLOW_PROMPT_CHARS = 1_200;
-const EMBED_WORKFLOW_IN_SPAWN_PROMPT = false;
+const EMBED_WORKFLOW_IN_SPAWN_PROMPT = true;
 
 function formatWorkflowBlock(workflow: string, indent: string): string {
   const trimmed = workflow.trim();
@@ -2174,6 +2174,40 @@ const AGENT_SPAWN_SUBAGENT_TYPE_RULE =
 
 function buildWorkflowBriefingInstruction(memberName: string): string {
   return `Workflow is stored in the team config. Do not rely on this launch prompt for full workflow details; your first member_briefing call for memberName="${memberName}" will return the complete workflow before you act.`;
+}
+
+function buildLazyMemberSpawnTemplate(
+  teamName: string,
+  displayName: string,
+  leadName: string
+): string {
+  return [
+    `按需启动成员时，Agent prompt 必须使用下面模板，不要自行简化：`,
+    `You are <memberName>, the <role or "team member"> on team "${displayName}" (${teamName}).`,
+    `Language: reply to users and teammates in Chinese.`,
+    `Workflow is stored in the team config. Do not rely on this launch prompt for full workflow details; your first member_briefing call for memberName="<memberName>" will return the complete workflow before you act.`,
+    `First action: call the MCP tool member_briefing with { teamName: "${teamName}", memberName: "<memberName>" }.`,
+    `Call member_briefing yourself. Do not use another Agent/subagent for that step.`,
+    `After member_briefing, use task_briefing as your work queue and stay silent if there is no actionable task/blocker.`,
+    `SendMessage to the lead must use to="${leadName}" and the real fields to, summary, message.`,
+  ].join('\n');
+}
+
+function buildLazyMemberSpawnCatalog(
+  members: TeamCreateRequest['members'],
+  displayName: string,
+  teamName: string,
+  leadName: string
+): string {
+  if (members.length === 0) return '';
+  return [
+    '按需启动成员时，请优先复制下面对应成员的精确 Agent 调用参数和 prompt：',
+    ...members.map((member) => {
+      const prompt = buildMemberSpawnPrompt(member, displayName, teamName, leadName);
+      const agentArgs = buildAgentToolArgsSuffix(member);
+      return `- ${member.name}: Agent(team_name="${teamName}", name="${member.name}", subagent_type="general-purpose"${agentArgs})\n  prompt:\n${indentMultiline(prompt, '    ')}`;
+    }),
+  ].join('\n\n');
 }
 
 type TeamMemberInput = TeamCreateRequest['members'][number];
@@ -2754,6 +2788,8 @@ function buildNativeCreateBootstrapPrompt(
       ? [
           '成员采用按需启动模式。本轮不要启动成员，不要调用带 team_name 的 Agent。',
           '成员名单已写入团队 roster。后续如果要把任务分配给某个成员，或需要给某个成员发送消息，而该成员尚未在线，请先使用 Agent 工具启动该成员：team_name 必须是当前团队名，name 必须是成员名单中的真实成员名，subagent_type 必须是 "general-purpose"。',
+          buildLazyMemberSpawnTemplate(request.teamName, displayName, leadName),
+          buildLazyMemberSpawnCatalog(effectiveMembers, displayName, request.teamName, leadName),
           '启动成员后再通过任务看板或 SendMessage 分派具体工作。',
           AGENT_SPAWN_SUBAGENT_TYPE_RULE,
         ].join('\n')
@@ -3254,6 +3290,7 @@ function buildDeterministicLaunchHydrationPrompt(
   const isSolo = members.length === 0;
   const projectName = path.basename(request.cwd);
   const startLabel = isResume ? 'Team Start (resume)' : 'Team Start';
+  const displayName = request.teamName;
   const userPromptBlock = request.prompt?.trim()
     ? `\n重新连接稳定后需要应用的原始用户指令：\n${request.prompt.trim()}\n`
     : '';
@@ -3274,6 +3311,8 @@ function buildDeterministicLaunchHydrationPrompt(
       ? [
           '成员采用按需启动模式。本轮不要重新连接/启动成员，不要调用带 team_name 的 Agent。',
           '后续如果要把任务分配给某个成员，或需要给某个成员发送消息，而该成员尚未在线，请先使用 Agent 工具启动该成员：team_name 必须是当前团队名，name 必须是成员名单中的真实成员名，subagent_type 必须是 "general-purpose"。',
+          buildLazyMemberSpawnTemplate(request.teamName, displayName, leadName),
+          buildLazyMemberSpawnCatalog(members, displayName, request.teamName, leadName),
           AGENT_SPAWN_SUBAGENT_TYPE_RULE,
         ].join('\n')
       : ''
@@ -8838,7 +8877,7 @@ export class TeamProvisioningService {
     }
     if (!this.isCurrentTrackedRun(run)) return;
     this.emitMemberSpawnChange(run, memberName);
-    if (run.isLaunch) {
+    if (run.isLaunch && !run.provisioningComplete) {
       void this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
     }
   }
@@ -8890,7 +8929,7 @@ export class TeamProvisioningService {
     this.appendMemberBootstrapDiagnostic(run, memberName, 'bootstrap 已确认 via transcript');
     if (!this.isCurrentTrackedRun(run)) return;
     this.emitMemberSpawnChange(run, memberName);
-    if (run.isLaunch) {
+    if (run.isLaunch && !run.provisioningComplete) {
       void this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
     }
   }
@@ -8943,7 +8982,9 @@ export class TeamProvisioningService {
 
     await this.refreshMemberSpawnStatusesFromLeadInbox(run);
     await this.maybeAuditMemberSpawnStatuses(run);
-    await this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
+    if (!run.provisioningComplete) {
+      await this.persistLaunchStateSnapshot(run, 'active');
+    }
 
     const persisted = await this.launchStateStore.read(teamName);
     if (persisted) {
@@ -9595,7 +9636,7 @@ export class TeamProvisioningService {
     this.clearMemberSpawnToolTracking(run, memberName);
     this.setMemberSpawnStatus(run, memberName, 'spawning');
     this.appendMemberBootstrapDiagnostic(run, memberName, 'live member add requested from UI');
-    if (run.isLaunch) {
+    if (run.isLaunch && !run.provisioningComplete) {
       await this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
     }
   }
@@ -9610,7 +9651,7 @@ export class TeamProvisioningService {
     const run = this.runs.get(runId);
     if (!run || run.processKilled || run.cancelRequested) return;
     this.setMemberSpawnStatus(run, memberName, 'error', reason);
-    if (run.isLaunch) {
+    if (run.isLaunch && !run.provisioningComplete) {
       await this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
     }
   }
@@ -12062,7 +12103,9 @@ export class TeamProvisioningService {
         allEffectiveMembers: allEffectiveMemberSpecs,
         effectiveMembers: bootstrapMemberSpecs,
         launchIdentity,
-        mixedSecondaryLanes: this.createMixedSecondaryLaneStates(lanePlan),
+        mixedSecondaryLanes: LAZY_NATIVE_MEMBER_BOOTSTRAP
+          ? []
+          : this.createMixedSecondaryLaneStates(lanePlan),
         lastLogProgressAt: 0,
         lastDataReceivedAt: 0, // intentionally 0 — real reset happens after spawn (see startStallWatchdog call sites)
         lastStdoutReceivedAt: 0,
@@ -12965,7 +13008,6 @@ export class TeamProvisioningService {
       // The durable source of truth is board/config/members metadata; resuming old
       // transcripts makes startup slower and can trigger provider rate limits once
       // historical context grows large. Old transcripts remain on disk for review.
-      let previousSessionId: string | undefined;
       logger.info(
         `[${request.teamName}] Starting fresh lead session; board/config provide context`
       );
@@ -13094,7 +13136,9 @@ export class TeamProvisioningService {
         allEffectiveMembers: allEffectiveMemberSpecs,
         effectiveMembers: bootstrapMemberSpecs,
         launchIdentity,
-        mixedSecondaryLanes: this.createMixedSecondaryLaneStates(lanePlan),
+        mixedSecondaryLanes: LAZY_NATIVE_MEMBER_BOOTSTRAP
+          ? []
+          : this.createMixedSecondaryLaneStates(lanePlan),
         lastLogProgressAt: 0,
         lastDataReceivedAt: 0, // intentionally 0 — real reset happens after spawn (see startStallWatchdog call sites)
         lastStdoutReceivedAt: 0,
@@ -13124,7 +13168,7 @@ export class TeamProvisioningService {
         pendingInboxRelayCandidates: [],
         provisioningOutputParts: [],
         provisioningOutputIndexByMessageId: new Map(),
-        detectedSessionId: previousSessionId ?? null,
+        detectedSessionId: null,
         leadActivityState: 'active',
         leadContextUsage: null,
         authFailureRetried: false,
@@ -13203,7 +13247,7 @@ export class TeamProvisioningService {
         request,
         effectiveMemberSpecs,
         existingTasks,
-        Boolean(previousSessionId),
+        false,
         feishuChannels2,
         teamMeta2?.workflow,
         LAZY_NATIVE_MEMBER_BOOTSTRAP
@@ -13246,12 +13290,6 @@ export class TeamProvisioningService {
           ? ['--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']
           : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'default']),
       ];
-      if (previousSessionId) {
-        launchArgs.push('--resume', previousSessionId);
-        logger.info(
-          `[${request.teamName}] Launching with --resume ${previousSessionId} for session continuity`
-        );
-      }
       const launchModelArg = getLaunchModelArg(
         resolveTeamProviderId(request.providerId),
         request.model,
@@ -13287,8 +13325,7 @@ export class TeamProvisioningService {
         expectedMembersCount: bootstrapMemberSpecs.length,
         launchIdentity,
       });
-      // --resume is added above when a valid previous session JSONL exists.
-      // Without it, CLI creates a fresh session ID automatically.
+      // Team launches intentionally do not use --resume; board/config are the durable context.
       await Promise.all([
         this.teamMetaStore.writeMeta(request.teamName, {
           displayName: syntheticRequest.displayName,
@@ -13354,8 +13391,7 @@ export class TeamProvisioningService {
         throw error;
       }
 
-      const resumeHint = previousSessionId ? '（正在恢复上次会话）' : '';
-      updateProgress(run, 'spawning', `正在为团队启动 Claude CLI 进程${resumeHint}`, {
+      updateProgress(run, 'spawning', '正在为团队启动 Claude CLI 进程', {
         pid: child.pid ?? undefined,
         warnings: mergeProvisioningWarnings(run.progress.warnings, runtimeWarning),
       });
@@ -13768,7 +13804,7 @@ export class TeamProvisioningService {
     this.setLeadActivity(run, 'active');
   }
 
-  async deliverExternalChannelMessageToLead(
+  async enqueueExternalChannelMessageForLead(
     teamName: string,
     input: {
       channelName: string;
@@ -13780,66 +13816,21 @@ export class TeamProvisioningService {
       senderId?: string;
       messageId?: string;
     }
-  ): Promise<string | null> {
-    const runId = this.getAliveRunId(teamName) ?? this.getProvisioningRunId(teamName);
-    if (!runId) return null;
-    const run = this.runs.get(runId);
-    if (!run?.child || run.processKilled || run.cancelRequested || !run.child.stdin?.writable) {
-      return null;
-    }
-    if (run.leadRelayCapture) {
-      logger.warn(`[${teamName}] external channel delivery skipped — lead turn already in-flight`);
-      return null;
-    }
-
+  ): Promise<boolean> {
     const config = await this.configReader.getConfig(teamName).catch(() => null);
     const leadName =
       config?.members?.find((member) => isLeadMember(member))?.name?.trim() ||
       CANONICAL_LEAD_MEMBER_NAME;
-    this.persistExternalChannelUserMessage(teamName, {
-      leadName,
-      provider: input.provider,
-      channelId: input.channelId,
-      channelName: input.channelName,
-      chatId: input.chatId,
-      senderId: input.senderId,
-      text: input.text,
+    const text = input.text.trim();
+    if (!text) return false;
+    const inboxWriter = new TeamInboxWriter();
+    await inboxWriter.sendMessage(teamName, {
+      member: leadName,
+      to: leadName,
+      from: 'user',
+      text,
       messageId: input.messageId,
-    });
-    const message = [
-      `你收到了一条来自飞书的外部渠道直接消息。`,
-      `重要：你在这里的文本响应会发回该渠道，并显示在 Messages 面板。当发送者期待回复时，始终包含简短的人类可读回复。不要只用 agent-only 块响应。`,
-      ``,
-      `External channel: ${input.provider} / ${input.channelName} / chat ${input.chatId}`,
-      `From: ${input.from}`,
-      ...(input.senderId ? [`Feishu user id: ${input.senderId}`] : []),
-      ...(input.messageId ? [`MessageId: ${input.messageId}`] : []),
-      `To: ${leadName}`,
-      ``,
-      `Message:`,
-      input.text,
-      ``,
-      `请记住：上面的 Message 是飞书发来的，不是 Hermit UI 普通消息。Feishu user id 是发送者的飞书用户 ID，后续如需说明回复对象或定向跟进，请保留这个 ID。回复时按飞书上下文给出可读答复。`,
-    ].join('\n');
-
-    const captureTimeoutMs = 15_000;
-    const captureIdleMs = 800;
-    let resolveCapture: (text: string) => void = () => {};
-    let rejectCapture: (error: Error) => void = () => {};
-    const capturePromise = new Promise<string>((resolve, reject) => {
-      resolveCapture = resolve;
-      rejectCapture = reject;
-    });
-    const activeCapture: NonNullable<ProvisioningRun['leadRelayCapture']> = {
-      leadName,
-      startedAt: nowIso(),
-      textParts: [],
-      settled: false,
-      idleHandle: null,
-      idleMs: captureIdleMs,
-      timeoutHandle: setTimeout(() => {
-        rejectCapture(new Error('Timed out waiting for lead external-channel reply'));
-      }, captureTimeoutMs),
+      source: 'inbox',
       externalChannel: {
         provider: input.provider,
         channelId: input.channelId,
@@ -13847,87 +13838,23 @@ export class TeamProvisioningService {
         chatId: input.chatId,
         senderId: input.senderId,
       },
-      visibleUserMessageCaptured: false,
-      resolveOnce: (text: string) => {
-        if (activeCapture.settled) return;
-        activeCapture.settled = true;
-        if (activeCapture.idleHandle) {
-          clearTimeout(activeCapture.idleHandle);
-          activeCapture.idleHandle = null;
-        }
-        clearTimeout(activeCapture.timeoutHandle);
-        resolveCapture(text);
-      },
-      rejectOnce: (error: string) => {
-        if (activeCapture.settled) return;
-        activeCapture.settled = true;
-        if (activeCapture.idleHandle) {
-          clearTimeout(activeCapture.idleHandle);
-          activeCapture.idleHandle = null;
-        }
-        clearTimeout(activeCapture.timeoutHandle);
-        rejectCapture(new Error(error));
-      },
-    };
-    run.leadRelayCapture = activeCapture;
-
-    try {
-      await this.sendMessageToRun(run, message);
-    } catch (error) {
-      if (activeCapture) {
-        clearTimeout(activeCapture.timeoutHandle);
-        if (activeCapture.idleHandle) {
-          clearTimeout(activeCapture.idleHandle);
-        }
-      }
-      if (run.leadRelayCapture === activeCapture) {
-        run.leadRelayCapture = null;
-      }
-      logger.warn(`[${teamName}] external channel stdin delivery failed: ${String(error)}`);
-      return null;
-    }
-
-    let replyText: string | null = null;
-    try {
-      replyText = (await capturePromise).trim() || null;
-    } catch {
-      const partial = activeCapture?.textParts?.join('')?.trim();
-      replyText = partial && partial.length > 0 ? partial : null;
-    } finally {
-      if (activeCapture) {
-        if (activeCapture.idleHandle) {
-          clearTimeout(activeCapture.idleHandle);
-          activeCapture.idleHandle = null;
-        }
-        clearTimeout(activeCapture.timeoutHandle);
-      }
-      if (run.leadRelayCapture === activeCapture) {
-        run.leadRelayCapture = null;
-      }
-    }
-
-    const cleanReply = replyText ? stripAgentBlocks(replyText).trim() : '';
-    if (cleanReply && !activeCapture.visibleUserMessageCaptured) {
-      const replyMessage: InboxMessage = {
-        from: leadName,
-        to: 'user',
-        text: cleanReply,
-        timestamp: nowIso(),
-        read: true,
-        summary: cleanReply.length > 60 ? cleanReply.slice(0, 57) + '...' : cleanReply,
-        messageId: `external-lead-reply-${input.channelId}-${Date.now()}`,
-        source: 'lead_process',
-        externalChannel: activeCapture.externalChannel,
-      };
-      this.persistSentMessage(teamName, replyMessage);
-      this.pushLiveLeadProcessMessage(teamName, replyMessage);
-      this.teamChangeEmitter?.({
-        type: 'inbox',
-        teamName,
-        detail: 'external-channel-lead-reply',
-      });
-    }
-    return cleanReply || null;
+    });
+    this.persistExternalChannelUserMessage(teamName, {
+      leadName,
+      provider: input.provider,
+      channelId: input.channelId,
+      channelName: input.channelName,
+      chatId: input.chatId,
+      senderId: input.senderId,
+      text,
+      messageId: input.messageId,
+    });
+    this.teamChangeEmitter?.({
+      type: 'inbox',
+      teamName,
+      detail: 'external-channel-queued',
+    });
+    return true;
   }
 
   /**
@@ -14652,6 +14579,10 @@ export class TeamProvisioningService {
       }
 
       if (!run.provisioningComplete) return 0;
+      if (run.leadRelayCapture || run.leadActivityState !== 'idle') {
+        this.scheduleLeadInboxRelay(teamName, 800);
+        return 0;
+      }
 
       const relayedIds = this.relayedLeadInboxMessageIds.get(teamName) ?? new Set<string>();
       const inFlightIds = this.inFlightLeadInboxMessageIds.get(teamName) ?? new Set<string>();
@@ -14896,8 +14827,8 @@ export class TeamProvisioningService {
         `普通对话、追问、确认、状态询问或解释请求不需要创建任务；请直接回复 user。只有明确需要执行/跟进/交付的工作才进入任务看板；即使进入任务看板，也要 SendMessage "user" 说明状态。`,
         `对于外部渠道消息（例如飞书），你的文本响应也会发回该渠道。当外部发送者看起来期待回复时，请自然、简洁地回复。`,
         `如果你确实采取行动，请包含简短的人类可读摘要（例如 "已委派给 carol。"）。`,
-        `如果没有需要采取的行动，请输出零文本。不要写“无需操作”、状态回声或任何其他无操作摘要。`,
-        `对于不需要回复/评论/行动的纯系统通知、评论通知或常规成员可用性更新，请保持安静。`,
+        `如果消息来自外部渠道（例如飞书），即使暂时没有可执行行动，也必须给出一句简短可读回复（例如 "已收到，我会尽快处理。"），不要空回复。`,
+        `只有对于不需要回复/评论/行动的纯系统通知、评论通知或常规成员可用性更新，才保持安静。`,
         `不要只用 agent-only 块响应。`,
         ...(rosterContextBlock ? [rosterContextBlock] : []),
         wrapAgentBlock(
@@ -14962,47 +14893,51 @@ export class TeamProvisioningService {
 
       const captureTimeoutMs = 15_000;
       const captureIdleMs = 800;
+      let resolveCapture: (text: string) => void = () => {};
+      let rejectCapture: (error: Error) => void = () => {};
       const capturePromise = new Promise<string>((resolve, reject) => {
-        const timeoutHandle = setTimeout(() => {
-          reject(new Error('Timed out waiting for lead reply'));
-        }, captureTimeoutMs);
-        const capture = {
-          leadName,
-          startedAt: nowIso(),
-          textParts: [] as string[],
-          settled: false,
-          idleHandle: null as NodeJS.Timeout | null,
-          idleMs: captureIdleMs,
-          timeoutHandle,
-          resolveOnce: (text: string) => {
-            if (capture.settled) return;
-            capture.settled = true;
-            if (capture.idleHandle) {
-              clearTimeout(capture.idleHandle);
-              capture.idleHandle = null;
-            }
-            clearTimeout(capture.timeoutHandle);
-            resolve(text);
-          },
-          rejectOnce: (error: string) => {
-            if (capture.settled) return;
-            capture.settled = true;
-            if (capture.idleHandle) {
-              clearTimeout(capture.idleHandle);
-              capture.idleHandle = null;
-            }
-            clearTimeout(capture.timeoutHandle);
-            reject(new Error(error));
-          },
-        };
-        run.leadRelayCapture = capture;
+        resolveCapture = resolve;
+        rejectCapture = reject;
       });
+      const timeoutHandle = setTimeout(() => {
+        rejectCapture(new Error('Timed out waiting for lead reply'));
+      }, captureTimeoutMs);
+      let relayCapture: NonNullable<ProvisioningRun['leadRelayCapture']> | null = {
+        leadName,
+        startedAt: nowIso(),
+        textParts: [],
+        settled: false,
+        idleHandle: null,
+        idleMs: captureIdleMs,
+        timeoutHandle,
+        resolveOnce: (text: string) => {
+          if (!relayCapture || relayCapture.settled) return;
+          relayCapture.settled = true;
+          if (relayCapture.idleHandle) {
+            clearTimeout(relayCapture.idleHandle);
+            relayCapture.idleHandle = null;
+          }
+          clearTimeout(relayCapture.timeoutHandle);
+          resolveCapture(text);
+        },
+        rejectOnce: (error: string) => {
+          if (!relayCapture || relayCapture.settled) return;
+          relayCapture.settled = true;
+          if (relayCapture.idleHandle) {
+            clearTimeout(relayCapture.idleHandle);
+            relayCapture.idleHandle = null;
+          }
+          clearTimeout(relayCapture.timeoutHandle);
+          rejectCapture(new Error(error));
+        },
+      };
+      run.leadRelayCapture = relayCapture;
 
       try {
         await this.sendMessageToRun(run, message);
       } catch {
-        if (run.leadRelayCapture) {
-          clearTimeout(run.leadRelayCapture.timeoutHandle);
+        if (relayCapture) {
+          clearTimeout(relayCapture.timeoutHandle);
           run.leadRelayCapture = null;
         }
         return 0;
@@ -15015,15 +14950,16 @@ export class TeamProvisioningService {
         relayTurnCompleted = true;
       } catch {
         // Best-effort: if we captured some text but never got result.success, keep it.
-        const partial = run.leadRelayCapture?.textParts?.join('')?.trim();
+        const partial = relayCapture?.textParts?.join('')?.trim();
         replyText = partial && partial.length > 0 ? partial : null;
       } finally {
-        if (run.leadRelayCapture) {
-          if (run.leadRelayCapture.idleHandle) {
-            clearTimeout(run.leadRelayCapture.idleHandle);
-            run.leadRelayCapture.idleHandle = null;
+        if (relayCapture) {
+          if (relayCapture.idleHandle) {
+            clearTimeout(relayCapture.idleHandle);
+            relayCapture.idleHandle = null;
           }
-          clearTimeout(run.leadRelayCapture.timeoutHandle);
+          clearTimeout(relayCapture.timeoutHandle);
+          relayCapture = null;
           run.leadRelayCapture = null;
         }
       }
@@ -15072,20 +15008,22 @@ export class TeamProvisioningService {
 
       // Strip agent-only blocks — lead may respond with pure coordination content
       // that is not meant for the human user.
-      const cleanReply = replyText ? stripAgentBlocks(replyText) : null;
-      if (cleanReply) {
-        const externalTargets = new Map<string, NonNullable<InboxMessage['externalChannel']>>();
-        for (const message of batch) {
-          const channel = message.externalChannel;
-          if (channel?.provider !== 'feishu') continue;
-          externalTargets.set(`${channel.channelId}:${channel.chatId}`, channel);
-        }
+      const cleanReply = replyText ? stripAgentBlocks(replyText).trim() : null;
+      const externalTargets = new Map<string, NonNullable<InboxMessage['externalChannel']>>();
+      for (const message of batch) {
+        const channel = message.externalChannel;
+        if (channel?.provider !== 'feishu') continue;
+        externalTargets.set(`${channel.channelId}:${channel.chatId}`, channel);
+      }
+      const replyForExternalTargets =
+        cleanReply || (externalTargets.size > 0 ? '已收到，我会尽快处理。' : null);
+      if (replyForExternalTargets) {
         for (const channel of externalTargets.values()) {
           try {
             await getLeadChannelListenerService().sendFeishuReply(
               channel.channelId,
               channel.chatId,
-              cleanReply
+              replyForExternalTargets
             );
           } catch (error: unknown) {
             logger.warn(
@@ -15097,16 +15035,19 @@ export class TeamProvisioningService {
         const relayMsg: InboxMessage = {
           from: leadName,
           to: 'user',
-          text: cleanReply,
+          text: replyForExternalTargets,
           timestamp: nowIso(),
           read: true,
-          summary: cleanReply.length > 60 ? cleanReply.slice(0, 57) + '...' : cleanReply,
+          summary:
+            replyForExternalTargets.length > 60
+              ? replyForExternalTargets.slice(0, 57) + '...'
+              : replyForExternalTargets,
           messageId: `lead-process-${runId}-${Date.now()}`,
           source: 'lead_process',
         };
         this.pushLiveLeadProcessMessage(teamName, relayMsg);
         if (externalTargets.size === 0) {
-          this.pushLeadUserMessageToRecentFeishu(teamName, cleanReply);
+          this.pushLeadUserMessageToRecentFeishu(teamName, replyForExternalTargets);
         }
         // Persist to disk so relayed replies survive app restart and trigger FileWatcher
         this.persistSentMessage(teamName, relayMsg);
@@ -15128,6 +15069,22 @@ export class TeamProvisioningService {
         this.leadInboxRelayInFlight.delete(teamName);
       }
     }
+  }
+
+  scheduleLeadInboxRelay(teamName: string, delayMs = 500): void {
+    const key = `lead-inbox-relay:${teamName}`;
+    const existing = this.pendingTimeouts.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      this.pendingTimeouts.delete(key);
+      void this.relayLeadInboxMessages(teamName).catch((error: unknown) =>
+        logger.warn(`[${teamName}] scheduled lead inbox relay failed: ${String(error)}`)
+      );
+    }, delayMs);
+    timer.unref?.();
+    this.pendingTimeouts.set(key, timer);
   }
 
   /**
@@ -15433,6 +15390,11 @@ export class TeamProvisioningService {
       const toolUseId = typeof part.id === 'string' ? part.id.trim() : '';
       if (toolUseId) {
         run.memberSpawnToolUseIds.set(toolUseId, resolvedName);
+      }
+
+      if (run.provisioningComplete) {
+        this.emitMemberSpawnChange(run, resolvedName);
+        continue;
       }
 
       // Advance stepper to "Members joining" when first member spawn is detected
@@ -19448,6 +19410,7 @@ export class TeamProvisioningService {
           this.resetRuntimeToolActivity(run, this.getRunLeadName(run));
           this.setLeadActivity(run, 'idle');
           this.teamSendBlockReasonByTeam.delete(run.teamName);
+          this.scheduleLeadInboxRelay(run.teamName, 250);
         }
         if (run.pendingDirectCrossTeamSendRefresh) {
           run.pendingDirectCrossTeamSendRefresh = false;
@@ -20914,7 +20877,7 @@ export class TeamProvisioningService {
           providerId: run.request.providerId,
           model: run.request.model,
           effort: run.request.effort,
-          members: run.effectiveMembers,
+          members: run.allEffectiveMembers,
         }
       );
       await this.cleanupPrelaunchBackup(run.teamName);
