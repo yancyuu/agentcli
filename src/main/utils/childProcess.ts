@@ -241,6 +241,9 @@ function quoteArg(arg: string): string {
 /** Env vars injected into every spawned Claude CLI process. */
 const CLI_ENV_DEFAULTS: Record<string, string> = {
   CLAUDE_HOOK_JUDGE_MODE: 'true',
+  ...(process.platform === 'win32'
+    ? { COMSPEC: path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe') }
+    : {}),
 };
 
 const activeCliProcesses = new Set<ChildProcess>();
