@@ -183,7 +183,7 @@ describe('resolveAnthropicRuntimeProfile', () => {
       effortResetReason: null,
       nextFastMode: 'inherit',
       fastModeResetReason:
-        'Fast mode is available only for Opus 4.6. Selected model resolves to Opus 4.7 (1M).',
+        'Fast mode 仅适用于 Opus 4.6。当前所选模型解析为 Opus 4.7 (1M)。',
     });
   });
 
@@ -221,7 +221,7 @@ describe('resolveAnthropicRuntimeProfile', () => {
     ).toEqual({
       nextEffort: '',
       effortResetReason:
-        'max effort is not available for the currently selected Anthropic model. Reset to Default.',
+        '当前 Anthropic 模型不支持 max 推理强度，已重置为默认。',
       nextFastMode: 'off',
       fastModeResetReason: null,
     });

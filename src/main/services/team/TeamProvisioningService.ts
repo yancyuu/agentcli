@@ -4747,14 +4747,7 @@ export class TeamProvisioningService {
         );
       }
       if (params.effort) {
-        if (isAnthropicOneMillionModel(resolvedLaunchModel)) {
-          return;
-        }
-        if (!selection.supportedEfforts.includes(params.effort)) {
-          throw new Error(
-            `${params.actorLabel} 使用了 effort "${params.effort}"，但当前 Anthropic 运行时/模型不支持此 effort。支持的值：${selection.supportedEfforts.join(', ') || '（无）'}`
-          );
-        }
+        return;
       }
       return;
     }

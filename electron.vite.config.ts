@@ -18,6 +18,7 @@ const runtimeExternalDeps = new Set([
   'fastify',
   '@fastify/cors',
   '@fastify/static',
+  '@fastify/merge-json-schemas',
 ])
 
 // node-pty is a native addon that cannot be bundled by Rollup.

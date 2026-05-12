@@ -2363,7 +2363,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     ).toThrow('enables Codex Fast mode');
   });
 
-  it('rejects Anthropic max and fast when the exact resolved launch model does not support them', () => {
+  it('ignores Anthropic effort and rejects fast when the exact resolved launch model does not support them', () => {
     const svc = new TeamProvisioningService();
     const facts = {
       defaultModel: 'opus',
@@ -2423,7 +2423,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         limitContext: false,
         facts,
       })
-    ).toThrow('当前 Anthropic 运行时/模型不支持此 effort');
+    ).not.toThrow();
 
     expect(() =>
       (svc as any).validateRuntimeLaunchSelection({

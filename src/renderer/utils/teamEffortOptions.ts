@@ -71,6 +71,28 @@ export function getTeamEffortOptions(params: {
   }
 
   if (providerId === 'anthropic') {
+    const catalogModel = getCatalogModel(providerId, params.providerStatus, params.model);
+    const catalogEfforts = catalogModel?.supportedReasoningEfforts ?? [];
+
+    // If catalog is available and reports no supported efforts, only show Default.
+    if (catalogModel && catalogEfforts.length === 0) {
+      return [{ value: '', label: '默认' }];
+    }
+
+    // If catalog reports specific efforts, use those.
+    if (catalogEfforts.length > 0) {
+      const normalized = normalizeEfforts(providerId, catalogEfforts as EffortLevel[], false);
+      if (normalized.length > 0) {
+        return [
+          { value: '', label: '默认' },
+          ...normalized.map((effort: EffortLevel) => ({
+            value: effort,
+            label: TEAM_EFFORT_LABELS[effort],
+          })),
+        ];
+      }
+    }
+
     return [
       { value: '', label: '默认' },
       { value: 'low', label: TEAM_EFFORT_LABELS.low },

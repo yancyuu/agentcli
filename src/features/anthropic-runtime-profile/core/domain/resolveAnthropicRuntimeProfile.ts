@@ -177,12 +177,10 @@ export function reconcileAnthropicRuntimeSelections(params: {
     };
   }
 
-  const nextEffort =
-    selectedEffort &&
+  const effortInCatalog =
     params.selection.supportedEfforts.length > 0 &&
-    !params.selection.supportedEfforts.includes(selectedEffort)
-      ? ''
-      : (selectedEffort ?? '');
+    params.selection.supportedEfforts.includes(selectedEffort!);
+  const nextEffort = selectedEffort && !effortInCatalog ? '' : (selectedEffort ?? '');
   const effortResetReason =
     selectedEffort && nextEffort === ''
       ? `当前 Anthropic 模型不支持 ${selectedEffort} 推理强度，已重置为默认。`
