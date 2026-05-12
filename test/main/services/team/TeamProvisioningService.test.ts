@@ -9074,7 +9074,7 @@ describe('TeamProvisioningService', () => {
     });
   });
 
-  it('downgrades stale process liveness to pending when live metadata is weak', async () => {
+  it('does not downgrade process-liveness members on weak evidence', async () => {
     const svc = new TeamProvisioningService();
     (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
       async () =>
@@ -9104,8 +9104,11 @@ describe('TeamProvisioningService', () => {
       }),
     });
 
+    // Weak evidence should NOT downgrade a member that was previously promoted
+    // to online via process liveness with agentToolAccepted.  The member stays
+    // online but runtimeAlive is cleared to reflect the uncertain probe.
     expect(result.bob).toMatchObject({
-      status: 'waiting',
+      status: 'online',
       launchState: 'runtime_pending_bootstrap',
       runtimeAlive: false,
       livenessSource: undefined,

@@ -15722,11 +15722,16 @@ export class TeamProvisioningService {
         ) {
           nextEntry.agentToolAccepted = true;
         }
-        if (
+        // Do not downgrade a member that was previously promoted to online
+        // via process liveness with agentToolAccepted.  On Windows, PID
+        // detection can intermittently return weak evidence; that should not
+        // undo a prior strong liveness determination from the same source.
+        const shouldDowngrade =
           current.status === 'online' &&
           current.hardFailure !== true &&
-          current.launchState !== 'failed_to_start'
-        ) {
+          current.launchState !== 'failed_to_start' &&
+          !(current.livenessSource === 'process' && current.agentToolAccepted === true);
+        if (shouldDowngrade) {
           nextEntry.status = nextEntry.agentToolAccepted ? 'waiting' : 'spawning';
         }
         nextEntry.launchState = deriveMemberLaunchState(nextEntry);
