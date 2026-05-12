@@ -683,6 +683,7 @@ const TEAM_JSON_READ_TIMEOUT_MS = 5_000;
 const TEAM_CONFIG_MAX_BYTES = 10 * 1024 * 1024;
 const TEAM_INBOX_MAX_BYTES = 2 * 1024 * 1024;
 const MEMBER_SPAWN_AUDIT_MIN_INTERVAL_MS = 1_500;
+const BOOTSTRAP_CONFIRM_TIMEOUT_MS = 30_000;
 const MEMBER_SPAWN_AUDIT_WARNING_THROTTLE_MS = 10_000;
 const CROSS_TEAM_TOOL_RECIPIENT_NAMES = new Set([
   'cross_team_send',
@@ -10006,6 +10007,7 @@ export class TeamProvisioningService {
   }
 
   private async reconcileBootstrapTranscriptSuccesses(run: ProvisioningRun): Promise<void> {
+    const now = Date.now();
     for (const memberName of run.expectedMembers ?? []) {
       const current = run.memberSpawnStatuses.get(memberName);
       if (
@@ -10019,15 +10021,32 @@ export class TeamProvisioningService {
       }
       const acceptedAtMs =
         current.firstSpawnAcceptedAt != null ? Date.parse(current.firstSpawnAcceptedAt) : NaN;
+
+      // Transcript-based confirmation
       const transcriptOutcome = await this.findBootstrapTranscriptOutcome(
         run.teamName,
         memberName,
         Number.isFinite(acceptedAtMs) ? acceptedAtMs : null
       );
-      if (transcriptOutcome?.kind !== 'success') {
+      if (transcriptOutcome?.kind === 'success') {
+        this.confirmMemberSpawnStatusFromTranscript(run, memberName, transcriptOutcome.observedAt);
         continue;
       }
-      this.confirmMemberSpawnStatusFromTranscript(run, memberName, transcriptOutcome.observedAt);
+
+      // Timeout-based confirmation: if the member is alive via process liveness
+      // and has been running for longer than the timeout threshold, confirm it.
+      // This handles cases where heartbeat never arrives (e.g. Windows PID detection issues).
+      if (
+        current.runtimeAlive === true &&
+        Number.isFinite(acceptedAtMs) &&
+        now - acceptedAtMs >= BOOTSTRAP_CONFIRM_TIMEOUT_MS
+      ) {
+        this.confirmMemberSpawnStatusFromTranscript(
+          run,
+          memberName,
+          current.firstSpawnAcceptedAt ?? new Date(now).toISOString()
+        );
+      }
     }
   }
 
