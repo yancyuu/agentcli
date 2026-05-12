@@ -64,6 +64,59 @@ function createGeneratedBunLauncher(): { dir: string; launcher: string; target: 
   return { dir, launcher, target };
 }
 
+function createNpxStyleLauncher(): { dir: string; launcher: string; target: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cat-cli-npx-'));
+  const targetDir = path.join(dir, 'dist');
+  mkdirSync(targetDir, { recursive: true });
+  const target = path.join(targetDir, 'cli.js');
+  writeFileSync(target, 'console.log("ok")', 'utf8');
+  const launcher = path.join(dir, 'claude.cmd');
+  writeFileSync(
+    launcher,
+    [
+      '@echo off',
+      'node "%~dp0\\dist\\cli.js" %*',
+      '',
+    ].join('\r\n'),
+    'utf8'
+  );
+  return { dir, launcher, target };
+}
+
+function createCorepackStyleLauncher(): { dir: string; launcher: string; target: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cat-cli-corepack-'));
+  const targetDir = path.join(dir, 'lib');
+  mkdirSync(targetDir, { recursive: true });
+  const target = path.join(targetDir, 'index.js');
+  writeFileSync(target, 'console.log("ok")', 'utf8');
+  const launcher = path.join(dir, 'claude.cmd');
+  writeFileSync(
+    launcher,
+    [
+      '@echo off',
+      'node.exe "%~dp0\\lib\\index.js" %*',
+      '',
+    ].join('\r\n'),
+    'utf8'
+  );
+  return { dir, launcher, target };
+}
+
+function createUnresolvableCmdLauncher(): { dir: string; launcher: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cat-cli-unknown-'));
+  const launcher = path.join(dir, 'claude.cmd');
+  writeFileSync(
+    launcher,
+    [
+      '@echo off',
+      'powershell -File "%~dp0\\script.ps1" %*',
+      '',
+    ].join('\r\n'),
+    'utf8'
+  );
+  return { dir, launcher };
+}
+
 describe('cli child process helpers', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -167,6 +220,58 @@ describe('cli child process helpers', () => {
       expect(shellCmd).toMatch(/claude\.cmd/);
       expect(spawnMock.mock.calls[0][1]).toMatchObject({ shell: true, env: { FOO: 'bar' } });
       expect(result).toBe(fake);
+    });
+
+    it('runs npx-style cmd launchers directly to avoid shell overhead', () => {
+      setPlatform('win32');
+      const fake = {} as any;
+      const spawnMock = child.spawn as unknown as Mock;
+      spawnMock.mockReturnValue(fake);
+      const { dir, launcher, target } = createNpxStyleLauncher();
+      try {
+        const result = spawnCli(launcher, ['--version']);
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+        expect(spawnMock.mock.calls[0][0]).toBe('node');
+        expect(spawnMock.mock.calls[0][1]).toEqual([target, '--version']);
+        expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('shell');
+        expect(result).toBe(fake);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('runs corepack-style cmd launchers (node.exe) directly', () => {
+      setPlatform('win32');
+      const fake = {} as any;
+      const spawnMock = child.spawn as unknown as Mock;
+      spawnMock.mockReturnValue(fake);
+      const { dir, launcher, target } = createCorepackStyleLauncher();
+      try {
+        const result = spawnCli(launcher, ['--model', 'test']);
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+        expect(spawnMock.mock.calls[0][0]).toBe('node');
+        expect(spawnMock.mock.calls[0][1]).toEqual([target, '--model', 'test']);
+        expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('shell');
+        expect(result).toBe(fake);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('falls back to shell for unresolvable cmd launchers', () => {
+      setPlatform('win32');
+      const fake = {} as any;
+      const spawnMock = child.spawn as unknown as Mock;
+      spawnMock.mockReturnValue(fake);
+      const { dir, launcher } = createUnresolvableCmdLauncher();
+      try {
+        const result = spawnCli(launcher, ['--version']);
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+        expect(spawnMock.mock.calls[0][1]).toMatchObject({ shell: true });
+        expect(result).toBe(fake);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('does not use shell when not on windows', () => {
@@ -274,6 +379,29 @@ describe('cli child process helpers', () => {
         expect(execFileMock).toHaveBeenCalledTimes(1);
         expect(execFileMock.mock.calls[0][0]).toBe('bun');
         expect(execFileMock.mock.calls[0][1]).toEqual([target, '--model', 'test%PATH%"arg']);
+        expect(execMock).not.toHaveBeenCalled();
+        expect(result.stdout).toBe('ok');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('executes npx-style cmd launchers directly without shell', async () => {
+      setPlatform('win32');
+      const execFileMock = child.execFile as unknown as Mock;
+      const execMock = child.exec as unknown as Mock;
+      execFileMock.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: ExecCallback) => {
+          cb(null, 'ok', '');
+          return {} as any;
+        }
+      );
+      const { dir, launcher, target } = createNpxStyleLauncher();
+      try {
+        const result = await execCli(launcher, ['--version']);
+        expect(execFileMock).toHaveBeenCalledTimes(1);
+        expect(execFileMock.mock.calls[0][0]).toBe('node');
+        expect(execFileMock.mock.calls[0][1]).toEqual([target, '--version']);
         expect(execMock).not.toHaveBeenCalled();
         expect(result.stdout).toBe('ok');
       } finally {

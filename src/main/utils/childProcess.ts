@@ -157,6 +157,33 @@ function resolveNpmNodeShim(content: string, launcherDir: string): DirectWindows
 }
 
 /**
+ * Generic resolver for Windows .cmd launchers that invoke a Node.js script.
+ * Covers npx shims, corepack shims, and other custom launchers that call
+ * `node "<script>.{js,cjs,mjs}"`.
+ */
+function resolveGenericNodeCmdLauncher(
+  content: string,
+  launcherDir: string
+): DirectWindowsLauncher | null {
+  const scriptMatch = /(?:^|\s)(?:node|node\.exe)\s+"([^"]+\.(?:js|cjs|mjs))"/im.exec(content);
+  const scriptTemplate = scriptMatch?.[1];
+  if (!scriptTemplate) {
+    return null;
+  }
+
+  const scriptPath = resolveCmdPathTemplate(scriptTemplate, launcherDir);
+  if (!existsSync(scriptPath)) {
+    return null;
+  }
+
+  const localNode = path.join(launcherDir, 'node.exe');
+  return {
+    command: existsSync(localNode) ? localNode : 'node',
+    argsPrefix: [scriptPath],
+  };
+}
+
+/**
  * Some Windows launchers are thin wrappers around a real JS entrypoint.
  * Running that entrypoint directly with an argv array avoids cmd.exe's
  * percent expansion, which cannot safely represent args like `%PATH%`.
@@ -170,7 +197,9 @@ function resolveDirectWindowsLauncher(binaryPath: string): DirectWindowsLauncher
     const content = readFileSync(binaryPath, 'utf8');
     const launcherDir = path.dirname(binaryPath);
     return (
-      resolveGeneratedBunLauncher(content, launcherDir) ?? resolveNpmNodeShim(content, launcherDir)
+      resolveGeneratedBunLauncher(content, launcherDir) ??
+      resolveNpmNodeShim(content, launcherDir) ??
+      resolveGenericNodeCmdLauncher(content, launcherDir)
     );
   } catch {
     return null;
