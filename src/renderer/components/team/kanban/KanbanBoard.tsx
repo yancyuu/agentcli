@@ -4,6 +4,7 @@ import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useResizableColumns } from '@renderer/hooks/useResizableColumns';
@@ -36,6 +37,7 @@ import type { KanbanSortField, KanbanSortState } from './KanbanSortPopover';
 import type { DragEndEvent } from '@dnd-kit/core';
 import type { Session } from '@renderer/types/data';
 import type { KanbanColumnId, KanbanState, ResolvedTeamMember, TeamTask } from '@shared/types';
+import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 
 const COLUMN_ACCENTS: Record<
   KanbanColumnId,
@@ -234,43 +236,40 @@ function sortColumnTasksByField(
 interface SortableKanbanTaskCardProps {
   task: TeamTask;
   columnId: KanbanColumnId;
-  teamName: string;
-  kanbanState: KanbanState;
-  compact?: boolean;
-  taskMap: Map<string, TeamTask>;
   memberColorMap: Map<string, string>;
-  onRequestReview: (taskId: string) => void;
-  onApprove: (taskId: string) => void;
-  onRequestChanges: (taskId: string) => void;
-  onMoveBackToDone: (taskId: string) => void;
-  onStartTask: (taskId: string) => void;
-  onCompleteTask: (taskId: string) => void;
-  onCancelTask: (taskId: string) => void;
-  onScrollToTask?: (taskId: string) => void;
-  onTaskClick?: (task: TeamTask) => void;
-  onViewChanges?: (taskId: string) => void;
-  onDeleteTask?: (taskId: string) => void;
 }
+
+const SortableTaskLiteCard = ({
+  task,
+  memberColorMap,
+}: {
+  task: TeamTask;
+  memberColorMap: Map<string, string>;
+}): React.JSX.Element => (
+  <div
+    data-task-id={task.id}
+    className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 py-2 text-xs shadow-sm"
+  >
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <div className="text-[10px] text-[var(--color-text-muted)]">
+          {formatTaskDisplayLabel(task)}
+        </div>
+        <div className="mt-0.5 line-clamp-2 font-medium text-[var(--color-text)]">
+          {task.subject}
+        </div>
+      </div>
+      {task.owner ? (
+        <MemberBadge name={task.owner} color={memberColorMap.get(task.owner)} size="xs" />
+      ) : null}
+    </div>
+  </div>
+);
 
 const SortableKanbanTaskCard = ({
   task,
   columnId,
-  teamName,
-  kanbanState,
-  compact,
-  taskMap,
   memberColorMap,
-  onRequestReview,
-  onApprove,
-  onRequestChanges,
-  onMoveBackToDone,
-  onStartTask,
-  onCompleteTask,
-  onCancelTask,
-  onScrollToTask,
-  onTaskClick,
-  onViewChanges,
-  onDeleteTask,
 }: SortableKanbanTaskCardProps): React.JSX.Element => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -286,27 +285,7 @@ const SortableKanbanTaskCard = ({
   return (
     // eslint-disable-next-line react/jsx-props-no-spreading -- dnd-kit useSortable requires spreading attributes/listeners
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <KanbanTaskCard
-        task={task}
-        teamName={teamName}
-        columnId={columnId}
-        kanbanTaskState={kanbanState.tasks[task.id]}
-        hasReviewers={kanbanState.reviewers.length > 0}
-        compact={compact}
-        taskMap={taskMap}
-        memberColorMap={memberColorMap}
-        onRequestReview={onRequestReview}
-        onApprove={onApprove}
-        onRequestChanges={onRequestChanges}
-        onMoveBackToDone={onMoveBackToDone}
-        onStartTask={onStartTask}
-        onCompleteTask={onCompleteTask}
-        onCancelTask={onCancelTask}
-        onScrollToTask={onScrollToTask}
-        onTaskClick={onTaskClick}
-        onViewChanges={onViewChanges}
-        onDeleteTask={onDeleteTask}
-      />
+      <SortableTaskLiteCard task={task} memberColorMap={memberColorMap} />
     </div>
   );
 };
@@ -464,22 +443,7 @@ export const KanbanBoard = ({
                 key={task.id}
                 task={task}
                 columnId={columnId}
-                teamName={teamName}
-                kanbanState={kanbanState}
-                compact={compact}
-                taskMap={taskMap}
                 memberColorMap={memberColorMap}
-                onRequestReview={onRequestReview}
-                onApprove={onApprove}
-                onRequestChanges={onRequestChanges}
-                onMoveBackToDone={onMoveBackToDone}
-                onStartTask={onStartTask}
-                onCompleteTask={onCompleteTask}
-                onCancelTask={onCancelTask}
-                onScrollToTask={onScrollToTask}
-                onTaskClick={onTaskClick}
-                onViewChanges={onViewChanges}
-                onDeleteTask={onDeleteTask}
               />
             ))}
           </SortableContext>

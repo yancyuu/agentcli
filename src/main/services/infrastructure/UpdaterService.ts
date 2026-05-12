@@ -30,6 +30,7 @@ import type { UpdaterStatus } from '@shared/types';
 import type { BrowserWindow } from 'electron';
 
 const logger = createLogger('UpdaterService');
+const BEFORE_QUIT_INSTALL_TIMEOUT_MS = 8_000;
 
 /**
  * Check if a remote URL exists using a HEAD request.
@@ -110,6 +111,7 @@ export class UpdaterService {
     } catch (error) {
       logger.error('Download update failed:', getErrorMessage(error));
       this.sendStatus({ type: 'error', error: getErrorMessage(error) });
+      throw error;
     }
   }
 
@@ -127,10 +129,24 @@ export class UpdaterService {
         type: 'error',
         error: 'Refused to install a non-newer app version.',
       });
-      return;
+      throw new Error('Refused to install a non-newer app version.');
     }
 
-    await this.beforeQuitAndInstall?.();
+    if (this.beforeQuitAndInstall) {
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      await Promise.race([
+        this.beforeQuitAndInstall(),
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(() => {
+            logger.warn('beforeQuitAndInstall timed out; continuing update installation');
+            resolve();
+          }, BEFORE_QUIT_INSTALL_TIMEOUT_MS);
+          timeout.unref?.();
+        }),
+      ]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+    }
     autoUpdater.quitAndInstall(true, true);
   }
 

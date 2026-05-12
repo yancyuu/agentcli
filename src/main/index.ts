@@ -1541,7 +1541,7 @@ function createWindow(): void {
     branchStatusService?.resetAllTracking();
   });
 
-  // Set traffic light position + notify renderer on first load, and auto-check for updates
+  // Set traffic light position + notify renderer on first load.
   mainWindow.webContents.on('did-finish-load', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (isShutdownStarted()) {
@@ -1566,11 +1566,6 @@ function createWindow(): void {
       // with fs.watch() setup and the renderer's initial IPC burst.
       const activeContext = contextRegistry.getActive();
       scheduleStartupTask(() => activeContext.startFileWatcher(), 1500);
-
-      if (!isShutdownStarted()) {
-        scheduleStartupTask(() => void updaterService.checkForUpdates(), 3000);
-        updaterService.startPeriodicCheck(60 * 60 * 1000);
-      }
 
       // Defer non-critical startup work to avoid thread pool contention.
       // The window is now visible and responsive; these run in the background.

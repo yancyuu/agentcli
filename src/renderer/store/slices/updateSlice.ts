@@ -70,15 +70,32 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
   },
 
   downloadUpdate: () => {
-    set({ showUpdateDialog: false, showUpdateBanner: true, downloadProgress: 0 });
+    set({
+      showUpdateDialog: false,
+      showUpdateBanner: true,
+      downloadProgress: 0,
+      updateStatus: 'downloading',
+      updateError: null,
+    });
     api.updater.download().catch((error) => {
       logger.error('Failed to download update:', error);
+      set({
+        updateStatus: 'error',
+        updateError: error instanceof Error ? error.message : '下载更新失败',
+        showUpdateBanner: true,
+      });
     });
   },
 
   installUpdate: () => {
     api.updater.install().catch((error) => {
       logger.error('Failed to install update:', error);
+      set({
+        updateStatus: 'error',
+        updateError: error instanceof Error ? error.message : '安装更新失败',
+        showUpdateBanner: true,
+        showUpdateDialog: true,
+      });
     });
   },
 

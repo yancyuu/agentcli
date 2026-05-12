@@ -14,6 +14,7 @@ export const UpdateBanner = (): React.JSX.Element | null => {
     updateStatus,
     downloadProgress,
     availableVersion,
+    updateError,
     installUpdate,
     dismissUpdateBanner,
   } = useStore(
@@ -22,16 +23,21 @@ export const UpdateBanner = (): React.JSX.Element | null => {
       updateStatus: s.updateStatus,
       downloadProgress: s.downloadProgress,
       availableVersion: s.availableVersion,
+      updateError: s.updateError,
       installUpdate: s.installUpdate,
       dismissUpdateBanner: s.dismissUpdateBanner,
     }))
   );
 
-  if (!showUpdateBanner || (updateStatus !== 'downloading' && updateStatus !== 'downloaded')) {
+  if (
+    !showUpdateBanner ||
+    (updateStatus !== 'downloading' && updateStatus !== 'downloaded' && updateStatus !== 'error')
+  ) {
     return null;
   }
 
   const isDownloading = updateStatus === 'downloading';
+  const isError = updateStatus === 'error';
   const percent = Math.round(downloadProgress);
   const clampedPercent = Math.max(0, Math.min(percent, 100));
 
@@ -43,14 +49,23 @@ export const UpdateBanner = (): React.JSX.Element | null => {
         borderColor: 'var(--color-border)',
       }}
     >
-      {isDownloading ? (
+      {isError ? (
+        <div className="flex items-center gap-2 pr-8">
+          <span className="text-sm text-red-300">更新操作失败</span>
+          {updateError ? (
+            <span className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {updateError}
+            </span>
+          ) : null}
+        </div>
+      ) : isDownloading ? (
         <div className="pr-8">
           <div
             className="mb-1.5 flex items-center gap-2 text-xs"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
-            <span>Updating app</span>
+            <span>正在更新应用</span>
             <span className="tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
               {clampedPercent}%
             </span>
@@ -69,7 +84,7 @@ export const UpdateBanner = (): React.JSX.Element | null => {
         <div className="flex items-center gap-2 pr-8">
           <CheckCircle className="size-4 shrink-0 text-green-400" />
           <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Update ready
+            更新已就绪
             {availableVersion ? (
               <span className="ml-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 v{availableVersion}
@@ -84,7 +99,7 @@ export const UpdateBanner = (): React.JSX.Element | null => {
               color: 'var(--color-text)',
             }}
           >
-            Restart now
+            立即重启
           </button>
         </div>
       )}

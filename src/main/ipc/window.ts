@@ -10,6 +10,7 @@ import { app, BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'elect
 const WINDOW_IS_FULLSCREEN = 'window:isFullScreen';
 
 const logger = createLogger('IPC:window');
+const RELAUNCH_FORCE_EXIT_TIMEOUT_MS = 5_000;
 
 function getMainWindow(): BrowserWindow | null {
   const win = BrowserWindow.getFocusedWindow();
@@ -54,6 +55,11 @@ export function registerWindowHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('app:relaunch', () => {
     app.relaunch();
+    const timer = setTimeout(() => {
+      logger.warn('Relaunch quit timed out; forcing app exit');
+      app.exit(0);
+    }, RELAUNCH_FORCE_EXIT_TIMEOUT_MS);
+    timer.unref?.();
     app.quit();
   });
 

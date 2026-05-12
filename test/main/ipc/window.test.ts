@@ -4,6 +4,7 @@ const electronMock = vi.hoisted(() => ({
   app: {
     quit: vi.fn(),
     relaunch: vi.fn(),
+    exit: vi.fn(),
   },
   BrowserWindow: {
     fromWebContents: vi.fn(),
@@ -82,6 +83,7 @@ describe('window IPC handlers', () => {
   });
 
   it('relaunches through app.quit so shutdown cleanup can run', async () => {
+    vi.useFakeTimers();
     const ipcMain = createMockIpcMain();
     registerWindowHandlers(ipcMain);
 
@@ -89,6 +91,10 @@ describe('window IPC handlers', () => {
 
     expect(app.relaunch).toHaveBeenCalledTimes(1);
     expect(app.quit).toHaveBeenCalledTimes(1);
+    expect(app.exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(app.exit).toHaveBeenCalledWith(0);
+    vi.useRealTimers();
   });
 
   it('uses the window that sent the IPC event for window-specific controls', async () => {

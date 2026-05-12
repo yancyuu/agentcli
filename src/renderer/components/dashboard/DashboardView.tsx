@@ -12,7 +12,6 @@ import { Command, Search, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { CliStatusBanner } from './CliStatusBanner';
-import { DashboardUpdateBanner } from './DashboardUpdateBanner';
 import { WebPreviewBanner } from './WebPreviewBanner';
 
 interface CommandSearchProps {
@@ -112,7 +111,6 @@ export const DashboardView = (): React.JSX.Element => {
 
       <div className="relative mx-auto max-w-5xl px-8 py-12">
         <WebPreviewBanner />
-        <DashboardUpdateBanner />
         <CliStatusBanner />
 
         <div className="mb-12 flex items-center justify-center gap-3">

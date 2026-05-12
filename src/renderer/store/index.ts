@@ -1543,7 +1543,7 @@ export function initializeNotificationListeners(): () => void {
             updateStatus: 'available',
             availableVersion: nextVersion,
             releaseNotes: s.releaseNotes ?? null,
-            showUpdateDialog: nextVersion !== dismissed,
+            showUpdateDialog: false,
           });
           break;
         }

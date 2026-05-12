@@ -23,6 +23,7 @@ export const UpdateDialog = (): React.JSX.Element | null => {
     updateStatus,
     availableVersion,
     releaseNotes,
+    updateError,
     downloadUpdate,
     installUpdate,
     dismissUpdateDialog,
@@ -32,6 +33,7 @@ export const UpdateDialog = (): React.JSX.Element | null => {
       updateStatus: s.updateStatus,
       availableVersion: s.availableVersion,
       releaseNotes: s.releaseNotes,
+      updateError: s.updateError,
       downloadUpdate: s.downloadUpdate,
       installUpdate: s.installUpdate,
       dismissUpdateDialog: s.dismissUpdateDialog,
@@ -162,6 +164,11 @@ export const UpdateDialog = (): React.JSX.Element | null => {
         </div>
 
         {/* Release notes */}
+        {updateError ? (
+          <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {updateError}
+          </div>
+        ) : null}
         <div
           className="prose prose-sm prose-invert mb-4 max-h-[60vh] max-w-none overflow-y-auto rounded border p-3 text-xs"
           style={{
@@ -193,8 +200,7 @@ export const UpdateDialog = (): React.JSX.Element | null => {
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-white/5"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              <ExternalLink className="size-3" />
-              View on GitHub
+              <ExternalLink className="size-3" />在 GitHub 查看
             </button>
           )}
           <div className="flex-1" />
@@ -206,21 +212,21 @@ export const UpdateDialog = (): React.JSX.Element | null => {
               color: 'var(--color-text-secondary)',
             }}
           >
-            Later
+            稍后
           </button>
           {isDownloaded ? (
             <button
               onClick={installUpdate}
               className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500"
             >
-              Restart now
+              立即重启
             </button>
           ) : (
             <button
               onClick={downloadUpdate}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500"
             >
-              Download
+              下载更新
             </button>
           )}
         </div>

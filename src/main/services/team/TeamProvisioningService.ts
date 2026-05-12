@@ -833,6 +833,18 @@ function isAnthropicOneMillionModel(model: string | undefined | null): boolean {
   return /\[1m\]/i.test(model?.trim() ?? '');
 }
 
+function getLaunchEffortArg(
+  providerId: TeamProviderId,
+  effort: EffortLevel | null | undefined,
+  launchModel: string | undefined
+): EffortLevel | undefined {
+  if (!effort) return undefined;
+  if (providerId === 'anthropic' && isAnthropicOneMillionModel(launchModel)) {
+    return undefined;
+  }
+  return effort;
+}
+
 function sanitizeAnthropicEffortForModel(
   providerId: TeamProviderId,
   model: string | undefined,
@@ -3254,6 +3266,33 @@ function buildBootstrapTaskBoardSummary(tasks: TeamTask[]): string {
     .join('\n');
 }
 
+function recoverInterruptedInProgressTasks(teamName: string, tasks: TeamTask[]): number {
+  let recovered = 0;
+  const controller = createController({ teamName, claudeDir: getClaudeBasePath() });
+  for (const task of tasks) {
+    if (task.status !== 'in_progress' || task.id.startsWith('_internal')) {
+      continue;
+    }
+    try {
+      controller.tasks.addTaskComment(task.id, {
+        text: '系统已检测到团队重启/关闭时该任务仍处于进行中。为避免误判为仍在执行，已自动恢复为 TODO；请重新开始任务后继续。',
+        from: 'system',
+        id: `auto-recover-${task.id}`,
+        notifyOwner: false,
+      });
+      controller.tasks.setTaskStatus(task.id, 'pending', 'system');
+      recovered += 1;
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to recover interrupted task ${task.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+  return recovered;
+}
+
 function buildDeterministicLaunchHydrationPrompt(
   request: TeamLaunchRequest,
   members: TeamCreateRequest['members'],
@@ -4709,9 +4748,7 @@ export class TeamProvisioningService {
       }
       if (params.effort) {
         if (isAnthropicOneMillionModel(resolvedLaunchModel)) {
-          throw new Error(
-            `${params.actorLabel} 使用了 effort "${params.effort}"，但 1M token 模型不支持 effort 参数。`
-          );
+          return;
         }
         if (!selection.supportedEfforts.includes(params.effort)) {
           throw new Error(
@@ -12193,6 +12230,11 @@ export class TeamProvisioningService {
         launchIdentity
       );
       const resolvedProviderId = resolveTeamProviderId(request.providerId);
+      const launchEffortArg = getLaunchEffortArg(
+        resolvedProviderId,
+        launchIdentity.resolvedEffort,
+        launchModelArg
+      );
       const providerFastModeArgs = buildProviderFastModeArgs(
         resolvedProviderId,
         launchIdentity,
@@ -12219,7 +12261,7 @@ export class TeamProvisioningService {
           ? ['--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']
           : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'default']),
         ...(launchModelArg ? ['--model', launchModelArg] : []),
-        ...(launchIdentity.resolvedEffort ? ['--effort', launchIdentity.resolvedEffort] : []),
+        ...(launchEffortArg ? ['--effort', launchEffortArg] : []),
         ...providerFastModeArgs,
         ...(request.worktree ? ['--worktree', request.worktree] : []),
         '--teammate-mode',
@@ -13222,6 +13264,15 @@ export class TeamProvisioningService {
         ]);
       _t('parallelPreSpawn (tasks+feishu+mcp)');
       const existingTasks = existingTasksResult;
+      const recoveredInterruptedTasks = recoverInterruptedInProgressTasks(
+        request.teamName,
+        existingTasks
+      );
+      if (recoveredInterruptedTasks > 0) {
+        logger.info(
+          `[${request.teamName}] Recovered ${recoveredInterruptedTasks} interrupted in-progress task(s) to pending before launch`
+        );
+      }
       const prompt = buildDeterministicLaunchHydrationPrompt(
         request,
         effectiveMemberSpecs,
@@ -13275,6 +13326,11 @@ export class TeamProvisioningService {
         launchIdentity
       );
       const resolvedProviderId = resolveTeamProviderId(request.providerId);
+      const launchEffortArg = getLaunchEffortArg(
+        resolvedProviderId,
+        launchIdentity.resolvedEffort,
+        launchModelArg
+      );
       const providerFastModeArgs = buildProviderFastModeArgs(
         resolvedProviderId,
         launchIdentity,
@@ -13283,8 +13339,8 @@ export class TeamProvisioningService {
       if (launchModelArg) {
         launchArgs.push('--model', launchModelArg);
       }
-      if (launchIdentity.resolvedEffort) {
-        launchArgs.push('--effort', launchIdentity.resolvedEffort);
+      if (launchEffortArg) {
+        launchArgs.push('--effort', launchEffortArg);
       }
       launchArgs.push(...providerFastModeArgs);
       if (request.worktree) {

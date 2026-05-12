@@ -964,7 +964,20 @@ const electronAPI: ElectronAPI = {
       teamName: string,
       options?: { cursor?: string | null; limit?: number }
     ) => {
-      return invokeIpcWithResult<MessagesPage>(TEAM_GET_MESSAGES_PAGE, teamName, options);
+      try {
+        return await invokeIpcWithResult<MessagesPage>(TEAM_GET_MESSAGES_PAGE, teamName, options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes(`No handler registered for '${TEAM_GET_MESSAGES_PAGE}'`)) {
+          return {
+            messages: [],
+            nextCursor: null,
+            hasMore: false,
+            feedRevision: 'messages-page-handler-missing',
+          };
+        }
+        throw error;
+      }
     },
     getMemberActivityMeta: async (teamName: string) => {
       return invokeIpcWithResult<TeamMemberActivityMeta>(TEAM_GET_MEMBER_ACTIVITY_META, teamName);
