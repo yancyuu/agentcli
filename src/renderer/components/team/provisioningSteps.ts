@@ -275,21 +275,22 @@ export function getLaunchJoinState({
   hasMembersStillJoining: boolean;
   remainingJoinCount: number;
 } {
+  const aliveCount = heartbeatConfirmedCount + processOnlyAliveCount;
   const allTeammatesConfirmedAlive =
     expectedTeammateCount > 0 &&
     failedSpawnCount === 0 &&
     skippedSpawnCount === 0 &&
-    heartbeatConfirmedCount >= expectedTeammateCount;
+    aliveCount >= expectedTeammateCount;
   const remainingJoinCount =
     expectedTeammateCount > 0 && failedSpawnCount === 0 && skippedSpawnCount === 0
-      ? Math.max(0, expectedTeammateCount - heartbeatConfirmedCount)
+      ? Math.max(0, expectedTeammateCount - aliveCount)
       : 0;
   const hasMembersStillJoining =
     expectedTeammateCount > 0 &&
     failedSpawnCount === 0 &&
     skippedSpawnCount === 0 &&
     remainingJoinCount > 0 &&
-    (processOnlyAliveCount > 0 || pendingSpawnCount > 0);
+    pendingSpawnCount > 0;
 
   return {
     allTeammatesConfirmedAlive,

@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { useResizableColumns } from '@renderer/hooks/useResizableColumns';
 import { cn } from '@renderer/lib/utils';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   CheckCircle2,
   ClipboardList,
@@ -37,7 +38,6 @@ import type { KanbanSortField, KanbanSortState } from './KanbanSortPopover';
 import type { DragEndEvent } from '@dnd-kit/core';
 import type { Session } from '@renderer/types/data';
 import type { KanbanColumnId, KanbanState, ResolvedTeamMember, TeamTask } from '@shared/types';
-import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 
 const COLUMN_ACCENTS: Record<
   KanbanColumnId,
@@ -248,7 +248,7 @@ const SortableTaskLiteCard = ({
 }): React.JSX.Element => (
   <div
     data-task-id={task.id}
-    className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 py-2 text-xs shadow-sm"
+    className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2 text-xs shadow-sm"
   >
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">

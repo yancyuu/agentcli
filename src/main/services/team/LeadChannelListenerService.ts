@@ -74,7 +74,21 @@ interface FeishuMessageEventRow {
     message_id?: string;
     create_time?: string;
   };
-  sender?: { sender_id?: Record<string, string> };
+  sender?: {
+    sender_id?: Record<string, string>;
+    sender_type?: string;
+  };
+}
+
+function deduplicateId(base: string, seen: Set<string>): string {
+  let id = base;
+  let suffix = 2;
+  while (seen.has(id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  seen.add(id);
+  return id;
 }
 
 function cloneDefaultConfig(): LeadChannelConfig {
@@ -127,11 +141,7 @@ function normalizeConfig(input: unknown): LeadChannelConfig {
           const row = channel as Partial<LeadChannelConfig['channels'][number]>;
           const provider = row.provider === 'webhook' ? 'webhook' : 'feishu';
           const rawId = typeof row.id === 'string' && row.id.trim() ? row.id.trim() : provider;
-          let id = rawId;
-          for (let suffix = 2; seenChannelIds.has(id); suffix += 1) {
-            id = `${rawId}-${suffix}`;
-          }
-          seenChannelIds.add(id);
+          const id = deduplicateId(rawId, seenChannelIds);
           const name =
             typeof row.name === 'string' && row.name.trim()
               ? row.name.trim()
@@ -456,8 +466,12 @@ export class LeadChannelListenerService {
 
     const eventDispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data: unknown) => {
-        const text = extractFeishuText(data);
         const event = getFeishuEventRow(data);
+        const senderType = event.sender?.sender_type;
+        if (senderType === 'app') {
+          return;
+        }
+        const text = extractFeishuText(data);
         const chatId = event.message?.chat_id ?? 'unknown-chat';
         const senderId =
           event.sender?.sender_id?.open_id ?? event.sender?.sender_id?.user_id ?? 'unknown-sender';

@@ -36,11 +36,11 @@ import {
   getTasksBasePath,
   getTeamsBasePath,
 } from '@main/utils/pathDecoder';
+import { listPosixHostProcesses } from '@main/utils/posixProcessTable';
 import { isProcessAlive } from '@main/utils/processHealth';
 import { killProcessByPid } from '@main/utils/processKill';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
-import { listPosixHostProcesses } from '@main/utils/posixProcessTable';
 import { listWindowsHostProcesses } from '@main/utils/windowsProcessTable';
 import {
   AGENT_BLOCK_CLOSE,
@@ -208,8 +208,8 @@ import {
   commandArgEquals,
   isStrongRuntimeEvidence,
   resolveTeamMemberRuntimeLiveness,
-  sanitizeProcessCommandForDiagnostics,
   type RuntimeProcessTableRow,
+  sanitizeProcessCommandForDiagnostics,
 } from './TeamRuntimeLivenessResolver';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
@@ -8961,6 +8961,7 @@ export class TeamProvisioningService {
     const readPersistedStatuses = async (resolvedRunId: string | null) => {
       const { snapshot, statuses } = await this.reconcilePersistedLaunchState(teamName);
       if (!snapshot) {
+        // no persisted snapshot — rely on live runtime data only
       }
       const nextStatuses = await this.attachLiveRuntimeMetadataToStatuses(teamName, statuses);
       const expectedMembers = snapshot ? this.getPersistedLaunchMemberNames(snapshot) : undefined;
@@ -14869,10 +14870,10 @@ export class TeamProvisioningService {
         `You have new inbox messages addressed to you (team lead "${leadName}").`,
         `Process them in order (oldest first).`,
         `If action is required, delegate via task creation or SendMessage, and keep responses minimal.`,
-        `IMPORTANT: Your text response here is shown to the user.`,
-        `如果下面任一消息来自 "user" 或外部渠道（例如飞书），本轮必须给出一个发给 user 的简短回复。首选 SendMessage to="user"；不要让页面或渠道回复为空。`,
-        `普通对话、追问、确认、状态询问或解释请求不需要创建任务；请直接回复 user。只有明确需要执行/跟进/交付的工作才进入任务看板；即使进入任务看板，也要 SendMessage "user" 说明状态。`,
-        `对于外部渠道消息（例如飞书），你的文本响应也会发回该渠道。当外部发送者看起来期待回复时，请自然、简洁地回复。`,
+        `IMPORTANT: Your text response here is shown to the user AND sent back to external channels (e.g. Feishu). Do NOT also call SendMessage to="user" with the same content — that would cause duplicate delivery.`,
+        `对于来自外部渠道（例如飞书）的消息：你的文本响应会自动发回该渠道并展示给用户，不需要再额外调用 SendMessage to="user"。直接在文本中回复即可。`,
+        `对于来自 Hermit 内部 "user" 的消息：仍然使用 SendMessage to="user" 回复。`,
+        `普通对话、追问、确认、状态询问或解释请求不需要创建任务；请直接回复。只有明确需要执行/跟进/交付的工作才进入任务看板。`,
         `如果你确实采取行动，请包含简短的人类可读摘要（例如 "已委派给 carol。"）。`,
         `如果消息来自外部渠道（例如飞书），即使暂时没有可执行行动，也必须给出一句简短可读回复（例如 "已收到，我会尽快处理。"），不要空回复。`,
         `只有对于不需要回复/评论/行动的纯系统通知、评论通知或常规成员可用性更新，才保持安静。`,

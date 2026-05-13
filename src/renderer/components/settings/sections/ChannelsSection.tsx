@@ -51,8 +51,8 @@ function makeUniqueFeishuChannelId(baseId: string, seenIds: Set<string>): string
   const fallback = `feishu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const root = baseId.trim() || fallback;
   let nextId = root;
-  for (let suffix = 2; seenIds.has(nextId); suffix += 1) {
-    nextId = `${root}-${suffix}`;
+  while (seenIds.has(nextId)) {
+    nextId = `${root}-${seenIds.size + 2}`;
   }
   seenIds.add(nextId);
   return nextId;

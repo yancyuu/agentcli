@@ -101,7 +101,7 @@ function parseQualifiedRecipient(
 
 function buildExternalChannelSourceLabel(message: InboxMessage): string | null {
   const channel = message.externalChannel;
-  if (!channel || channel.provider !== 'feishu') {
+  if (channel?.provider !== 'feishu') {
     return null;
   }
   const channelName = channel.channelName?.trim() || channel.channelId;

@@ -9,11 +9,11 @@ import { atomicWriteAsync } from './atomicWrite';
 import type {
   EffortLevel,
   TeamFastMode,
+  TeamProviderId,
   TeamTemplateMember,
   TeamTemplateSource,
   TeamTemplateSourcesSnapshot,
   TeamTemplateSummary,
-  TeamProviderId,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamTemplateSource');
