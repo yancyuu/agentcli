@@ -509,8 +509,8 @@ export class LeadChannelListenerService {
           });
           return;
         }
-        const triggerMode = channel.triggerMode ?? 'mention';
-        if (boundTeam && triggerMode === 'mention') {
+        const triggerMode = channel.triggerMode ?? 'all';
+        if (!boundTeam && triggerMode === 'mention') {
           const hasExplicitTeam = await this.resolveMentionedTeamName(text);
           if (!hasExplicitTeam) {
             return;
