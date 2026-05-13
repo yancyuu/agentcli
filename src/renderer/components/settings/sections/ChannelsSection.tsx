@@ -568,6 +568,34 @@ export const ChannelsSection = (): React.JSX.Element => {
                           可选绑定一个默认团队。未绑定时，发送者需要在消息开头 @ 团队，或使用 /team
                           团队名，系统才会投递到对应团队。
                         </p>
+                        {channel.boundTeam ? (
+                          <div className="space-y-1.5 border-t border-[var(--color-border-subtle)] pt-3">
+                            <Label>群聊触发模式</Label>
+                            <Select
+                              value={channel.triggerMode ?? 'mention'}
+                              onValueChange={(value) =>
+                                updateFeishuChannel(channel.id, (item) => ({
+                                  ...item,
+                                  triggerMode: value as 'mention' | 'all',
+                                }))
+                              }
+                              disabled={saving}
+                            >
+                              <SelectTrigger className="h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="mention">@才回复（默认）</SelectItem>
+                                <SelectItem value="all">每条都回复</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[10px] text-[var(--color-text-muted)]">
+                              {channel.triggerMode === 'all'
+                                ? '所有群消息都会转发给绑定的团队。'
+                                : '只有 @机器人 或包含 /team 命令的消息才会转发。'}
+                            </p>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </>

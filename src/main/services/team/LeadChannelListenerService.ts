@@ -509,6 +509,13 @@ export class LeadChannelListenerService {
           });
           return;
         }
+        const triggerMode = channel.triggerMode ?? 'mention';
+        if (boundTeam && triggerMode === 'mention') {
+          const hasExplicitTeam = await this.resolveMentionedTeamName(text);
+          if (!hasExplicitTeam) {
+            return;
+          }
+        }
         const targetTeam = boundTeam ?? (await this.resolveMentionedTeamName(text));
         if (!targetTeam) {
           await apiClient.im.message
@@ -582,6 +589,35 @@ export class LeadChannelListenerService {
           message: deliveredDirect
             ? `${channel.name} 已接收消息并直达负责人。`
             : `${channel.name} 已接收消息并转入负责人。`,
+          lastEventAt: new Date().toISOString(),
+        });
+      },
+      'im.chat.member.bot.added_v1': async (data: unknown) => {
+        const row = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+        const eventRow = (row.event ?? row) as Record<string, Record<string, unknown>>;
+        const chatInfo = eventRow.chat ?? {};
+        const chatId = String(chatInfo.chat_id ?? eventRow.chat_id ?? 'unknown-chat');
+        logger.info(`[${statusOwner}/${channel.id}] Bot added to chat ${chatId}`);
+        try {
+          await apiClient.im.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              content: JSON.stringify({
+                text: '👋 你好！我是 Hermit 团队助手。请先在 Hermit 中将此群绑定到一个团队，我就可以开始工作了。\n\n绑定方式：Hermit 设置 → 飞书渠道 → 群绑定 → 选择团队。',
+              }),
+              msg_type: 'text',
+            },
+          });
+        } catch (error: unknown) {
+          logger.warn(
+            `[${statusOwner}/${channel.id}] Failed to send welcome message to chat ${chatId}: ${String(error)}`
+          );
+        }
+        this.patchStatus(statusOwner, channel.id, {
+          running: true,
+          state: 'connected',
+          message: `${channel.name} 已加入新群 ${chatId}。`,
           lastEventAt: new Date().toISOString(),
         });
       },

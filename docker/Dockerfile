@@ -1,16 +1,20 @@
 # =============================================================================
-# Agent Teams standalone Docker image
+# Hermit standalone Docker image
 #
-# Runs the HTTP server without Electron, serving the full UI over HTTP.
-# Mount your ~/.claude directory to make session data available.
+# Includes Claude Code CLI so agents can operate on mounted project code.
 #
-# Build:  docker build -t agent-teams-ai .
-# Run:    docker run -p 3456:3456 -v ~/.claude:/data/.claude:ro agent-teams-ai
+# Build:  docker build -t hermit .
+# Run:    docker run -p 3456:3456 \
+#           -v ~/.claude:/data/.claude \
+#           -v ~/my-project:/data/project \
+#           hermit
 # =============================================================================
 
 FROM node:20-slim AS builder
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 # Enable corepack for pnpm
 RUN corepack enable
@@ -24,13 +28,16 @@ COPY . .
 RUN pnpm standalone:build
 
 # =============================================================================
-# Production stage — minimal image with only the built output
+# Production stage
 # =============================================================================
 FROM node:20-slim
 
 WORKDIR /app
 
-# Enable corepack for pnpm
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Enable corepack for pnpm (production deps)
 RUN corepack enable
 
 # Copy package files and install production-only dependencies
@@ -42,8 +49,8 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist-standalone ./dist-standalone
 COPY --from=builder /app/out/renderer ./out/renderer
 
-# Create data directory for Claude session mount
-RUN mkdir -p /data/.claude
+# Create data directories
+RUN mkdir -p /data/.claude /data/project
 
 ENV NODE_ENV=production
 ENV CLAUDE_ROOT=/data/.claude

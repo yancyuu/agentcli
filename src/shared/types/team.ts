@@ -1501,6 +1501,8 @@ export interface LeadChannelFeishuConfig {
 
 export type LeadChannelProvider = 'feishu' | 'webhook';
 
+export type LeadChannelTriggerMode = 'mention' | 'all';
+
 export interface LeadChannelDefinition {
   id: string;
   name: string;
@@ -1509,6 +1511,8 @@ export interface LeadChannelDefinition {
   feishu?: LeadChannelFeishuConfig;
   /** If set, inbound messages from this channel are routed to the specified team. */
   boundTeam?: string;
+  /** Trigger mode: 'mention' = only respond when @mentioned, 'all' = respond to every message. */
+  triggerMode?: LeadChannelTriggerMode;
 }
 
 export interface LeadChannelConfig {
