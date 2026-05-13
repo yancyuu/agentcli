@@ -42,6 +42,8 @@ function splitCsvLine(line: string): string[] {
   return fields;
 }
 
+export { splitCsvLine };
+
 function parsePositivePid(value: string | undefined): number | null {
   const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;

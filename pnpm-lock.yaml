@@ -248,9 +248,6 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
-      pidusage:
-        specifier: 4.0.1
-        version: 4.0.1
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -339,9 +336,6 @@ importers:
       '@types/node':
         specifier: ^25.0.7
         version: 25.0.7
-      '@types/pidusage':
-        specifier: 2.0.5
-        version: 2.0.5
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
@@ -4454,9 +4448,6 @@ packages:
 
   '@types/pg@8.15.6':
     resolution: {integrity: sha512-NoaMtzhxOrubeL/7UZuNTrejB4MPAJ0RpxZqXQf2qXuVlTPuG6Y8p4u9dKRaue4yjmC7ZhzVO2/Yyyn25znrPQ==}
-
-  '@types/pidusage@2.0.5':
-    resolution: {integrity: sha512-MIiyZI4/MK9UGUXWt0jJcCZhVw7YdhBuTOuqP/BjuLDLZ2PmmViMIQgZiWxtaMicQfAz/kMrZ5T7PKxFSkTeUA==}
 
   '@types/plist@3.0.5':
     resolution: {integrity: sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA==}
@@ -8621,10 +8612,6 @@ packages:
     resolution: {integrity: sha512-eG2dWTVw5bzqGRztnHExczNxt5VGsE6OwTeCG3fdUf9KBsZzO3R5OIIIzWR+iZA0NtZ+RDVdaoE2dK1cn6jH4g==}
     engines: {node: '>=0.10'}
     hasBin: true
-
-  pidusage@4.0.1:
-    resolution: {integrity: sha512-yCH2dtLHfEBnzlHUJymR/Z1nN2ePG3m392Mv8TFlTP1B0xkpMQNHAnfkY0n2tAi6ceKO6YWhxYfZ96V4vVkh/g==}
-    engines: {node: '>=18'}
 
   pify@2.3.0:
     resolution: {integrity: sha512-udgsAY+fTnvv7kI7aaxbqwWNb0AHiB0qBO89PZKPkoTmGOgdbrHDKD+0B2X4uTfJ/FT1R09r9gTsjUjNJotuog==}
@@ -15049,8 +15036,6 @@ snapshots:
       pg-protocol: 1.13.0
       pg-types: 2.2.0
 
-  '@types/pidusage@2.0.5': {}
-
   '@types/plist@3.0.5':
     dependencies:
       '@types/node': 25.0.7
@@ -20543,10 +20528,6 @@ snapshots:
   picomatch@4.0.3: {}
 
   pidtree@0.6.0: {}
-
-  pidusage@4.0.1:
-    dependencies:
-      safe-buffer: 5.2.1
 
   pify@2.3.0: {}
 

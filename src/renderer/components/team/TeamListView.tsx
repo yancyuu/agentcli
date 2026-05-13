@@ -834,6 +834,8 @@ export const TeamListView = (): React.JSX.Element => {
         fastMode: template.fastMode,
         limitContext: template.limitContext,
         skipPermissions: template.skipPermissions,
+        templateSourceId: template.sourceId,
+        templateId: template.templateId,
         members: template.members.map((member) => ({
           name: member.name,
           role: member.role,

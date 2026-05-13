@@ -102,6 +102,32 @@ function createCorepackStyleLauncher(): { dir: string; launcher: string; target:
   return { dir, launcher, target };
 }
 
+function createDirectExeLauncher(): { dir: string; launcher: string; target: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cat-cli-direct-exe-'));
+  const targetDir = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin');
+  mkdirSync(targetDir, { recursive: true });
+  const target = path.join(targetDir, 'claude.exe');
+  writeFileSync(target, '', 'utf8');
+  const launcher = path.join(dir, 'claude.cmd');
+  writeFileSync(
+    launcher,
+    [
+      '@ECHO off',
+      'GOTO start',
+      ':find_dp0',
+      'SET dp0=%~dp0',
+      'EXIT /b',
+      ':start',
+      'SETLOCAL',
+      'CALL :find_dp0',
+      '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*',
+      '',
+    ].join('\r\n'),
+    'utf8'
+  );
+  return { dir, launcher, target };
+}
+
 function createUnresolvableCmdLauncher(): { dir: string; launcher: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'cat-cli-unknown-'));
   const launcher = path.join(dir, 'claude.cmd');
@@ -258,6 +284,24 @@ describe('cli child process helpers', () => {
       }
     });
 
+    it('runs direct-exe cmd launchers (Anthropic claude.cmd) directly', () => {
+      setPlatform('win32');
+      const fake = {} as any;
+      const spawnMock = child.spawn as unknown as Mock;
+      spawnMock.mockReturnValue(fake);
+      const { dir, launcher, target } = createDirectExeLauncher();
+      try {
+        const result = spawnCli(launcher, ['--version']);
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+        expect(spawnMock.mock.calls[0][0]).toBe(target);
+        expect(spawnMock.mock.calls[0][1]).toEqual(['--version']);
+        expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('shell');
+        expect(result).toBe(fake);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('falls back to shell for unresolvable cmd launchers', () => {
       setPlatform('win32');
       const fake = {} as any;
@@ -404,6 +448,29 @@ describe('cli child process helpers', () => {
         expect(execFileMock.mock.calls[0][1]).toEqual([target, '--version']);
         expect(execMock).not.toHaveBeenCalled();
         expect(result.stdout).toBe('ok');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('executes direct-exe cmd launchers (Anthropic claude.cmd) directly without shell', async () => {
+      setPlatform('win32');
+      const execFileMock = child.execFile as unknown as Mock;
+      const execMock = child.exec as unknown as Mock;
+      execFileMock.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: ExecCallback) => {
+          cb(null, '1.0.0', '');
+          return {} as any;
+        }
+      );
+      const { dir, launcher, target } = createDirectExeLauncher();
+      try {
+        const result = await execCli(launcher, ['--version']);
+        expect(execFileMock).toHaveBeenCalledTimes(1);
+        expect(execFileMock.mock.calls[0][0]).toBe(target);
+        expect(execFileMock.mock.calls[0][1]).toEqual(['--version']);
+        expect(execMock).not.toHaveBeenCalled();
+        expect(result.stdout).toBe('1.0.0');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

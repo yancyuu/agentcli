@@ -184,6 +184,43 @@ function resolveGenericNodeCmdLauncher(
 }
 
 /**
+ * Resolver for Windows .cmd launchers that directly invoke a native .exe
+ * (e.g. Anthropic's official claude.cmd, which calls a prebuilt claude.exe).
+ * Without this we'd fall back to `spawn(cmd, { shell: true })`, which on
+ * Windows wraps every long-running claude.exe in an idle cmd.exe parent
+ * process — visible as black console windows and doubling the process count.
+ */
+function resolveDirectExeLauncher(
+  content: string,
+  launcherDir: string
+): DirectWindowsLauncher | null {
+  // Match all `"<path>.exe" %*` calls and keep the LAST one. Launchers can
+  // probe alternate paths earlier (e.g. `@IF EXIST "...\foo.exe" ...`); the
+  // actual invocation is normally the final matching line.
+  const pattern = /"([^"\r\n]+\.exe)"\s+%\*/gim;
+  let lastTarget: string | null = null;
+  let candidate: RegExpExecArray | null;
+  while ((candidate = pattern.exec(content)) !== null) {
+    if (candidate[1]) {
+      lastTarget = candidate[1];
+    }
+  }
+  if (!lastTarget) {
+    return null;
+  }
+  const exePath = resolveCmdPathTemplate(lastTarget, launcherDir);
+  if (!existsSync(exePath)) {
+    return null;
+  }
+  // node.exe shims are handled by resolveNpmNodeShim / resolveGenericNodeCmdLauncher,
+  // which also extract the JS entrypoint. Don't claim them here.
+  if (/[\\/]node\.exe$/i.test(exePath)) {
+    return null;
+  }
+  return { command: exePath, argsPrefix: [] };
+}
+
+/**
  * Some Windows launchers are thin wrappers around a real JS entrypoint.
  * Running that entrypoint directly with an argv array avoids cmd.exe's
  * percent expansion, which cannot safely represent args like `%PATH%`.
@@ -199,7 +236,8 @@ function resolveDirectWindowsLauncher(binaryPath: string): DirectWindowsLauncher
     return (
       resolveGeneratedBunLauncher(content, launcherDir) ??
       resolveNpmNodeShim(content, launcherDir) ??
-      resolveGenericNodeCmdLauncher(content, launcherDir)
+      resolveGenericNodeCmdLauncher(content, launcherDir) ??
+      resolveDirectExeLauncher(content, launcherDir)
     );
   } catch {
     return null;

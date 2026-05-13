@@ -206,6 +206,9 @@ export interface TeamCopyData {
   fastMode?: TeamFastMode;
   limitContext?: boolean;
   skipPermissions?: boolean;
+  /** Template source for copying skill/memory files (set when using a template). */
+  templateSourceId?: string;
+  templateId?: string;
 }
 
 export interface ActiveTeamRef {
@@ -1323,6 +1326,8 @@ export const CreateTeamDialog = ({
       skipPermissions,
       worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
       extraCliArgs: launchTeam ? buildLaunchExtraCliArgs(customArgs) : undefined,
+      templateSourceId: initialData?.templateSourceId,
+      templateId: initialData?.templateId,
     };
   }, [
     sanitizedTeamName,
@@ -1586,6 +1591,8 @@ export const CreateTeamDialog = ({
             model: request.model,
             effort: request.effort,
             fastMode: request.fastMode,
+            templateSourceId: request.templateSourceId,
+            templateId: request.templateId,
           });
           onOpenTeam(request.teamName, effectiveCwd || undefined);
           resetFormState();

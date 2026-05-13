@@ -29,6 +29,7 @@ import { FileReadTimeoutError, readFileUtf8WithTimeout } from '@main/utils/fsRea
 import {
   encodePath,
   extractBaseDir,
+  getAppDataPath,
   getAutoDetectedClaudeBasePath,
   getClaudeBasePath,
   getHomeDir,
@@ -39,6 +40,7 @@ import {
 import { listPosixHostProcesses } from '@main/utils/posixProcessTable';
 import { isProcessAlive } from '@main/utils/processHealth';
 import { killProcessByPid } from '@main/utils/processKill';
+import { readProcessRssBytes } from '@main/utils/processRss';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import { listWindowsHostProcesses } from '@main/utils/windowsProcessTable';
@@ -104,7 +106,6 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import pidusage from 'pidusage';
 import * as readline from 'readline';
 
 import {
@@ -9191,10 +9192,11 @@ export class TeamProvisioningService {
       let rssBytes = rssPid ? rssBytesByPid.get(rssPid) : undefined;
       if (rssBytes == null && isSharedOpenCodeHost && typeof rssPid === 'number' && rssPid > 0) {
         try {
-          const refreshedStat = await pidusage(rssPid, { maxage: 0 });
-          if (Number.isFinite(refreshedStat.memory) && refreshedStat.memory >= 0) {
-            rssBytesByPid.set(rssPid, refreshedStat.memory);
-            rssBytes = refreshedStat.memory;
+          const refreshed = await readProcessRssBytes([rssPid]);
+          const refreshedBytes = refreshed.get(rssPid);
+          if (Number.isFinite(refreshedBytes) && (refreshedBytes ?? 0) >= 0) {
+            rssBytesByPid.set(rssPid, refreshedBytes as number);
+            rssBytes = refreshedBytes;
           }
         } catch {
           // Shared OpenCode host can exit between discovery and the targeted RSS refresh.
@@ -11988,6 +11990,46 @@ export class TeamProvisioningService {
     await atomicWriteAsync(configPath, `${JSON.stringify(config, null, 2)}\n`);
   }
 
+  private async copyTemplateFilesForProvisioning(
+    teamName: string,
+    templateSourceId: string,
+    templateId: string
+  ): Promise<void> {
+    const templateBase = path.join(
+      getAppDataPath(),
+      'team-template-sources',
+      'repos',
+      templateSourceId,
+      templateId
+    );
+    const teamDir = path.join(getTeamsBasePath(), teamName);
+    const claudeDir = path.join(templateBase, '.claude');
+    try {
+      const stat = await fs.promises.stat(claudeDir);
+      if (stat.isDirectory()) {
+        const destDir = path.join(teamDir, '.claude');
+        await fs.promises.mkdir(destDir, { recursive: true });
+        await this.copyDirRecursiveInternal(claudeDir, destDir);
+      }
+    } catch {
+      // .claude dir doesn't exist in template — skip silently
+    }
+  }
+
+  private async copyDirRecursiveInternal(src: string, dest: string): Promise<void> {
+    const entries = await fs.promises.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await fs.promises.mkdir(destPath, { recursive: true });
+        await this.copyDirRecursiveInternal(srcPath, destPath);
+      } else if (entry.isFile()) {
+        await fs.promises.copyFile(srcPath, destPath);
+      }
+    }
+  }
+
   private async sendStreamJsonUserPrompt(
     child: ReturnType<typeof spawn>,
     prompt: string,
@@ -12360,6 +12402,16 @@ export class TeamProvisioningService {
             : []),
         ]);
         _t('create:metaWritten');
+
+        // Copy skill and memory files from template source if provided
+        if (request.templateSourceId && request.templateId) {
+          await this.copyTemplateFilesForProvisioning(
+            request.teamName,
+            request.templateSourceId,
+            request.templateId
+          );
+        }
+
         if (
           run.cancelRequested ||
           run.processKilled ||
@@ -12552,6 +12604,15 @@ export class TeamProvisioningService {
       providerBackendId: request.providerBackendId,
     });
     await this.writeOpenCodeTeamConfig(request, effectiveMembers);
+
+    // Copy skill and memory files from template source if provided
+    if (request.templateSourceId && request.templateId) {
+      await this.copyTemplateFilesForProvisioning(
+        request.teamName,
+        request.templateSourceId,
+        request.templateId
+      );
+    }
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
       request,
@@ -16328,44 +16389,14 @@ export class TeamProvisioningService {
   }
 
   private async readProcessRssBytesByPid(pids: readonly number[]): Promise<Map<number, number>> {
-    const uniquePids = [...new Set(pids.filter((pid) => Number.isFinite(pid) && pid > 0))];
-    if (uniquePids.length === 0) {
-      return new Map();
-    }
-
-    const rssBytesByPid = new Map<number, number>();
-    const options = { maxage: 0 };
     try {
-      const statsByPid = await pidusage(uniquePids, options);
-      for (const [rawPid, stat] of Object.entries(statsByPid)) {
-        const pid = Number.parseInt(rawPid, 10);
-        const rssBytes = stat?.memory;
-        if (Number.isFinite(pid) && pid > 0 && Number.isFinite(rssBytes) && rssBytes >= 0) {
-          rssBytesByPid.set(pid, rssBytes);
-        }
-      }
-      return rssBytesByPid;
+      return await readProcessRssBytes(pids);
     } catch (error) {
       logger.debug(
-        `pidusage batch runtime snapshot failed; falling back to per-pid reads: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `process RSS snapshot failed: ${error instanceof Error ? error.message : String(error)}`
       );
+      return new Map();
     }
-
-    await Promise.all(
-      uniquePids.map(async (pid) => {
-        try {
-          const stat = await pidusage(pid, options);
-          if (Number.isFinite(stat.memory) && stat.memory >= 0) {
-            rssBytesByPid.set(pid, stat.memory);
-          }
-        } catch {
-          // Process likely exited between discovery and sampling.
-        }
-      })
-    );
-    return rssBytesByPid;
   }
 
   private async clearPersistedLaunchState(teamName: string): Promise<void> {

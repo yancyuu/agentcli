@@ -1274,6 +1274,9 @@ export interface TeamCreateRequest {
   worktree?: string;
   /** Raw custom CLI args string, shell-split and appended to CLI command. */
   extraCliArgs?: string;
+  /** Template source for copying skill/memory files (set when using a template). */
+  templateSourceId?: string;
+  templateId?: string;
 }
 
 export interface TeamCreateConfigRequest {
@@ -1289,6 +1292,9 @@ export interface TeamCreateConfigRequest {
   model?: string;
   effort?: EffortLevel;
   fastMode?: TeamFastMode;
+  /** Template source for copying skill/memory files (set when using a template). */
+  templateSourceId?: string;
+  templateId?: string;
 }
 
 export interface TeamTemplateSource {

@@ -1736,6 +1736,14 @@ async function validateProvisioningRequest(
         typeof payload.extraCliArgs === 'string' && payload.extraCliArgs.trim()
           ? payload.extraCliArgs.trim()
           : undefined,
+      templateSourceId:
+        typeof payload.templateSourceId === 'string' && payload.templateSourceId.trim()
+          ? payload.templateSourceId.trim()
+          : undefined,
+      templateId:
+        typeof payload.templateId === 'string' && payload.templateId.trim()
+          ? payload.templateId.trim()
+          : undefined,
     },
   };
 }
@@ -3339,6 +3347,14 @@ async function handleCreateConfig(
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: effortValidation.value,
       fastMode: fastModeValidation.value,
+      templateSourceId:
+        typeof (payload as { templateSourceId?: unknown }).templateSourceId === 'string'
+          ? (payload as { templateSourceId?: string }).templateSourceId
+          : undefined,
+      templateId:
+        typeof (payload as { templateId?: unknown }).templateId === 'string'
+          ? (payload as { templateId?: string }).templateId
+          : undefined,
     })
   );
 }
