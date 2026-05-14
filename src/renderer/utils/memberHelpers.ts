@@ -552,6 +552,15 @@ export function getLaunchAwarePresenceLabel(
   ) {
     return basePresenceLabel;
   }
+
+  // In lazy native bootstrap mode, skipped members should show as 'skipped' instead of 'joining team'
+  if (
+    basePresenceLabel === 'starting' &&
+    (member.skippedForLaunch === true || member.launchState === 'skipped_for_launch')
+  ) {
+    return 'skipped';
+  }
+
   const advisoryLabel = getMemberRuntimeAdvisoryLabel(runtimeAdvisory, member.providerId);
   return advisoryLabel ?? basePresenceLabel;
 }

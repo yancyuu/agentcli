@@ -3,6 +3,7 @@ import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMoni
 import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
+import { validateTemplatePathIds } from '@main/utils/templateCopy';
 import { stripMarkdown } from '@main/utils/textFormatting';
 import {
   TEAM_ADD_MEMBER,
@@ -1740,9 +1741,17 @@ async function validateProvisioningRequest(
         typeof payload.templateSourceId === 'string' && payload.templateSourceId.trim()
           ? payload.templateSourceId.trim()
           : undefined,
-      templateId:
-        typeof payload.templateId === 'string' && payload.templateId.trim()
-          ? payload.templateId.trim()
+      templateDirectoryId:
+        typeof payload.templateDirectoryId === 'string' && payload.templateDirectoryId.trim()
+          ? payload.templateDirectoryId.trim()
+          : undefined,
+      workflow:
+        typeof payload.workflow === 'string' && payload.workflow.trim()
+          ? payload.workflow.trim()
+          : undefined,
+      workflowFile:
+        typeof payload.workflowFile === 'string' && payload.workflowFile.trim()
+          ? payload.workflowFile.trim()
           : undefined,
     },
   };
@@ -3333,6 +3342,21 @@ async function handleCreateConfig(
     });
   }
 
+  const tmplSrc =
+    typeof (payload as { templateSourceId?: unknown }).templateSourceId === 'string'
+      ? ((payload as { templateSourceId?: string }).templateSourceId ?? '').trim()
+      : undefined;
+  const tmplDir =
+    typeof (payload as { templateDirectoryId?: unknown }).templateDirectoryId === 'string'
+      ? ((payload as { templateDirectoryId?: string }).templateDirectoryId ?? '').trim()
+      : undefined;
+  if (tmplSrc && tmplDir) {
+    const pathValidation = validateTemplatePathIds(tmplSrc, tmplDir);
+    if (!pathValidation.valid) {
+      return { success: false, error: pathValidation.error };
+    }
+  }
+
   return wrapTeamHandler('createConfig', () =>
     getTeamDataService().createTeamConfig({
       teamName,
@@ -3347,14 +3371,8 @@ async function handleCreateConfig(
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: effortValidation.value,
       fastMode: fastModeValidation.value,
-      templateSourceId:
-        typeof (payload as { templateSourceId?: unknown }).templateSourceId === 'string'
-          ? (payload as { templateSourceId?: string }).templateSourceId
-          : undefined,
-      templateId:
-        typeof (payload as { templateId?: unknown }).templateId === 'string'
-          ? (payload as { templateId?: string }).templateId
-          : undefined,
+      templateSourceId: tmplSrc || undefined,
+      templateDirectoryId: tmplDir || undefined,
     })
   );
 }

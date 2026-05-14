@@ -1276,7 +1276,11 @@ export interface TeamCreateRequest {
   extraCliArgs?: string;
   /** Template source for copying skill/memory files (set when using a template). */
   templateSourceId?: string;
-  templateId?: string;
+  templateDirectoryId?: string;
+  /** Workflow content for the team lead (from template). */
+  workflow?: string;
+  /** Path to workflow file for the team lead (from template). */
+  workflowFile?: string;
 }
 
 export interface TeamCreateConfigRequest {
@@ -1294,7 +1298,7 @@ export interface TeamCreateConfigRequest {
   fastMode?: TeamFastMode;
   /** Template source for copying skill/memory files (set when using a template). */
   templateSourceId?: string;
-  templateId?: string;
+  templateDirectoryId?: string;
 }
 
 export interface TeamTemplateSource {
@@ -1323,12 +1327,12 @@ export interface TeamTemplateSummary {
   sourceId: string;
   sourceName: string;
   templateId: string;
+  /** On-disk directory name (may differ from templateId when manifest declares a custom id). */
+  templateDirectoryId: string;
   displayName: string;
   description?: string;
   tags?: string[];
   members: TeamTemplateMember[];
-  skillPaths?: string[];
-  memoryPaths?: string[];
   providerId?: TeamProviderId;
   model?: string;
   effort?: EffortLevel;
@@ -1336,6 +1340,10 @@ export interface TeamTemplateSummary {
   limitContext?: boolean;
   skipPermissions?: boolean;
   color?: string;
+  /** Workflow content for the team lead. */
+  workflow?: string;
+  /** Path to workflow file for the team lead. */
+  workflowFile?: string;
 }
 
 export interface TeamTemplateSourcesSnapshot {

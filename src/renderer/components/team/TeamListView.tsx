@@ -35,7 +35,6 @@ import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { buildPendingRuntimeSummaryCopy } from '@renderer/utils/teamLaunchSummaryCopy';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
   CheckCircle,
@@ -86,14 +85,7 @@ function generateUniqueName(sourceName: string, existingNames: string[]): string
   }
 }
 
-type TeamStatus =
-  | 'active'
-  | 'idle'
-  | 'provisioning'
-  | 'offline'
-  | 'partial_failure'
-  | 'partial_skipped'
-  | 'partial_pending';
+type TeamStatus = 'active' | 'idle' | 'provisioning' | 'offline';
 
 function getRecentProjects(team: TeamSummary): string[] {
   const history = team.projectPathHistory;
@@ -231,15 +223,6 @@ function resolveTeamStatus(
   ) {
     return 'provisioning';
   }
-  if (team.teamLaunchState === 'partial_pending') {
-    return 'partial_pending';
-  }
-  if (team.teamLaunchState === 'partial_skipped') {
-    return 'partial_skipped';
-  }
-  if (team.partialLaunchFailure || team.teamLaunchState === 'partial_failure') {
-    return 'partial_failure';
-  }
   return 'offline';
 }
 
@@ -271,27 +254,6 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
         <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-zinc-500/15 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
           <span className="size-1.5 rounded-full bg-zinc-500" />
           离线
-        </span>
-      );
-    case 'partial_failure':
-      return (
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
-          <span className="size-1.5 rounded-full bg-amber-400" />
-          部分启动失败
-        </span>
-      );
-    case 'partial_skipped':
-      return (
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-300">
-          <span className="size-1.5 rounded-full bg-sky-300" />
-          已跳过部分成员
-        </span>
-      );
-    case 'partial_pending':
-      return (
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">
-          <span className="size-1.5 rounded-full bg-amber-300" />
-          启动待完成
         </span>
       );
   }
@@ -469,8 +431,7 @@ export const TeamListView = (): React.JSX.Element => {
           getCurrentProvisioningProgressForTeam(provisioningState, t.teamName),
           leadActivityByTeam
         );
-        const isRunning =
-          status !== 'offline' && status !== 'partial_failure' && status !== 'partial_pending';
+        const isRunning = status !== 'offline';
         if (filter.selectedStatuses.has('running') && isRunning) return true;
         if (filter.selectedStatuses.has('offline') && !isRunning) return true;
         return false;
@@ -830,7 +791,7 @@ export const TeamListView = (): React.JSX.Element => {
         limitContext: template.limitContext,
         skipPermissions: template.skipPermissions,
         templateSourceId: template.sourceId,
-        templateId: template.templateId,
+        templateDirectoryId: template.templateDirectoryId,
         members: template.members.map((member) => ({
           name: member.name,
           role: member.role,
@@ -1179,30 +1140,24 @@ export const TeamListView = (): React.JSX.Element => {
                         })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
-                      {(status === 'offline' ||
-                        status === 'partial_failure' ||
-                        status === 'partial_skipped' ||
-                        status === 'partial_pending') &&
-                        team.projectPath && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
-                                onClick={(e) =>
-                                  handleLaunchTeam(team.teamName, team.projectPath, e)
-                                }
-                                disabled={launchingTeamName === team.teamName}
-                                aria-label="启动团队"
-                              >
-                                <Play size={14} fill="currentColor" />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">
-                              {launchingTeamName === team.teamName ? '启动中…' : '启动团队'}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
+                      {status === 'offline' && team.projectPath && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
+                              onClick={(e) => handleLaunchTeam(team.teamName, team.projectPath, e)}
+                              disabled={launchingTeamName === team.teamName}
+                              aria-label="启动团队"
+                            >
+                              <Play size={14} fill="currentColor" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            {launchingTeamName === team.teamName ? '启动中…' : '启动团队'}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       {(status === 'active' || status === 'idle') && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1256,31 +1211,6 @@ export const TeamListView = (): React.JSX.Element => {
                       {team.description || '暂无描述'}
                     </p>
                   </div>
-                  {team.teamLaunchState === 'partial_pending' ? (
-                    <p className="mt-2 text-[11px] text-amber-300">
-                      {team.runtimeProcessPendingCount && team.runtimeProcessPendingCount > 0
-                        ? buildPendingRuntimeSummaryCopy({
-                            confirmedCount: team.confirmedCount,
-                            expectedMemberCount: team.expectedMemberCount,
-                            memberCount: team.memberCount,
-                            runtimeProcessPendingCount: team.runtimeProcessPendingCount,
-                            includePeriod: true,
-                          })
-                        : '上次启动仍在收敛中。'}
-                    </p>
-                  ) : team.partialLaunchFailure || team.teamLaunchState === 'partial_failure' ? (
-                    <p className="mt-2 text-[11px] text-amber-400">
-                      {team.missingMembers?.length
-                        ? `上次启动在 ${team.missingMembers.length}/${team.expectedMemberCount ?? team.missingMembers.length} 名成员加入前停止。`
-                        : '上次启动在所有成员加入前停止。'}
-                    </p>
-                  ) : team.teamLaunchState === 'partial_skipped' ? (
-                    <p className="mt-2 text-[11px] text-sky-300">
-                      {team.skippedMembers?.length
-                        ? `上次启动跳过了 ${team.skippedMembers.length}/${team.expectedMemberCount ?? team.skippedMembers.length} 名成员。`
-                        : '上次启动有成员被跳过。'}
-                    </p>
-                  ) : null}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {team.members && team.members.length > 0 ? (
                       renderMemberChips(team.members, isLight)

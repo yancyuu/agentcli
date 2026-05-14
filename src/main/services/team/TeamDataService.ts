@@ -1,11 +1,7 @@
 import { fromProvisioningMembers, isMixedOpenCodeSideLanePlan } from '@features/team-runtime-lanes';
 import { yieldToEventLoop } from '@main/utils/asyncYield';
-import {
-  getAppDataPath,
-  getClaudeBasePath,
-  getTasksBasePath,
-  getTeamsBasePath,
-} from '@main/utils/pathDecoder';
+import { copyTemplateClaudeDir, validateTemplatePathIds } from '@main/utils/templateCopy';
+import { getClaudeBasePath, getTasksBasePath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { killProcessByPid } from '@main/utils/processKill';
 import {
   AGENT_BLOCK_CLOSE,
@@ -1264,6 +1260,10 @@ export class TeamDataService {
           teamMeta?.launchIdentity?.providerBackendId ??
           migrateProviderBackendId(teamMeta?.providerId, teamMeta?.providerBackendId) ??
           undefined,
+        leadModel: teamMeta?.launchIdentity?.selectedModel ?? teamMeta?.model,
+        leadEffort:
+          teamMeta?.launchIdentity?.resolvedEffort ??
+          (isTeamEffortLevel(teamMeta?.effort) ? teamMeta.effort : undefined),
         leadFastMode: teamMeta?.launchIdentity?.selectedFastMode ?? teamMeta?.fastMode ?? undefined,
         leadWorkflow: teamMeta?.workflow,
         leadResolvedFastMode:
@@ -2865,51 +2865,27 @@ export class TeamDataService {
     });
 
     // Copy skill and memory files from template source if provided
-    if (request.templateSourceId && request.templateId) {
-      await this.copyTemplateFiles(request.teamName, request.templateSourceId, request.templateId);
+    if (request.templateSourceId && request.templateDirectoryId) {
+      await this.copyTemplateFiles(
+        request.teamName,
+        request.templateSourceId,
+        request.templateDirectoryId
+      );
     }
   }
 
   private async copyTemplateFiles(
     teamName: string,
     templateSourceId: string,
-    templateId: string
+    templateDirectoryId: string
   ): Promise<void> {
-    const templateBase = path.join(
-      getAppDataPath(),
-      'team-template-sources',
-      'repos',
-      templateSourceId,
-      templateId
-    );
+    const validation = validateTemplatePathIds(templateSourceId, templateDirectoryId);
+    if (!validation.valid) {
+      logger.warn(`Template copy skipped: ${validation.error}`);
+      return;
+    }
     const teamDir = path.join(getTeamsBasePath(), teamName);
-
-    // Copy .claude/ if it exists in the template
-    const claudeDir = path.join(templateBase, '.claude');
-    try {
-      const stat = await fs.promises.stat(claudeDir);
-      if (stat.isDirectory()) {
-        const destDir = path.join(teamDir, '.claude');
-        await fs.promises.mkdir(destDir, { recursive: true });
-        await this.copyDirRecursive(claudeDir, destDir);
-      }
-    } catch {
-      // .claude dir doesn't exist in template — skip silently
-    }
-  }
-
-  private async copyDirRecursive(src: string, dest: string): Promise<void> {
-    const entries = await fs.promises.readdir(src, { withFileTypes: true });
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-      if (entry.isDirectory()) {
-        await fs.promises.mkdir(destPath, { recursive: true });
-        await this.copyDirRecursive(srcPath, destPath);
-      } else if (entry.isFile()) {
-        await fs.promises.copyFile(srcPath, destPath);
-      }
-    }
+    await copyTemplateClaudeDir(teamDir, validation.resolvedBase);
   }
 
   async reconcileTeamArtifacts(

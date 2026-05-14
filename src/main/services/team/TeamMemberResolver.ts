@@ -75,6 +75,8 @@ export class TeamMemberResolver {
       launchSnapshot?: PersistedTeamLaunchSnapshot | null;
       leadProviderId?: TeamProviderId;
       leadProviderBackendId?: TeamProviderBackendId | null;
+      leadModel?: string;
+      leadEffort?: TeamMember['effort'];
       leadFastMode?: TeamMember['fastMode'];
       leadResolvedFastMode?: boolean | null;
       leadWorkflow?: string;
@@ -331,8 +333,16 @@ export class TeamMemberResolver {
         isolation: configMember?.isolation ?? metaMember?.isolation,
         providerId: effectiveProviderId,
         providerBackendId,
-        model: launchMember?.model ?? configMember?.model ?? metaMember?.model,
-        effort: launchMember?.effort ?? configMember?.effort ?? metaMember?.effort,
+        model:
+          launchMember?.model ??
+          configMember?.model ??
+          metaMember?.model ??
+          (isLead ? options?.leadModel : undefined),
+        effort:
+          launchMember?.effort ??
+          configMember?.effort ??
+          metaMember?.effort ??
+          (isLead ? options?.leadEffort : undefined),
         selectedFastMode:
           launchMember?.selectedFastMode ??
           configMember?.fastMode ??

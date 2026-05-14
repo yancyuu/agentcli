@@ -52,7 +52,7 @@ import {
   buildTaskChangeRequestOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
-import { buildPendingRuntimeSummaryCopy } from '@renderer/utils/teamLaunchSummaryCopy';
+
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
@@ -242,40 +242,7 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
   teamName: string;
   onLaunch: () => void;
 }): React.JSX.Element {
-  const summary = useStore(
-    useShallow((s) => {
-      const team = s.teamByName[teamName];
-      if (!team) {
-        return null;
-      }
-
-      return {
-        memberCount: team.memberCount,
-        expectedMemberCount: team.expectedMemberCount,
-        confirmedCount: team.confirmedCount,
-        runtimeProcessPendingCount: team.runtimeProcessPendingCount,
-        teamLaunchState: team.teamLaunchState,
-        partialLaunchFailure: team.partialLaunchFailure,
-        missingMemberCount: team.missingMembers?.length ?? 0,
-      };
-    })
-  );
-
-  const message =
-    summary?.teamLaunchState === 'partial_pending'
-      ? summary.runtimeProcessPendingCount != null && summary.runtimeProcessPendingCount > 0
-        ? buildPendingRuntimeSummaryCopy({
-            confirmedCount: summary.confirmedCount,
-            expectedMemberCount: summary.expectedMemberCount,
-            memberCount: summary.memberCount,
-            runtimeProcessPendingCount: summary.runtimeProcessPendingCount,
-          })
-        : '上次启动仍在收敛中'
-      : summary?.partialLaunchFailure
-        ? summary.missingMemberCount > 0
-          ? `上次启动部分失败 - ${summary.missingMemberCount}/${summary.expectedMemberCount ?? summary.missingMemberCount} 名成员未加入`
-          : '上次启动部分失败'
-        : '团队离线中';
+  const message = '团队离线中';
 
   return (
     <div

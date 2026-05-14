@@ -43,6 +43,7 @@ import { killProcessByPid } from '@main/utils/processKill';
 import { readProcessRssBytes } from '@main/utils/processRss';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
+import { copyTemplateClaudeDir, validateTemplatePathIds } from '@main/utils/templateCopy';
 import { listWindowsHostProcesses } from '@main/utils/windowsProcessTable';
 import {
   AGENT_BLOCK_CLOSE,
@@ -1617,6 +1618,22 @@ function createInitialMemberSpawnStatusEntry(): MemberSpawnStatusEntry {
   return {
     status: 'offline',
     launchState: 'starting',
+    agentToolAccepted: false,
+    runtimeAlive: false,
+    bootstrapConfirmed: false,
+    hardFailure: false,
+    updatedAt,
+  };
+}
+
+function createSkippedMemberSpawnStatusEntry(reason: string): MemberSpawnStatusEntry {
+  const updatedAt = nowIso();
+  return {
+    status: 'offline',
+    launchState: 'skipped_for_launch',
+    skippedForLaunch: true,
+    skipReason: reason,
+    skippedAt: updatedAt,
     agentToolAccepted: false,
     runtimeAlive: false,
     bootstrapConfirmed: false,
@@ -11993,41 +12010,15 @@ export class TeamProvisioningService {
   private async copyTemplateFilesForProvisioning(
     teamName: string,
     templateSourceId: string,
-    templateId: string
+    templateDirectoryId: string
   ): Promise<void> {
-    const templateBase = path.join(
-      getAppDataPath(),
-      'team-template-sources',
-      'repos',
-      templateSourceId,
-      templateId
-    );
+    const validation = validateTemplatePathIds(templateSourceId, templateDirectoryId);
+    if (!validation.valid) {
+      logger.warn(`Template copy skipped: ${validation.error}`);
+      return;
+    }
     const teamDir = path.join(getTeamsBasePath(), teamName);
-    const claudeDir = path.join(templateBase, '.claude');
-    try {
-      const stat = await fs.promises.stat(claudeDir);
-      if (stat.isDirectory()) {
-        const destDir = path.join(teamDir, '.claude');
-        await fs.promises.mkdir(destDir, { recursive: true });
-        await this.copyDirRecursiveInternal(claudeDir, destDir);
-      }
-    } catch {
-      // .claude dir doesn't exist in template — skip silently
-    }
-  }
-
-  private async copyDirRecursiveInternal(src: string, dest: string): Promise<void> {
-    const entries = await fs.promises.readdir(src, { withFileTypes: true });
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-      if (entry.isDirectory()) {
-        await fs.promises.mkdir(destPath, { recursive: true });
-        await this.copyDirRecursiveInternal(srcPath, destPath);
-      } else if (entry.isFile()) {
-        await fs.promises.copyFile(srcPath, destPath);
-      }
-    }
+    await copyTemplateClaudeDir(teamDir, validation.resolvedBase);
   }
 
   private async sendStreamJsonUserPrompt(
@@ -12222,7 +12213,15 @@ export class TeamProvisioningService {
         geminiPostLaunchHydrationSent: false,
         suppressGeminiPostLaunchHydrationOutput: false,
         memberSpawnStatuses: new Map(
-          bootstrapMemberSpecs.map((member) => [member.name, createInitialMemberSpawnStatusEntry()])
+          LAZY_NATIVE_MEMBER_BOOTSTRAP
+            ? effectiveMemberSpecs.map((member) => [
+                member.name,
+                createSkippedMemberSpawnStatusEntry('lazy_bootstrap'),
+              ])
+            : bootstrapMemberSpecs.map((member) => [
+                member.name,
+                createInitialMemberSpawnStatusEntry(),
+              ])
         ),
         memberSpawnToolUseIds: new Map(),
         pendingMemberRestarts: new Map(),
@@ -12404,11 +12403,11 @@ export class TeamProvisioningService {
         _t('create:metaWritten');
 
         // Copy skill and memory files from template source if provided
-        if (request.templateSourceId && request.templateId) {
+        if (request.templateSourceId && request.templateDirectoryId) {
           await this.copyTemplateFilesForProvisioning(
             request.teamName,
             request.templateSourceId,
-            request.templateId
+            request.templateDirectoryId
           );
         }
 
@@ -12582,6 +12581,32 @@ export class TeamProvisioningService {
     const tasksDir = path.join(getTasksBasePath(), request.teamName);
     await fs.promises.mkdir(teamDir, { recursive: true });
     await fs.promises.mkdir(tasksDir, { recursive: true });
+
+    // Get workflow from template if provided, otherwise from existing meta
+    let workflow = request.workflow;
+    if (!workflow && request.templateSourceId && request.templateDirectoryId) {
+      try {
+        const { getTeamTemplateSourceService } = await import('./TeamTemplateSourceService');
+        const templateService = getTeamTemplateSourceService();
+        const snapshot = await templateService.getSnapshot();
+        const template = snapshot.templates.find(
+          (t) =>
+            t.sourceId === request.templateSourceId &&
+            t.templateDirectoryId === request.templateDirectoryId
+        );
+        if (template?.workflow) {
+          workflow = template.workflow;
+        }
+      } catch (error) {
+        logger.warn(`Failed to read template workflow: ${String(error)}`);
+      }
+    }
+
+    // Fall back to existing meta if still no workflow
+    if (!workflow) {
+      workflow = (await this.teamMetaStore.getMeta(request.teamName).catch(() => null))?.workflow;
+    }
+
     await this.teamMetaStore.writeMeta(request.teamName, {
       displayName: request.displayName,
       description: request.description,
@@ -12596,7 +12621,7 @@ export class TeamProvisioningService {
       worktree: request.worktree,
       extraCliArgs: request.extraCliArgs,
       limitContext: request.limitContext,
-      workflow: (await this.teamMetaStore.getMeta(request.teamName).catch(() => null))?.workflow,
+      workflow,
       createdAt: Date.now(),
     });
     const membersToWrite = this.buildMembersMetaWritePayload(effectiveMembers);
@@ -12606,11 +12631,11 @@ export class TeamProvisioningService {
     await this.writeOpenCodeTeamConfig(request, effectiveMembers);
 
     // Copy skill and memory files from template source if provided
-    if (request.templateSourceId && request.templateId) {
+    if (request.templateSourceId && request.templateDirectoryId) {
       await this.copyTemplateFilesForProvisioning(
         request.teamName,
         request.templateSourceId,
-        request.templateId
+        request.templateDirectoryId
       );
     }
 
@@ -13279,7 +13304,12 @@ export class TeamProvisioningService {
         geminiPostLaunchHydrationSent: false,
         suppressGeminiPostLaunchHydrationOutput: false,
         memberSpawnStatuses: new Map(
-          expectedMembers.map((name) => [name, createInitialMemberSpawnStatusEntry()])
+          LAZY_NATIVE_MEMBER_BOOTSTRAP
+            ? effectiveMemberSpecs.map((member) => [
+                member.name,
+                createSkippedMemberSpawnStatusEntry('lazy_bootstrap'),
+              ])
+            : expectedMembers.map((name) => [name, createInitialMemberSpawnStatusEntry()])
         ),
         memberSpawnToolUseIds: new Map(),
         pendingMemberRestarts: new Map(),

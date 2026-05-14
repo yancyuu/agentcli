@@ -216,10 +216,18 @@ function scanSourceTemplates(source: TeamTemplateSource): TeamTemplateSummary[] 
       if (!isRecord(manifest)) continue;
       const templateId =
         typeof manifest.id === 'string' && manifest.id.trim() ? manifest.id.trim() : entry.name;
+      const workflowFile =
+        typeof manifest.workflowFile === 'string' && manifest.workflowFile.trim()
+          ? manifest.workflowFile.trim()
+          : undefined;
+      const workflow = workflowFile
+        ? readMarkdownIfExists(path.join(templateDir, workflowFile))
+        : undefined;
       templates.push({
         sourceId: source.id,
         sourceName: source.name,
         templateId,
+        templateDirectoryId: entry.name,
         displayName:
           typeof manifest.displayName === 'string' && manifest.displayName.trim()
             ? manifest.displayName.trim()
@@ -230,8 +238,6 @@ function scanSourceTemplates(source: TeamTemplateSource): TeamTemplateSummary[] 
             : readMarkdownIfExists(path.join(templateDir, 'README.md')),
         tags: parseStringArray(manifest.tags),
         members: parseMembers(manifest.members, templateDir),
-        skillPaths: parseStringArray(manifest.skillPaths),
-        memoryPaths: parseStringArray(manifest.memoryPaths),
         providerId: parseTemplateProviderId(manifest.providerId ?? manifest.provider),
         model:
           typeof manifest.model === 'string' && manifest.model.trim()
@@ -247,6 +253,8 @@ function scanSourceTemplates(source: TeamTemplateSource): TeamTemplateSummary[] 
           typeof manifest.color === 'string' && manifest.color.trim()
             ? manifest.color.trim()
             : undefined,
+        workflow,
+        workflowFile,
       });
     } catch (error) {
       logger.warn(`Failed to read template manifest ${manifestPath}: ${String(error)}`);

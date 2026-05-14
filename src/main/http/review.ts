@@ -11,6 +11,7 @@ import { createLogger } from '@shared/utils/logger';
 
 import type { HttpServices } from './index';
 import type { ApplyReviewRequest, SnippetDiff } from '@shared/types/review';
+import type { TaskChangeStateBucket } from '@shared/utils/taskChangeState';
 import type { FastifyInstance } from 'fastify';
 
 const logger = createLogger('HTTP:review');
@@ -83,7 +84,7 @@ export function registerReviewRoutes(app: FastifyInstance, services: HttpService
                 stateBucket === 'review' ||
                 stateBucket === 'completed' ||
                 stateBucket === 'active'
-                  ? (stateBucket as 'approved' | 'review' | 'completed' | 'active')
+                  ? (stateBucket as TaskChangeStateBucket)
                   : undefined,
               summaryOnly: summaryOnly === 'true',
               forceFresh: forceFresh === 'true',

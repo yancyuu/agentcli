@@ -630,6 +630,10 @@ export function buildTeamProvisioningPresentation({
   }
 
   if (isReady) {
+    const allMembersSkipped =
+      skippedSpawnCount > 0 &&
+      expectedTeammateCount > 0 &&
+      skippedSpawnCount >= expectedTeammateCount;
     const joiningPhrase =
       remainingJoinCount === 1 ? '1 个成员仍在加入' : `${remainingJoinCount} 个成员仍在加入`;
     const pendingMembersAwaitApproval =
@@ -645,45 +649,32 @@ export function buildTeamProvisioningPresentation({
           memberSpawnSnapshotUpdatedAt: memberSpawnSnapshot?.updatedAt,
           fallbackJoiningPhrase: joiningPhrase,
         });
-    const readyCompactDetail =
-      failedSpawnCount > 0
-        ? (failedSpawnCompactDetail ?? `${failedSpawnCount} 个成员启动失败`)
-        : skippedSpawnCount > 0
-          ? (skippedSpawnCompactDetail ?? `${skippedSpawnCount} 个成员已跳过`)
-          : hasMembersStillJoining
-            ? pendingDetailPhrase
-            : expectedTeammateCount === 0
-              ? '负责人已在线'
-              : `全部 ${expectedTeammateCount} 个成员已加入`;
+    const readyCompactDetail = hasMembersStillJoining
+      ? pendingDetailPhrase
+      : expectedTeammateCount === 0
+        ? '负责人已在线'
+        : allMembersSkipped
+          ? '按需加载'
+          : `全部 ${expectedTeammateCount} 个成员已加入`;
     const readyDetailMessage =
-      failedSpawnCount > 0
-        ? (failedSpawnPanelMessage ?? genericFailedSpawnPanelMessage ?? progress.message)
-        : skippedSpawnCount > 0
-          ? (skippedSpawnPanelMessage ??
-            `本次启动已跳过 ${skippedSpawnCount}/${Math.max(expectedTeammateCount, skippedSpawnCount)} 个成员`)
-          : expectedTeammateCount === 0
-            ? '团队已启动，负责人已在线'
-            : allTeammatesConfirmedAlive
-              ? `团队已启动，全部 ${expectedTeammateCount} 个成员已加入`
-              : hasMembersStillJoining
-                ? pendingDetailPhrase
-                : '团队已启动，成员仍在加入';
-    const readyDetailSeverity =
-      failedSpawnCount > 0 || skippedSpawnCount > 0
-        ? 'warning'
-        : hasMembersStillJoining
-          ? 'info'
-          : undefined;
+      expectedTeammateCount === 0
+        ? '团队已启动，负责人已在线'
+        : allTeammatesConfirmedAlive
+          ? `团队已启动，全部 ${expectedTeammateCount} 个成员已加入`
+          : allMembersSkipped
+            ? '团队已启动，成员按需加载'
+            : hasMembersStillJoining
+              ? pendingDetailPhrase
+              : '团队已启动，成员仍在加入';
+    const readyDetailSeverity = hasMembersStillJoining ? 'info' : undefined;
     const readyMessage =
-      failedSpawnCount > 0
-        ? `启动完成但有错误：${failedSpawnCount}/${Math.max(expectedTeammateCount, failedSpawnCount)} 个成员启动失败`
-        : skippedSpawnCount > 0
-          ? `启动已继续：已跳过 ${skippedSpawnCount}/${Math.max(expectedTeammateCount, skippedSpawnCount)} 个成员`
-          : expectedTeammateCount === 0
-            ? '团队已启动，负责人已在线'
-            : allTeammatesConfirmedAlive
-              ? `团队已启动，全部 ${expectedTeammateCount} 个成员已加入`
-              : '正在完成启动';
+      expectedTeammateCount === 0
+        ? '团队已启动，负责人已在线'
+        : allTeammatesConfirmedAlive
+          ? `团队已启动，全部 ${expectedTeammateCount} 个成员已加入`
+          : allMembersSkipped
+            ? '团队已启动，成员按需加载'
+            : '正在完成启动';
 
     return {
       progress,
@@ -701,40 +692,15 @@ export function buildTeamProvisioningPresentation({
       hasMembersStillJoining,
       remainingJoinCount,
       panelTitle: '启动详情',
-      panelMessage:
-        failedSpawnCount > 0 || skippedSpawnCount > 0 || hasMembersStillJoining
-          ? readyDetailMessage
-          : null,
+      panelMessage: hasMembersStillJoining ? readyDetailMessage : null,
       panelMessageSeverity: readyDetailSeverity,
       successMessage: readyMessage,
-      successMessageSeverity:
-        failedSpawnCount > 0 || skippedSpawnCount > 0
-          ? 'warning'
-          : hasMembersStillJoining
-            ? 'info'
-            : 'success',
+      successMessageSeverity: hasMembersStillJoining ? 'info' : 'success',
       defaultLiveOutputOpen: false,
-      compactTitle:
-        failedSpawnCount > 0
-          ? '启动完成但有错误'
-          : skippedSpawnCount > 0
-            ? '启动已继续，部分成员已跳过'
-            : hasMembersStillJoining
-              ? '正在完成启动'
-              : '团队已启动',
+      compactTitle: hasMembersStillJoining ? '正在完成启动' : '团队已启动',
       compactDetail: readyCompactDetail,
-      compactTone:
-        failedSpawnCount > 0 || skippedSpawnCount > 0
-          ? 'warning'
-          : hasMembersStillJoining
-            ? 'default'
-            : 'success',
-      currentStepIndex:
-        failedSpawnCount > 0 || skippedSpawnCount > 0
-          ? 2
-          : hasMembersStillJoining
-            ? 2
-            : DISPLAY_COMPLETE_STEP_INDEX,
+      compactTone: hasMembersStillJoining ? 'default' : 'success',
+      currentStepIndex: hasMembersStillJoining ? 2 : DISPLAY_COMPLETE_STEP_INDEX,
     };
   }
 

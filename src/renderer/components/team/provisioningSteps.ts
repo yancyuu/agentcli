@@ -348,7 +348,7 @@ export function getDisplayStepIndex({
   if (failedSpawnCount > 0) {
     return 2;
   }
-  if (skippedSpawnCount > 0) {
+  if (skippedSpawnCount > 0 && skippedSpawnCount < expectedTeammateCount) {
     return 2;
   }
 
