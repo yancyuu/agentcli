@@ -4,7 +4,7 @@
 # Includes Claude Code CLI so agents can operate on mounted project code.
 #
 # Build:  docker build -t hermit .
-# Run:    docker run -p 3456:3456 \
+# Run:    docker run -p 4567:4567 \
 #           -v ~/.claude:/data/.claude \
 #           -v ~/my-project:/data/project \
 #           hermit
@@ -34,6 +34,17 @@ RUN pnpm --filter agent-teams-controller build
 COPY . .
 RUN pnpm standalone:build
 
+# Trim node_modules to production deps only for the runtime stage
+RUN CI=true pnpm prune --prod --ignore-scripts || true
+# protobufjs/minimal is externalized but may be pruned; re-hoist from pnpm store
+RUN if [ -d node_modules/.pnpm ]; then \
+      cp -r node_modules/.pnpm/protobufjs@*/node_modules/protobufjs node_modules/protobufjs 2>/dev/null || true; \
+      for pkg in @protobufjs/aspromise @protobufjs/base64 @protobufjs/codegen @protobufjs/eventemitter @protobufjs/fetch @protobufjs/float @protobufjs/inquire @protobufjs/path @protobufjs/pool @protobufjs/utf8; do \
+        src=$(find node_modules/.pnpm -path "*/$pkg/package.json" -maxdepth 5 2>/dev/null | head -1); \
+        if [ -n "$src" ]; then mkdir -p "node_modules/$pkg" && cp -r "$(dirname "$src")/." "node_modules/$pkg/"; fi; \
+      done; \
+    fi
+
 # =============================================================================
 # Production stage
 # =============================================================================
@@ -44,24 +55,10 @@ WORKDIR /app
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Enable corepack for pnpm (production deps)
-RUN corepack enable
-
-# Copy package files and install production-only dependencies.
-# --ignore-scripts skips native addon builds (node-pty, ssh2, etc.) which
-# require Electron headers or compilers not available in this slim image.
-# The standalone bundle externalizes fastify and agent-teams-controller;
-# only those packages need real node_modules at runtime.
+# Copy production node_modules from builder (already pruned)
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
-# protobufjs is a transitive dep required at runtime by bundled protobuf code
-# but not hoisted by pnpm to top-level. Copy it from the builder where it exists.
-COPY --from=builder /app/node_modules/.pnpm/protobufjs@*/node_modules/protobufjs ./node_modules/protobufjs
-
-# Copy workspace packages that are externalized from the bundle
-COPY --from=builder /app/agent-teams-controller ./agent-teams-controller
-# Copy pnpm store links so workspace deps resolve at runtime
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/agent-teams-controller ./agent-teams-controller
 
 # Copy built standalone server and renderer output
 COPY --from=builder /app/dist-standalone ./dist-standalone
