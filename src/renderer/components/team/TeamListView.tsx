@@ -373,7 +373,7 @@ export const TeamListView = (): React.JSX.Element => {
       leadActivityByTeam: s.leadActivityByTeam,
     }))
   );
-  const canCreate = electronMode && connectionMode === 'local';
+  const canCreate = connectionMode === 'local';
   const provisioningState = useMemo(
     () => ({ currentProvisioningRunIdByTeam, provisioningRuns }),
     [currentProvisioningRunIdByTeam, provisioningRuns]
@@ -397,7 +397,6 @@ export const TeamListView = (): React.JSX.Element => {
 
   // Fetch alive teams on mount and when teams list changes
   useEffect(() => {
-    if (!electronMode) return;
     let cancelled = false;
     const fetchAlive = async (): Promise<void> => {
       try {
@@ -411,11 +410,11 @@ export const TeamListView = (): React.JSX.Element => {
     return () => {
       cancelled = true;
     };
-  }, [electronMode, teams]);
+  }, [teams]);
 
   // Refresh alive teams when opening the create dialog so conflict warning is accurate.
   useEffect(() => {
-    if (!electronMode || !showCreateDialog) return;
+    if (!showCreateDialog) return;
     let cancelled = false;
     void api.teams
       .aliveList()
@@ -426,7 +425,7 @@ export const TeamListView = (): React.JSX.Element => {
     return () => {
       cancelled = true;
     };
-  }, [electronMode, showCreateDialog]);
+  }, [showCreateDialog]);
 
   const currentProjectSelection = useMemo(
     () =>
@@ -716,12 +715,9 @@ export const TeamListView = (): React.JSX.Element => {
   );
 
   useEffect(() => {
-    if (!electronMode) {
-      return;
-    }
     void fetchTeams();
     void fetchAllTasks();
-  }, [electronMode, fetchTeams, fetchAllTasks]);
+  }, [fetchTeams, fetchAllTasks]);
 
   const taskCountsByTeam = useMemo(() => buildTaskCountsByTeam(globalTasks), [globalTasks]);
 
@@ -858,21 +854,6 @@ export const TeamListView = (): React.JSX.Element => {
     },
     [createTeam]
   );
-
-  if (!electronMode) {
-    return (
-      <div className="flex size-full items-center justify-center p-6">
-        <div className="max-w-md text-center">
-          <p className="text-sm font-medium text-[var(--color-text)]">
-            Teams is only available in Electron mode
-          </p>
-          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            In browser mode, access to local `~/.claude/teams` directories is not available.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   const createDialogElement = (
     <CreateTeamDialog
