@@ -27,6 +27,11 @@ const nodeBuiltins = new Set([
 // (fastify ecosystem uses internal file resolution that doesn't survive bundling)
 const externalPackages = [
   'fastify', '@fastify/cors', '@fastify/static',
+  'ssh2', 'cpu-features',
+  'protobufjs', '@protobufjs/aspromise', '@protobufjs/base64',
+  '@protobufjs/codegen', '@protobufjs/eventemitter', '@protobufjs/fetch',
+  '@protobufjs/float', '@protobufjs/inquire', '@protobufjs/path',
+  '@protobufjs/pool', '@protobufjs/utf8',
   'agent-teams-controller'
 ]
 
@@ -64,6 +69,7 @@ export const shell = { openPath: noop, openExternal: noop };
 export const dialog = { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) };
 export const Notification = class { show() {} };
 export const safeStorage = { isEncryptionAvailable: () => false, encryptString: noop, decryptString: () => '' };
+export const net = { request: () => ({ on: noop, end: noop }) };
 export const screen = proxyObj;
 export default proxyObj;
 `
@@ -82,14 +88,44 @@ export default proxyObj;
   }
 }
 
+// Stub out Sentry — @sentry/electron requires Electron runtime
+function sentryStub(): Plugin {
+  const SENTRY_STUB_ID = '\0sentry-stub'
+  const sentryStubCode = `
+const noop = () => ({});
+export const init = noop;
+export const captureException = noop;
+export const captureMessage = noop;
+export const startSpan = (opts, fn) => fn ? fn({ setStatus: noop }) : noop;
+export const setTag = noop;
+export const setUser = noop;
+export const setExtra = noop;
+export const setContext = noop;
+export default { init: noop, captureException: noop };
+`
+  return {
+    name: 'sentry-stub',
+    enforce: 'pre',
+    resolveId(source) {
+      if (source === '@sentry/electron/main' || source === '@sentry/electron' || source.startsWith('@sentry/')) return SENTRY_STUB_ID
+      return null
+    },
+    load(id) {
+      if (id === SENTRY_STUB_ID) return sentryStubCode
+      return null
+    }
+  }
+}
+
 export default defineConfig({
   root: ROOT,
-  plugins: [nativeModuleStub(), electronStub()],
+  plugins: [nativeModuleStub(), electronStub(), sentryStub()],
   resolve: {
     alias: {
       '@main': resolve(ROOT, 'src/main'),
       '@shared': resolve(ROOT, 'src/shared'),
-      '@preload': resolve(ROOT, 'src/preload')
+      '@preload': resolve(ROOT, 'src/preload'),
+      '@features': resolve(ROOT, 'src/features')
     }
   },
   ssr: {

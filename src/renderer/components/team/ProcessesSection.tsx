@@ -1,5 +1,6 @@
 import { memo } from 'react';
 
+import { api } from '@renderer/api';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ExternalLink, Square, Terminal } from 'lucide-react';
 
@@ -130,7 +131,7 @@ export const ProcessesSection = memo(function ProcessesSection({
                   <button
                     type="button"
                     className="text-[var(--color-text-secondary)] underline decoration-dotted underline-offset-2 transition-colors hover:text-blue-400"
-                    onClick={() => void window.electronAPI.openExternal(proc.url!)}
+                    onClick={() => void api.openExternal(proc.url!)}
                     title={proc.url}
                   >
                     {proc.url}
@@ -145,7 +146,7 @@ export const ProcessesSection = memo(function ProcessesSection({
                 <button
                   type="button"
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-red-400 transition-colors hover:bg-red-500/10"
-                  onClick={() => void window.electronAPI.teams.killProcess(teamName, proc.pid)}
+                  onClick={() => void api.teams.killProcess(teamName, proc.pid)}
                   title="停止进程（SIGTERM）"
                 >
                   <Square size={8} className="fill-current" />
@@ -156,7 +157,7 @@ export const ProcessesSection = memo(function ProcessesSection({
                 <button
                   type="button"
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-blue-400 transition-colors hover:bg-blue-500/10"
-                  onClick={() => void window.electronAPI.openExternal(proc.url!)}
+                  onClick={() => void api.openExternal(proc.url!)}
                   title="在浏览器中打开"
                 >
                   <ExternalLink size={10} />

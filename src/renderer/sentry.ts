@@ -15,6 +15,7 @@ import {
   SENTRY_RELEASE,
   TRACES_SAMPLE_RATE,
 } from '@shared/utils/sentryConfig';
+import { isElectronMode } from '@renderer/api';
 
 // ---------------------------------------------------------------------------
 // Telemetry gate (mirrors src/main/sentry.ts pattern)
@@ -50,7 +51,7 @@ export function initSentryRenderer(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cross-version @sentry/core type mismatch
   const beforeSend = (event: any): any => (telemetryAllowed ? event : null);
 
-  if (window.electronAPI) {
+  if (isElectronMode()) {
     // Electron renderer — uses IPC transport to main process.
     // browserTracingIntegration from @sentry/electron/renderer to avoid
     // @sentry/core version mismatch with @sentry/react.

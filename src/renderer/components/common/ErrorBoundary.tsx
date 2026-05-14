@@ -8,6 +8,7 @@ import {
   buildGitHubBugReportUrl,
 } from '@renderer/utils/bugReportUtils';
 import { createLogger } from '@shared/utils/logger';
+import { api } from '@renderer/api';
 import { AlertTriangle, Bug, Check, Copy, RefreshCw } from 'lucide-react';
 
 const logger = createLogger('Component:ErrorBoundary');
@@ -101,12 +102,7 @@ export class ErrorBoundary extends Component<Props, State> {
       context: this.getBugReportContext(),
     });
 
-    if (window.electronAPI?.openExternal) {
-      void window.electronAPI.openExternal(issueUrl);
-      return;
-    }
-
-    window.open(issueUrl, '_blank', 'noopener,noreferrer');
+    void api.openExternal(issueUrl);
   };
 
   handleCopyErrorDetails = async (): Promise<void> => {

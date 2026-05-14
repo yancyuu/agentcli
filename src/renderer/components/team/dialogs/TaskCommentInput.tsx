@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { ImageLightbox } from '@renderer/components/team/attachments/ImageLightbox';
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
@@ -98,7 +99,7 @@ export const TaskCommentInput = ({
         if (categorizeFile(file) === 'unsupported') {
           let filePath = '';
           try {
-            filePath = window.electronAPI.getPathForFile(file);
+            filePath = api.getPathForFile(file);
           } catch {
             // Clipboard files: no path available
           }
@@ -380,7 +381,7 @@ export const TaskCommentInput = ({
                   <button
                     type="button"
                     className="inline-flex shrink-0 items-center rounded-full p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]"
-                    onClick={() => void window.electronAPI.openExternal('https://voicetext.site')}
+                    onClick={() => void api.openExternal('https://voicetext.site')}
                   >
                     <Mic size={14} />
                   </button>

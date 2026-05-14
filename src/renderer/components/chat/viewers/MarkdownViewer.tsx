@@ -278,7 +278,7 @@ const LocalImage = React.memo(function LocalImage({
     setError(false);
 
     const fullPath = resolveRelativePath(src, baseDir);
-    window.electronAPI.editor
+    api.editor
       .readBinaryPreview(fullPath)
       .then((result) => {
         if (!cancelled) {

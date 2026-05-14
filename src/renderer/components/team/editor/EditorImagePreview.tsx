@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { ImageLightbox } from '@renderer/components/team/attachments/ImageLightbox';
 import { Button } from '@renderer/components/ui/button';
 import { useStore } from '@renderer/store';
@@ -46,7 +47,7 @@ export const EditorImagePreview = ({
   useEffect(() => {
     let cancelled = false;
 
-    window.electronAPI.editor
+    api.editor
       .readBinaryPreview(filePath)
       .then((result) => {
         if (cancelled) return;
@@ -73,7 +74,7 @@ export const EditorImagePreview = ({
   }, []);
 
   const handleOpenExternal = useCallback((): void => {
-    window.electronAPI.openPath(filePath, projectPath ?? undefined).catch(console.error);
+    api.openPath(filePath, projectPath ?? undefined).catch(console.error);
   }, [filePath, projectPath]);
 
   const sizeFormatted =

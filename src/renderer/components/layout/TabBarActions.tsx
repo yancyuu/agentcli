@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { isElectronMode } from '@renderer/api';
+import { api, isElectronMode } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { Calendar, PanelRight, Puzzle, Users } from 'lucide-react';
@@ -151,12 +151,7 @@ export const TabBarActions = (): React.JSX.Element => {
         <TooltipTrigger asChild>
           <button
             onClick={async () => {
-              if (isElectronMode()) {
-                await window.electronAPI.openExternal('https://github.com/yancyuu/Hermit');
-                return;
-              }
-
-              window.open('https://github.com/yancyuu/Hermit', '_blank', 'noopener,noreferrer');
+              await api.openExternal('https://github.com/yancyuu/Hermit');
             }}
             onMouseEnter={() => setGithubHover(true)}
             onMouseLeave={() => setGithubHover(false)}

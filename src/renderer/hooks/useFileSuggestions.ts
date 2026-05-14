@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import {
   getQuickOpenCache,
   onQuickOpenCacheInvalidated,
@@ -203,7 +204,7 @@ export function useFileSuggestions(
     (projectRoot: string) => {
       let cancelled = false;
       setLoading(true);
-      window.electronAPI.project
+      api.project
         .listFiles(projectRoot)
         .then((files) => {
           if (cancelled) return;

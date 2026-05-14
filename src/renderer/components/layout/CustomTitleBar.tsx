@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { isElectronMode } from '@renderer/api';
+import { api as apiAdapter, isElectronMode } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import faviconUrl from '@renderer/favicon.png';
 import { useStore } from '@renderer/store';
@@ -33,7 +33,7 @@ export const CustomTitleBar = (): React.JSX.Element | null => {
   const [isMaximized, setIsMaximized] = useState(false);
   const useNativeTitleBar = useStore((s) => s.appConfig?.general?.useNativeTitleBar ?? false);
   const showTitleBar = needsCustomTitleBar() && !useNativeTitleBar;
-  const api = typeof window !== 'undefined' ? window.electronAPI?.windowControls : null;
+  const api = typeof window !== 'undefined' ? apiAdapter.windowControls : null;
 
   useEffect(() => {
     if (api) void api.isMaximized().then(setIsMaximized);

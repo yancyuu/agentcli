@@ -7,7 +7,7 @@
  * Group 4: File operations (iter-3)
  */
 
-import { api } from '@renderer/api';
+import { api, isElectronMode } from '@renderer/api';
 import { getLanguageFromFileName } from '@renderer/utils/codemirrorLanguages';
 import { editorBridge } from '@renderer/utils/editorBridge';
 import { invalidateQuickOpenCache } from '@renderer/utils/quickOpenCache';
@@ -81,7 +81,7 @@ const MAX_WATCHED_DIRS = 120;
 
 function scheduleSyncWatchedFiles(get: () => AppState): void {
   // Editor watcher is Electron-only. In browser mode, api.editor exists but throws.
-  if (!window.electronAPI?.editor) return;
+  if (!isElectronMode()) return;
   const state = get();
   if (!state.editorWatcherEnabled) return;
   const projectPath = state.editorProjectPath;
@@ -96,12 +96,12 @@ function scheduleSyncWatchedFiles(get: () => AppState): void {
   if (watchedFilesSyncTimer) clearTimeout(watchedFilesSyncTimer);
   watchedFilesSyncTimer = setTimeout(() => {
     watchedFilesSyncTimer = null;
-    void window.electronAPI.editor.setWatchedFiles(filePaths);
+    void api.editor.setWatchedFiles(filePaths);
   }, 150);
 }
 
 function scheduleSyncWatchedDirs(get: () => AppState): void {
-  if (!window.electronAPI?.editor) return;
+  if (!isElectronMode()) return;
   const state = get();
   if (!state.editorWatcherEnabled) return;
   const projectPath = state.editorProjectPath;
@@ -122,7 +122,7 @@ function scheduleSyncWatchedDirs(get: () => AppState): void {
   if (watchedDirsSyncTimer) clearTimeout(watchedDirsSyncTimer);
   watchedDirsSyncTimer = setTimeout(() => {
     watchedDirsSyncTimer = null;
-    void window.electronAPI.editor.setWatchedDirs(dirs);
+    void api.editor.setWatchedDirs(dirs);
   }, WATCHED_DIRS_DEBOUNCE_MS);
 }
 

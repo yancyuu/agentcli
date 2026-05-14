@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { Command } from 'cmdk';
 import { Loader2 } from 'lucide-react';
@@ -43,7 +44,7 @@ export const QuickOpenDialog = ({
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync on prop change
     setLoading(true);
-    window.electronAPI.editor
+    api.editor
       .listFiles()
       .then((files) => {
         if (!cancelled) {

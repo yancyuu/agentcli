@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -210,7 +211,7 @@ export const ProjectEditorOverlay = ({
         let promise = pendingReads.current.get(filePath);
         const wasCached = !!promise;
         if (!promise) {
-          promise = window.electronAPI.editor.readFile(filePath);
+          promise = api.editor.readFile(filePath);
           pendingReads.current.set(filePath, promise);
           void promise.finally(() => pendingReads.current.delete(filePath));
         }

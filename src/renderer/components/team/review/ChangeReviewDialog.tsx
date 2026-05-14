@@ -1093,7 +1093,7 @@ export const ChangeReviewDialog = ({
   // Cmd+N IPC listener (forwarded from main process)
   useEffect(() => {
     if (!open) return;
-    const cleanup = window.electronAPI?.review.onCmdN?.(() => {
+    const cleanup = api.review.onCmdN?.(() => {
       const fp = activeFilePathRef.current;
       if (!fp) return;
       const view = editorViewMapRef.current.get(fp);

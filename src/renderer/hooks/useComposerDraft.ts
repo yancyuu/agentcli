@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import {
   type ComposerDraftSnapshot,
   composerDraftStorage,
@@ -333,7 +334,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
         if (categorizeFile(f) === 'unsupported') {
           let filePath = '';
           try {
-            filePath = window.electronAPI.getPathForFile(f);
+            filePath = api.getPathForFile(f);
           } catch {
             // Clipboard files or non-Electron: no path available
           }

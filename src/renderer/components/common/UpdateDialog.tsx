@@ -9,7 +9,7 @@
 import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-import { isElectronMode } from '@renderer/api';
+import { api, isElectronMode } from '@renderer/api';
 import { markdownComponents } from '@renderer/components/chat/markdownComponents';
 import { useStore } from '@renderer/store';
 import { REHYPE_PLUGINS } from '@renderer/utils/markdownPlugins';
@@ -108,7 +108,7 @@ export const UpdateDialog = (): React.JSX.Element | null => {
   const openReleaseOnGitHub = (): void => {
     if (!releaseUrl) return;
     if (isElectronMode()) {
-      void window.electronAPI.openExternal(releaseUrl);
+      void api.openExternal(releaseUrl);
     } else {
       window.open(releaseUrl, '_blank');
     }

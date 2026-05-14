@@ -389,7 +389,7 @@ export const GeneralSection = ({
                   onGeneralToggle('useNativeTitleBar', v);
                   await new Promise((r) => setTimeout(r, 500));
                 }
-                void window.electronAPI?.windowControls?.relaunch();
+                void api.windowControls.relaunch();
               }
             }}
             disabled={saving}
