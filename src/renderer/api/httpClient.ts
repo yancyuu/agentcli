@@ -10,6 +10,8 @@ import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts'
 import type { DashboardRecentProjectsPayload } from '@features/recent-projects/contracts';
 import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type {
+  AddMemberRequest,
+  AddTaskCommentRequest,
   AppConfig,
   AttachmentFileData,
   BoardTaskActivityDetailResult,
@@ -35,10 +37,12 @@ import type {
   KanbanColumnId,
   MachineProfile,
   MachineRuntimeProcess,
+  MemberLogSummary,
   NotificationsAPI,
   NotificationTrigger,
   PaginatedSessionsResult,
   Project,
+  ReplaceMembersRequest,
   RepositoryGroup,
   Schedule,
   ScheduleRun,
@@ -58,9 +62,12 @@ import type {
   SshConnectionStatus,
   SshLastConnection,
   SubagentDetail,
+  TaskComment,
   TeamChangeEvent,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
+  TeamConfig,
+  TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
   TeamLaunchRequest,
@@ -74,7 +81,9 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamTemplateSource,
+  SaveLeadChannelConfigRequest,
   TeamTemplateSourcesSnapshot,
+  TeamUpdateConfigRequest,
   TeamViewSnapshot,
   TriggerTestResult,
   UpdateKanbanPatch,
@@ -83,8 +92,17 @@ import type {
   WaterfallData,
   WslClaudeRootCandidate,
 } from '@shared/types';
+import type {
+  AgentChangeSet,
+  ApplyReviewResult,
+  ChangeStats,
+  FileChangeWithContent,
+  RejectResult,
+  TaskChangeSetV2,
+} from '@shared/types/review';
 import type { AgentConfig } from '@shared/types/api';
 import type { EditorAPI, ProjectAPI } from '@shared/types/editor';
+import type { ApplyReviewRequest } from '@shared/types/review';
 import type { TerminalAPI } from '@shared/types/terminal';
 
 export class HttpAPIClient implements ElectronAPI {
@@ -208,6 +226,22 @@ export class HttpAPIClient implements ElectronAPI {
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      return this.parseJson<T>(res);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async patch<T>(path: string, body?: unknown): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -766,54 +800,66 @@ export class HttpAPIClient implements ElectronAPI {
       console.warn('[HttpAPIClient] getClaudeLogs is not available in browser mode');
       return { lines: [], total: 0, hasMore: false };
     },
-    deleteTeam: async (_teamName: string): Promise<void> => {
-      throw new Error('Team deletion is not available in browser mode');
+    deleteTeam: async (teamName: string): Promise<void> => {
+      await this.del(`/api/teams/${encodeURIComponent(teamName)}`);
     },
-    restoreTeam: async (_teamName: string): Promise<void> => {
-      throw new Error('Team restore is not available in browser mode');
+    restoreTeam: async (teamName: string): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/restore`);
     },
-    permanentlyDeleteTeam: async (_teamName: string): Promise<void> => {
-      throw new Error('Permanent team deletion is not available in browser mode');
+    permanentlyDeleteTeam: async (teamName: string): Promise<void> => {
+      await this.del(`/api/teams/${encodeURIComponent(teamName)}/permanent`);
     },
     getSavedRequest: async (_teamName: string): Promise<TeamCreateRequest | null> => {
       console.warn('[HttpAPIClient] getSavedRequest is not available in browser mode');
       return null;
     },
-    deleteDraft: async (_teamName: string): Promise<void> => {
-      throw new Error('Draft team deletion is not available in browser mode');
+    deleteDraft: async (teamName: string): Promise<void> => {
+      await this.del(`/api/teams/${encodeURIComponent(teamName)}/draft`);
     },
     prepareProvisioning: async (
-      _cwd?: string,
-      _providerId?: TeamLaunchRequest['providerId'],
-      _providerIds?: TeamLaunchRequest['providerId'][],
-      _selectedModels?: string[],
-      _limitContext?: boolean,
-      _modelVerificationMode?: TeamProvisioningModelVerificationMode
+      cwd?: string,
+      providerId?: TeamLaunchRequest['providerId'],
+      providerIds?: TeamLaunchRequest['providerId'][],
+      selectedModels?: string[],
+      limitContext?: boolean,
+      modelVerificationMode?: TeamProvisioningModelVerificationMode
     ): Promise<TeamProvisioningPrepareResult> => {
-      throw new Error('Team provisioning is not available in browser mode');
+      return this.post<TeamProvisioningPrepareResult>('/api/teams/provisioning/prepare', {
+        cwd,
+        providerId,
+        providerIds,
+        selectedModels,
+        limitContext,
+        modelVerificationMode,
+      });
     },
     listTemplateSources: async (): Promise<TeamTemplateSourcesSnapshot> => {
-      return { sources: [], templates: [] };
+      return this.get<TeamTemplateSourcesSnapshot>('/api/teams/templates');
     },
     saveTemplateSources: async (
-      _sources: TeamTemplateSource[]
+      sources: TeamTemplateSource[]
     ): Promise<TeamTemplateSourcesSnapshot> => {
-      throw new Error('Team template sources are not available in browser mode');
+      return this.post<TeamTemplateSourcesSnapshot>('/api/teams/templates/save', sources);
     },
     refreshTemplateSources: async (): Promise<TeamTemplateSourcesSnapshot> => {
-      throw new Error('Team template sources are not available in browser mode');
+      return this.post<TeamTemplateSourcesSnapshot>('/api/teams/templates/refresh');
     },
-    createTeam: async (_request: TeamCreateRequest): Promise<TeamCreateResponse> => {
-      throw new Error('Team provisioning is not available in browser mode');
+    createTeam: async (request: TeamCreateRequest): Promise<TeamCreateResponse> => {
+      return this.post<TeamCreateResponse>('/api/teams/create', request);
     },
-    launchTeam: async (_request: TeamLaunchRequest): Promise<TeamLaunchResponse> => {
-      throw new Error('Team launch is not available in browser mode');
+    launchTeam: async (request: TeamLaunchRequest): Promise<TeamLaunchResponse> => {
+      return this.post<TeamLaunchResponse>(
+        `/api/teams/${encodeURIComponent(request.teamName)}/launch`,
+        request
+      );
     },
-    getProvisioningStatus: async (_runId: string): Promise<TeamProvisioningProgress> => {
-      throw new Error('Team provisioning is not available in browser mode');
+    getProvisioningStatus: async (runId: string): Promise<TeamProvisioningProgress> => {
+      return this.get<TeamProvisioningProgress>(
+        `/api/teams/provisioning/${encodeURIComponent(runId)}`
+      );
     },
-    cancelProvisioning: async (_runId: string): Promise<void> => {
-      throw new Error('Team provisioning is not available in browser mode');
+    cancelProvisioning: async (runId: string): Promise<void> => {
+      await this.post(`/api/teams/provisioning/${encodeURIComponent(runId)}/cancel`);
     },
     sendMessage: async (
       teamName: string,
@@ -838,58 +884,76 @@ export class HttpAPIClient implements ElectronAPI {
       this.get<TeamMemberActivityMeta>(
         `/api/teams/${encodeURIComponent(teamName)}/member-activity`
       ),
-    createTask: async (_teamName: string, _request: CreateTaskRequest): Promise<TeamTask> => {
-      throw new Error('Team task creation is not available in browser mode');
-    },
-    requestReview: async (_teamName: string, _taskId: string): Promise<void> => {
-      throw new Error('Team review is not available in browser mode');
+    createTask: async (teamName: string, request: CreateTaskRequest): Promise<TeamTask> =>
+      this.post<TeamTask>(`/api/teams/${encodeURIComponent(teamName)}/tasks`, request),
+    requestReview: async (teamName: string, taskId: string): Promise<void> => {
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/review`
+      );
     },
     updateKanban: async (
-      _teamName: string,
-      _taskId: string,
-      _patch: UpdateKanbanPatch
+      teamName: string,
+      taskId: string,
+      patch: UpdateKanbanPatch
     ): Promise<void> => {
-      throw new Error('Team kanban is not available in browser mode');
+      await this.patch(
+        `/api/teams/${encodeURIComponent(teamName)}/kanban/${encodeURIComponent(taskId)}`,
+        patch
+      );
     },
     updateKanbanColumnOrder: async (
-      _teamName: string,
-      _columnId: KanbanColumnId,
-      _orderedTaskIds: string[]
+      teamName: string,
+      columnId: KanbanColumnId,
+      orderedTaskIds: string[]
     ): Promise<void> => {
-      throw new Error('Team kanban column order is not available in browser mode');
+      await this.put(`/api/teams/${encodeURIComponent(teamName)}/kanban/column-order`, {
+        columnId,
+        orderedTaskIds,
+      });
     },
     updateTaskStatus: async (
-      _teamName: string,
-      _taskId: string,
-      _status: TeamTaskStatus
+      teamName: string,
+      taskId: string,
+      status: TeamTaskStatus
     ): Promise<void> => {
-      throw new Error('Team task status update is not available in browser mode');
+      await this.patch(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/status`,
+        { status }
+      );
     },
     updateTaskOwner: async (
-      _teamName: string,
-      _taskId: string,
-      _owner: string | null
+      teamName: string,
+      taskId: string,
+      owner: string | null
     ): Promise<void> => {
-      throw new Error('Team task owner update is not available in browser mode');
+      await this.patch(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/owner`,
+        { owner }
+      );
     },
     updateTaskFields: async (
-      _teamName: string,
-      _taskId: string,
-      _fields: { subject?: string; description?: string }
+      teamName: string,
+      taskId: string,
+      fields: { subject?: string; description?: string }
     ): Promise<void> => {
-      throw new Error('Team task fields update is not available in browser mode');
+      await this.patch(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/fields`,
+        fields
+      );
     },
-    startTask: async (_teamName: string, _taskId: string): Promise<{ notifiedOwner: boolean }> => {
-      throw new Error('Team start task is not available in browser mode');
-    },
+    startTask: async (teamName: string, taskId: string): Promise<{ notifiedOwner: boolean }> =>
+      this.post<{ notifiedOwner: boolean }>(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/start`
+      ),
     startTaskByUser: async (
-      _teamName: string,
-      _taskId: string
-    ): Promise<{ notifiedOwner: boolean }> => {
-      throw new Error('Team start task by user is not available in browser mode');
-    },
-    processSend: async (_teamName: string, _message: string): Promise<void> => {
-      throw new Error('Team process communication is not available in browser mode');
+      teamName: string,
+      taskId: string
+    ): Promise<{ notifiedOwner: boolean }> =>
+      this.post<{ notifiedOwner: boolean }>(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/start-by-user`
+      ),
+    processSend: async (teamName: string, message: string): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/process-send`, { message });
     },
     processAlive: async (_teamName: string): Promise<boolean> => {
       try {
@@ -900,46 +964,87 @@ export class HttpAPIClient implements ElectronAPI {
       }
     },
     aliveList: async (): Promise<string[]> => this.get<string[]>('/api/teams/runtime/alive'),
-    stop: async (): Promise<void> => {
-      throw new Error('Team stop is not available in browser mode');
+    stop: async (teamName: string): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/stop`);
     },
-    createConfig: async (): Promise<void> => {
-      throw new Error('Team config creation is not available in browser mode');
+    createConfig: async (request: TeamCreateConfigRequest): Promise<void> => {
+      await this.post('/api/teams/config', request);
     },
-    getMemberLogs: async () => {
-      console.warn('[HttpAPIClient] getMemberLogs is not available in browser mode');
-      return [];
+    getMemberLogs: async (teamName: string, memberName: string): Promise<MemberLogSummary[]> => {
+      return this.get<MemberLogSummary[]>(
+        `/api/teams/${encodeURIComponent(teamName)}/member-logs/${encodeURIComponent(memberName)}`
+      );
     },
-    getLogsForTask: async () => {
-      return [];
+    getLogsForTask: async (
+      teamName: string,
+      taskId: string,
+      options?: {
+        owner?: string;
+        status?: string;
+        intervals?: { startedAt: string; completedAt?: string }[];
+        since?: string;
+      }
+    ): Promise<MemberLogSummary[]> => {
+      const params = new URLSearchParams();
+      if (options?.owner) params.set('owner', options.owner);
+      if (options?.status) params.set('status', options.status);
+      if (options?.intervals) params.set('intervals', JSON.stringify(options.intervals));
+      if (options?.since) params.set('since', options.since);
+      const qs = params.toString();
+      const path = `/api/teams/${encodeURIComponent(teamName)}/task-logs/${encodeURIComponent(taskId)}`;
+      return this.get(qs ? `${path}?${qs}` : path);
     },
-    getTaskActivity: async () => {
-      console.warn('[HttpAPIClient] getTaskActivity is not available in browser mode');
-      return [];
+    getTaskActivity: async (teamName: string, taskId: string) => {
+      const params = new URLSearchParams();
+      params.set('taskId', taskId);
+      return this.get(`/api/teams/${encodeURIComponent(teamName)}/activity?${params}`);
     },
-    getTaskActivityDetail: async (): Promise<BoardTaskActivityDetailResult> => {
-      console.warn('[HttpAPIClient] getTaskActivityDetail is not available in browser mode');
-      return { status: 'missing' };
+    getTaskActivityDetail: async (
+      teamName: string,
+      taskId: string,
+      activityId: string
+    ): Promise<BoardTaskActivityDetailResult> => {
+      const params = new URLSearchParams();
+      params.set('taskId', taskId);
+      params.set('activityId', activityId);
+      return this.get(`/api/teams/${encodeURIComponent(teamName)}/task-activity-detail?${params}`);
     },
-    getTaskLogStreamSummary: async (): Promise<BoardTaskLogStreamSummary> => {
-      console.warn('[HttpAPIClient] getTaskLogStreamSummary is not available in browser mode');
-      return { segmentCount: 0 };
+    getTaskLogStreamSummary: async (
+      teamName: string,
+      taskId: string
+    ): Promise<BoardTaskLogStreamSummary> => {
+      return this.get(
+        `/api/teams/${encodeURIComponent(teamName)}/task-log-stream-summary/${encodeURIComponent(taskId)}`
+      );
     },
-    getTaskLogStream: async (): Promise<BoardTaskLogStreamResponse> => {
-      console.warn('[HttpAPIClient] getTaskLogStream is not available in browser mode');
-      return {
-        participants: [],
-        defaultFilter: 'all',
-        segments: [],
-      };
+    getTaskLogStream: async (
+      teamName: string,
+      taskId: string
+    ): Promise<BoardTaskLogStreamResponse> => {
+      return this.get(
+        `/api/teams/${encodeURIComponent(teamName)}/task-log-stream/${encodeURIComponent(taskId)}`
+      );
     },
-    getTaskExactLogSummaries: async (): Promise<BoardTaskExactLogSummariesResponse> => {
-      console.warn('[HttpAPIClient] getTaskExactLogSummaries is not available in browser mode');
-      return { items: [] };
+    getTaskExactLogSummaries: async (
+      teamName: string,
+      taskId: string
+    ): Promise<BoardTaskExactLogSummariesResponse> => {
+      return this.get(
+        `/api/teams/${encodeURIComponent(teamName)}/exact-log-summaries/${encodeURIComponent(taskId)}`
+      );
     },
-    getTaskExactLogDetail: async (): Promise<BoardTaskExactLogDetailResult> => {
-      console.warn('[HttpAPIClient] getTaskExactLogDetail is not available in browser mode');
-      return { status: 'missing' };
+    getTaskExactLogDetail: async (
+      teamName: string,
+      taskId: string,
+      exactLogId: string,
+      expectedSourceGeneration: string
+    ): Promise<BoardTaskExactLogDetailResult> => {
+      const params = new URLSearchParams();
+      params.set('exactLogId', exactLogId);
+      params.set('expectedSourceGeneration', expectedSourceGeneration);
+      return this.get(
+        `/api/teams/${encodeURIComponent(teamName)}/exact-log-detail/${encodeURIComponent(taskId)}?${params}`
+      );
     },
     getMemberStats: async () => {
       console.warn('[HttpAPIClient] getMemberStats is not available in browser mode');
@@ -964,23 +1069,42 @@ export class HttpAPIClient implements ElectronAPI {
       console.warn('[HttpAPIClient] getAllTasks is not available in browser mode');
       return [];
     },
-    updateConfig: async () => {
-      throw new Error('Team config update is not available in browser mode');
+    updateConfig: async (
+      teamName: string,
+      config: TeamUpdateConfigRequest
+    ): Promise<TeamConfig> => {
+      return this.put(`/api/teams/${encodeURIComponent(teamName)}/config`, config);
     },
-    addTaskComment: async () => {
-      throw new Error('Task comments are not available in browser mode');
+    addTaskComment: async (
+      teamName: string,
+      taskId: string,
+      request: AddTaskCommentRequest
+    ): Promise<TaskComment> => {
+      return this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/comments`,
+        request
+      );
     },
-    addMember: async (): Promise<void> => {
-      throw new Error('Team member management is not available in browser mode');
+    addMember: async (teamName: string, request: AddMemberRequest): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/members`, request);
     },
-    replaceMembers: async (): Promise<void> => {
-      throw new Error('Team member management is not available in browser mode');
+    replaceMembers: async (teamName: string, request: ReplaceMembersRequest): Promise<void> => {
+      await this.put(`/api/teams/${encodeURIComponent(teamName)}/members`, request);
     },
-    removeMember: async (): Promise<void> => {
-      throw new Error('Team member management is not available in browser mode');
+    removeMember: async (teamName: string, memberName: string): Promise<void> => {
+      await this.del(
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}`
+      );
     },
-    updateMemberRole: async (): Promise<void> => {
-      throw new Error('Team member management is not available in browser mode');
+    updateMemberRole: async (
+      teamName: string,
+      memberName: string,
+      role: string | undefined
+    ): Promise<void> => {
+      await this.patch(
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/role`,
+        { role }
+      );
     },
     getProjectBranch: async (_projectPath: string): Promise<string | null> => {
       return null;
@@ -994,45 +1118,32 @@ export class HttpAPIClient implements ElectronAPI {
     ): Promise<AttachmentFileData[]> => {
       return [];
     },
-    killProcess: async (_teamName: string, _pid: number): Promise<void> => {
-      // Not available via HTTP client — no-op
+    killProcess: async (teamName: string, pid: number): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/kill-process`, { pid });
     },
-    getLeadActivity: async (_teamName: string) => {
-      return { state: 'offline' as const, runId: null };
+    getLeadActivity: async (teamName: string) => {
+      return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-activity`);
     },
-    getLeadContext: async () => {
-      return { usage: null, runId: null };
+    getLeadContext: async (teamName: string) => {
+      return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-context`);
     },
-    getLeadChannel: async () => {
-      return {
-        config: { channels: [], feishu: { enabled: false, appId: '', appSecret: '' } },
-        status: {
-          running: false,
-          state: 'stopped' as const,
-          message: '浏览器模式不支持负责人渠道监听。',
-          startedAt: null,
-          lastEventAt: null,
-        },
-        statusesByChannel: {},
-      };
+    getLeadChannel: async (teamName: string) => {
+      return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-channel`);
     },
     getGlobalLeadChannel: async () => {
-      return {
-        config: { channels: [], feishu: { enabled: false, appId: '', appSecret: '' } },
-        statusesByChannel: {},
-      };
+      return this.get('/api/teams/lead-channel/global');
     },
-    saveGlobalLeadChannel: async () => {
-      throw new Error('渠道集成仅在 Electron 模式可用');
+    saveGlobalLeadChannel: async (request: SaveLeadChannelConfigRequest) => {
+      return this.post('/api/teams/lead-channel/global/save', request);
     },
-    saveLeadChannel: async () => {
-      throw new Error('负责人渠道监听仅在 Electron 模式可用');
+    saveLeadChannel: async (teamName: string, request: SaveLeadChannelConfigRequest) => {
+      return this.post(`/api/teams/${encodeURIComponent(teamName)}/lead-channel/save`, request);
     },
-    startFeishuLeadChannel: async (_channelId?: string) => {
-      throw new Error('飞书长连接仅在 Electron 模式可用');
+    startFeishuLeadChannel: async (channelId?: string) => {
+      return this.post('/api/teams/lead-channel/feishu/start', { channelId });
     },
-    stopFeishuLeadChannel: async (_channelId?: string) => {
-      throw new Error('飞书长连接仅在 Electron 模式可用');
+    stopFeishuLeadChannel: async (channelId?: string) => {
+      return this.post('/api/teams/lead-channel/feishu/stop', { channelId });
     },
     getMemberSpawnStatuses: async () => {
       return { statuses: {}, runId: null };
@@ -1045,20 +1156,28 @@ export class HttpAPIClient implements ElectronAPI {
         members: {},
       };
     },
-    restartMember: async (): Promise<void> => {
-      throw new Error('Member restart is not available in browser mode');
+    restartMember: async (teamName: string, memberName: string): Promise<void> => {
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/restart`
+      );
     },
-    skipMemberForLaunch: async (): Promise<void> => {
-      throw new Error('Member launch skip is not available in browser mode');
+    skipMemberForLaunch: async (teamName: string, memberName: string): Promise<void> => {
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/skip`
+      );
     },
-    softDeleteTask: async (_teamName: string, _taskId: string): Promise<void> => {
-      // Not available via HTTP client — no-op
+    softDeleteTask: async (teamName: string, taskId: string): Promise<void> => {
+      await this.del(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}`
+      );
     },
-    restoreTask: async (_teamName: string, _taskId: string): Promise<void> => {
-      // Not available via HTTP client — no-op
+    restoreTask: async (teamName: string, taskId: string): Promise<void> => {
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/restore`
+      );
     },
-    getDeletedTasks: async (_teamName: string): Promise<TeamTask[]> => {
-      return [];
+    getDeletedTasks: async (teamName: string): Promise<TeamTask[]> => {
+      return this.get<TeamTask[]>(`/api/teams/${encodeURIComponent(teamName)}/deleted-tasks`);
     },
     setTaskClarification: async (
       _teamName: string,
@@ -1071,20 +1190,26 @@ export class HttpAPIClient implements ElectronAPI {
       // Not available via HTTP client — native notifications require Electron
     },
     addTaskRelationship: async (
-      _teamName: string,
-      _taskId: string,
-      _targetId: string,
-      _type: 'blockedBy' | 'blocks' | 'related'
+      teamName: string,
+      taskId: string,
+      targetId: string,
+      type: 'blockedBy' | 'blocks' | 'related'
     ): Promise<void> => {
-      throw new Error('Task relationships are not available in browser mode');
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/relationships`,
+        { targetId, type }
+      );
     },
     removeTaskRelationship: async (
-      _teamName: string,
-      _taskId: string,
-      _targetId: string,
-      _type: 'blockedBy' | 'blocks' | 'related'
+      teamName: string,
+      taskId: string,
+      targetId: string,
+      type: 'blockedBy' | 'blocks' | 'related'
     ): Promise<void> => {
-      throw new Error('Task relationships are not available in browser mode');
+      await this.del(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/relationships`,
+        { targetId, type }
+      );
     },
     saveTaskAttachment: async (
       _teamName: string,
@@ -1157,15 +1282,17 @@ export class HttpAPIClient implements ElectronAPI {
     },
   };
 
-  // Review API stubs
+  // Review API
   review = {
-    getAgentChanges: async (_teamName: string, _memberName: string): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    getAgentChanges: async (teamName: string, memberName: string) => {
+      return this.get<AgentChangeSet>(
+        `/api/teams/${encodeURIComponent(teamName)}/review/agent-changes/${encodeURIComponent(memberName)}`
+      );
     },
     getTaskChanges: async (
-      _teamName: string,
-      _taskId: string,
-      _options?: {
+      teamName: string,
+      taskId: string,
+      options?: {
         owner?: string;
         status?: string;
         intervals?: { startedAt: string; completedAt?: string }[];
@@ -1174,72 +1301,94 @@ export class HttpAPIClient implements ElectronAPI {
         summaryOnly?: boolean;
         forceFresh?: boolean;
       }
-    ): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    ) => {
+      const params = new URLSearchParams();
+      if (options?.owner) params.set('owner', options.owner);
+      if (options?.status) params.set('status', options.status);
+      if (options?.since) params.set('since', options.since);
+      if (options?.stateBucket) params.set('stateBucket', options.stateBucket);
+      if (options?.summaryOnly) params.set('summaryOnly', 'true');
+      if (options?.forceFresh) params.set('forceFresh', 'true');
+      const qs = params.toString();
+      const path = `/api/teams/${encodeURIComponent(teamName)}/review/task-changes/${encodeURIComponent(taskId)}`;
+      return this.get<TaskChangeSetV2>(qs ? `${path}?${qs}` : path);
     },
-    invalidateTaskChangeSummaries: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    invalidateTaskChangeSummaries: async (): Promise<void> => {
+      console.warn(
+        '[HttpAPIClient] invalidateTaskChangeSummaries is not available in browser mode'
+      );
     },
-    getChangeStats: async (_teamName: string, _memberName: string): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    getChangeStats: async (teamName: string, memberName: string) => {
+      return this.get<ChangeStats>(
+        `/api/teams/${encodeURIComponent(teamName)}/review/change-stats/${encodeURIComponent(memberName)}`
+      );
     },
     getFileContent: async (
-      _teamName: string,
-      _memberName: string | undefined,
-      _filePath: string,
+      teamName: string,
+      memberName: string | undefined,
+      filePath: string,
       _snippets: SnippetDiff[] = []
-    ): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    ) => {
+      const params = new URLSearchParams();
+      params.set('filePath', filePath);
+      if (memberName) params.set('memberName', memberName);
+      return this.get<FileChangeWithContent>(
+        `/api/teams/${encodeURIComponent(teamName)}/review/file-content?${params}`
+      );
     },
-    applyDecisions: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    applyDecisions: async (request: ApplyReviewRequest) => {
+      return this.post<ApplyReviewResult>(
+        `/api/teams/${encodeURIComponent(request.teamName)}/review/apply-decisions`,
+        request
+      );
     },
-    // Phase 2 stubs
     checkConflict: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+      throw new Error('Review conflict check is not available in browser mode');
     },
-    rejectHunks: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    rejectHunks: async (
+      filePath: string,
+      original: string,
+      modified: string,
+      hunkIndices: number[],
+      snippets: SnippetDiff[]
+    ) => {
+      // TeamName not in API interface; reject-hunks endpoint requires it in URL.
+      // This is a limitation in browser mode — would need teamName tracking.
+      throw new Error('Review reject hunks is not available in browser mode');
     },
-    rejectFile: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    rejectFile: async (filePath: string, original: string, modified: string) => {
+      throw new Error('Review reject file is not available in browser mode');
     },
     previewReject: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+      throw new Error('Review preview reject is not available in browser mode');
     },
-    // Editable diff stubs
-    saveEditedFile: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    saveEditedFile: async (filePath: string, content: string, projectPath?: string) => {
+      return this.post<{ success: boolean }>('/api/teams/review/save-edited-file', {
+        filePath,
+        content,
+        projectPath,
+      });
     },
-    watchFiles: async (): Promise<never> => {
-      throw new Error('Review file watching is not available in browser mode');
+    watchFiles: async (): Promise<void> => {
+      console.warn('[HttpAPIClient] Review file watching is not available in browser mode');
     },
-    unwatchFiles: async (): Promise<never> => {
-      throw new Error('Review file watching is not available in browser mode');
+    unwatchFiles: async (): Promise<void> => {
+      console.warn('[HttpAPIClient] Review file watching is not available in browser mode');
     },
     onExternalFileChange: (): (() => void) => {
       return () => {};
     },
-    // Decision persistence stubs
     loadDecisions: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+      throw new Error('Review decisions persistence is not available in browser mode');
     },
-    saveDecisions: async (
-      _teamName: string,
-      _scopeKey: string,
-      _scopeToken: string,
-      _hunkDecisions: Record<string, unknown>,
-      _fileDecisions: Record<string, unknown>,
-      _hunkContextHashesByFile?: Record<string, Record<number, string>>
-    ): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+    saveDecisions: async (): Promise<never> => {
+      throw new Error('Review decisions persistence is not available in browser mode');
     },
     clearDecisions: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+      throw new Error('Review decisions persistence is not available in browser mode');
     },
-    // Phase 4 stubs
     getGitFileLog: async (): Promise<never> => {
-      throw new Error('Review is not available in browser mode');
+      throw new Error('Review git file log is not available in browser mode');
     },
   };
 
@@ -1248,23 +1397,51 @@ export class HttpAPIClient implements ElectronAPI {
   // ---------------------------------------------------------------------------
 
   cliInstaller: CliInstallerAPI = {
-    getStatus: async () => ({
-      flavor: 'claude',
-      displayName: 'Agent CLI',
-      supportsSelfUpdate: true,
-      showVersionDetails: true,
-      showBinaryPath: true,
-      installed: false,
-      installedVersion: null,
-      binaryPath: null,
-      launchError: null,
-      latestVersion: null,
-      updateAvailable: false,
-      authLoggedIn: false,
-      authStatusChecking: false,
-      authMethod: null,
-      providers: [],
-    }),
+    getStatus: async () => {
+      try {
+        const result = await this.get<{
+          installed: boolean;
+          version: string | null;
+          path: string | null;
+          authenticated: boolean;
+        }>('/api/cli/status');
+        return {
+          flavor: 'claude',
+          displayName: 'Agent CLI',
+          supportsSelfUpdate: true,
+          showVersionDetails: true,
+          showBinaryPath: true,
+          installed: result.installed,
+          installedVersion: result.version,
+          binaryPath: result.path,
+          launchError: null,
+          latestVersion: null,
+          updateAvailable: false,
+          authLoggedIn: result.authenticated,
+          authStatusChecking: false,
+          authMethod: null,
+          providers: [],
+        };
+      } catch {
+        return {
+          flavor: 'claude',
+          displayName: 'Agent CLI',
+          supportsSelfUpdate: true,
+          showVersionDetails: true,
+          showBinaryPath: true,
+          installed: false,
+          installedVersion: null,
+          binaryPath: null,
+          launchError: null,
+          latestVersion: null,
+          updateAvailable: false,
+          authLoggedIn: false,
+          authStatusChecking: false,
+          authMethod: null,
+          providers: [],
+        };
+      }
+    },
     getProviderStatus: async (): Promise<null> => null,
     verifyProviderModels: async (): Promise<null> => null,
     install: async (): Promise<void> => {
@@ -1375,70 +1552,107 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   // ---------------------------------------------------------------------------
-  // Project (not available in browser mode)
+  // Project (browser mode — delegates to HTTP)
   // ---------------------------------------------------------------------------
 
   project: ProjectAPI = {
-    listFiles: async () => {
-      throw new Error('Project API not available in browser mode');
+    listFiles: async (projectPath: string) => {
+      const params = new URLSearchParams({ root: projectPath });
+      return this.get(`/api/editor/listFiles?${params}`);
     },
   };
 
   // ---------------------------------------------------------------------------
-  // Editor (not available in browser mode)
+  // Editor (browser mode — delegates to HTTP)
   // ---------------------------------------------------------------------------
 
+  private _editorRoot: string | null = null;
+
   editor: EditorAPI = {
-    open: async () => {
-      throw new Error('Editor not available in browser mode');
+    open: async (projectPath: string) => {
+      this._editorRoot = projectPath;
     },
     close: async () => {
-      throw new Error('Editor not available in browser mode');
+      this._editorRoot = null;
     },
-    readDir: async () => {
-      throw new Error('Editor not available in browser mode');
+    readDir: async (dirPath: string, maxEntries?: number) => {
+      const params = new URLSearchParams({ root: this._editorRoot!, dirPath });
+      if (maxEntries) params.set('maxEntries', String(maxEntries));
+      return this.get(`/api/editor/readDir?${params}`);
     },
-    readFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    readFile: async (filePath: string) => {
+      const params = new URLSearchParams({ root: this._editorRoot!, filePath });
+      return this.get(`/api/editor/readFile?${params}`);
     },
-    writeFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    writeFile: async (filePath: string, content: string, baselineMtimeMs?: number) => {
+      return this.post('/api/editor/writeFile', {
+        root: this._editorRoot,
+        filePath,
+        content,
+        baselineMtimeMs,
+      });
     },
-    createFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    createFile: async (parentDir: string, fileName: string) => {
+      return this.post('/api/editor/createFile', {
+        root: this._editorRoot,
+        parentDir,
+        fileName,
+      });
     },
-    createDir: async () => {
-      throw new Error('Editor not available in browser mode');
+    createDir: async (parentDir: string, dirName: string) => {
+      return this.post('/api/editor/createDir', {
+        root: this._editorRoot,
+        parentDir,
+        dirName,
+      });
     },
-    deleteFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    deleteFile: async (filePath: string) => {
+      return this.post('/api/editor/deleteFile', {
+        root: this._editorRoot,
+        filePath,
+      });
     },
-    moveFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    moveFile: async (sourcePath: string, destDir: string) => {
+      return this.post('/api/editor/moveFile', {
+        root: this._editorRoot,
+        sourcePath,
+        destDir,
+      });
     },
-    renameFile: async () => {
-      throw new Error('Editor not available in browser mode');
+    renameFile: async (sourcePath: string, newName: string) => {
+      return this.post('/api/editor/renameFile', {
+        root: this._editorRoot,
+        sourcePath,
+        newName,
+      });
     },
-    searchInFiles: async () => {
-      throw new Error('Editor not available in browser mode');
+    searchInFiles: async (options) => {
+      const params = new URLSearchParams({ root: this._editorRoot!, query: options.query });
+      if (options.caseSensitive) params.set('caseSensitive', 'true');
+      if (options.maxFiles) params.set('maxFiles', String(options.maxFiles));
+      if (options.maxMatches) params.set('maxMatches', String(options.maxMatches));
+      return this.get(`/api/editor/search?${params}`);
     },
     listFiles: async () => {
-      throw new Error('Editor not available in browser mode');
+      const params = new URLSearchParams({ root: this._editorRoot! });
+      return this.get(`/api/editor/listFiles?${params}`);
     },
-    readBinaryPreview: async () => {
-      throw new Error('Editor not available in browser mode');
+    readBinaryPreview: async (filePath: string) => {
+      const params = new URLSearchParams({ root: this._editorRoot!, filePath });
+      return this.get(`/api/editor/readBinaryPreview?${params}`);
     },
     gitStatus: async () => {
-      throw new Error('Editor not available in browser mode');
+      const params = new URLSearchParams({ root: this._editorRoot! });
+      return this.get(`/api/editor/gitStatus?${params}`);
     },
-    watchDir: async () => {
-      throw new Error('Editor not available in browser mode');
+    watchDir: async (): Promise<void> => {
+      // File watching not supported in browser mode
     },
-    setWatchedFiles: async () => {
-      throw new Error('Editor not available in browser mode');
+    setWatchedFiles: async (): Promise<void> => {
+      // File watching not supported in browser mode
     },
-    setWatchedDirs: async () => {
-      throw new Error('Editor not available in browser mode');
+    setWatchedDirs: async (): Promise<void> => {
+      // File watching not supported in browser mode
     },
     onEditorChange: () => {
       return () => {};

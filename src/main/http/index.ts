@@ -12,6 +12,8 @@ import {
 import { createLogger } from '@shared/utils/logger';
 
 import { registerConfigRoutes } from './config';
+import { registerCliInstallerRoutes } from './cliInstaller';
+import { registerEditorRoutes } from './editor';
 import { registerEventRoutes } from './events';
 import { registerNotificationRoutes } from './notifications';
 import { registerProjectRoutes } from './projects';
@@ -20,6 +22,7 @@ import { registerSessionRoutes } from './sessions';
 import { registerSshRoutes } from './ssh';
 import { registerSubagentRoutes } from './subagents';
 import { registerTeamRoutes } from './teams';
+import { registerReviewRoutes } from './review';
 import { registerUpdaterRoutes } from './updater';
 import { registerUtilityRoutes } from './utility';
 import { registerValidationRoutes } from './validation';
@@ -49,6 +52,15 @@ export interface HttpServices {
   sshConnectionManager: SshConnectionManager;
   teamProvisioningService?: TeamProvisioningService;
   teamDataService?: import('@main/services/team/TeamDataService').TeamDataService;
+  teamMemberLogsFinder?: import('@main/services').TeamMemberLogsFinder;
+  boardTaskActivityService?: import('@main/services').BoardTaskActivityService;
+  boardTaskActivityDetailService?: import('@main/services').BoardTaskActivityDetailService;
+  boardTaskLogStreamService?: import('@main/services').BoardTaskLogStreamService;
+  boardTaskExactLogsService?: import('@main/services').BoardTaskExactLogsService;
+  boardTaskExactLogDetailService?: import('@main/services').BoardTaskExactLogDetailService;
+  changeExtractorService?: import('@main/services/team/ChangeExtractorService').ChangeExtractorService;
+  reviewApplierService?: import('@main/services/team/ReviewApplierService').ReviewApplierService;
+  fileContentResolverService?: import('@main/services/team/FileContentResolver').FileContentResolver;
 }
 
 export function registerHttpRoutes(
@@ -63,8 +75,13 @@ export function registerHttpRoutes(
   if (services.teamProvisioningService) {
     registerTeamRoutes(app, services);
   }
+  registerEditorRoutes(app);
+  if (services.changeExtractorService) {
+    registerReviewRoutes(app, services);
+  }
   registerNotificationRoutes(app);
   registerConfigRoutes(app);
+  registerCliInstallerRoutes(app);
   registerValidationRoutes(app);
   registerUtilityRoutes(app);
   registerSshRoutes(app, services.sshConnectionManager, sshModeSwitchCallback);

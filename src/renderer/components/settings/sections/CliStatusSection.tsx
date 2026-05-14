@@ -279,13 +279,11 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     effectiveCliStatus !== null && (installerState === 'idle' || installerState === 'completed');
 
   useEffect(() => {
-    if (isElectron) {
-      if (!cliStatus) {
-        if (multimodelEnabled) {
-          void bootstrapCliStatus({ multimodelEnabled: true });
-        } else {
-          void fetchCliStatus();
-        }
+    if (!cliStatus) {
+      if (multimodelEnabled) {
+        void bootstrapCliStatus({ multimodelEnabled: true });
+      } else {
+        void fetchCliStatus();
       }
     }
   }, [bootstrapCliStatus, cliStatus, fetchCliStatus, isElectron, multimodelEnabled]);
@@ -373,8 +371,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     },
     [appConfig?.runtime?.providerBackends, fetchCliProviderStatus, updateConfig]
   );
-
-  if (!isElectron) return null;
 
   const runtimeDisplayName = getRuntimeDisplayName(effectiveCliStatus, multimodelEnabled);
   const runtimeLabel = 'Agent CLI';

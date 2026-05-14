@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { recordRecentProjectOpenPaths } from '@features/recent-projects/renderer';
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
@@ -299,7 +299,6 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
 
 export const TeamListView = (): React.JSX.Element => {
   const { isLight } = useTheme();
-  const electronMode = isElectronMode();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [templateLoading, setTemplateLoading] = useState(false);

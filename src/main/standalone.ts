@@ -148,6 +148,26 @@ async function start(): Promise<void> {
   const { TeamDataService } = await import('./services/team/TeamDataService');
   const teamDataService = new TeamDataService() as TeamDataService;
 
+  // Initialize LeadChannelListener for Feishu integration
+  const { getLeadChannelListenerService } =
+    await import('./services/team/LeadChannelListenerService');
+  const leadChannelService = getLeadChannelListenerService();
+  leadChannelService.setInboundMessageHandler(async (teamName, message) => {
+    const queued = await teamProvisioningService.enqueueExternalChannelMessageForLead(teamName, {
+      channelName: message.channelName,
+      provider: message.provider,
+      channelId: message.channelId,
+      text: message.text,
+      from: message.from,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      messageId: message.messageId,
+    });
+    if (!queued) return false;
+    teamProvisioningService.scheduleLeadInboxRelay(teamName, 250);
+    return true;
+  });
+
   // Wire file watcher events to SSE broadcast
   localContext.fileWatcher.on('file-change', (event: unknown) => {
     httpServer.broadcast('file-change', event);
@@ -167,6 +187,27 @@ async function start(): Promise<void> {
     httpServer.broadcast('notification:clicked', data);
   });
 
+  // Initialize review services for code review HTTP routes
+  const { ChangeExtractorService } = await import('./services/team/ChangeExtractorService');
+  const { TaskBoundaryParser } = await import('./services/team/TaskBoundaryParser');
+  const { GitDiffFallback } = await import('./services/team/GitDiffFallback');
+  const { FileContentResolver } = await import('./services/team/FileContentResolver');
+  const { ReviewApplierService } = await import('./services/team/ReviewApplierService');
+  const { TeamMemberLogsFinder } = await import('./services/team/TeamMemberLogsFinder');
+  const teamMemberLogsFinder = new TeamMemberLogsFinder();
+  const taskBoundaryParser = new TaskBoundaryParser();
+  const changeExtractor = new ChangeExtractorService(
+    teamMemberLogsFinder,
+    taskBoundaryParser,
+    undefined,
+    undefined,
+    undefined,
+    null
+  );
+  const gitDiffFallback = new GitDiffFallback();
+  const fileContentResolver = new FileContentResolver(teamMemberLogsFinder, gitDiffFallback);
+  const reviewApplier = new ReviewApplierService();
+
   // Build services for HTTP routes
   const services: HttpServices = {
     projectScanner: localContext.projectScanner,
@@ -177,6 +218,10 @@ async function start(): Promise<void> {
     recentProjectsFeature,
     teamProvisioningService,
     teamDataService,
+    teamMemberLogsFinder,
+    changeExtractorService: changeExtractor,
+    reviewApplierService: reviewApplier,
+    fileContentResolverService: fileContentResolver,
     updaterService: updaterServiceStub,
     sshConnectionManager: sshConnectionManagerStub,
   };
