@@ -19,6 +19,8 @@
 import { createRecentProjectsFeature } from '@features/recent-projects/main';
 import { createLogger } from '@shared/utils/logger';
 
+import type { TeamProvisioningService } from './services/team/TeamProvisioningService';
+
 import { LocalFileSystemProvider } from './services/infrastructure/LocalFileSystemProvider';
 import {
   getProjectsBasePath,
@@ -137,6 +139,10 @@ async function start(): Promise<void> {
     logger: createLogger('Feature:RecentProjects'),
   });
 
+  // Initialize team service (no SSH/runtime adapters in standalone)
+  const { TeamProvisioningService } = await import('./services/team/TeamProvisioningService');
+  const teamProvisioningService = new TeamProvisioningService() as TeamProvisioningService;
+
   // Wire file watcher events to SSE broadcast
   localContext.fileWatcher.on('file-change', (event: unknown) => {
     httpServer.broadcast('file-change', event);
@@ -164,6 +170,7 @@ async function start(): Promise<void> {
     chunkBuilder: localContext.chunkBuilder,
     dataCache: localContext.dataCache,
     recentProjectsFeature,
+    teamProvisioningService,
     updaterService: updaterServiceStub,
     sshConnectionManager: sshConnectionManagerStub,
   };
