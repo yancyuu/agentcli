@@ -19242,8 +19242,16 @@ export class TeamProvisioningService {
       );
 
       const textParts = content
-        .filter((part) => part.type === 'text' && typeof part.text === 'string')
-        .map((part) => part.text as string);
+        .filter(
+          (part) =>
+            (part.type === 'text' && typeof part.text === 'string') || part.type === 'thinking'
+        )
+        .map((part) => {
+          if (part.type === 'thinking' && typeof part.thinking === 'string') {
+            return `[思考]\n${part.thinking}`;
+          }
+          return part.text as string;
+        });
       let assistantIsRateLimitApiError = false;
       if (textParts.length > 0) {
         const text = textParts.join('\n');

@@ -20,6 +20,7 @@ import { createRecentProjectsFeature } from '@features/recent-projects/main';
 import { createLogger } from '@shared/utils/logger';
 
 import type { TeamProvisioningService } from './services/team/TeamProvisioningService';
+import type { TeamDataService } from './services/team/TeamDataService';
 
 import { LocalFileSystemProvider } from './services/infrastructure/LocalFileSystemProvider';
 import {
@@ -143,6 +144,10 @@ async function start(): Promise<void> {
   const { TeamProvisioningService } = await import('./services/team/TeamProvisioningService');
   const teamProvisioningService = new TeamProvisioningService() as TeamProvisioningService;
 
+  // Initialize team data service for HTTP API (read team data, tasks, messages)
+  const { TeamDataService } = await import('./services/team/TeamDataService');
+  const teamDataService = new TeamDataService() as TeamDataService;
+
   // Wire file watcher events to SSE broadcast
   localContext.fileWatcher.on('file-change', (event: unknown) => {
     httpServer.broadcast('file-change', event);
@@ -171,6 +176,7 @@ async function start(): Promise<void> {
     dataCache: localContext.dataCache,
     recentProjectsFeature,
     teamProvisioningService,
+    teamDataService,
     updaterService: updaterServiceStub,
     sshConnectionManager: sshConnectionManagerStub,
   };

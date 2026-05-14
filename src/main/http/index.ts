@@ -48,6 +48,7 @@ export interface HttpServices {
   updaterService: UpdaterService;
   sshConnectionManager: SshConnectionManager;
   teamProvisioningService?: TeamProvisioningService;
+  teamDataService?: import('@main/services/team/TeamDataService').TeamDataService;
 }
 
 export function registerHttpRoutes(

@@ -742,13 +742,9 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   teams: TeamsAPI = {
-    list: async (): Promise<TeamSummary[]> => {
-      console.warn('[HttpAPIClient] teams API is not available in browser mode');
-      return [];
-    },
-    getData: async (_teamName: string): Promise<TeamViewSnapshot> => {
-      throw new Error('Teams detail is not available in browser mode');
-    },
+    list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams'),
+    getData: async (teamName: string): Promise<TeamViewSnapshot> =>
+      this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`),
     getTaskChangePresence: async (): Promise<
       Record<string, 'has_changes' | 'no_changes' | 'unknown'>
     > => {
@@ -820,22 +816,28 @@ export class HttpAPIClient implements ElectronAPI {
       throw new Error('Team provisioning is not available in browser mode');
     },
     sendMessage: async (
-      _teamName: string,
-      _request: SendMessageRequest
-    ): Promise<SendMessageResult> => {
-      throw new Error('Team messaging is not available in browser mode');
+      teamName: string,
+      request: SendMessageRequest
+    ): Promise<SendMessageResult> =>
+      this.post<SendMessageResult>(
+        `/api/teams/${encodeURIComponent(teamName)}/send-message`,
+        request
+      ),
+    getMessagesPage: async (
+      teamName: string,
+      opts?: { cursor?: string | null; limit?: number }
+    ) => {
+      const params = new URLSearchParams();
+      if (opts?.cursor) params.set('cursor', opts.cursor);
+      if (opts?.limit) params.set('limit', String(opts.limit));
+      const qs = params.toString();
+      const path = `/api/teams/${encodeURIComponent(teamName)}/messages`;
+      return this.get(qs ? `${path}?${qs}` : path);
     },
-    getMessagesPage: async () => {
-      return { messages: [], nextCursor: null, hasMore: false, feedRevision: 'empty' };
-    },
-    getMemberActivityMeta: async (_teamName: string): Promise<TeamMemberActivityMeta> => {
-      return {
-        teamName: _teamName,
-        computedAt: new Date(0).toISOString(),
-        members: {},
-        feedRevision: 'empty',
-      };
-    },
+    getMemberActivityMeta: async (teamName: string): Promise<TeamMemberActivityMeta> =>
+      this.get<TeamMemberActivityMeta>(
+        `/api/teams/${encodeURIComponent(teamName)}/member-activity`
+      ),
     createTask: async (_teamName: string, _request: CreateTaskRequest): Promise<TeamTask> => {
       throw new Error('Team task creation is not available in browser mode');
     },
@@ -890,11 +892,14 @@ export class HttpAPIClient implements ElectronAPI {
       throw new Error('Team process communication is not available in browser mode');
     },
     processAlive: async (_teamName: string): Promise<boolean> => {
-      return false;
+      try {
+        const alive = await this.get<string[]>('/api/teams/runtime/alive');
+        return alive.includes(_teamName);
+      } catch {
+        return false;
+      }
     },
-    aliveList: async (): Promise<string[]> => {
-      return [];
-    },
+    aliveList: async (): Promise<string[]> => this.get<string[]>('/api/teams/runtime/alive'),
     stop: async (): Promise<void> => {
       throw new Error('Team stop is not available in browser mode');
     },

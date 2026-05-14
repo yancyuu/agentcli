@@ -27,6 +27,13 @@ function getTeamProvisioningService(services: HttpServices) {
   return services.teamProvisioningService;
 }
 
+function getTeamDataService(services: HttpServices) {
+  if (!services.teamDataService) {
+    throw new HttpFeatureUnavailableError('Team data service is not available in this mode');
+  }
+  return services.teamDataService;
+}
+
 function getStatusCode(error: unknown, fallback: number = 500): number {
   if (error instanceof HttpBadRequestError) {
     return 400;
@@ -186,6 +193,41 @@ function withRuntimeTeamName(teamName: string, body: unknown): Record<string, un
 }
 
 export function registerTeamRoutes(app: FastifyInstance, services: HttpServices): void {
+  // ---------------------------------------------------------------------------
+  // Fixed-path data routes MUST come before parameterized routes
+  // (fastify matches first-registered; /api/teams would otherwise conflict)
+  // ---------------------------------------------------------------------------
+
+  // List all teams
+  app.get('/api/teams', async (_request, reply) => {
+    try {
+      const teams = await getTeamDataService(services).listTeams();
+      return reply.send(teams);
+    } catch (error) {
+      if (shouldLogError(error)) {
+        logger.error('Error in GET /api/teams:', getErrorMessage(error));
+      }
+      return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+    }
+  });
+
+  // Get all tasks (global, across teams)
+  app.get('/api/teams/tasks', async (_request, reply) => {
+    try {
+      const tasks = await getTeamDataService(services).getAllTasks();
+      return reply.send(tasks);
+    } catch (error) {
+      if (shouldLogError(error)) {
+        logger.error('Error in GET /api/teams/tasks:', getErrorMessage(error));
+      }
+      return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Parameterized team routes
+  // ---------------------------------------------------------------------------
+
   app.post<{ Params: { teamName: string }; Body: LaunchBody }>(
     '/api/teams/:teamName/launch',
     async (request, reply) => {
@@ -392,6 +434,117 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
         if (shouldLogError(error)) {
           logger.error(
             `Error in POST /api/teams/${request.params.teamName}/opencode/runtime/heartbeat:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Team data routes (read-only, powered by TeamDataService)
+  // ---------------------------------------------------------------------------
+
+  // Get team data (full snapshot)
+  app.get<{ Params: { teamName: string } }>('/api/teams/:teamName/data', async (request, reply) => {
+    try {
+      const validatedTeamName = validateTeamName(request.params.teamName);
+      if (!validatedTeamName.valid) {
+        return reply.status(400).send({ error: validatedTeamName.error });
+      }
+      const data = await getTeamDataService(services).getTeamData(validatedTeamName.value!);
+      return reply.send(data);
+    } catch (error) {
+      if (shouldLogError(error)) {
+        logger.error(
+          `Error in GET /api/teams/${request.params.teamName}/data:`,
+          getErrorMessage(error)
+        );
+      }
+      return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+    }
+  });
+
+  // Get messages page
+  app.get<{ Params: { teamName: string }; Querystring: { cursor?: string; limit?: string } }>(
+    '/api/teams/:teamName/messages',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const cursor = request.query.cursor ?? null;
+        const limit = request.query.limit ? parseInt(request.query.limit, 10) : 50;
+        const page = await getTeamDataService(services).getMessagesPage(validatedTeamName.value!, {
+          cursor,
+          limit,
+        });
+        return reply.send(page);
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in GET /api/teams/${request.params.teamName}/messages:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
+
+  // Get member activity meta
+  app.get<{ Params: { teamName: string } }>(
+    '/api/teams/:teamName/member-activity',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const meta = await getTeamDataService(services).getMemberActivityMeta(
+          validatedTeamName.value!
+        );
+        return reply.send(meta);
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in GET /api/teams/${request.params.teamName}/member-activity:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
+
+  // Send message to team
+  app.post<{ Params: { teamName: string }; Body: Record<string, unknown> }>(
+    '/api/teams/:teamName/send-message',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const body = request.body ?? {};
+        const text = typeof body.text === 'string' ? body.text : '';
+        if (!text.trim()) {
+          return reply.status(400).send({ error: 'text is required' });
+        }
+        const result = await getTeamDataService(services).sendMessage(validatedTeamName.value!, {
+          member: typeof body.member === 'string' ? body.member : 'lead',
+          text,
+          from: typeof body.from === 'string' ? body.from : 'user',
+          to: typeof body.to === 'string' ? body.to : undefined,
+          taskRefs: Array.isArray(body.taskRefs) ? body.taskRefs : undefined,
+        });
+        return reply.send(result);
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in POST /api/teams/${request.params.teamName}/send-message:`,
             getErrorMessage(error)
           );
         }
