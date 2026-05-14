@@ -52,7 +52,8 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install Claude Code CLI globally
+# Install git (needed for template source cloning) and Claude Code CLI
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
 
 # Copy production node_modules from builder (already pruned)

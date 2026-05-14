@@ -38,7 +38,6 @@ const tabs: TabConfig[] = [
     label: '渠道',
     icon: PlugZap,
     description: '管理飞书、Webhook 等外部渠道集成，负责人可选择监听这些渠道。',
-    electronOnly: true,
   },
   {
     id: 'notifications',
