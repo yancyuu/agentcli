@@ -10,7 +10,7 @@ import {
   mergeCodexProviderStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
@@ -112,7 +112,6 @@ function isCodexSnapshotPending(
 }
 
 export const ExtensionStoreView = (): React.JSX.Element => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const tabId = useTabIdOptional();
   const {
     fetchPluginCatalog,
@@ -167,7 +166,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   );
   const codexAccount = useCodexAccountSnapshot({
     enabled:
-      isElectron &&
       multimodelEnabled &&
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(

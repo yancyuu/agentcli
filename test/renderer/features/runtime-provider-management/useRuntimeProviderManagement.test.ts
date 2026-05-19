@@ -12,18 +12,30 @@ import {
   getStoredCreateTeamProvider,
 } from '../../../../src/renderer/services/createTeamPreferences';
 
-import type { ElectronAPI } from '../../../../src/shared/types/api';
 import type { RuntimeProviderManagementModelTestResponse } from '../../../../src/features/runtime-provider-management/contracts';
 
+const hoisted = vi.hoisted(() => ({
+  loadView: vi.fn(),
+  loadProviderDirectory: vi.fn(),
+  loadSetupForm: vi.fn(),
+  connectProvider: vi.fn(),
+  testModel: vi.fn(),
+}));
+
+vi.mock('@renderer/api', () => ({
+  api: {
+    runtimeProviderManagement: {
+      loadView: hoisted.loadView,
+      loadProviderDirectory: hoisted.loadProviderDirectory,
+      loadSetupForm: hoisted.loadSetupForm,
+      connectProvider: hoisted.connectProvider,
+      testModel: hoisted.testModel,
+    },
+  },
+}));
+
 function installRuntimeProviderManagementApi(response: RuntimeProviderManagementModelTestResponse): void {
-  Object.defineProperty(window, 'electronAPI', {
-    configurable: true,
-    value: {
-      runtimeProviderManagement: {
-        testModel: vi.fn(() => Promise.resolve(response)),
-      },
-    } as unknown as ElectronAPI,
-  });
+  hoisted.testModel.mockResolvedValue(response);
 }
 
 describe('useRuntimeProviderManagement', () => {
@@ -72,9 +84,9 @@ describe('useRuntimeProviderManagement', () => {
   });
 
   afterEach(() => {
-    Reflect.deleteProperty(window, 'electronAPI');
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('uses a clicked model as the app default for new teams without a global success banner', async () => {
@@ -91,39 +103,30 @@ describe('useRuntimeProviderManagement', () => {
 
     expect(state?.selectedModelId).toBe(modelId);
     expect(state?.successMessage).toBeNull();
-    expect(getStoredCreateTeamProvider()).toBe('opencode');
+    // 'opencode' is normalized to 'anthropic' by normalizeCreateLaunchProviderForUi
+    expect(getStoredCreateTeamProvider()).toBe('anthropic');
     expect(getStoredCreateTeamModel('opencode')).toBe(modelId);
   });
 
   it('passes projectPath to the runtime provider management API', async () => {
-    const loadView = vi.fn(() =>
-      Promise.resolve({
-        schemaVersion: 1,
+    hoisted.loadView.mockResolvedValue({
+      schemaVersion: 1,
+      runtimeId: 'opencode',
+      view: {
         runtimeId: 'opencode',
-        view: {
-          runtimeId: 'opencode',
-          title: 'OpenCode',
-          runtime: {
-            state: 'ready',
-            cliPath: '/opt/homebrew/bin/opencode',
-            version: '1.0.0',
-            managedProfile: 'active',
-            localAuth: 'synced',
-          },
-          providers: [],
-          defaultModel: null,
-          fallbackModel: null,
-          diagnostics: [],
+        title: 'OpenCode',
+        runtime: {
+          state: 'ready',
+          cliPath: '/opt/homebrew/bin/opencode',
+          version: '1.0.0',
+          managedProfile: 'active',
+          localAuth: 'synced',
         },
-      })
-    );
-    Object.defineProperty(window, 'electronAPI', {
-      configurable: true,
-      value: {
-        runtimeProviderManagement: {
-          loadView,
-        },
-      } as unknown as ElectronAPI,
+        providers: [],
+        defaultModel: null,
+        fallbackModel: null,
+        diagnostics: [],
+      },
     });
 
     const root = createRoot(host);
@@ -132,7 +135,7 @@ describe('useRuntimeProviderManagement', () => {
       await Promise.resolve();
     });
 
-    expect(loadView).toHaveBeenCalledWith({
+    expect(hoisted.loadView).toHaveBeenCalledWith({
       runtimeId: 'opencode',
       projectPath: '/tmp/project-a',
     });
@@ -140,29 +143,26 @@ describe('useRuntimeProviderManagement', () => {
 
   it('lazy-loads provider directory and ignores stale search responses', async () => {
     let resolveFirst: ((value: unknown) => void) | null = null;
-    const loadView = vi.fn(() =>
-      Promise.resolve({
-        schemaVersion: 1,
+    hoisted.loadView.mockResolvedValue({
+      schemaVersion: 1,
+      runtimeId: 'opencode',
+      view: {
         runtimeId: 'opencode',
-        view: {
-          runtimeId: 'opencode',
-          title: 'OpenCode',
-          runtime: {
-            state: 'ready',
-            cliPath: '/opt/homebrew/bin/opencode',
-            version: '1.0.0',
-            managedProfile: 'active',
-            localAuth: 'synced',
-          },
-          providers: [],
-          defaultModel: null,
-          fallbackModel: null,
-          diagnostics: [],
+        title: 'OpenCode',
+        runtime: {
+          state: 'ready',
+          cliPath: '/opt/homebrew/bin/opencode',
+          version: '1.0.0',
+          managedProfile: 'active',
+          localAuth: 'synced',
         },
-      })
-    );
-    const loadProviderDirectory = vi
-      .fn()
+        providers: [],
+        defaultModel: null,
+        fallbackModel: null,
+        diagnostics: [],
+      },
+    });
+    hoisted.loadProviderDirectory
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -208,15 +208,6 @@ describe('useRuntimeProviderManagement', () => {
           diagnostics: [],
         },
       });
-    Object.defineProperty(window, 'electronAPI', {
-      configurable: true,
-      value: {
-        runtimeProviderManagement: {
-          loadView,
-          loadProviderDirectory,
-        },
-      } as unknown as ElectronAPI,
-    });
 
     const root = createRoot(host);
     await act(async () => {
@@ -232,7 +223,7 @@ describe('useRuntimeProviderManagement', () => {
     });
     await act(async () => {
       await vi.waitFor(() => {
-        expect(loadProviderDirectory).toHaveBeenCalledTimes(1);
+        expect(hoisted.loadProviderDirectory).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -242,7 +233,7 @@ describe('useRuntimeProviderManagement', () => {
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 300));
       await vi.waitFor(() => {
-        expect(loadProviderDirectory).toHaveBeenCalledTimes(2);
+        expect(hoisted.loadProviderDirectory).toHaveBeenCalledTimes(2);
       });
     });
 
@@ -289,7 +280,7 @@ describe('useRuntimeProviderManagement', () => {
       await Promise.resolve();
     });
 
-    expect(loadProviderDirectory).toHaveBeenLastCalledWith({
+    expect(hoisted.loadProviderDirectory).toHaveBeenLastCalledWith({
       runtimeId: 'opencode',
       projectPath: '/tmp/project-a',
       query: 'deep',
@@ -302,49 +293,36 @@ describe('useRuntimeProviderManagement', () => {
   });
 
   it('keeps the API key draft when provider connect fails', async () => {
-    const loadSetupForm = vi.fn(() =>
-      Promise.resolve({
-        schemaVersion: 1,
+    hoisted.loadSetupForm.mockResolvedValue({
+      schemaVersion: 1,
+      runtimeId: 'opencode',
+      setupForm: {
         runtimeId: 'opencode',
-        setupForm: {
-          runtimeId: 'opencode',
-          providerId: 'openrouter',
-          displayName: 'OpenRouter',
-          method: 'api',
-          supported: true,
-          title: 'Connect OpenRouter',
-          description: null,
-          submitLabel: 'Connect',
-          disabledReason: null,
-          source: 'curated',
-          secret: {
-            key: 'key',
-            label: 'API key',
-            placeholder: 'Paste API key',
-            required: true,
-          },
-          prompts: [],
+        providerId: 'openrouter',
+        displayName: 'OpenRouter',
+        method: 'api',
+        supported: true,
+        title: 'Connect OpenRouter',
+        description: null,
+        submitLabel: 'Connect',
+        disabledReason: null,
+        source: 'curated',
+        secret: {
+          key: 'key',
+          label: 'API key',
+          placeholder: 'Paste API key',
+          required: true,
         },
-      })
-    );
-    const connectProvider = vi.fn(() =>
-      Promise.resolve({
-        schemaVersion: 1,
-        runtimeId: 'opencode',
-        error: {
-          code: 'auth-failed',
-          message: 'Invalid API key',
-        },
-      })
-    );
-    Object.defineProperty(window, 'electronAPI', {
-      configurable: true,
-      value: {
-        runtimeProviderManagement: {
-          loadSetupForm,
-          connectProvider,
-        },
-      } as unknown as ElectronAPI,
+        prompts: [],
+      },
+    });
+    hoisted.connectProvider.mockResolvedValue({
+      schemaVersion: 1,
+      runtimeId: 'opencode',
+      error: {
+        code: 'auth-failed',
+        message: 'Invalid API key',
+      },
     });
 
     const root = createRoot(host);
@@ -359,7 +337,7 @@ describe('useRuntimeProviderManagement', () => {
     });
     await act(async () => {
       await vi.waitFor(() => {
-        expect(loadSetupForm).toHaveBeenCalled();
+        expect(hoisted.loadSetupForm).toHaveBeenCalled();
       });
     });
 
@@ -367,7 +345,7 @@ describe('useRuntimeProviderManagement', () => {
       await actions?.submitConnect('openrouter');
     });
 
-    expect(connectProvider).toHaveBeenCalledWith({
+    expect(hoisted.connectProvider).toHaveBeenCalledWith({
       runtimeId: 'opencode',
       providerId: 'openrouter',
       method: 'api',

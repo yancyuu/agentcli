@@ -8,6 +8,10 @@
 #           -v ~/.claude:/data/.claude \
 #           -v ~/my-project:/data/project \
 #           hermit
+#
+# Note: The CLI requires non-root for --dangerously-skip-permissions.
+# Use --user flag when running: docker run --user $(id -u):$(id -g) ...
+# Or set UID/GID via environment: UID=501 GID=20 docker compose up
 # =============================================================================
 
 FROM node:20-slim AS builder
@@ -23,12 +27,15 @@ RUN corepack enable
 # Install dependencies first (better layer caching)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY agent-teams-controller/package.json ./agent-teams-controller/package.json
-# --ignore-scripts skips native addon builds (node-pty needs Electron headers)
+COPY mcp-server/package.json ./mcp-server/package.json
+# --ignore-scripts for faster install in Docker
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Build workspace packages that the main app depends on
 COPY agent-teams-controller ./agent-teams-controller
+COPY mcp-server ./mcp-server
 RUN pnpm --filter agent-teams-controller build
+RUN pnpm --filter agent-teams-mcp build
 
 # Copy source and build
 COPY . .
@@ -52,21 +59,25 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install git (needed for template source cloning) and Claude Code CLI
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# Install git + ca-certificates (needed for template source cloning)
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install Claude Code CLI via npm
 RUN npm install -g @anthropic-ai/claude-code
 
 # Copy production node_modules from builder (already pruned)
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/agent-teams-controller ./agent-teams-controller
+COPY --from=builder /app/mcp-server ./mcp-server
 
 # Copy built standalone server and renderer output
 COPY --from=builder /app/dist-standalone ./dist-standalone
 COPY --from=builder /app/out/renderer ./out/renderer
 
-# Create data directories
-RUN mkdir -p /data/.claude /data/project
+# Create data directories (ownership set at runtime via --user flag in docker-compose)
+RUN mkdir -p /data/.claude /data/project /data/.claude/skills
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/settings.template.json /data/.claude/settings.template.json
 
 ENV NODE_ENV=production
 ENV CLAUDE_ROOT=/data/.claude
@@ -75,4 +86,6 @@ ENV PORT=4567
 
 EXPOSE 4567
 
-CMD ["node", "dist-standalone/index.cjs"]
+# Run as non-root user (CLI requires non-root for --dangerously-skip-permissions).
+# Set via --user flag in docker-compose.yml.
+CMD ["/usr/local/bin/entrypoint.sh"]

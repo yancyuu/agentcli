@@ -11,7 +11,6 @@ import {
   mergeCodexProviderStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
-import { isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import {
@@ -27,7 +26,6 @@ import {
 import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelBadges';
 import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
-import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
@@ -198,7 +196,6 @@ function getProviderTerminalLogoutCommand(provider: CliProviderStatus): {
 }
 
 export const CliStatusSection = (): React.JSX.Element | null => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const appConfig = useStore((s) => s.appConfig);
   const selectedProjectId = useStore((s) => s.selectedProjectId);
   const projects = useStore((s) => s.projects);
@@ -239,7 +236,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
       : cliStatus;
   const codexAccount = useCodexAccountSnapshot({
     enabled:
-      isElectron &&
       multimodelEnabled &&
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
@@ -286,7 +282,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         void fetchCliStatus();
       }
     }
-  }, [bootstrapCliStatus, cliStatus, fetchCliStatus, isElectron, multimodelEnabled]);
+  }, [bootstrapCliStatus, cliStatus, fetchCliStatus, multimodelEnabled]);
 
   const handleInstall = useCallback(() => {
     installCli();
@@ -692,33 +688,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
               </div>
             )}
 
-            {/* Install button (CLI not installed) */}
-            {!effectiveCliStatus.installed && effectiveCliStatus.supportsSelfUpdate && (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleRefresh}
-                  className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-white/5"
-                  style={{
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)',
-                  }}
-                >
-                  <RefreshCw className="size-3.5" />
-                  重新检查
-                </button>
-                <button
-                  onClick={handleInstall}
-                  disabled={isBusy}
-                  className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: '#3b82f6' }}
-                >
-                  <Download className="size-3.5" />
-                  {effectiveCliStatus.binaryPath && effectiveCliStatus.launchError
-                    ? `重新安装 ${runtimeDisplayName}`
-                    : `安装 ${runtimeDisplayName}`}
-                </button>
-              </div>
-            )}
             {!effectiveCliStatus.installed && !effectiveCliStatus.supportsSelfUpdate && (
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 {effectiveCliStatus.binaryPath && effectiveCliStatus.launchError
@@ -827,30 +796,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
           </div>
         )}
       </div>
-      {providerTerminal && cliStatus?.binaryPath && (
-        <TerminalModal
-          title={`${getRuntimeDisplayName(cliStatus, multimodelEnabled)} ${
-            providerTerminal.action === 'login' ? 'Login' : 'Logout'
-          }: ${getProviderLabel(providerTerminal.providerId)}`}
-          command={cliStatus.binaryPath}
-          args={providerTerminalCommand?.args}
-          env={providerTerminalCommand?.env}
-          onClose={() => {
-            setProviderTerminal(null);
-            recheckStatus();
-          }}
-          onExit={() => {
-            recheckStatus();
-          }}
-          autoCloseOnSuccessMs={3000}
-          successMessage={
-            providerTerminal.action === 'login' ? 'Authentication updated' : 'Provider logged out'
-          }
-          failureMessage={
-            providerTerminal.action === 'login' ? 'Authentication failed' : 'Logout failed'
-          }
-        />
-      )}
     </div>
   );
 };

@@ -17,11 +17,10 @@
       "@features/*": ["./src/features/*"],
       "@main/*": ["./src/main/*"],
       "@renderer/*": ["./src/renderer/*"],
-      "@preload/*": ["./src/preload/*"],
       "@shared/*": ["./src/shared/*"]
     },
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "dist", "dist-electron"]
+  "exclude": ["node_modules", "dist", "dist-standalone"]
 }

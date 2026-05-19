@@ -7,15 +7,19 @@
  * When `VITE_SENTRY_DSN` is not set (dev / self-builds), everything is a no-op.
  */
 
-import * as SentryElectron from '@sentry/electron/renderer';
-import { browserTracingIntegration as reactBrowserTracing, init as reactInit } from '@sentry/react';
+import {
+  addBreadcrumb,
+  captureException,
+  init as reactInit,
+  browserTracingIntegration as reactBrowserTracing,
+  withScope,
+} from '@sentry/react';
 import {
   isValidDsn,
   SENTRY_ENVIRONMENT,
   SENTRY_RELEASE,
   TRACES_SAMPLE_RATE,
 } from '@shared/utils/sentryConfig';
-import { isElectronMode } from '@renderer/api';
 
 // ---------------------------------------------------------------------------
 // Telemetry gate (mirrors src/main/sentry.ts pattern)
@@ -51,23 +55,12 @@ export function initSentryRenderer(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cross-version @sentry/core type mismatch
   const beforeSend = (event: any): any => (telemetryAllowed ? event : null);
 
-  if (isElectronMode()) {
-    // Electron renderer — uses IPC transport to main process.
-    // browserTracingIntegration from @sentry/electron/renderer to avoid
-    // @sentry/core version mismatch with @sentry/react.
-    SentryElectron.init({
-      ...baseOptions,
-      beforeSend,
-      integrations: [SentryElectron.browserTracingIntegration()],
-    });
-  } else {
-    // Standalone browser mode — direct HTTP transport
-    reactInit({
-      ...baseOptions,
-      beforeSend,
-      integrations: [reactBrowserTracing()],
-    });
-  }
+  // Web browser mode — direct HTTP transport
+  reactInit({
+    ...baseOptions,
+    beforeSend,
+    integrations: [reactBrowserTracing()],
+  });
 
   initialized = true;
 }
@@ -84,7 +77,7 @@ export function isSentryRendererActive(): boolean {
 /** Record a navigation breadcrumb (tab switches). */
 export function addNavigationBreadcrumb(from: string, to: string): void {
   if (!initialized) return;
-  SentryElectron.addBreadcrumb({
+  addBreadcrumb({
     category: 'navigation',
     message: `Tab: ${from} → ${to}`,
     level: 'info',
@@ -98,14 +91,14 @@ export function addRendererBreadcrumb(
   data?: Record<string, unknown>
 ): void {
   if (!initialized) return;
-  SentryElectron.addBreadcrumb({ category, message, data, level: 'info' });
+  addBreadcrumb({ category, message, data, level: 'info' });
 }
 
 /** Capture an exception with optional extra context. */
 export function captureRendererException(error: Error, context?: Record<string, unknown>): void {
   if (!initialized) return;
-  SentryElectron.withScope((scope) => {
+  withScope((scope) => {
     if (context) scope.setContext('react', context);
-    SentryElectron.captureException(error);
+    captureException(error);
   });
 }

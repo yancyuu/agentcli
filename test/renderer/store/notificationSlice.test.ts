@@ -5,19 +5,71 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { installMockElectronAPI, type MockElectronAPI } from '../../mocks/electronAPI';
+import type { DetectedError } from '../../../src/renderer/types/data';
+
+const hoisted = vi.hoisted(() => ({
+  notificationsGet: vi.fn(),
+  notificationsMarkRead: vi.fn(),
+  notificationsMarkAllRead: vi.fn(),
+  notificationsDelete: vi.fn(),
+  notificationsClear: vi.fn(),
+  getSessionsPaginated: vi.fn(),
+  getSessionDetail: vi.fn(),
+  getProjects: vi.fn(),
+  getRepositoryGroups: vi.fn(),
+  configGet: vi.fn(),
+}));
+
+vi.mock('@renderer/api', () => ({
+  api: {
+    notifications: {
+      get: hoisted.notificationsGet,
+      markRead: hoisted.notificationsMarkRead,
+      markAllRead: hoisted.notificationsMarkAllRead,
+      delete: hoisted.notificationsDelete,
+      clear: hoisted.notificationsClear,
+      onNew: vi.fn(() => () => undefined),
+      onUpdated: vi.fn(() => () => undefined),
+      getUnreadCount: vi.fn(),
+      markAsRead: vi.fn(),
+      markAllAsRead: vi.fn(),
+      testNotification: vi.fn(),
+    },
+    getSessionsPaginated: hoisted.getSessionsPaginated,
+    getSessionDetail: hoisted.getSessionDetail,
+    getProjects: hoisted.getProjects,
+    getRepositoryGroups: hoisted.getRepositoryGroups,
+    config: {
+      get: hoisted.configGet,
+    },
+  },
+}));
 
 import { createTestStore, type TestStore } from './storeTestUtils';
 
-import type { DetectedError } from '../../../src/renderer/types/data';
-
 describe('notificationSlice', () => {
   let store: TestStore;
-  let mockAPI: MockElectronAPI;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    mockAPI = installMockElectronAPI();
+
+    hoisted.notificationsGet.mockResolvedValue({ notifications: [], unreadCount: 0 });
+    hoisted.notificationsMarkRead.mockResolvedValue(true);
+    hoisted.notificationsMarkAllRead.mockResolvedValue(true);
+    hoisted.notificationsDelete.mockResolvedValue(true);
+    hoisted.notificationsClear.mockResolvedValue(true);
+    hoisted.getSessionsPaginated.mockResolvedValue({
+      sessions: [],
+      nextCursor: null,
+      hasMore: false,
+      totalCount: 0,
+    });
+    hoisted.getSessionDetail.mockResolvedValue(null);
+    hoisted.configGet.mockResolvedValue({
+      notifications: { enabled: true },
+      sessions: { pinnedSessions: {}, hiddenSessions: {} },
+    });
+
     store = createTestStore();
 
     // Mock crypto.randomUUID for predictable tab IDs
@@ -44,14 +96,14 @@ describe('notificationSlice', () => {
         ] as never[],
       });
 
-      mockAPI.notifications.markRead.mockResolvedValue(false);
-      mockAPI.notifications.get.mockResolvedValue({
+      hoisted.notificationsMarkRead.mockResolvedValue(false);
+      hoisted.notificationsGet.mockResolvedValue({
         notifications: [{ id: 'n1', message: 'msg', isRead: false }],
       });
 
       await store.getState().markNotificationRead('n1');
 
-      expect(mockAPI.notifications.get).toHaveBeenCalled();
+      expect(hoisted.notificationsGet).toHaveBeenCalled();
     });
 
     it('re-fetches notifications when clear returns false', async () => {
@@ -59,14 +111,14 @@ describe('notificationSlice', () => {
         notifications: [{ id: 'n1', message: 'msg', isRead: true }] as never[],
       });
 
-      mockAPI.notifications.clear.mockResolvedValue(false);
-      mockAPI.notifications.get.mockResolvedValue({
+      hoisted.notificationsClear.mockResolvedValue(false);
+      hoisted.notificationsGet.mockResolvedValue({
         notifications: [{ id: 'n1', message: 'msg', isRead: true }],
       });
 
       await store.getState().clearNotifications();
 
-      expect(mockAPI.notifications.get).toHaveBeenCalled();
+      expect(hoisted.notificationsGet).toHaveBeenCalled();
     });
   });
 
@@ -112,9 +164,9 @@ describe('notificationSlice', () => {
 
       await store.getState().markAllNotificationsRead('trigger-a');
 
-      expect(mockAPI.notifications.markRead).toHaveBeenCalledWith('n1');
-      expect(mockAPI.notifications.markRead).toHaveBeenCalledWith('n2');
-      expect(mockAPI.notifications.markAllRead).not.toHaveBeenCalled();
+      expect(hoisted.notificationsMarkRead).toHaveBeenCalledWith('n1');
+      expect(hoisted.notificationsMarkRead).toHaveBeenCalledWith('n2');
+      expect(hoisted.notificationsMarkAllRead).not.toHaveBeenCalled();
     });
 
     it('uses markAllRead API when no triggerName is provided', async () => {
@@ -123,8 +175,8 @@ describe('notificationSlice', () => {
 
       await store.getState().markAllNotificationsRead();
 
-      expect(mockAPI.notifications.markAllRead).toHaveBeenCalled();
-      expect(mockAPI.notifications.markRead).not.toHaveBeenCalled();
+      expect(hoisted.notificationsMarkAllRead).toHaveBeenCalled();
+      expect(hoisted.notificationsMarkRead).not.toHaveBeenCalled();
     });
 
     it('treats notifications without triggerName as "Other"', async () => {
@@ -147,8 +199,8 @@ describe('notificationSlice', () => {
       await store.getState().markAllNotificationsRead('trigger-a');
 
       // Only n2 should be sent to API (n1 already read)
-      expect(mockAPI.notifications.markRead).toHaveBeenCalledTimes(1);
-      expect(mockAPI.notifications.markRead).toHaveBeenCalledWith('n2');
+      expect(hoisted.notificationsMarkRead).toHaveBeenCalledTimes(1);
+      expect(hoisted.notificationsMarkRead).toHaveBeenCalledWith('n2');
     });
 
     it('no-ops when no unread notifications match the trigger', async () => {
@@ -157,7 +209,7 @@ describe('notificationSlice', () => {
 
       await store.getState().markAllNotificationsRead('trigger-a');
 
-      expect(mockAPI.notifications.markRead).not.toHaveBeenCalled();
+      expect(hoisted.notificationsMarkRead).not.toHaveBeenCalled();
     });
 
     it('re-fetches when any scoped markRead call fails', async () => {
@@ -165,12 +217,12 @@ describe('notificationSlice', () => {
       const n2 = makeNotification('n2', 'trigger-a', false);
       store.setState({ notifications: [n1, n2] as never[], unreadCount: 2 });
 
-      mockAPI.notifications.markRead.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-      mockAPI.notifications.get.mockResolvedValue({ notifications: [] });
+      hoisted.notificationsMarkRead.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      hoisted.notificationsGet.mockResolvedValue({ notifications: [] });
 
       await store.getState().markAllNotificationsRead('trigger-a');
 
-      expect(mockAPI.notifications.get).toHaveBeenCalled();
+      expect(hoisted.notificationsGet).toHaveBeenCalled();
     });
   });
 
@@ -215,9 +267,9 @@ describe('notificationSlice', () => {
 
       await store.getState().clearNotifications('trigger-a');
 
-      expect(mockAPI.notifications.delete).toHaveBeenCalledWith('n1');
-      expect(mockAPI.notifications.delete).toHaveBeenCalledWith('n2');
-      expect(mockAPI.notifications.clear).not.toHaveBeenCalled();
+      expect(hoisted.notificationsDelete).toHaveBeenCalledWith('n1');
+      expect(hoisted.notificationsDelete).toHaveBeenCalledWith('n2');
+      expect(hoisted.notificationsClear).not.toHaveBeenCalled();
     });
 
     it('uses clear API when no triggerName is provided', async () => {
@@ -226,8 +278,8 @@ describe('notificationSlice', () => {
 
       await store.getState().clearNotifications();
 
-      expect(mockAPI.notifications.clear).toHaveBeenCalled();
-      expect(mockAPI.notifications.delete).not.toHaveBeenCalled();
+      expect(hoisted.notificationsClear).toHaveBeenCalled();
+      expect(hoisted.notificationsDelete).not.toHaveBeenCalled();
     });
 
     it('treats notifications without triggerName as "Other"', async () => {
@@ -260,7 +312,7 @@ describe('notificationSlice', () => {
 
       await store.getState().clearNotifications('trigger-a');
 
-      expect(mockAPI.notifications.delete).not.toHaveBeenCalled();
+      expect(hoisted.notificationsDelete).not.toHaveBeenCalled();
       expect(store.getState().notifications).toHaveLength(1);
     });
 
@@ -269,12 +321,12 @@ describe('notificationSlice', () => {
       const n2 = makeNotification('n2', 'trigger-a', false);
       store.setState({ notifications: [n1, n2] as never[], unreadCount: 2 });
 
-      mockAPI.notifications.delete.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-      mockAPI.notifications.get.mockResolvedValue({ notifications: [] });
+      hoisted.notificationsDelete.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      hoisted.notificationsGet.mockResolvedValue({ notifications: [] });
 
       await store.getState().clearNotifications('trigger-a');
 
-      expect(mockAPI.notifications.get).toHaveBeenCalled();
+      expect(hoisted.notificationsGet).toHaveBeenCalled();
     });
 
     it('correctly recalculates unreadCount after scoped clear', async () => {
@@ -323,14 +375,14 @@ describe('notificationSlice', () => {
           ] as never[],
         });
 
-        mockAPI.getSessionsPaginated.mockResolvedValue({
+        hoisted.getSessionsPaginated.mockResolvedValue({
           sessions: [{ id: 'session-1' }] as never[],
           nextCursor: null,
           hasMore: false,
           totalCount: 1,
         });
 
-        mockAPI.getSessionDetail.mockResolvedValue({
+        hoisted.getSessionDetail.mockResolvedValue({
           session: { id: 'session-target' },
           chunks: [],
         } as never);
@@ -409,14 +461,14 @@ describe('notificationSlice', () => {
           ] as never[],
         });
 
-        mockAPI.getSessionsPaginated.mockResolvedValue({
+        hoisted.getSessionsPaginated.mockResolvedValue({
           sessions: [{ id: 'session-1' }] as never[],
           nextCursor: null,
           hasMore: false,
           totalCount: 1,
         });
 
-        mockAPI.getSessionDetail.mockResolvedValue({
+        hoisted.getSessionDetail.mockResolvedValue({
           session: { id: 'session-target' },
           chunks: [],
         } as never);
@@ -601,14 +653,14 @@ describe('notificationSlice', () => {
           sessions: [{ id: 'session-1', createdAt: '2024-01-15' }] as never[],
         });
 
-        mockAPI.getSessionsPaginated.mockResolvedValue({
+        hoisted.getSessionsPaginated.mockResolvedValue({
           sessions: [{ id: 'session-1' }] as never[],
           nextCursor: 'cursor-1',
           hasMore: true,
           totalCount: 100,
         });
 
-        mockAPI.getSessionDetail.mockResolvedValue({
+        hoisted.getSessionDetail.mockResolvedValue({
           session: { id: 'session-target' },
           chunks: [],
         } as never);
@@ -644,14 +696,14 @@ describe('notificationSlice', () => {
           ] as never[],
         });
 
-        mockAPI.getSessionsPaginated.mockResolvedValue({
+        hoisted.getSessionsPaginated.mockResolvedValue({
           sessions: [{ id: 'session-1' }, { id: 'session-target' }] as never[],
           nextCursor: null,
           hasMore: false,
           totalCount: 2,
         });
 
-        mockAPI.getSessionDetail.mockResolvedValue({
+        hoisted.getSessionDetail.mockResolvedValue({
           session: { id: 'session-target' },
           chunks: [],
         } as never);
@@ -691,14 +743,14 @@ describe('notificationSlice', () => {
           selectedSessionId: 'session-1', // Previous selection that might cause wrong highlight
         });
 
-        mockAPI.getSessionsPaginated.mockResolvedValue({
+        hoisted.getSessionsPaginated.mockResolvedValue({
           sessions: [{ id: 'session-1' }] as never[],
           nextCursor: 'cursor-1',
           hasMore: true,
           totalCount: 100,
         });
 
-        mockAPI.getSessionDetail.mockResolvedValue({
+        hoisted.getSessionDetail.mockResolvedValue({
           session: { id: 'session-target' },
           chunks: [],
         } as never);

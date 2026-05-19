@@ -3,10 +3,8 @@
  * when the configured runtime is unavailable.
  *
  * Hidden on Dashboard pages (which have their own detailed CliStatusBanner).
- * Only rendered in Electron mode.
  */
 
-import { isElectronMode } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { AlertTriangle } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -24,14 +22,8 @@ export const CliInstallWarningBanner = (): React.JSX.Element | null => {
     return fp.tabs.find((t) => t.id === fp.activeTabId)?.type === 'dashboard';
   });
 
-  // Hide when: not Electron, status not loaded yet, CLI installed, or dashboard is focused
-  if (
-    !isElectronMode() ||
-    cliStatusLoading ||
-    !cliStatus ||
-    cliStatus.installed ||
-    isDashboardFocused
-  ) {
+  // Hide when: status not loaded yet, CLI installed, or dashboard is focused
+  if (cliStatusLoading || !cliStatus || cliStatus.installed || isDashboardFocused) {
     return null;
   }
 

@@ -86,10 +86,11 @@ describe('ScheduledTaskExecutor', () => {
     vi.clearAllMocks();
     mockResolve.mockResolvedValue('/usr/local/bin/claude');
     mockResolveShellEnv.mockResolvedValue({ SHELL: '/bin/zsh' });
-    buildProviderAwareCliEnvMock.mockResolvedValue({
-      env: { ...process.env, SHELL: '/bin/zsh' },
-      connectionIssues: {},
-      providerArgs: [],
+    buildProviderAwareCliEnvMock.mockImplementation(async (opts) => {
+      const env = { ...process.env, ...(opts?.shellEnv ?? {}), ...(opts?.env ?? {}) };
+      // Mirror source behavior: strip CLAUDECODE
+      delete env.CLAUDECODE;
+      return { env, connectionIssues: {}, providerArgs: [] };
     });
 
     const mod = await import('../../../../src/main/services/schedule/ScheduledTaskExecutor');

@@ -300,42 +300,9 @@ export function buildTodoPath(claudeBasePath: string, sessionId: string): string
 // =============================================================================
 
 /**
- * Try Electron's app.getPath('home') which correctly handles Unicode paths
- * on Windows (Cyrillic, CJK, etc.) unlike Node's os.homedir() / env vars
- * that can suffer from UTF-8 vs system codepage mismatches.
- *
- * Returns null when Electron app is unavailable (e.g. in tests).
- */
-function getElectronHome(): string | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Lazy require to avoid hard dependency on electron in test environments
-    const electron = require('electron') as {
-      app?: { getPath: (name: string) => string };
-    };
-    const app = electron.app;
-    if (app && typeof app.getPath === 'function') {
-      const home = app.getPath('home');
-      if (home) return home;
-    }
-  } catch {
-    // Not in Electron context (tests, standalone builds, etc.)
-  }
-  return null;
-}
-
-/**
  * Get the user's home directory.
- *
- * Priority:
- * 1. Electron app.getPath('home') — correct Unicode handling on all platforms
- * 2. HOME env var (Unix) / USERPROFILE (Windows)
- * 3. HOMEDRIVE + HOMEPATH (Windows fallback)
- * 4. os.homedir() (Node.js built-in)
  */
 export function getHomeDir(): string {
-  const electronHome = getElectronHome();
-  if (electronHome) return electronHome;
-
   const windowsHome =
     process.env.HOMEDRIVE && process.env.HOMEPATH
       ? `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`
@@ -559,15 +526,7 @@ export function setAppDataBasePath(p: string | null | undefined): void {
 
 function getAppDataBasePath(): string {
   if (appDataBasePathOverride) return appDataBasePathOverride;
-  // Fallback: resolve lazily from Electron app (safe after app.whenReady)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { app } = require('electron') as typeof import('electron');
-    return app.getPath('userData');
-  } catch {
-    // Outside Electron (tests, CLI): use the new fallback path and migrate legacy data once.
-    return getFallbackAppDataBasePath();
-  }
+  return getFallbackAppDataBasePath();
 }
 
 function getFallbackAppDataBasePath(): string {

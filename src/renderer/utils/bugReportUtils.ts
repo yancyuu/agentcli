@@ -1,5 +1,4 @@
 import packageJson from '../../../package.json';
-import { isElectronMode } from '@renderer/api';
 
 const GITHUB_BUG_REPORT_URL = 'https://github.com/yancyuu/Hermit/issues/new';
 const MAX_TITLE_LENGTH = 120;
@@ -37,7 +36,7 @@ const buildIssueTitle = (error: Error | null): string => {
   return truncate(baseTitle, MAX_TITLE_LENGTH);
 };
 
-const getRuntimeLabel = (): string => (isElectronMode() ? 'Electron renderer' : 'Web browser');
+const getRuntimeLabel = (): string => 'Web browser';
 
 const formatOptional = (value: string | null | undefined): string => {
   if (!value) {

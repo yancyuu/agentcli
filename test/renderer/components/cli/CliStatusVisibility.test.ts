@@ -859,7 +859,7 @@ describe('CLI status visibility during completed install state', () => {
     expect(secondHost.textContent).toContain('提供商：2/2 已连接');
     expect(secondHost.textContent).not.toContain('ChatGPT 账号已就绪');
     expect(
-      secondHost.querySelector('button[aria-label="Expand provider details"]')
+      secondHost.querySelector('button[aria-label="展开提供商详情"]')
     ).not.toBeNull();
 
     await act(async () => {
@@ -951,8 +951,22 @@ describe('CLI status visibility during completed install state', () => {
       displayName: 'Multimodel runtime',
       supportsSelfUpdate: true,
       showVersionDetails: false,
-      installed: false,
+      installed: true,
       authLoggedIn: false,
+      providers: [
+        {
+          providerId: 'codex',
+          displayName: 'Codex',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'verified',
+          statusMessage: 'Codex native ready',
+          models: ['gpt-5-codex'],
+          canLoginFromUi: false,
+          capabilities: { teamLaunch: true, oneShot: true },
+        },
+      ],
     });
 
     const host = document.createElement('div');
@@ -964,8 +978,9 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
+    // The per-provider "检查更新" button triggers fetchCliProviderStatus
     const refreshButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('重新检查')
+      button.textContent?.includes('检查更新')
     );
     expect(refreshButton).not.toBeNull();
 
@@ -974,7 +989,8 @@ describe('CLI status visibility during completed install state', () => {
       await Promise.resolve();
     });
 
-    expect(storeState.bootstrapCliStatus).toHaveBeenCalledWith({ multimodelEnabled: true });
+    // Per-provider check calls fetchCliProviderStatus, not bootstrapCliStatus
+    expect(storeState.fetchCliProviderStatus).toHaveBeenCalled();
     expect(storeState.fetchCliStatus).not.toHaveBeenCalled();
 
     await act(async () => {

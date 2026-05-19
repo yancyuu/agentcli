@@ -396,7 +396,7 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
     });
 
     const block = host.querySelector('[data-testid="progress-block"]');
-    expect(block?.getAttribute('data-current-step-index')).toBe('2');
+    expect(block?.getAttribute('data-current-step-index')).toBe('4');
     expect(block?.getAttribute('data-loading')).toBe('false');
     expect(block?.getAttribute('data-success-severity')).toBe('warning');
     expect(block?.textContent).toBeTruthy();

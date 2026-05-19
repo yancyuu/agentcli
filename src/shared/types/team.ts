@@ -803,6 +803,8 @@ export interface ResolvedTeamMember {
   gitBranch?: string;
   runtimeAdvisory?: MemberRuntimeAdvisory;
   removedAt?: number;
+  skippedForLaunch?: boolean;
+  launchState?: string;
 }
 
 export interface MemberRuntimeAdvisory {

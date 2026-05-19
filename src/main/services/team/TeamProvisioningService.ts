@@ -7637,15 +7637,14 @@ export class TeamProvisioningService {
   }
 
   private toolApprovalEventEmitter: ((event: ToolApprovalEvent) => void) | null = null;
-  private mainWindowRef: import('electron').BrowserWindow | null = null;
-  private activeApprovalNotifications = new Map<string, import('electron').Notification>();
 
   setToolApprovalEventEmitter(emitter: (event: ToolApprovalEvent) => void): void {
     this.toolApprovalEventEmitter = emitter;
   }
 
-  setMainWindow(win: import('electron').BrowserWindow | null): void {
-    this.mainWindowRef = win;
+  /** @deprecated No-op in web mode. Kept for API compatibility. */
+  setMainWindow(_win: unknown): void {
+    // No-op: native window reference not needed in web mode
   }
 
   private getToolApprovalSettings(teamName: string): ToolApprovalSettings {
@@ -12323,32 +12322,6 @@ export class TeamProvisioningService {
         ...parseInProcessTeamExtraCliArgs(request.extraCliArgs),
         ...providerArgs,
       ];
-
-      // Create deterministic bootstrap spec file for CLI-level sequential member spawning
-      const specDir = path.join(getTeamsBasePath(), request.teamName, '.bootstrap');
-      const specPath = path.join(specDir, 'spec.json');
-      await fs.promises.mkdir(specDir, { recursive: true });
-      const bootstrapSpec = {
-        mode: 'create' as const,
-        team: { name: request.teamName, cwd: request.cwd },
-        members: bootstrapMemberSpecs.map((member) => ({
-          name: member.name,
-          agentType: 'agent-teams-member',
-          description: member.role || member.name,
-          cwd: member.cwd || request.cwd,
-          provider: member.providerId || undefined,
-          model: member.model || undefined,
-          effort: member.effort || undefined,
-          role: member.role || undefined,
-          isolation: member.isolation || undefined,
-        })),
-      };
-      await fs.promises.writeFile(specPath, JSON.stringify(bootstrapSpec, null, 2));
-      run.bootstrapSpecPath = specPath;
-      spawnArgs.push('--team-bootstrap-spec', specPath);
-
-      // Enable deterministic bootstrap for CLI-controlled sequential member spawning
-      shellEnv.CLAUDE_ENABLE_DETERMINISTIC_TEAM_BOOTSTRAP = '1';
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
         promptSize,
@@ -12868,7 +12841,7 @@ export class TeamProvisioningService {
         type: 'process',
         teamName: input.request.teamName,
         runId,
-        detail: finalProgress.state,
+        detail: JSON.stringify(finalProgress),
       });
       return { runId };
     } catch (error) {
@@ -13650,7 +13623,9 @@ export class TeamProvisioningService {
         await this.cancelRuntimeAdapterProvisioning(runId, runtimeProgress);
         return;
       }
-      throw new Error('Unknown runId');
+      // Run not found — already cancelled/completed/cleaned up, nothing to do.
+      // This is normal (e.g. stopTeam cleaned up the run before cancel arrived).
+      return;
     }
     if (
       !['spawning', 'configuring', 'assembling', 'finalizing', 'verifying'].includes(
@@ -18520,6 +18495,7 @@ export class TeamProvisioningService {
     run.pendingToolCalls = [];
     const leadMsg: InboxMessage = {
       from: leadName,
+      to: 'user',
       text: cleanText,
       timestamp,
       read: true,
@@ -19272,16 +19248,8 @@ export class TeamProvisioningService {
       );
 
       const textParts = content
-        .filter(
-          (part) =>
-            (part.type === 'text' && typeof part.text === 'string') || part.type === 'thinking'
-        )
-        .map((part) => {
-          if (part.type === 'thinking' && typeof part.thinking === 'string') {
-            return `[思考]\n${part.thinking}`;
-          }
-          return part.text as string;
-        });
+        .filter((part) => part.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text as string);
       let assistantIsRateLimitApiError = false;
       if (textParts.length > 0) {
         const text = textParts.join('\n');
@@ -20270,95 +20238,19 @@ export class TeamProvisioningService {
     run: ProvisioningRun,
     approval: ToolApprovalRequest
   ): void {
-    const win = this.mainWindowRef;
-    if (win && !win.isDestroyed() && win.isFocused()) return;
-
     const config = ConfigManager.getInstance().getConfig();
     if (!config.notifications.enabled || !config.notifications.notifyOnToolApproval) return;
 
-    // Respect snooze — consistent with other notification types
     const snoozedUntil = config.notifications.snoozedUntil;
     if (snoozedUntil && Date.now() < snoozedUntil) return;
 
-    const { Notification: ElectronNotification } = require('electron') as typeof import('electron');
-    if (!ElectronNotification.isSupported()) return;
-
-    const isMac = process.platform === 'darwin';
-    const isLinux = process.platform === 'linux';
-    const iconPath = isMac ? undefined : getAppIconPath();
-    const teamLabel = run.request.displayName ?? run.teamName;
-    const body = this.formatToolApprovalBody(approval.toolName, approval.toolInput);
-
-    // Actions (Allow/Deny buttons) supported on macOS and Windows.
-    // Linux libnotify doesn't fire the 'action' event — users get click-to-focus.
-    const supportsActions = !isLinux;
-
-    const notification = new ElectronNotification({
-      title: `Tool Approval — ${teamLabel}`,
-      body,
-      sound: config.notifications.soundEnabled ? 'default' : undefined,
-      ...(iconPath ? { icon: iconPath } : {}),
-      ...(supportsActions
-        ? {
-            actions: [
-              { type: 'button' as const, text: 'Allow' },
-              { type: 'button' as const, text: 'Deny' },
-            ],
-          }
-        : {}),
-    });
-
-    // Track by requestId so we can close it when approval is resolved via UI
-    this.activeApprovalNotifications.set(approval.requestId, notification);
-    const cleanup = (): void => {
-      this.activeApprovalNotifications.delete(approval.requestId);
-    };
-
-    notification.on('click', () => {
-      cleanup();
-      // Use current mainWindowRef (not captured `win`) in case window was recreated
-      const currentWin = this.mainWindowRef;
-      if (currentWin && !currentWin.isDestroyed()) {
-        currentWin.show();
-        currentWin.focus();
-      }
-    });
-
-    notification.on('close', cleanup);
-
-    // Action buttons: Allow (index 0) / Deny (index 1)
-    // 'action' event fires on macOS and Windows (not Linux)
-    if (supportsActions) {
-      notification.on('action', (_event, index) => {
-        cleanup();
-        const allow = index === 0;
-        logger.info(
-          `[${run.teamName}] Tool approval ${allow ? 'allowed' : 'denied'} via OS notification`
-        );
-        void this.respondToToolApproval(
-          run.teamName,
-          run.runId,
-          approval.requestId,
-          allow,
-          allow ? undefined : 'Denied via notification'
-        ).catch((err) => {
-          logger.error(
-            `[${run.teamName}] Failed to respond via notification: ${err instanceof Error ? err.message : String(err)}`
-          );
-        });
-      });
-    }
-
-    notification.show();
+    // In web mode, tool approval notifications are delivered via SSE
+    // The event is already emitted through toolApprovalEventEmitter
   }
 
-  /** Dismiss the OS notification for a resolved/dismissed approval. */
-  dismissApprovalNotification(requestId: string): void {
-    const notification = this.activeApprovalNotifications.get(requestId);
-    if (notification) {
-      notification.close();
-      this.activeApprovalNotifications.delete(requestId);
-    }
+  /** Dismiss the OS notification for a resolved/dismissed approval. No-op in web mode. */
+  dismissApprovalNotification(_requestId: string): void {
+    // No-op: native notifications not available in web mode
   }
 
   private formatToolApprovalBody(toolName: string, toolInput: Record<string, unknown>): string {
@@ -21876,13 +21768,6 @@ export class TeamProvisioningService {
       return;
     }
     // Skip if respawn after auth failure is in progress — the old process is being replaced
-    if (run.authRetryInProgress) {
-      logger.info(
-        `[${run.teamName}] Process exited (code ${code ?? '?'}) during auth-failure respawn — ignoring`
-      );
-      return;
-    }
-
     // IMPORTANT: stopStallWatchdog MUST be AFTER authRetryInProgress guard above!
     // During respawn, the old process exit fires but run.stallCheckHandle already
     // points to the NEW process's watchdog. Stopping it here would kill the wrong timer.

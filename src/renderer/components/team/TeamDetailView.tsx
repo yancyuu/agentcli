@@ -134,12 +134,15 @@ import type { ContextInjection } from '@renderer/types/contextInjection';
 import type { Session } from '@renderer/types/data';
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type {
+  EffortLevel,
   MemberSpawnStatusEntry,
   ResolvedTeamMember,
   TaskRef,
   TeamAgentRuntimeEntry,
   TeamCreateRequest,
+  TeamFastMode,
   TeamLaunchRequest,
+  TeamProviderId,
   TeamTaskWithKanban,
 } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
@@ -924,6 +927,22 @@ export const TeamDetailView = ({
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [savedLaunchRequest, setSavedLaunchRequest] = useState<TeamLaunchRequest | null>(null);
+  useEffect(() => {
+    if (!editDialogOpen || !teamName) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await api.teams.getSavedRequest(teamName);
+        if (!cancelled) setSavedLaunchRequest(saved ?? null);
+      } catch {
+        if (!cancelled) setSavedLaunchRequest(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editDialogOpen, teamName]);
   const [leadChannelDialogOpen, setLeadChannelDialogOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
@@ -1736,6 +1755,32 @@ export const TeamDetailView = ({
     });
   }, [data?.config.projectPath, launchTeam, teamName]);
 
+  const handleSaveAndRestartFromEdit = useCallback(
+    async (runtimeConfig: {
+      providerId: TeamProviderId;
+      model: string | undefined;
+      effort: EffortLevel | undefined;
+      fastMode: TeamFastMode | undefined;
+      clearContext: boolean;
+    }): Promise<void> => {
+      if (!data?.config.projectPath) {
+        throw new Error('团队缺少项目路径，无法自动重启。');
+      }
+      await api.teams.stop(teamName);
+      const request: TeamLaunchRequest = {
+        teamName,
+        cwd: data.config.projectPath,
+        providerId: runtimeConfig.providerId,
+        model: runtimeConfig.model,
+        effort: runtimeConfig.effort,
+        fastMode: runtimeConfig.fastMode,
+        clearContext: runtimeConfig.clearContext,
+      };
+      await launchTeam(request);
+    },
+    [data?.config.projectPath, launchTeam, teamName]
+  );
+
   const handleRestartMember = useCallback(
     async (memberName: string): Promise<void> => {
       await restartMember(teamName, memberName);
@@ -1823,15 +1868,20 @@ export const TeamDetailView = ({
     []
   );
 
+  const [stopError, setStopError] = useState<string | null>(null);
+
   const handleStopTeam = useCallback(async (): Promise<void> => {
     setStoppingTeam(true);
+    setStopError(null);
     try {
       await api.teams.stop(teamName);
       // Backend sends 'disconnected' progress which triggers store refresh,
       // but refresh here too as a safety net (e.g. if progress event is missed).
       await refreshTeamData(teamName);
     } catch (err) {
+      const message = err instanceof Error ? err.message : '停止团队失败';
       console.error('Failed to stop team:', err);
+      setStopError(message);
     } finally {
       setStoppingTeam(false);
     }
@@ -2245,6 +2295,11 @@ export const TeamDetailView = ({
                         <TooltipContent side="bottom">停止团队</TooltipContent>
                       </Tooltip>
                     )}
+                    {stopError && (
+                      <span className="max-w-48 truncate text-xs text-red-400" title={stopError}>
+                        {stopError}
+                      </span>
+                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -2318,7 +2373,7 @@ export const TeamDetailView = ({
                               onClick={() => setEditorOpen(true)}
                               className="ml-1 flex items-center gap-0.5 rounded border border-[var(--color-border-emphasis)] bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
                             >
-                              <Code size={10} className="shrink-0" /> 编辑代码
+                              <Code size={10} className="shrink-0" /> 查看工作空间
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>在内置编辑器中打开项目</TooltipContent>
@@ -2818,9 +2873,11 @@ export const TeamDetailView = ({
                 isTeamAlive={data.isAlive && !isTeamProvisioning}
                 isTeamProvisioning={isTeamProvisioning}
                 projectPath={data.config.projectPath}
+                savedLaunchRequest={savedLaunchRequest}
                 onClose={() => setEditDialogOpen(false)}
                 onSaved={() => void selectTeam(teamName)}
                 onRestartTeam={handleRestartTeamFromEdit}
+                onSaveAndRestart={handleSaveAndRestartFromEdit}
               />
 
               <AddMemberDialog

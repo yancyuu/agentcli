@@ -24,7 +24,6 @@ import { createTabSlice } from '../../../src/renderer/store/slices/tabSlice';
 import { createTabUISlice } from '../../../src/renderer/store/slices/tabUISlice';
 import { createTeamSlice } from '../../../src/renderer/store/slices/teamSlice';
 import { createUISlice } from '../../../src/renderer/store/slices/uiSlice';
-import { createUpdateSlice } from '../../../src/renderer/store/slices/updateSlice';
 
 import type { AppState } from '../../../src/renderer/store/types';
 
@@ -49,7 +48,6 @@ export function createTestStore() {
     ...createConfigSlice(...args),
     ...createConnectionSlice(...args),
     ...createContextSlice(...args),
-    ...createUpdateSlice(...args),
     ...createChangeReviewSlice(...args),
     ...createCliInstallerSlice(...args),
     ...createEditorSlice(...args),

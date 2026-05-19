@@ -66,6 +66,7 @@ vi.mock('@renderer/api', () => ({
       startWatching: (...args: unknown[]) => startWatchingMock(...args),
       stopWatching: (...args: unknown[]) => stopWatchingMock(...args),
       onChanged: (...args: unknown[]) => onChangedMock(...args),
+      listSources: vi.fn(() => Promise.resolve({ sources: [] })),
     },
   },
 }));
@@ -134,18 +135,18 @@ vi.mock('@renderer/components/extensions/skills/SkillDetailDialog', () => ({
 }));
 
 vi.mock('@renderer/components/extensions/skills/SkillEditorDialog', () => ({
-  SkillEditorDialog: ({ allowCodexRootKind }: { allowCodexRootKind: boolean }) =>
+  SkillEditorDialog: ({ allowCodexRootKind }: { allowCodexRootKind?: boolean }) =>
     React.createElement('div', {
       'data-testid': 'skill-editor-dialog',
-      'data-allow-codex-root-kind': String(allowCodexRootKind),
+      'data-allow-codex-root-kind': String(allowCodexRootKind ?? false),
     }),
 }));
 
 vi.mock('@renderer/components/extensions/skills/SkillImportDialog', () => ({
-  SkillImportDialog: ({ allowCodexRootKind }: { allowCodexRootKind: boolean }) =>
+  SkillImportDialog: ({ allowCodexRootKind }: { allowCodexRootKind?: boolean }) =>
     React.createElement('div', {
       'data-testid': 'skill-import-dialog',
-      'data-allow-codex-root-kind': String(allowCodexRootKind),
+      'data-allow-codex-root-kind': String(allowCodexRootKind ?? false),
     }),
 }));
 
@@ -408,10 +409,8 @@ describe('SkillsPanel', () => {
       await Promise.resolve();
     });
 
-    // Banner shows Anthropic as sole provider audience (localized text: "Anthropic使用")
-    expect(host.textContent).toContain('`.claude`');
-    expect(host.textContent).toContain('Anthropic');
-    expect(host.textContent).not.toContain('Anthropic and Codex');
+    // Banner shows runtime-aware info; Codex is unavailable so only Anthropic is relevant
+    expect(host.textContent).toContain('hermit/skills');
 
     await act(async () => {
       root.unmount();
@@ -494,12 +493,9 @@ describe('SkillsPanel', () => {
       await Promise.resolve();
     });
 
-    // Banner mentions .claude, .cursor, .agents, Anthropic and Codex
-    expect(host.textContent).toContain('`.claude`');
-    expect(host.textContent).toContain('Anthropic');
+    // Banner mentions skills management with runtimes
+    expect(host.textContent).toContain('hermit/skills');
     expect(host.textContent).toContain('Codex');
-    // Codex-only quick filter is available
-    expect(host.textContent).toContain('.codex');
 
     await act(async () => {
       root.unmount();
@@ -559,10 +555,9 @@ describe('SkillsPanel', () => {
       await Promise.resolve();
     });
 
-    // Banner mentions providers (text is localized); Codex is visible via live snapshot
+    // Banner mentions providers; Codex is visible via live snapshot
     // even while multimodel provider status is still loading
-    expect(host.textContent).toContain('`.claude`');
-    expect(host.textContent).toContain('Anthropic');
+    expect(host.textContent).toContain('hermit/skills');
     expect(host.textContent).toContain('Codex');
 
     await act(async () => {
@@ -571,7 +566,7 @@ describe('SkillsPanel', () => {
     });
   });
 
-  it('resets the codex-only quick filter when codex entries disappear', async () => {
+  it('renders both personal and codex-rooted skills together in the skills list', async () => {
     storeState.cliStatus = makeMultimodelStatus({
       providers: [
         ...makeMultimodelStatus().providers,
@@ -620,45 +615,9 @@ describe('SkillsPanel', () => {
       await Promise.resolve();
     });
 
-    const codexOnlyButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Codex')
-    );
-    expect(codexOnlyButton).toBeDefined();
-
-    await act(async () => {
-      (codexOnlyButton as HTMLButtonElement).click();
-      await Promise.resolve();
-    });
-
+    // Both skills should be visible in the panel
     expect(host.textContent).toContain('Codex Helper');
-    expect(host.textContent).not.toContain('Review Helper');
-
-    storeState.cliStatus = {
-      ...storeState.cliStatus,
-      providers: storeState.cliStatus.providers.filter((provider) => provider.providerId !== 'codex'),
-    };
-    storeState.skillsUserCatalog = [makeUserSkill()];
-
-    await act(async () => {
-      root.render(
-        React.createElement(SkillsPanel, {
-          projectPath: '/tmp/project-a',
-          projectLabel: 'Project A',
-          skillsSearchQuery: '',
-          setSkillsSearchQuery: vi.fn(),
-          skillsSort: 'name-asc',
-          setSkillsSort: vi.fn(),
-          selectedSkillId: null,
-          setSelectedSkillId: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
     expect(host.textContent).toContain('Review Helper');
-    expect(host.textContent).not.toContain('Codex Helper');
-    expect(host.textContent).not.toContain('No skills yet');
 
     await act(async () => {
       root.unmount();

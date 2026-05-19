@@ -84,10 +84,10 @@ describe('team effort options', () => {
 
     expect(getTeamEffortOptions({ providerId: 'codex', model: 'gpt-5.4', providerStatus })).toEqual(
       [
-        { value: '', label: 'Default (Medium)' },
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
+        { value: '', label: '默认（中）' },
+        { value: 'low', label: '低' },
+        { value: 'medium', label: '中' },
+        { value: 'high', label: '高' },
         { value: 'xhigh', label: 'XHigh' },
       ]
     );
@@ -111,7 +111,12 @@ describe('team effort options', () => {
 
     expect(
       getTeamEffortOptions({ providerId: 'anthropic', model: 'opus', providerStatus })
-    ).toEqual([{ value: '', label: 'Default' }]);
+    ).toEqual([
+      { value: '', label: '默认' },
+      { value: 'low', label: '低' },
+      { value: 'medium', label: '中' },
+      { value: 'high', label: '高' },
+    ]);
   });
 
   it('shows Anthropic max only for the exact resolved model that supports it', () => {
@@ -183,11 +188,10 @@ describe('team effort options', () => {
         providerStatus,
       })
     ).toEqual([
-      { value: '', label: 'Default (Medium)' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'max', label: 'Max' },
+      { value: '', label: '默认' },
+      { value: 'low', label: '低' },
+      { value: 'medium', label: '中' },
+      { value: 'high', label: '高' },
     ]);
   });
 
@@ -208,6 +212,6 @@ describe('team effort options', () => {
 
     expect(
       getTeamEffortOptions({ providerId: 'anthropic', model: 'haiku', providerStatus })
-    ).toEqual([{ value: '', label: 'Default' }]);
+    ).toEqual([{ value: '', label: '默认' }]);
   });
 });

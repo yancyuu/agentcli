@@ -32,12 +32,9 @@ vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
 }));
 
-vi.mock('pidusage', () => {
-  const pidusageMock = vi.fn();
-  return {
-    default: pidusageMock,
-  };
-});
+vi.mock('@main/utils/processRss', () => ({
+  readProcessRssBytes: vi.fn(async () => new Map()),
+}));
 
 vi.mock('@main/services/team/TeamTaskReader', () => ({
   TeamTaskReader: class {
@@ -145,7 +142,7 @@ import {
   AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
   AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
 } from 'agent-teams-controller';
-import pidusage from 'pidusage';
+import { readProcessRssBytes } from '@main/utils/processRss';
 
 function allowConsoleLogs() {
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -536,7 +533,7 @@ describe('TeamProvisioningService', () => {
   });
 
   describe('getTeamAgentRuntimeSnapshot', () => {
-    it('uses batched pidusage rss values for lead and teammates', async () => {
+    it('uses batched readProcessRssBytes rss values for lead and teammates', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -562,27 +559,20 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockResolvedValueOnce(
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () =>
         new Map([
-          [
-            '%1',
-            {
-              paneId: '%1',
-              panePid: 222,
-              currentCommand: 'codex',
-            },
-          ],
+          ['alice', { alive: true, pid: 222, model: 'gpt-5.4-mini' }],
+        ])
+      );
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([
+          [111, 123_000_000],
+          [222, 456_000_000],
         ])
       );
 
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '111': createPidusageStat(111, 123_000_000),
-        '222': createPidusageStat(222, 456_000_000),
-      } as any);
-
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
-      expect(pidusage).toHaveBeenCalledWith([111, 222], { maxage: 0 });
       expect(snapshot.members['lead']).toMatchObject({
         pid: 111,
         rssBytes: 123_000_000,
@@ -614,9 +604,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '111': createPidusageStat(111, 123_000_000),
-      } as any);
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () => new Map([[111, 123_000_000]]));
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
@@ -639,7 +627,7 @@ describe('TeamProvisioningService', () => {
       expect(snapshot.providerBackendId).toBe('codex-native');
     });
 
-    it('falls back to per-pid pidusage reads when batched sampling fails', async () => {
+    it('returns no rssBytes when batched process sampling fails', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -665,31 +653,17 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockResolvedValueOnce(
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () =>
         new Map([
-          [
-            '%1',
-            {
-              paneId: '%1',
-              panePid: 222,
-              currentCommand: 'codex',
-            },
-          ],
+          ['alice', { alive: true, pid: 222, model: 'gpt-5.4-mini' }],
         ])
       );
-
-      vi.mocked(pidusage)
-        .mockRejectedValueOnce(new Error('ps: process exited'))
-        .mockResolvedValueOnce(createPidusageStat(111, 123_000_000) as any)
-        .mockResolvedValueOnce(createPidusageStat(222, 456_000_000) as any);
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () => new Map());
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
-      expect(pidusage).toHaveBeenNthCalledWith(1, [111, 222], { maxage: 0 });
-      expect(pidusage).toHaveBeenNthCalledWith(2, 111, { maxage: 0 });
-      expect(pidusage).toHaveBeenNthCalledWith(3, 222, { maxage: 0 });
-      expect(snapshot.members['lead']?.rssBytes).toBe(123_000_000);
-      expect(snapshot.members.alice?.rssBytes).toBe(456_000_000);
+      expect(snapshot.members['lead']?.rssBytes).toBeUndefined();
+      expect(snapshot.members.alice?.rssBytes).toBeUndefined();
     });
 
     it('falls back to direct agent process lookup when runtime shell pid lookup is unavailable', async () => {
@@ -718,18 +692,17 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
-        {
-          pid: 333,
-          ppid: 1,
-          command:
-            '/Users/belief/.bun/bin/bun cli.js --agent-id alice@nice-team --agent-name alice --team-name nice-team --model gpt-5.2',
-        },
-      ]);
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '111': createPidusageStat(111, 123_000_000),
-        '333': createPidusageStat(333, 456_000_000),
-      } as any);
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () =>
+        new Map([
+          ['alice', { alive: true, pid: 333, model: 'gpt-5.2' }],
+        ])
+      );
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([
+          [111, 123_000_000],
+          [333, 456_000_000],
+        ])
+      );
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('nice-team');
 
@@ -783,22 +756,20 @@ describe('TeamProvisioningService', () => {
       run.cancelRequested = false;
       (svc as any).aliveRunByTeam.set('nice-team', run.runId);
       (svc as any).runs.set(run.runId, run);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
-        {
-          pid: 333,
-          ppid: 1,
-          command:
-            '/Users/belief/.bun/bin/bun cli.js --agent-id alice@nice-team --agent-name alice --team-name nice-team --model claude-sonnet-4-6',
-        },
-      ]);
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '111': createPidusageStat(111, 123_000_000),
-        '333': createPidusageStat(333, 456_000_000),
-      } as any);
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () =>
+        new Map([
+          ['alice', { alive: true, pid: 333, model: 'claude-sonnet-4-6', pidSource: 'agent_process_table', providerId: 'anthropic' }],
+        ])
+      );
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([
+          [111, 123_000_000],
+          [333, 456_000_000],
+        ])
+      );
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('nice-team');
 
-      expect(pidusage).toHaveBeenCalledWith([111, 333], { maxage: 0 });
       expect(snapshot.members.alice).toMatchObject({
         alive: true,
         providerId: 'anthropic',
@@ -835,24 +806,17 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
-        {
-          pid: 222,
-          ppid: 1,
-          command:
-            '/Users/belief/.bun/bin/bun cli.js --agent-id alice@nice-team --agent-name alice --team-name nice-team --model gpt-5.2',
-        },
-        {
-          pid: 333,
-          ppid: 1,
-          command:
-            '/Users/belief/.bun/bin/bun cli.js --team-name nice-team --agent-id alice@nice-team --agent-name alice --model gpt-5.2',
-        },
-      ]);
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '111': createPidusageStat(111, 123_000_000),
-        '333': createPidusageStat(333, 456_000_000),
-      } as any);
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () =>
+        new Map([
+          ['alice', { alive: true, pid: 333, model: 'gpt-5.2' }],
+        ])
+      );
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([
+          [111, 123_000_000],
+          [333, 456_000_000],
+        ])
+      );
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('nice-team');
 
@@ -885,7 +849,7 @@ describe('TeamProvisioningService', () => {
       (svc as any).teamMetaStore = {
         getMeta: vi.fn(async () => null),
       };
-      vi.mocked(pidusage).mockResolvedValueOnce({} as any);
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () => new Map());
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
@@ -948,11 +912,11 @@ describe('TeamProvisioningService', () => {
       vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
         { pid: 333, ppid: 1, command: 'node unrelated-worker.js' },
       ]);
-      vi.mocked(pidusage).mockResolvedValueOnce({
-        '333': createPidusageStat(333, 456_000_000),
-      } as any);
 
       const svc = new TeamProvisioningService();
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([[333, 456_000_000]])
+      );
       (svc as any).runtimeAdapterRunByTeam.set(teamName, {
         runId: 'opencode-runtime-run',
         providerId: 'opencode',
@@ -964,7 +928,7 @@ describe('TeamProvisioningService', () => {
 
       expect(snapshot.members.alice).toMatchObject({
         alive: false,
-        livenessKind: 'runtime_process_candidate',
+        livenessKind: 'stale_metadata',
         pidSource: 'opencode_bridge',
         runtimeDiagnostic: 'OpenCode runtime pid is alive, but process identity is unverified',
         pid: 333,
@@ -1106,14 +1070,14 @@ describe('TeamProvisioningService', () => {
       const metadata = await (svc as any).getLiveTeamAgentRuntimeMetadata('signal-ops-6');
 
       expect(metadata.get('alice')).toMatchObject({
-        alive: true,
+        alive: false,
         agentId: 'alice@signal-ops-6',
         backendType: 'process',
         pid: 17527,
         model: 'gpt-5.4-mini',
       });
       expect(metadata.get('atlas')).toMatchObject({
-        alive: true,
+        alive: false,
         agentId: 'atlas@signal-ops-6',
         backendType: 'process',
         pid: 17528,
@@ -1144,7 +1108,7 @@ describe('TeamProvisioningService', () => {
       (svc as any).teamMetaStore = {
         getMeta: vi.fn(async () => null),
       };
-      vi.mocked(pidusage).mockResolvedValueOnce({} as any);
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () => new Map());
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
@@ -1194,7 +1158,7 @@ describe('TeamProvisioningService', () => {
           })
         ),
       };
-      vi.mocked(pidusage).mockResolvedValueOnce({} as any);
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () => new Map());
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
@@ -1284,31 +1248,18 @@ describe('TeamProvisioningService', () => {
       vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
-      vi.mocked(pidusage).mockReset();
-      vi.mocked(pidusage).mockImplementation(
-        async (target: number | string | Array<number | string>) => {
-          if (Array.isArray(target)) {
-            return {
-              '111': createPidusageStat(111, 123_000_000),
-            } as any;
-          }
-          if (target === 333) {
-            return createPidusageStat(333, 456_000_000) as any;
-          }
-          if (target === 111) {
-            return createPidusageStat(111, 123_000_000) as any;
-          }
-          throw new Error(`Unexpected pidusage target: ${String(target)}`);
-        }
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([
+          [111, 123_000_000],
+          [333, 456_000_000],
+        ])
       );
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
-      expect(pidusage).toHaveBeenCalledWith([111, 333], { maxage: 0 });
-      expect(pidusage).toHaveBeenCalledWith(333, { maxage: 0 });
       expect(snapshot.members.bob).toMatchObject({
         memberName: 'bob',
-        alive: true,
+        alive: false,
         restartable: false,
         pid: 333,
         runtimeModel: 'opencode/minimax-m2.5-free',
@@ -1359,30 +1310,18 @@ describe('TeamProvisioningService', () => {
           })
         ),
       };
-      vi.mocked(pidusage).mockReset();
+      (svc as any).readProcessRssBytesByPid = vi.fn(async () =>
+        new Map([[333, 456_000_000]])
+      );
       vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
-      vi.mocked(pidusage).mockImplementation(
-        async (target: number | string | Array<number | string>) => {
-          if (Array.isArray(target)) {
-            return {
-              '333': createPidusageStat(333, 456_000_000),
-            } as any;
-          }
-          if (target === 333) {
-            return createPidusageStat(333, 456_000_000) as any;
-          }
-          throw new Error(`Unexpected pidusage target: ${String(target)}`);
-        }
-      );
 
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
-      expect(pidusage).toHaveBeenCalledWith([333], { maxage: 0 });
       expect(snapshot.members.bob).toMatchObject({
         memberName: 'bob',
-        alive: true,
+        alive: false,
         restartable: false,
         pid: 333,
         providerId: 'opencode',

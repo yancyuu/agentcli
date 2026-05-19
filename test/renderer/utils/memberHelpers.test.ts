@@ -193,7 +193,7 @@ describe('memberHelpers spawn-aware presence', () => {
     expect(runtimePending.launchVisualState).toBe('runtime_pending');
     expect(runtimePending.launchStatusLabel).toBe('waiting for bootstrap');
     expect(settling.launchVisualState).toBe('settling');
-    expect(settling.launchStatusLabel).toBe('joining team');
+    expect(settling.launchStatusLabel).toBe('joining');
   });
 
   it('surfaces permission-blocked teammates as awaiting permission instead of generic starting', () => {

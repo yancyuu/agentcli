@@ -8,7 +8,6 @@ import {
   mergeCodexProviderStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
-import { isElectronMode } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
@@ -30,7 +29,6 @@ export const ApiKeysPanel = ({
   projectPath,
   projectLabel,
 }: ApiKeysPanelProps): React.JSX.Element => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const {
     apiKeys,
     apiKeysLoading,
@@ -62,7 +60,6 @@ export const ApiKeysPanel = ({
   );
   const codexAccount = useCodexAccountSnapshot({
     enabled:
-      isElectron &&
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
   });

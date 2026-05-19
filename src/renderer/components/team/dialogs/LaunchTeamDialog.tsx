@@ -2031,6 +2031,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     : isLaunchMode
       ? isSubmitting ||
         launchInFlight ||
+        !effectiveCliStatus ||
+        (cliStatusLoading && !cliStatus) ||
         validationErrors.length > 0 ||
         !!modelValidationError ||
         hasInvalidLaunchMemberNames ||

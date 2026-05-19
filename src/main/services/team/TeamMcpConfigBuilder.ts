@@ -31,22 +31,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPackagedApp(): boolean {
-  try {
-    const { app } = require('electron') as typeof import('electron');
-    return app.isPackaged;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function getAppVersion(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { app } = require('electron') as typeof import('electron');
-    return app.getVersion();
-  } catch {
-    return '0.0.0-dev';
-  }
+  return '0.0.0-dev';
 }
 
 /**
@@ -55,7 +44,7 @@ function getAppVersion(): string {
  * This is the fallback location when the stable copy is unavailable.
  */
 function getPackagedServerEntry(): string {
-  return path.join(process.resourcesPath, 'mcp-server', 'index.js');
+  return path.join((process as any).resourcesPath ?? '', 'mcp-server', 'index.js');
 }
 
 function getWorkspaceRoot(): string {
@@ -174,7 +163,7 @@ async function resolvePackagedServerEntry(): Promise<string> {
   }
 
   try {
-    const sourceDir = path.join(process.resourcesPath, 'mcp-server');
+    const sourceDir = path.join((process as any).resourcesPath ?? '', 'mcp-server');
     if (!(await hasValidServerCopy(sourceDir))) {
       logger.warn(`Packaged MCP server missing in resourcesPath: ${sourceDir}`);
       return fallbackEntry;

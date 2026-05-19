@@ -100,8 +100,6 @@ describe('buildProviderAwareCliEnv', () => {
         HOME: '/Users/tester',
         USERPROFILE: '/Users/tester',
         EXTRA_FLAG: '1',
-        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
-        CLAUDE_CODE_ENTRY_PROVIDER: 'anthropic',
       }),
       'anthropic',
       undefined

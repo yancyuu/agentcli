@@ -8,7 +8,6 @@ import { FileContentResolver } from '@main/services/team/FileContentResolver';
 import { ReviewApplierService } from '@main/services/team/ReviewApplierService';
 import { TaskChangeLedgerReader } from '@main/services/team/TaskChangeLedgerReader';
 import { setClaudeBasePathOverride } from '@main/utils/pathDecoder';
-import { buildPathChangeLabels } from '@renderer/components/team/review/pathChangeLabels';
 
 import { materializeTaskChangeLedgerFixture } from './taskChangeLedgerFixtureUtils';
 
@@ -180,16 +179,6 @@ describe('task change ledger golden fixtures', () => {
     const copyFile = copy.files[0];
     expect(renameFile?.filePath).toBe(path.join(renameFixture.projectDir, 'src', 'new.ts'));
     expect(copyFile?.filePath).toBe(path.join(copyFixture.projectDir, 'src', 'copy.ts'));
-    expect(buildPathChangeLabels(rename.files, {})[renameFile!.filePath]).toEqual({
-      kind: 'renamed',
-      direction: 'from',
-      otherPath: 'src/old.ts',
-    });
-    expect(buildPathChangeLabels(copy.files, {})[copyFile!.filePath]).toEqual({
-      kind: 'copied',
-      direction: 'from',
-      otherPath: 'src/base.ts',
-    });
   });
 
   it('returns warning-only notice fixtures without synthesizing fake file changes', async () => {

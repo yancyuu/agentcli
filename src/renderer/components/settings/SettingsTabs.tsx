@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 
-import { isElectronMode } from '@renderer/api';
 import {
   Tooltip,
   TooltipContent,
@@ -57,11 +56,7 @@ export const SettingsTabs = ({
   activeSection,
   onSectionChange,
 }: Readonly<SettingsTabsProps>): React.JSX.Element => {
-  const isElectron = useMemo(() => isElectronMode(), []);
-  const visibleTabs = useMemo(
-    () => tabs.filter((tab) => !tab.electronOnly || isElectron),
-    [isElectron]
-  );
+  const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.electronOnly), []);
 
   return (
     <TooltipProvider>

@@ -19,6 +19,10 @@ export default defineConfig({
       '/api': {
         target: `http://127.0.0.1:${standalonePort}`,
         changeOrigin: false,
+        bypass: (req: { url?: string }) => {
+          // Don't proxy Vite module requests (renderer's api/ directory)
+          if (req.url && /\.(ts|tsx)(\?|$)/.test(req.url)) return req.url;
+        },
       },
     },
   },

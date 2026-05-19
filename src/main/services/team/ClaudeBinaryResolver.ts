@@ -188,7 +188,7 @@ async function resolveFromDoctorFallback(commandName: string): Promise<string | 
 }
 
 async function resolveBundledOrchestratorBinary(): Promise<string | null> {
-  const resourcesPath = process.resourcesPath?.trim();
+  const resourcesPath = (process as any).resourcesPath?.trim();
   if (!resourcesPath) {
     return null;
   }

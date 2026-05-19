@@ -231,6 +231,10 @@ export interface ConfigAPI {
   addCustomProjectPath: (projectPath: string) => Promise<void>;
   /** Remove a custom project path */
   removeCustomProjectPath: (projectPath: string) => Promise<void>;
+  /** Read env vars from ~/.claude/settings.json */
+  getClaudeEnv: () => Promise<Record<string, string>>;
+  /** Write env vars to ~/.claude/settings.json */
+  updateClaudeEnv: (env: Record<string, string>) => Promise<Record<string, string>>;
 }
 
 export interface ClaudeRootInfo {
@@ -971,6 +975,6 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
 
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
+    electronAPI?: ElectronAPI;
   }
 }

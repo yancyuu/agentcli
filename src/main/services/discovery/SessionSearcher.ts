@@ -61,7 +61,7 @@ export class SessionSearcher {
     query: string,
     maxResults: number = 50
   ): Promise<SearchSessionsResult> {
-    return startMainSpan('session.search', 'search', async () => {
+    return startMainSpan('session.search', async () => {
       const startedAt = Date.now();
       const results: SearchResult[] = [];
       let sessionsSearched = 0;

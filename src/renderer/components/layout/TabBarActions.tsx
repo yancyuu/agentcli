@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { Calendar, PanelRight, Puzzle, Users } from 'lucide-react';
@@ -25,8 +25,6 @@ export const TabBarActions = (): React.JSX.Element => {
     tabSessionData,
     sidebarCollapsed,
     toggleSidebar,
-    updateStatus,
-    openUpdateDialog,
   } = useStore(
     useShallow((s) => ({
       unreadCount: s.unreadCount,
@@ -38,8 +36,6 @@ export const TabBarActions = (): React.JSX.Element => {
       tabSessionData: s.tabSessionData,
       sidebarCollapsed: s.sidebarCollapsed,
       toggleSidebar: s.toggleSidebar,
-      updateStatus: s.updateStatus,
-      openUpdateDialog: s.openUpdateDialog,
     }))
   );
 
@@ -49,7 +45,6 @@ export const TabBarActions = (): React.JSX.Element => {
   const [schedulesHover, setSchedulesHover] = useState(false);
   const [githubHover, setGithubHover] = useState(false);
   const [expandHover, setExpandHover] = useState(false);
-  const [updateHover, setUpdateHover] = useState(false);
 
   // Derive active tab and session detail for MoreMenu
   const activeTab = useMemo(
@@ -65,29 +60,6 @@ export const TabBarActions = (): React.JSX.Element => {
       className="ml-2 flex shrink-0 items-center gap-1"
       style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
     >
-      {/* Update app button — only visible when update available or downloaded */}
-      {(updateStatus === 'available' || updateStatus === 'downloaded') && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={openUpdateDialog}
-              onMouseEnter={() => setUpdateHover(true)}
-              onMouseLeave={() => setUpdateHover(false)}
-              className="rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-              style={{
-                color: updateHover ? '#4ade80' : '#22c55e',
-                backgroundColor: updateHover ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
-              }}
-            >
-              {updateStatus === 'downloaded' ? '重启更新' : '更新应用'}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {updateStatus === 'downloaded' ? '更新已下载，重启后生效' : '发现新版本'}
-          </TooltipContent>
-        </Tooltip>
-      )}
-
       {/* Primary app areas */}
       <Tooltip>
         <TooltipTrigger asChild>

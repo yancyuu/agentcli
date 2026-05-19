@@ -7,6 +7,7 @@ import { useCallback, useRef } from 'react';
 
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
+import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 
 import type { RepositoryDropdownItem } from './useSettingsConfig';
 import type { AppConfig, NotificationTrigger } from '@renderer/types/data';
@@ -69,7 +70,18 @@ export function useSettingsHandlers({
   configRef.current = config;
   const fireAndForgetConfigUpdate = useCallback(
     (section: keyof AppConfig, data: Partial<AppConfig[keyof AppConfig]>) => {
-      void updateConfig(section, data).catch(() => undefined);
+      void updateConfig(section, data)
+        .then(() => {
+          if (section === 'general' || section === 'runtime' || section === 'providerConnections') {
+            const { bootstrapCliStatus, fetchCliStatus, appConfig } = useStore.getState();
+            void refreshCliStatusForCurrentMode({
+              multimodelEnabled: appConfig?.general?.multimodelEnabled ?? false,
+              bootstrapCliStatus,
+              fetchCliStatus,
+            });
+          }
+        })
+        .catch(() => undefined);
     },
     [updateConfig]
   );

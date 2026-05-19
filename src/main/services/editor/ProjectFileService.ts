@@ -17,7 +17,6 @@ import {
   validateFilePath,
 } from '@main/utils/pathValidation';
 import { createLogger } from '@shared/utils/logger';
-import { shell } from 'electron';
 import * as fs from 'fs/promises';
 import { isBinaryFile } from 'isbinaryfile';
 import * as path from 'path';
@@ -480,9 +479,9 @@ export class ProjectFileService {
     // 4. Verify path exists
     await fs.lstat(normalizedPath);
 
-    // 5. Move to Trash (safe, reversible)
-    await shell.trashItem(normalizedPath);
-    log.info('File moved to Trash:', normalizedPath);
+    // 5. Delete (permanent in web mode — no native trash)
+    await fs.rm(normalizedPath, { recursive: true, force: true });
+    log.info('File deleted:', normalizedPath);
 
     return { deletedPath: normalizedPath };
   }

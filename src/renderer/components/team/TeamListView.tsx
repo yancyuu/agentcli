@@ -312,7 +312,6 @@ export const TeamListView = (): React.JSX.Element => {
     }))
   );
   const {
-    connectionMode,
     createTeam,
     launchTeam,
     provisioningErrorByTeam,
@@ -323,7 +322,6 @@ export const TeamListView = (): React.JSX.Element => {
     leadActivityByTeam,
   } = useStore(
     useShallow((s) => ({
-      connectionMode: s.connectionMode,
       createTeam: s.createTeam,
       launchTeam: s.launchTeam,
       provisioningErrorByTeam: s.provisioningErrorByTeam,
@@ -334,7 +332,7 @@ export const TeamListView = (): React.JSX.Element => {
       leadActivityByTeam: s.leadActivityByTeam,
     }))
   );
-  const canCreate = connectionMode === 'local';
+  const canCreate = true;
   const provisioningState = useMemo(
     () => ({ currentProvisioningRunIdByTeam, provisioningRuns }),
     [currentProvisioningRunIdByTeam, provisioningRuns]
@@ -1005,9 +1003,6 @@ export const TeamListView = (): React.JSX.Element => {
           </Button>
         </div>
       </div>
-      {!canCreate ? (
-        <p className="mt-2 text-xs text-[var(--color-text-muted)]">仅本地 Electron 模式可用。</p>
-      ) : null}
 
       {teamsWithProvisioning.length > 0 ? (
         <div className="mt-3 flex items-center gap-2">

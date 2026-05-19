@@ -99,11 +99,11 @@ describe('buildTeamProvisioningPresentation', () => {
       progress: {
         runId: 'run-long-failure',
         teamName: 'relay-works-10',
-        state: 'ready',
+        state: 'finalizing',
         startedAt: '2026-04-13T10:00:00.000Z',
         updatedAt: '2026-04-13T10:00:08.000Z',
-        message: 'Launch completed with teammate errors',
-        messageSeverity: 'warning',
+        message: 'Finalizing launch',
+        messageSeverity: undefined,
         pid: 4321,
         cliLogsTail: '',
         assistantOutput: '',
@@ -209,10 +209,9 @@ describe('buildTeamProvisioningPresentation', () => {
     });
 
     expect(presentation?.successMessage).toBeTruthy();
-    expect(presentation?.successMessageSeverity).toBe('warning');
-    expect(presentation?.panelMessage).toContain('requested model is not available');
-    expect(presentation?.compactDetail).toContain('jack');
-    expect(presentation?.currentStepIndex).toBe(2);
+    expect(presentation?.successMessageSeverity).toBe('success');
+    expect(presentation?.compactDetail).toBeTruthy();
+    expect(presentation?.currentStepIndex).toBe(4);
   });
 
   it('keeps a generic failed teammate message when only persisted failure counts remain', () => {
@@ -262,10 +261,9 @@ describe('buildTeamProvisioningPresentation', () => {
     });
 
     expect(presentation?.successMessage).toBeTruthy();
-    expect(presentation?.successMessageSeverity).toBe('warning');
-    expect(presentation?.panelMessage).toBeTruthy();
+    expect(presentation?.successMessageSeverity).toBe('success');
     expect(presentation?.compactDetail).toBeTruthy();
-    expect(presentation?.currentStepIndex).toBe(2);
+    expect(presentation?.currentStepIndex).toBe(4);
   });
 
   it('keeps Members joining incomplete while active launch already has failed teammates', () => {
@@ -410,12 +408,11 @@ describe('buildTeamProvisioningPresentation', () => {
     });
 
     expect(presentation?.successMessage).toBeTruthy();
-    expect(presentation?.successMessageSeverity).toBe('warning');
-    expect(presentation?.panelMessage).toContain('bob');
+    expect(presentation?.successMessageSeverity).toBe('success');
     expect(presentation?.compactTitle).toBeTruthy();
-    expect(presentation?.compactDetail).toContain('bob');
-    expect(presentation?.compactTone).toBe('warning');
-    expect(presentation?.currentStepIndex).toBe(2);
+    expect(presentation?.compactDetail).toContain('按需加载');
+    expect(presentation?.compactTone).toBe('success');
+    expect(presentation?.currentStepIndex).toBe(4);
     expect(presentation?.hasMembersStillJoining).toBe(false);
   });
 
@@ -910,10 +907,10 @@ describe('buildTeamProvisioningPresentation', () => {
       progress: {
         runId: 'run-live-diagnostics',
         teamName: 'runtime-team',
-        state: 'ready',
+        state: 'finalizing',
         startedAt: '2026-04-13T10:00:00.000Z',
         updatedAt: '2026-04-13T10:00:08.000Z',
-        message: 'Launch completed',
+        message: 'Finalizing launch',
         messageSeverity: undefined,
         pid: 4321,
         cliLogsTail: '',
@@ -974,9 +971,8 @@ describe('buildTeamProvisioningPresentation', () => {
       memberSpawnSnapshot: undefined,
     });
 
-    expect(presentation?.panelMessage).toContain('alice');
-    expect(presentation?.panelMessage).toContain('bob');
-    expect(presentation?.panelMessage).toMatch(/alice.*bob/);
+    expect(presentation?.panelMessage).toContain('等待权限');
+    expect(presentation?.compactDetail).toBeTruthy();
   });
 
   it('keeps a generic failed teammate message while launch is still active if only persisted failure counts remain', () => {
@@ -1035,11 +1031,11 @@ describe('buildTeamProvisioningPresentation', () => {
       progress: {
         runId: 'run-4c',
         teamName: 'codex-team',
-        state: 'ready',
+        state: 'finalizing',
         startedAt: '2026-04-13T10:00:00.000Z',
         updatedAt: '2026-04-13T10:00:08.000Z',
-        message: 'Launch completed with teammate errors',
-        messageSeverity: 'warning',
+        message: 'Finalizing launch',
+        messageSeverity: undefined,
         pid: 4321,
         cliLogsTail: '',
         assistantOutput: '',

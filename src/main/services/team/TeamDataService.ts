@@ -3282,6 +3282,9 @@ export class TeamDataService {
           from: leadName,
           ...(leadSessionId ? { leadSessionId } : {}),
         });
+
+        // Auto-notify reviewer agent to review the task
+        void this.autoAssignReviewer(teamName, taskId);
       } else {
         const { leadName, leadSessionId } = await this.resolveLeadRuntimeContext(teamName);
         controller.review.approveReview(taskId, {
@@ -3303,6 +3306,43 @@ export class TeamDataService {
         : {}),
       ...(leadSessionId ? { leadSessionId } : {}),
     });
+  }
+
+  /**
+   * Auto-assign a reviewer agent when a task enters review.
+   * Finds the first team member with a tester/reviewer role and sends them an inbox message.
+   */
+  private async autoAssignReviewer(teamName: string, taskId: string): Promise<void> {
+    try {
+      const members = await this.membersMetaStore.getMembers(teamName);
+      const reviewer = members.find(
+        (m) =>
+          m.removedAt == null &&
+          m.name.toLowerCase() !== 'lead' &&
+          (m.role?.toLowerCase().includes('test') ||
+            m.role?.toLowerCase().includes('review') ||
+            m.role?.toLowerCase().includes('qa'))
+      );
+
+      if (!reviewer) return;
+
+      const tasks = await this.taskReader.getTasks(teamName);
+      const task = tasks.find((t) => t.id === taskId);
+      const taskLabel = task?.subject ?? taskId;
+
+      await this.sendMessage(teamName, {
+        from: 'user',
+        member: reviewer.name,
+        to: reviewer.name,
+        text: `请审核任务「${taskLabel}」的代码变更。审核完成后请 approve 或退回修改。`,
+        summary: `审核任务: ${taskLabel}`,
+        taskRefs: [{ taskId, teamName, displayId: task?.displayId ?? '' }],
+      });
+
+      logger.info(`Auto-assigned reviewer ${reviewer.name} for task ${taskId} in team ${teamName}`);
+    } catch (error) {
+      logger.warn(`Failed to auto-assign reviewer for task ${taskId}: ${String(error)}`);
+    }
   }
 
   async updateKanbanColumnOrder(

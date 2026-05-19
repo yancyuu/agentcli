@@ -50,10 +50,10 @@ describe('createTeamPreferences', () => {
     ]);
   });
 
-  it('keeps a stored OpenCode provider selection for future create-team runs', () => {
+  it('normalizes a stored OpenCode provider selection to anthropic for future create-team runs', () => {
     localStorage.setItem('createTeam:lastSelectedProvider', 'opencode');
 
-    expect(getStoredCreateTeamProvider()).toBe('opencode');
+    expect(getStoredCreateTeamProvider()).toBe('anthropic');
   });
 
   it('ignores invalid serialized preferences', () => {

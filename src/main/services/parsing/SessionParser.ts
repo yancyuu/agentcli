@@ -77,7 +77,7 @@ export class SessionParser {
    * Parse a JSONL file at the given path.
    */
   async parseSessionFile(filePath: string): Promise<ParsedSession> {
-    return startMainSpan('session.parse', 'parse', async () => {
+    return startMainSpan('session.parse', async () => {
       const messages = await parseJsonlFile(filePath, this.projectScanner.getFileSystemProvider());
       return this.processMessages(messages);
     });

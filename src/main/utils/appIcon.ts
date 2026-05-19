@@ -22,7 +22,7 @@ export function getAppIconPath(): string | undefined {
   const candidates = isDev
     ? [join(process.cwd(), 'resources/icon.png')]
     : [
-        join(process.resourcesPath, 'resources/icon.png'),
+        join((process as any).resourcesPath ?? '', 'resources/icon.png'),
         join(__dirname, '../../resources/icon.png'),
       ];
 

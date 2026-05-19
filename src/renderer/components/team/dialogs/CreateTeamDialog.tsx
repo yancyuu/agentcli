@@ -1149,7 +1149,7 @@ export const CreateTeamDialog = ({
       }
     }
     setSelectedProjectPath(selectableProjects[0].path);
-  }, [open, cwdMode, projects, selectedProjectPath, defaultProjectPath]);
+  }, [open, cwdMode, projects, selectedProjectPath, defaultProjectPath, initialData]);
 
   useEffect(() => {
     if (!open || cwdMode !== 'project' || !selectedProjectPath) {
@@ -1691,19 +1691,6 @@ export const CreateTeamDialog = ({
               </button>
             </div>
           </div>
-        ) : null}
-
-        {!canCreate ? (
-          <p
-            className="rounded border p-2 text-xs"
-            style={{
-              backgroundColor: 'var(--warning-bg)',
-              borderColor: 'var(--warning-border)',
-              color: 'var(--warning-text)',
-            }}
-          >
-            仅在本地 Electron 模式下可用。
-          </p>
         ) : null}
 
         <TeammateRuntimeCompatibilityNotice

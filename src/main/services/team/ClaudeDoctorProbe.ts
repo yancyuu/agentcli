@@ -156,7 +156,7 @@ async function captureDoctorOutput(commandName: string): Promise<string | null> 
       finalize(transcript);
     }, DOCTOR_TIMEOUT_MS);
 
-    pty.onData((chunk) => {
+    pty.onData((chunk: string) => {
       transcript = (transcript + chunk).slice(-DOCTOR_MAX_OUTPUT_CHARS);
       if (!continueSent && DOCTOR_CONTINUE_PROMPT_RE.test(normalizeDoctorOutput(transcript))) {
         continueSent = true;

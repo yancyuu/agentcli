@@ -2,9 +2,9 @@ import {
   CODEX_ACCOUNT_SNAPSHOT_CHANGED,
   type CodexAccountSnapshotDto,
 } from '@features/codex-account/contracts';
-import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
 
-import type { BrowserWindow } from 'electron';
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+type BrowserWindow = unknown;
 
 export class CodexAccountSnapshotPresenter {
   private mainWindow: BrowserWindow | null = null;
@@ -14,6 +14,14 @@ export class CodexAccountSnapshotPresenter {
   }
 
   publish(snapshot: CodexAccountSnapshotDto): void {
-    safeSendToRenderer(this.mainWindow, CODEX_ACCOUNT_SNAPSHOT_CHANGED, snapshot);
+    // Web mode: broadcast via SSE instead of Electron IPC
+    if (typeof window === 'undefined') {
+      try {
+        const { broadcastEvent } = require('@main/http/events');
+        broadcastEvent(CODEX_ACCOUNT_SNAPSHOT_CHANGED, snapshot);
+      } catch {
+        // SSE not available (e.g. during tests)
+      }
+    }
   }
 }

@@ -22,7 +22,6 @@ import {
   GitBranch,
   HelpCircle,
   Inbox,
-  Info,
   Mail,
   MessageSquare,
   PartyPopper,
@@ -30,7 +29,6 @@ import {
   Send,
   ShieldQuestion,
   Users,
-  Volume2,
 } from 'lucide-react';
 
 import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
@@ -64,7 +62,6 @@ interface NotificationsSectionProps {
   readonly onNotificationToggle: (
     key:
       | 'enabled'
-      | 'soundEnabled'
       | 'includeSubagentErrors'
       | 'notifyOnLeadInbox'
       | 'notifyOnUserInbox'
@@ -134,31 +131,8 @@ export const NotificationsSection = ({
     }
   };
 
-  const isDev = import.meta.env.DEV;
-
   return (
     <div>
-      {/* Dev-mode warning */}
-      {isDev ? (
-        <div
-          className="mb-4 flex items-start gap-2.5 rounded-lg border p-3"
-          style={{
-            borderColor: 'rgba(234, 179, 8, 0.2)',
-            backgroundColor: 'rgba(234, 179, 8, 0.05)',
-          }}
-        >
-          <Info className="mt-0.5 size-4 shrink-0 text-yellow-500" />
-          <div>
-            <div className="text-sm font-medium text-yellow-500">开发模式</div>
-            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              开发模式下通知可能无法正常工作。macOS 会把应用识别为 &quot;Electron&quot;（bundle ID
-              <code className="text-xs">com.github.Electron</code>
-              ），而不是正式应用名称。请到系统设置 → 通知 → Electron 检查权限。
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {/* Notification Settings */}
       <SettingsSectionHeader title="通知设置" icon={<Bell className="size-3.5" />} />
       <SettingRow
@@ -170,17 +144,6 @@ export const NotificationsSection = ({
           enabled={safeConfig.notifications.enabled}
           onChange={(v) => onNotificationToggle('enabled', v)}
           disabled={saving}
-        />
-      </SettingRow>
-      <SettingRow
-        label="播放声音"
-        description="通知出现时播放提示音"
-        icon={<Volume2 className="size-4" />}
-      >
-        <SettingsToggle
-          enabled={safeConfig.notifications.soundEnabled}
-          onChange={(v) => onNotificationToggle('soundEnabled', v)}
-          disabled={saving || !safeConfig.notifications.enabled}
         />
       </SettingRow>
       <SettingRow
@@ -485,8 +448,7 @@ export const NotificationsSection = ({
         }}
       >
         <p className="mb-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Claude 完成任务时获取系统原生通知，包括声音、横幅和 Dock/任务栏徽标。支持 macOS、Linux 和
-          Windows。
+          Claude 完成任务时获取系统原生通知。支持 macOS、Linux 和 Windows。
         </p>
         <button
           onClick={() =>

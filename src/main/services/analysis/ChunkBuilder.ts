@@ -82,7 +82,7 @@ export class ChunkBuilder {
     subagents: Process[] = [],
     options?: { includeSidechain?: boolean }
   ): EnhancedChunk[] {
-    return startMainSpan('chunks.build', 'build', () => {
+    return startMainSpan('chunks.build', () => {
       const chunks: EnhancedChunk[] = [];
 
       // Filter to main thread messages (non-sidechain)

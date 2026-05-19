@@ -16,7 +16,7 @@ import {
   normalizeCodexResetTimestamp,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import {
@@ -33,7 +33,6 @@ import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelB
 import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
 import { TerminalLogPanel } from '@renderer/components/terminal/TerminalLogPanel';
-import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import {
   loadDashboardCliStatusBannerCollapsed,
@@ -1003,7 +1002,6 @@ const InstalledBanner = ({
 // =============================================================================
 
 export const CliStatusBanner = (): React.JSX.Element | null => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const appConfig = useStore((s) => s.appConfig);
   const selectedProjectId = useStore((s) => s.selectedProjectId);
   const projects = useStore((s) => s.projects);
@@ -1056,7 +1054,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
   );
   const codexAccount = useCodexAccountSnapshot({
     enabled:
-      isElectron &&
       multimodelEnabled &&
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
@@ -1099,7 +1096,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
   const runtimeDisplayName = getHumanRuntimeDisplayName(renderCliStatus, multimodelEnabled);
 
   useEffect(() => {
-    if (!isElectron) return;
     // IMPORTANT: do NOT auto-fetch on mount.
     // Store initialization already schedules a deferred CLI status check to avoid
     // competing with initial teams/tasks/project scans.
@@ -1120,7 +1116,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     );
 
     return () => clearInterval(interval);
-  }, [bootstrapCliStatus, cliStatus, fetchCliStatus, isElectron, multimodelEnabled]);
+  }, [bootstrapCliStatus, cliStatus, fetchCliStatus, multimodelEnabled]);
 
   const handleInstall = useCallback(() => {
     installCli();
@@ -1242,8 +1238,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     [appConfig?.runtime?.providerBackends, fetchCliProviderStatus, updateConfig]
   );
 
-  if (!isElectron) return null;
-
   // Determine variant for styling
   const getVariant = (): BannerVariant => {
     if (installerState === 'error') return 'error';
@@ -1300,26 +1294,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
           onRequestLogin={(providerId) => setProviderTerminal({ providerId, action: 'login' })}
         />
-        {providerTerminal && renderCliStatus.binaryPath && (
-          <TerminalModal
-            title={`${getHumanRuntimeDisplayName(renderCliStatus, multimodelEnabled)} ${
-              providerTerminal.action === 'login' ? '登录' : '退出登录'
-            }: ${getProviderLabel(providerTerminal.providerId)}`}
-            command={renderCliStatus.binaryPath}
-            args={providerTerminalCommand?.args}
-            env={providerTerminalCommand?.env}
-            onClose={() => {
-              setProviderTerminal(null);
-              recheckAuthState();
-            }}
-            onExit={() => {
-              recheckAuthState();
-            }}
-            autoCloseOnSuccessMs={3000}
-            successMessage={providerTerminal.action === 'login' ? '认证已更新' : '提供商已退出登录'}
-            failureMessage={providerTerminal.action === 'login' ? '认证失败' : '退出登录失败'}
-          />
-        )}
       </>
     ) : null;
 
@@ -1829,47 +1803,6 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           )}
         </div>
         {installedAuxiliaryUi}
-        {showLoginTerminal && renderCliStatus.binaryPath && (
-          <TerminalModal
-            title={`${getHumanRuntimeDisplayName(renderCliStatus, multimodelEnabled)} 登录`}
-            command={renderCliStatus.binaryPath}
-            args={['auth', 'login']}
-            onClose={() => {
-              setShowLoginTerminal(false);
-              setIsVerifyingAuth(true);
-              void (async () => {
-                try {
-                  await invalidateCliStatus();
-                  if (multimodelEnabled) {
-                    await bootstrapCliStatus({ multimodelEnabled: true });
-                  } else {
-                    await fetchCliStatus();
-                  }
-                } finally {
-                  setIsVerifyingAuth(false);
-                }
-              })();
-            }}
-            onExit={() => {
-              setIsVerifyingAuth(true);
-              void (async () => {
-                try {
-                  await invalidateCliStatus();
-                  if (multimodelEnabled) {
-                    await bootstrapCliStatus({ multimodelEnabled: true });
-                  } else {
-                    await fetchCliStatus();
-                  }
-                } finally {
-                  setIsVerifyingAuth(false);
-                }
-              })();
-            }}
-            autoCloseOnSuccessMs={4000}
-            successMessage="登录完成"
-            failureMessage="登录失败"
-          />
-        )}
       </>
     );
   }

@@ -175,7 +175,7 @@ describe('SkillImportDialog', () => {
     });
 
     const browseButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('Browse')
+      (button) => button.textContent?.includes('浏览')
     ) as HTMLButtonElement;
     const sourceInput = host.querySelector('#skill-import-source') as HTMLInputElement;
     const folderInput = host.querySelector('#skill-import-folder') as HTMLInputElement;
@@ -240,7 +240,7 @@ describe('SkillImportDialog', () => {
     });
 
     const browseButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('Browse')
+      (button) => button.textContent?.includes('浏览')
     ) as HTMLButtonElement;
 
     await act(async () => {
@@ -348,7 +348,7 @@ describe('SkillImportDialog', () => {
     });
 
     const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Review And Import')
+      button.textContent?.includes('检查并导入')
     ) as HTMLButtonElement;
     await act(async () => {
       reviewButton.click();
@@ -409,7 +409,7 @@ describe('SkillImportDialog', () => {
     });
 
     const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Review And Import')
+      button.textContent?.includes('检查并导入')
     ) as HTMLButtonElement;
     await act(async () => {
       reviewButton.click();
@@ -454,7 +454,7 @@ describe('SkillImportDialog', () => {
     });
 
     const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Review And Import')
+      button.textContent?.includes('检查并导入')
     ) as HTMLButtonElement;
 
     expect(reviewButton.disabled).toBe(true);

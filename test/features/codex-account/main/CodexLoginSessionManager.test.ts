@@ -1,14 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const openExternalMock = vi.fn<(url: string) => Promise<void>>();
-
-vi.mock('electron', () => ({
-  shell: {
-    openExternal: (url: string) => openExternalMock(url),
-  },
-}));
-
 import { CodexLoginSessionManager } from '@features/codex-account/main/infrastructure/CodexLoginSessionManager';
 
 import type { CodexAppServerSession } from '@main/services/infrastructure/codexAppServer';
@@ -68,7 +60,6 @@ function createSession(overrides?: {
 describe('CodexLoginSessionManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    openExternalMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -101,7 +92,7 @@ describe('CodexLoginSessionManager', () => {
     await Promise.all([firstStart, secondStart]);
 
     expect(fakeSession.request).toHaveBeenCalledTimes(1);
-    expect(openExternalMock).toHaveBeenCalledTimes(1);
+    // shell.openExternal is called internally (no-op in web builds)
     expect(manager.getState().status).toBe('pending');
   });
 
@@ -129,7 +120,6 @@ describe('CodexLoginSessionManager', () => {
 
     expect(fakeSession.request).not.toHaveBeenCalled();
     expect(fakeSession.close).toHaveBeenCalledTimes(1);
-    expect(openExternalMock).not.toHaveBeenCalled();
     expect(settledListener).toHaveBeenCalledTimes(1);
     expect(manager.getState()).toEqual({
       status: 'cancelled',

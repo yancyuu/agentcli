@@ -11,6 +11,7 @@ import {
   validateMemberNameInline,
 } from '@renderer/components/team/members/MembersEditorSection';
 import { Button } from '@renderer/components/ui/button';
+import { Checkbox } from '@renderer/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import { Label } from '@renderer/components/ui/label';
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useStore } from '@renderer/store';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import {
@@ -30,16 +33,25 @@ import {
 } from '@renderer/utils/memberHelpers';
 import { isLeadMemberName } from '@shared/utils/leadDetection';
 import { parseNumericSuffixName } from '@shared/utils/teamMemberName';
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
 
+import { AnthropicFastModeSelector } from './AnthropicFastModeSelector';
+import { EffortLevelSelector } from './EffortLevelSelector';
 import {
   buildEditTeamSourceSnapshot,
   getLiveRosterIdentityChanges,
   getMemberRuntimeContractKey,
   getMembersRequiringRuntimeRestart,
 } from './editTeamRuntimeChanges';
+import { TeamModelSelector } from './TeamModelSelector';
 
-import type { EffortLevel, ResolvedTeamMember, TeamProviderId } from '@shared/types';
+import type {
+  EffortLevel,
+  ResolvedTeamMember,
+  TeamFastMode,
+  TeamLaunchRequest,
+  TeamProviderId,
+} from '@shared/types';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -64,9 +76,17 @@ interface EditTeamDialogProps {
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
   projectPath?: string | null;
+  savedLaunchRequest?: TeamLaunchRequest | null;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onRestartTeam?: () => Promise<void> | void;
+  onSaveAndRestart?: (runtimeConfig: {
+    providerId: TeamProviderId;
+    model: string | undefined;
+    effort: EffortLevel | undefined;
+    fastMode: TeamFastMode | undefined;
+    clearContext: boolean;
+  }) => Promise<void> | void;
 }
 
 function membersToDrafts(members: ResolvedTeamMember[]) {
@@ -145,8 +165,10 @@ export const EditTeamDialog = ({
   isTeamAlive = false,
   isTeamProvisioning = false,
   projectPath,
+  savedLaunchRequest = null,
   onClose,
   onSaved,
+  onSaveAndRestart,
 }: EditTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const [name, setName] = useState(currentName);
@@ -168,6 +190,23 @@ export const EditTeamDialog = ({
   const [membersPendingRestartRetry, setMembersPendingRestartRetry] = useState<
     Record<string, string>
   >({});
+  // Team-level runtime settings (separate from lead member settings)
+  const [teamProviderId, setTeamProviderId] = useState<TeamProviderId>(
+    savedLaunchRequest?.providerId ?? 'anthropic'
+  );
+  const [teamModel, setTeamModel] = useState(savedLaunchRequest?.model ?? '');
+  const [teamEffort, setTeamEffort] = useState<EffortLevel | undefined>(
+    savedLaunchRequest?.effort as EffortLevel | undefined
+  );
+  const [teamFastMode, setTeamFastMode] = useState<TeamFastMode>(
+    savedLaunchRequest?.fastMode ?? 'inherit'
+  );
+  const [clearContext, setClearContext] = useState(true);
+  const [restarting, setRestarting] = useState(false);
+  const [showRuntimeSettings, setShowRuntimeSettings] = useState(isTeamAlive);
+  const anthropicProviderFastModeDefault = useStore(
+    (s) => s.appConfig?.providerConnections?.anthropic.fastModeDefault ?? false
+  );
   const wasOpenRef = useRef(false);
   const initializedTeamNameRef = useRef<string | null>(null);
   const baselineSourceSnapshotRef = useRef<string | null>(null);
@@ -208,6 +247,13 @@ export const EditTeamDialog = ({
         setLeadModel(leadMember?.model ?? '');
         setLeadEffort(leadMember?.effort);
         setLeadWorkflow(leadMember?.workflow ?? '');
+        setTeamProviderId(savedLaunchRequest?.providerId ?? 'anthropic');
+        setTeamModel(savedLaunchRequest?.model ?? '');
+        setTeamEffort(savedLaunchRequest?.effort as EffortLevel | undefined);
+        setTeamFastMode(savedLaunchRequest?.fastMode ?? 'inherit');
+        setClearContext(true);
+        setRestarting(false);
+        setShowRuntimeSettings(isTeamAlive);
         setError(null);
         setSaveOutcomeError(null);
         setMembersPendingRestartRetry({});
@@ -237,7 +283,17 @@ export const EditTeamDialog = ({
       pendingCommittedSourceSnapshotRef.current = null;
     }
     wasOpenRef.current = open;
-  }, [open, teamName, currentName, currentDescription, currentColor, currentMembers, leadMember]);
+  }, [
+    open,
+    teamName,
+    currentName,
+    currentDescription,
+    currentColor,
+    currentMembers,
+    leadMember,
+    savedLaunchRequest,
+    isTeamAlive,
+  ]);
 
   const builtMembers = useMemo(() => buildMembersFromDrafts(members), [members]);
   const invalidMemberNamesError = useMemo(() => getInvalidMemberNamesError(members), [members]);
@@ -445,6 +501,102 @@ export const EditTeamDialog = ({
     })();
   };
 
+  const handleSaveAndRestart = (): void => {
+    if (!name.trim()) {
+      setError('团队名称不能为空');
+      return;
+    }
+    if (invalidMemberNamesError) {
+      setError(invalidMemberNamesError);
+      return;
+    }
+    if (hasDuplicateMembers) {
+      setError('保存前成员名称不能重复');
+      return;
+    }
+    const latestSourceSnapshot = buildEditTeamSourceSnapshot({
+      name: currentName,
+      description: currentDescription,
+      color: currentColor,
+      members: currentMembers,
+    });
+    const allowedSourceSnapshots = new Set(
+      [baselineSourceSnapshotRef.current, pendingCommittedSourceSnapshotRef.current].filter(
+        (value): value is string => value !== null
+      )
+    );
+    if (allowedSourceSnapshots.size > 0 && !allowedSourceSnapshots.has(latestSourceSnapshot)) {
+      setError('打开此对话框后团队设置已发生变化，请重新打开并确认最新状态后再保存。');
+      return;
+    }
+    if (hasBlockedLiveIdentityChanges) {
+      setError(`团队运行中不能重命名已有成员。已重命名：${liveIdentityChanges.renamed.join(', ')}`);
+      return;
+    }
+    if (isTeamProvisioning) {
+      setError('团队仍在启动准备中，暂时不能编辑设置。请等待启动完成后再试。');
+      return;
+    }
+    if (hasNewLiveTeammates) {
+      setError('团队运行中请通过专用的添加成员对话框新增成员。编辑团队仅支持更新已有成员。');
+      return;
+    }
+    if (!onSaveAndRestart) {
+      setError('保存并重启功能不可用。');
+      return;
+    }
+
+    setRestarting(true);
+    setError(null);
+    setSaveOutcomeError(null);
+
+    void (async () => {
+      let configSaved = false;
+      let membersSaved = false;
+      try {
+        await api.teams.updateConfig(teamName, {
+          name: name.trim(),
+          description: description.trim(),
+          color,
+          leadProviderId,
+          leadModel: leadModel.trim() || undefined,
+          leadEffort,
+          leadWorkflow: leadWorkflow.trim(),
+        });
+        configSaved = true;
+        for (const removedMemberName of liveRemovedExistingMembers) {
+          await api.teams.removeMember(teamName, removedMemberName);
+        }
+        await api.teams.replaceMembers(teamName, { members: builtMembers });
+        membersSaved = true;
+
+        await Promise.resolve(
+          onSaveAndRestart({
+            providerId: teamProviderId,
+            model: teamModel.trim() || undefined,
+            effort: teamEffort,
+            fastMode: teamFastMode,
+            clearContext,
+          })
+        );
+
+        await Promise.resolve(onSaved());
+        onClose();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : '保存并重启失败';
+        if (membersSaved) {
+          setSaveOutcomeError(`团队变更已保存，但重启失败：${message}`);
+        } else if (configSaved) {
+          setSaveOutcomeError(`团队设置已保存，但成员变更失败：${message}`);
+        } else {
+          setError(message);
+        }
+      } finally {
+        setRestarting(false);
+      }
+    })();
+  };
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-3xl">
@@ -584,6 +736,99 @@ export const EditTeamDialog = ({
               {effectiveMembersToRestart.join(', ')}.
             </p>
           ) : null}
+          {isTeamAlive && (
+            <div className="rounded-md border border-[var(--color-border)]">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium"
+                onClick={() => setShowRuntimeSettings((prev) => !prev)}
+              >
+                <span>运行时设置（重启时生效）</span>
+                {showRuntimeSettings ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
+              {showRuntimeSettings && (
+                <div className="space-y-3 border-t border-[var(--color-border)] px-3 py-3">
+                  <TeamModelSelector
+                    providerId={teamProviderId}
+                    onProviderChange={(id) => {
+                      setTeamProviderId(id);
+                      setTeamModel('');
+                    }}
+                    value={teamModel}
+                    onValueChange={setTeamModel}
+                    id="edit-team-model"
+                    disableGeminiOption={true}
+                  />
+                  <EffortLevelSelector
+                    value={teamEffort ?? ''}
+                    onValueChange={(v) =>
+                      setTeamEffort((v || undefined) as EffortLevel | undefined)
+                    }
+                    id="edit-team-effort"
+                    providerId={teamProviderId}
+                    model={teamModel}
+                    limitContext={false}
+                  />
+                  {teamProviderId === 'anthropic' && (
+                    <div className="mt-2">
+                      <AnthropicFastModeSelector
+                        value={teamFastMode}
+                        onValueChange={setTeamFastMode}
+                        providerFastModeDefault={anthropicProviderFastModeDefault}
+                        model={teamModel}
+                        limitContext={false}
+                        id="edit-team-fast-mode"
+                      />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="edit-team-clear-context"
+                      checked={clearContext}
+                      onCheckedChange={(checked) => setClearContext(checked === true)}
+                    />
+                    <Label
+                      htmlFor="edit-team-clear-context"
+                      className="flex cursor-pointer items-center gap-1.5 text-xs font-normal text-text-secondary"
+                    >
+                      <RotateCcw className="size-3 shrink-0" />
+                      清空上下文（新会话）
+                    </Label>
+                  </div>
+                  {!clearContext && (
+                    <div
+                      className="rounded-md border px-3 py-2 text-xs"
+                      style={{
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        borderColor: 'rgba(245, 158, 11, 0.25)',
+                        color: '#fbbf24',
+                      }}
+                    >
+                      恢复上次会话会带上旧上下文；当上下文较大或模型处于冷却时，重启更容易触发 API
+                      频率限制。
+                    </div>
+                  )}
+                  {clearContext && (
+                    <div
+                      className="rounded-md border px-3 py-2 text-xs"
+                      style={{
+                        backgroundColor: 'var(--warning-bg)',
+                        borderColor: 'var(--warning-border)',
+                        color: 'var(--warning-text)',
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                        <p>
+                          团队负责人会启动一个新会话，不再恢复之前的上下文。已积累的会话记忆和对话历史将不可用。
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control -- Color picker is a group of buttons, not a single input */}
             <label className="label-optional mb-1 block text-xs font-medium">颜色（可选）</label>
@@ -624,23 +869,44 @@ export const EditTeamDialog = ({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+          <Button variant="outline" size="sm" onClick={onClose} disabled={saving || restarting}>
             取消
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={
-              saving ||
-              isTeamProvisioning ||
-              !name.trim() ||
-              hasDuplicateMembers ||
-              Boolean(invalidMemberNamesError)
-            }
-          >
-            {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
-            保存
-          </Button>
+          <div className="flex items-center gap-2">
+            {isTeamAlive && onSaveAndRestart && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleSaveAndRestart}
+                disabled={
+                  saving ||
+                  restarting ||
+                  isTeamProvisioning ||
+                  !name.trim() ||
+                  hasDuplicateMembers ||
+                  Boolean(invalidMemberNamesError)
+                }
+              >
+                {restarting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+                保存并重启
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={
+                saving ||
+                restarting ||
+                isTeamProvisioning ||
+                !name.trim() ||
+                hasDuplicateMembers ||
+                Boolean(invalidMemberNamesError)
+              }
+            >
+              {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+              保存
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

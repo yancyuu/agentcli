@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { isPathWithinRoot, validateFileName } from '@main/utils/pathValidation';
-import { shell } from 'electron';
 
 import { SkillImportService } from './SkillImportService';
 import { SkillPlanService } from './SkillPlanService';
@@ -97,7 +96,11 @@ export class SkillsMutationService {
     const isUserSkill = this.rootsResolver
       .resolve(request.projectPath)
       .some((root) => root.scope === 'user' && isPathWithinRoot(skillDir, root.rootPath));
-    await shell.trashItem(skillDir);
+    try {
+      await fs.rm(skillDir, { recursive: true, force: true });
+    } catch {
+      await fs.rm(skillDir, { recursive: true, force: true });
+    }
     if (isUserSkill) {
       await this.projectionService.syncGlobalSkills();
     }

@@ -13,21 +13,13 @@ const FILE_NAME = 'claude-cli-auth-diag.ndjson';
 const MAX_DIAG_FILE_BYTES = 512 * 1024;
 
 function resolveLogsDirectory(): string | null {
+  // Web mode: use platform-specific log directory fallback
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy: tests / non-Electron
-    const { app } = require('electron') as typeof import('electron');
-    if (!app?.getPath) {
-      return null;
-    }
-    try {
-      return app.getPath('logs');
-    } catch {
-      try {
-        return join(app.getPath('userData'), 'logs');
-      } catch {
-        return null;
-      }
-    }
+    const { appendCliAuthDiagLogPath } = require('@main/utils/pathDecoder') as {
+      appendCliAuthDiagLogPath?: string;
+    };
+    if (appendCliAuthDiagLogPath) return appendCliAuthDiagLogPath;
+    return null;
   } catch {
     return null;
   }

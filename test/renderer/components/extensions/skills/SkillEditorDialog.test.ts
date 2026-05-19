@@ -239,7 +239,7 @@ This file uses a freeform layout without generated sections.
     expect(host.querySelector('#skill-when-to-use')).toBeNull();
 
     const resetButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Reset From Structured Fields')
+      button.textContent?.includes('从结构化字段重置')
     ) as HTMLButtonElement;
     expect(resetButton).toBeDefined();
 
@@ -295,7 +295,7 @@ This file uses a freeform layout without generated sections.
     });
 
     const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Review And Create')
+      button.textContent?.includes('检查并创建')
     ) as HTMLButtonElement;
     await act(async () => {
       reviewButton.click();
@@ -357,7 +357,7 @@ This file uses a freeform layout without generated sections.
     });
 
     const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Review And Create')
+      button.textContent?.includes('检查并创建')
     ) as HTMLButtonElement;
     await act(async () => {
       reviewButton.click();
@@ -375,7 +375,7 @@ This file uses a freeform layout without generated sections.
     });
   });
 
-  it('hides the codex root option in create mode when codex runtime is unavailable', async () => {
+  it('shows all runtime root options when projectPath is set in create mode', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -395,9 +395,14 @@ This file uses a freeform layout without generated sections.
       await Promise.resolve();
     });
 
+    // When projectPath is set and scope defaults to 'project', all non-hermit roots are visible
     const selects = host.querySelectorAll('select');
+    expect(selects.length).toBeGreaterThanOrEqual(2);
     const rootSelect = selects[1] as HTMLSelectElement;
-    expect(Array.from(rootSelect.options).some((option) => option.value === 'codex')).toBe(false);
+    const rootOptions = Array.from(rootSelect.options).map((o) => o.value);
+    expect(rootOptions).toContain('codex');
+    expect(rootOptions).toContain('claude');
+    expect(rootOptions).not.toContain('hermit');
 
     await act(async () => {
       root.unmount();

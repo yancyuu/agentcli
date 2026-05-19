@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useDroppable } from '@dnd-kit/core';
 import { horizontalListSortingStrategy, SortableContext } from '@dnd-kit/sortable';
-import { isElectronMode } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { formatShortcut } from '@renderer/utils/stringUtils';
@@ -227,8 +226,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
       : false;
 
   // Detect macOS Electron for traffic lights padding
-  const isMacElectron =
-    isElectronMode() && window.navigator.userAgent.toLowerCase().includes('mac');
+  const isMacElectron = false;
 
   // Show sidebar expand button only in the leftmost pane
   const isLeftmostPane = useStore(

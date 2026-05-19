@@ -283,6 +283,30 @@ export function registerEditorRoutes(app: FastifyInstance): void {
       return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
     }
   });
+
+  // Browse directories (for folder picker in browser mode)
+  app.get<{
+    Querystring: { path?: string };
+  }>('/api/editor/browse-dirs', async (request, reply) => {
+    try {
+      const dirPath = request.query.path || '/';
+      const normalized = path.resolve(path.normalize(dirPath));
+      const entries = await fs.readdir(normalized, { withFileTypes: true });
+      const dirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => ({
+          name: e.name,
+          path: path.join(normalized, e.name),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return reply.send({ currentPath: normalized, dirs });
+    } catch (error) {
+      if (shouldLogError(error)) {
+        logger.error('Error in GET /api/editor/browse-dirs:', getErrorMessage(error));
+      }
+      return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+    }
+  });
 }
 
 function shouldLogError(error: unknown): boolean {

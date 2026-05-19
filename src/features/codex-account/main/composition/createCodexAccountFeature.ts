@@ -30,7 +30,8 @@ import { CodexLoginSessionManager } from '../infrastructure/CodexLoginSessionMan
 import { detectCodexLocalAccountState } from '../infrastructure/detectCodexLocalAccountArtifacts';
 
 import type { Logger } from '@shared/utils/logger';
-import type { BrowserWindow } from 'electron';
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+type BrowserWindow = unknown;
 
 type LoggerPort = Pick<Logger, 'info' | 'warn' | 'error'>;
 

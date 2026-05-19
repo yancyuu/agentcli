@@ -7,7 +7,7 @@
  * Group 4: File operations (iter-3)
  */
 
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { getLanguageFromFileName } from '@renderer/utils/codemirrorLanguages';
 import { editorBridge } from '@renderer/utils/editorBridge';
 import { invalidateQuickOpenCache } from '@renderer/utils/quickOpenCache';
@@ -80,8 +80,6 @@ const WATCHED_DIRS_DEBOUNCE_MS = 250;
 const MAX_WATCHED_DIRS = 120;
 
 function scheduleSyncWatchedFiles(get: () => AppState): void {
-  // Editor watcher is Electron-only. In browser mode, api.editor exists but throws.
-  if (!isElectronMode()) return;
   const state = get();
   if (!state.editorWatcherEnabled) return;
   const projectPath = state.editorProjectPath;
@@ -101,7 +99,6 @@ function scheduleSyncWatchedFiles(get: () => AppState): void {
 }
 
 function scheduleSyncWatchedDirs(get: () => AppState): void {
-  if (!isElectronMode()) return;
   const state = get();
   if (!state.editorWatcherEnabled) return;
   const projectPath = state.editorProjectPath;

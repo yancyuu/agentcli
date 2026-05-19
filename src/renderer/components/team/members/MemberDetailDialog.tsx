@@ -20,6 +20,7 @@ import { isLeadMember } from '@shared/utils/leadDetection';
 import {
   BarChart3,
   FileText,
+  FolderOpen,
   ListPlus,
   Loader2,
   MessageSquare,
@@ -36,6 +37,7 @@ import { MemberLogsTab } from './MemberLogsTab';
 import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
 import { MemberTasksTab } from './MemberTasksTab';
+import { MemberWorkspaceTab } from './MemberWorkspaceTab';
 
 import type { TeamLaunchParams } from '@renderer/store/slices/teamSlice';
 import type {
@@ -235,6 +237,10 @@ export const MemberDetailDialog = ({
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="workspace" className="flex-1 gap-1.5">
+              <FolderOpen size={12} />
+              Workspace
+            </TabsTrigger>
             <TabsTrigger value="activity" className="flex-1 gap-1.5">
               Activity
               {memberActivityCount > 0 && (
@@ -254,6 +260,14 @@ export const MemberDetailDialog = ({
           </TabsList>
           <TabsContent value="tasks">
             <MemberTasksTab tasks={memberTasks} onTaskClick={onTaskClick} />
+          </TabsContent>
+          <TabsContent value="workspace">
+            <MemberWorkspaceTab
+              teamName={teamName}
+              memberName={member.name}
+              onFileClick={(filePath) => onViewMemberChanges?.(member.name, filePath)}
+              onViewAllChanges={() => onViewMemberChanges?.(member.name)}
+            />
           </TabsContent>
           <TabsContent value="activity">
             <MemberMessagesTab

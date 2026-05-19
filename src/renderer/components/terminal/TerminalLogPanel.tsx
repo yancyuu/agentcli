@@ -1,16 +1,7 @@
-import '@xterm/xterm/css/xterm.css';
-
 import { useEffect, useRef } from 'react';
 
-import { api } from '@renderer/api';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
-
 interface TerminalLogPanelProps {
-  /** Raw output chunks (with ANSI codes) to render */
   chunks: string[];
-  /** CSS class for container */
   className?: string;
 }
 
@@ -18,75 +9,29 @@ export const TerminalLogPanel = ({
   chunks,
   className,
 }: TerminalLogPanelProps): React.JSX.Element => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const writtenRef = useRef(0);
+  const preRef = useRef<HTMLPreElement>(null);
 
-  // Create xterm instance once
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const term = new Terminal({
-      cursorBlink: false,
-      disableStdin: true,
-      fontSize: 12,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 200,
-      theme: {
-        background: '#141416',
-        foreground: '#fafafa',
-        cursor: 'transparent',
-      },
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-
-    const webLinksAddon = new WebLinksAddon((_event, uri) => {
-      void api.openExternal(uri);
-    });
-    term.loadAddon(webLinksAddon);
-
-    term.open(container);
-
-    const rafId = requestAnimationFrame(() => fitAddon.fit());
-
-    const observer = new ResizeObserver(() => fitAddon.fit());
-    observer.observe(container);
-
-    termRef.current = term;
-    writtenRef.current = 0;
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      observer.disconnect();
-      term.dispose();
-      termRef.current = null;
-      writtenRef.current = 0;
-    };
-  }, []);
-
-  // Write new chunks incrementally
-  useEffect(() => {
-    const term = termRef.current;
-    if (!term) return;
-
-    for (let i = writtenRef.current; i < chunks.length; i++) {
-      // xterm requires \r\n for proper line breaks; normalize bare \n from process output
-      term.write(chunks[i].replace(/\r?\n/g, '\r\n'));
+    if (preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight;
     }
-    writtenRef.current = chunks.length;
   }, [chunks]);
 
   return (
-    <div
-      ref={containerRef}
-      className={`mt-2 overflow-hidden rounded border ${className ?? ''}`}
+    <pre
+      ref={preRef}
+      className={`mt-2 overflow-auto rounded border p-2 text-xs ${className ?? ''}`}
       style={{
+        backgroundColor: '#141416',
+        color: '#fafafa',
         borderColor: 'var(--color-border)',
         height: '120px',
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
       }}
-    />
+    >
+      {chunks.join('')}
+    </pre>
   );
 };

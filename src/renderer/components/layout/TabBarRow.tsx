@@ -6,7 +6,6 @@
 
 import { Fragment, useState } from 'react';
 
-import { isElectronMode } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { HEADER_ROW1_HEIGHT } from '@renderer/constants/layout';
 import { useStore } from '@renderer/store';
@@ -27,8 +26,7 @@ export const TabBarRow = (): React.JSX.Element => {
 
   const [newTabHover, setNewTabHover] = useState(false);
 
-  const isMacElectron =
-    isElectronMode() && window.navigator.userAgent.toLowerCase().includes('mac');
+  const isMacElectron = false;
 
   return (
     <div

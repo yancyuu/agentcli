@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
 
@@ -51,7 +51,6 @@ export function useCodexAccountSnapshot(options: {
   cancelChatgptLogin: () => Promise<boolean>;
   logout: () => Promise<boolean>;
 } {
-  const electronMode = isElectronMode();
   const [snapshot, setSnapshot] = useState<CodexAccountSnapshotDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +69,7 @@ export function useCodexAccountSnapshot(options: {
       forceRefreshToken?: boolean;
       silent?: boolean;
     }) => {
-      if (!electronMode || !options.enabled) {
+      if (!options.enabled) {
         return;
       }
 
@@ -97,11 +96,11 @@ export function useCodexAccountSnapshot(options: {
         }
       }
     },
-    [applySnapshot, electronMode, options.enabled, options.includeRateLimits]
+    [applySnapshot, options.enabled, options.includeRateLimits]
   );
 
   useEffect(() => {
-    if (!electronMode || !options.enabled) {
+    if (!options.enabled) {
       return;
     }
 
@@ -130,10 +129,10 @@ export function useCodexAccountSnapshot(options: {
     });
 
     return unsubscribe;
-  }, [applySnapshot, electronMode, options.enabled, options.includeRateLimits]);
+  }, [applySnapshot, options.enabled, options.includeRateLimits]);
 
   useEffect(() => {
-    if (!electronMode || !options.enabled || typeof document === 'undefined') {
+    if (!options.enabled || typeof document === 'undefined') {
       return;
     }
 
@@ -164,10 +163,10 @@ export function useCodexAccountSnapshot(options: {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [electronMode, options.enabled, options.includeRateLimits, refresh]);
+  }, [options.enabled, options.includeRateLimits, refresh]);
 
   useEffect(() => {
-    if (!electronMode || !options.enabled) {
+    if (!options.enabled) {
       return;
     }
 
@@ -186,18 +185,11 @@ export function useCodexAccountSnapshot(options: {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [
-    electronMode,
-    options.enabled,
-    options.includeRateLimits,
-    refresh,
-    snapshot?.login.status,
-    visible,
-  ]);
+  }, [options.enabled, options.includeRateLimits, refresh, snapshot?.login.status, visible]);
 
   const runAction = useCallback(
     async (runner: () => Promise<CodexAccountSnapshotDto>): Promise<boolean> => {
-      if (!electronMode || !options.enabled) {
+      if (!options.enabled) {
         return false;
       }
 
@@ -214,7 +206,7 @@ export function useCodexAccountSnapshot(options: {
         setLoading(false);
       }
     },
-    [applySnapshot, electronMode, options.enabled]
+    [applySnapshot, options.enabled]
   );
 
   return useMemo(

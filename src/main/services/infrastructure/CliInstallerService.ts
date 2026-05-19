@@ -23,7 +23,7 @@ import { appendCliAuthDiag } from '@main/utils/cliAuthDiagLog';
 import { buildEnrichedEnv } from '@main/utils/cliEnv';
 import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getClaudeBasePath, getHomeDir } from '@main/utils/pathDecoder';
-import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
+// safeSendToRenderer removed — SSE-only in web mode
 import {
   getCachedShellEnv,
   getShellPreferredHome,
@@ -56,7 +56,7 @@ import type {
   CliProviderModelAvailability,
   CliProviderStatus,
 } from '@shared/types';
-import type { BrowserWindow } from 'electron';
+// BrowserWindow type removed — web mode only
 import type { IncomingMessage } from 'http';
 
 const logger = createLogger('CliInstallerService');
@@ -361,7 +361,7 @@ function resetGatherDiag(diag: CliInstallerStatusRunDiag): void {
 // =============================================================================
 
 export class CliInstallerService {
-  private mainWindow: BrowserWindow | null = null;
+  private mainWindow: unknown = null;
   private installing = false;
   private readonly multimodelBridgeService = new ClaudeMultimodelBridgeService();
   private readonly modelAvailabilityService = new CliProviderModelAvailabilityService(
@@ -401,20 +401,7 @@ export class CliInstallerService {
   }
 
   private electronMetaForDiag(): Record<string, unknown> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { app } = require('electron') as typeof import('electron');
-      return {
-        electronPackaged: Boolean(app?.isPackaged),
-        appVersion: typeof app?.getVersion === 'function' ? app.getVersion() : null,
-        exePath:
-          typeof app?.getPath === 'function'
-            ? clipHeadForDiag(app.getPath('exe'), DIAG_PATH_HEAD)
-            : null,
-      };
-    } catch {
-      return { electronPackaged: null, appVersion: null, exePath: null };
-    }
+    return { electronPackaged: false, appVersion: null, exePath: null };
   }
 
   private async writeCliInstallerStatusDiag(
@@ -462,7 +449,7 @@ export class CliInstallerService {
     });
   }
 
-  setMainWindow(window: BrowserWindow | null): void {
+  setMainWindow(window: unknown): void {
     this.mainWindow = window;
   }
 
@@ -1305,7 +1292,7 @@ export class CliInstallerService {
   // ---------------------------------------------------------------------------
 
   private sendProgress(progress: CliInstallerProgress): void {
-    safeSendToRenderer(this.mainWindow, CLI_INSTALLER_PROGRESS_CHANNEL, progress);
+    // SSE broadcast handled by event emitter in web mode
   }
 
   private detectPlatform(): CliPlatform {

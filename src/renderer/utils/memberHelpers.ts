@@ -608,9 +608,9 @@ export function getMemberLaunchStatusLabel(visualState: MemberLaunchVisualState)
     case 'registered_only':
       return 'registered';
     case 'stale_runtime':
-      return 'stale runtime';
+      return 'standby';
     case 'settling':
-      return 'joining team';
+      return 'joining';
     case 'error':
       return 'failed';
     case 'skipped':

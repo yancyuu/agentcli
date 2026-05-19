@@ -23,7 +23,6 @@ import type { TabSlice } from './slices/tabSlice';
 import type { TabUISlice } from './slices/tabUISlice';
 import type { TeamSlice } from './slices/teamSlice';
 import type { UISlice } from './slices/uiSlice';
-import type { UpdateSlice } from './slices/updateSlice';
 
 // =============================================================================
 // Shared Types
@@ -97,7 +96,6 @@ export type AppState = ProjectSlice &
   ConfigSlice &
   ConnectionSlice &
   ContextSlice &
-  UpdateSlice &
   ChangeReviewSlice &
   CliInstallerSlice &
   EditorSlice &

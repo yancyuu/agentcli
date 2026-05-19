@@ -214,7 +214,7 @@ export const EditorFileTree = ({
   const gitStatusMap = useMemo(() => {
     const t0 = performance.now();
     const map = new Map<string, GitFileStatusType>();
-    if (!gitFiles.length || !projectPath) return map;
+    if (!gitFiles?.length || !projectPath) return map;
     for (const file of gitFiles) {
       const absPath = joinPath(projectPath, ...splitPath(file.path));
       map.set(absPath, file.status);

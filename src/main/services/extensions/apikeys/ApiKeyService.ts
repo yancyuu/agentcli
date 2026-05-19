@@ -15,7 +15,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createLogger } from '@shared/utils/logger';
-import { safeStorage } from 'electron';
 
 import type {
   ApiKeyEntry,
@@ -28,7 +27,7 @@ const logger = createLogger('Extensions:ApiKeys');
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]{0,100}$/i;
 
 /** How the value was encrypted on disk */
-type EncryptionMethod = 'safeStorage' | 'aes-local' | 'base64';
+type EncryptionMethod = 'aes-local' | 'base64';
 
 interface StoredApiKey {
   id: string;
@@ -236,40 +235,14 @@ export class ApiKeyService {
    * backend (hardcoded password), so we must check the actual backend name.
    */
   private isSecureBackend(): boolean {
-    try {
-      if (!safeStorage.isEncryptionAvailable()) return false;
-      if (process.platform === 'linux') {
-        const backend = safeStorage.getSelectedStorageBackend();
-        return backend !== 'basic_text' && backend !== 'unknown';
-      }
-      return true; // macOS Keychain / Windows DPAPI are always reliable
-    } catch {
-      return false;
-    }
+    return true;
   }
 
   private getBackendName(): string {
-    if (process.platform === 'darwin') return 'macOS Keychain';
-    if (process.platform === 'win32') return 'Windows DPAPI';
-    try {
-      return safeStorage.getSelectedStorageBackend();
-    } catch {
-      return 'unknown';
-    }
+    return 'AES-256-GCM (local)';
   }
 
   private encrypt(value: string): { method: EncryptionMethod; value: string } {
-    // Try OS keychain first
-    if (this.isSecureBackend()) {
-      try {
-        const buf = safeStorage.encryptString(value);
-        return { method: 'safeStorage', value: buf.toString('base64') };
-      } catch (err) {
-        logger.warn('safeStorage encryption failed, falling back to AES-local:', err);
-      }
-    }
-
-    // Fallback: AES-256-GCM with machine-derived key
     return { method: 'aes-local', value: this.encryptAesLocal(value) };
   }
 
@@ -278,10 +251,6 @@ export class ApiKeyService {
       const method = this.resolveMethod(stored);
 
       switch (method) {
-        case 'safeStorage': {
-          const buf = Buffer.from(stored.encryptedValue, 'base64');
-          return safeStorage.decryptString(buf);
-        }
         case 'aes-local':
           return this.decryptAesLocal(stored.encryptedValue);
         case 'base64':
@@ -295,8 +264,9 @@ export class ApiKeyService {
 
   /** Resolve encryption method, handling legacy entries without encryptionMethod field */
   private resolveMethod(stored: StoredApiKey): EncryptionMethod {
-    if (stored.encryptionMethod) return stored.encryptionMethod;
-    return stored.encrypted ? 'safeStorage' : 'base64';
+    if (stored.encryptionMethod === 'aes-local') return 'aes-local';
+    if (stored.encryptionMethod === 'base64') return 'base64';
+    return stored.encrypted ? 'aes-local' : 'base64';
   }
 
   private pickPreferredKey(matching: StoredApiKey[], projectPath?: string): StoredApiKey | null {

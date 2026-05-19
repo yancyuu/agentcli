@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type DashboardRecentProject } from '@features/recent-projects/contracts';
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { buildTaskCountsByProject } from '@renderer/utils/pathNormalize';
@@ -279,7 +279,7 @@ export function useRecentProjectsSection(
     loading,
     error,
     canLoadMore: !searchQuery.trim() && filteredCards.length > visibleProjects,
-    isElectron: isElectronMode(),
+    isElectron: false,
     loadMore: () => setVisibleProjects((current) => current + LOAD_MORE_STEP),
     reload,
     openRecentProject,

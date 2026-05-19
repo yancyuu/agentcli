@@ -21,11 +21,28 @@ const clients = new Set<FastifyReply>();
  */
 export function registerEventRoutes(app: FastifyInstance): void {
   app.get('/api/events', async (request, reply) => {
-    reply.raw.writeHead(200, {
+    // Write CORS headers via raw response so the EventStream works
+    // cross-origin when the frontend is served by a different dev server.
+    const origin = request.headers.origin;
+    const corsOrigin = process.env.CORS_ORIGIN;
+    const headers: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-    });
+    };
+    if (origin && corsOrigin) {
+      const allowed =
+        corsOrigin === '*' ||
+        corsOrigin
+          .split(',')
+          .map((o) => o.trim())
+          .includes(origin);
+      if (allowed) {
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Access-Control-Allow-Credentials'] = 'true';
+      }
+    }
+    reply.raw.writeHead(200, headers);
 
     clients.add(reply);
     logger.info(`SSE client connected (total: ${clients.size})`);

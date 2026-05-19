@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { Combobox } from '@renderer/components/ui/combobox';
 import { cn } from '@renderer/lib/utils';
@@ -258,8 +258,6 @@ export const GeneralSection = ({
   const isWindowsStyleDefaultPath =
     /^[a-zA-Z]:\\/.test(defaultClaudeRootPath) || defaultClaudeRootPath.startsWith('\\\\');
 
-  const isElectron = useMemo(() => isElectronMode(), []);
-
   const agentLanguageDescription = useMemo(() => {
     const current = safeConfig.general.agentLanguage ?? 'system';
     if (current === 'system') {
@@ -313,28 +311,6 @@ export const GeneralSection = ({
         />
       </SettingRow>
 
-      {isElectron && (
-        <>
-          <SettingsSectionHeader title="启动设置" />
-          <SettingRow label="开机启动" description="登录系统后自动启动应用">
-            <SettingsToggle
-              enabled={safeConfig.general.launchAtLogin}
-              onChange={(v) => onGeneralToggle('launchAtLogin', v)}
-              disabled={saving}
-            />
-          </SettingRow>
-          {window.navigator.userAgent.includes('Macintosh') && (
-            <SettingRow label="显示 Dock 图标" description="在 Dock 中显示应用图标（macOS）">
-              <SettingsToggle
-                enabled={safeConfig.general.showDockIcon}
-                onChange={(v) => onGeneralToggle('showDockIcon', v)}
-                disabled={saving}
-              />
-            </SettingRow>
-          )}
-        </>
-      )}
-
       <SettingsSectionHeader title="外观" />
       <SettingRow label="主题" description="选择你偏好的界面主题">
         <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
@@ -366,318 +342,44 @@ export const GeneralSection = ({
           disabled={saving}
         />
       </SettingRow>
-      {isElectron && !window.navigator.userAgent.includes('Macintosh') && (
-        <SettingRow
-          label="使用系统原生标题栏"
-          description="使用系统默认窗口边框，而不是自定义标题栏"
+      <SettingsSectionHeader title="服务状态" />
+      <div
+        className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
+        style={{ backgroundColor: 'var(--color-surface-raised)' }}
+      >
+        <div className="size-2 shrink-0 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+        <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          运行地址
+        </span>
+        <code
+          className="rounded px-1.5 py-0.5 font-mono text-xs"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            color: 'var(--color-text)',
+            border: '1px solid var(--color-border)',
+          }}
         >
-          <SettingsToggle
-            enabled={safeConfig.general.useNativeTitleBar}
-            onChange={async (v) => {
-              const shouldRelaunch = await confirm({
-                title: '需要重启',
-                message: '应用需要重启后才能应用标题栏设置。现在重启吗？',
-                confirmLabel: '立即重启',
-              });
-              if (shouldRelaunch) {
-                // Await config write before relaunch to avoid race condition on Windows
-                // (antivirus/NTFS can delay file writes beyond a fixed timeout)
-                try {
-                  await api.config.update('general', { useNativeTitleBar: v });
-                } catch {
-                  // If save fails, still try to toggle via the normal path
-                  onGeneralToggle('useNativeTitleBar', v);
-                  await new Promise((r) => setTimeout(r, 500));
-                }
-                void api.windowControls.relaunch();
-              }
-            }}
-            disabled={saving}
-          />
-        </SettingRow>
-      )}
-
-      {isElectron && (
-        <>
-          <SettingsSectionHeader title="本地 Claude 根目录" />
-          <p className="mb-4 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            选择哪个本地目录作为 Claude 数据根目录
-          </p>
-
-          <SettingRow
-            label="当前本地根目录"
-            description={isCustomClaudeRoot ? '正在使用自定义路径' : '正在使用自动检测路径'}
-          >
-            <div className="max-w-96 text-right">
-              <div className="truncate font-mono text-xs" style={{ color: 'var(--color-text)' }}>
-                {resolvedClaudeRootPath}
-              </div>
-              <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                自动检测：{defaultClaudeRootPath}
-              </div>
-            </div>
-          </SettingRow>
-
-          <div className="flex items-center gap-3 py-2">
-            <button
-              onClick={() => void handleSelectClaudeRootFolder()}
-              disabled={updatingClaudeRoot}
-              className="rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
-              style={{
-                backgroundColor: 'var(--color-surface-raised)',
-                color: 'var(--color-text)',
-              }}
-            >
-              <span className="flex items-center gap-2">
-                {updatingClaudeRoot ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <FolderOpen className="size-3" />
-                )}
-                选择目录
-              </span>
-            </button>
-
-            <button
-              onClick={() => void handleResetClaudeRoot()}
-              disabled={updatingClaudeRoot || !isCustomClaudeRoot}
-              className="rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
-              style={{
-                backgroundColor: 'var(--color-surface-raised)',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              <span className="flex items-center gap-2">
-                <RotateCcw className="size-3" />
-                使用自动检测
-              </span>
-            </button>
-
-            {isWindowsStyleDefaultPath && (
-              <button
-                onClick={() => void handleUseWslForClaude()}
-                disabled={updatingClaudeRoot || findingWslRoots}
-                className="rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
-                style={{
-                  backgroundColor: 'var(--color-surface-raised)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                <span className="flex items-center gap-2">
-                  {findingWslRoots ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Laptop className="size-3" />
-                  )}
-                  使用 Linux / WSL？
-                </span>
-              </button>
-            )}
-          </div>
-
-          {claudeRootError && (
-            <div className="rounded-md border border-red-500/20 bg-red-500/10 px-4 py-3">
-              <p className="text-sm text-red-400">{claudeRootError}</p>
-            </div>
-          )}
-
-          {showWslModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center">
-              <button
-                className="absolute inset-0 cursor-default"
-                style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
-                onClick={() => setShowWslModal(false)}
-                aria-label="关闭 WSL 路径弹窗"
-                tabIndex={-1}
-              />
-              <div
-                className="relative mx-4 w-full max-w-2xl rounded-lg border p-5 shadow-xl"
-                style={{
-                  backgroundColor: 'var(--color-surface-overlay)',
-                  borderColor: 'var(--color-border-emphasis)',
-                }}
-              >
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  选择 WSL Claude 根目录
-                </h3>
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  检测到的 WSL 发行版与 Claude 根目录候选路径
-                </p>
-
-                <div className="mt-4 space-y-2">
-                  {wslCandidates.map((candidate) => (
-                    <div
-                      key={`${candidate.distro}:${candidate.path}`}
-                      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>
-                          {candidate.distro}
-                        </p>
-                        <p
-                          className="truncate font-mono text-[11px]"
-                          style={{ color: 'var(--color-text-muted)' }}
-                        >
-                          {candidate.path}
-                        </p>
-                        {!candidate.hasProjectsDir && (
-                          <p className="text-[11px]" style={{ color: 'var(--warning-text)' }}>
-                            未检测到 projects 目录
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => void applyWslCandidate(candidate)}
-                        className="rounded-md px-3 py-1.5 text-xs transition-colors"
-                        style={{
-                          backgroundColor: 'var(--color-surface-raised)',
-                          color: 'var(--color-text)',
-                        }}
-                      >
-                        使用此路径
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-4 flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => setShowWslModal(false)}
-                    className="rounded-md border px-3 py-1.5 text-xs transition-colors hover:bg-white/5"
-                    style={{
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)',
-                    }}
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowWslModal(false);
-                      void handleSelectClaudeRootFolder();
-                    }}
-                    className="rounded-md px-3 py-1.5 text-xs transition-colors"
-                    style={{
-                      backgroundColor: 'var(--color-surface-raised)',
-                      color: 'var(--color-text)',
-                    }}
-                  >
-                    手动选择目录
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {isElectron ? (
-        <>
-          <SettingsSectionHeader title="浏览器访问" />
-          <SettingRow
-            label="启用服务端模式"
-            description="启动 HTTP 服务，以便在浏览器访问 UI 或嵌入 iframe"
-          >
-            {serverLoading ? (
-              <Loader2
-                className="size-5 animate-spin"
-                style={{ color: 'var(--color-text-muted)' }}
-              />
-            ) : (
-              <SettingsToggle
-                enabled={serverStatus.running}
-                onChange={handleServerToggle}
-                disabled={serverLoading}
-              />
-            )}
-          </SettingRow>
-
-          {serverError && (
-            <p className="-mt-1 mb-2 text-xs text-red-400">服务端模式启动失败：{serverError}</p>
-          )}
-
-          {serverStatus.running && (
-            <div
-              className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
-              style={{ backgroundColor: 'var(--color-surface-raised)' }}
-            >
-              <div
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: '#22c55e' }}
-              />
-              <span
-                className="text-xs font-medium"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                运行地址
-              </span>
-              <code
-                className="rounded px-1.5 py-0.5 font-mono text-xs"
-                style={{
-                  backgroundColor: 'var(--color-surface)',
-                  color: 'var(--color-text)',
-                  border: '1px solid var(--color-border)',
-                }}
-              >
-                {serverUrl}
-              </code>
-              <button
-                onClick={handleCopyUrl}
-                className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-                style={{
-                  borderColor: 'var(--color-border)',
-                  color: copied ? '#22c55e' : 'var(--color-text-secondary)',
-                }}
-              >
-                {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-                {copied ? '已复制' : '复制链接'}
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <SettingsSectionHeader title="服务状态" />
-          <div
-            className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
-            style={{ backgroundColor: 'var(--color-surface-raised)' }}
-          >
-            <div className="size-2 shrink-0 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-            <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              运行地址
-            </span>
-            <code
-              className="rounded px-1.5 py-0.5 font-mono text-xs"
-              style={{
-                backgroundColor: 'var(--color-surface)',
-                color: 'var(--color-text)',
-                border: '1px solid var(--color-border)',
-              }}
-            >
-              {window.location.origin}
-            </code>
-            <button
-              onClick={() => {
-                void navigator.clipboard.writeText(window.location.origin);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-              className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-              style={{
-                borderColor: 'var(--color-border)',
-                color: copied ? '#22c55e' : 'var(--color-text-secondary)',
-              }}
-            >
-              {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-              {copied ? '已复制' : '复制链接'}
-            </button>
-          </div>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            当前为独立运行模式。HTTP 服务始终开启。系统通知不可用，通知触发仅在应用内记录。
-          </p>
-        </>
-      )}
+          {window.location.origin}
+        </code>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(window.location.origin);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
+          style={{
+            borderColor: 'var(--color-border)',
+            color: copied ? '#22c55e' : 'var(--color-text-secondary)',
+          }}
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          {copied ? '已复制' : '复制链接'}
+        </button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        当前为独立运行模式。HTTP 服务始终开启。系统通知不可用，通知触发仅在应用内记录。
+      </p>
 
       {/* Privacy / Telemetry — only visible when Sentry DSN is baked into the build */}
       {import.meta.env.VITE_SENTRY_DSN && (

@@ -124,16 +124,20 @@ describe('NotificationManager.addTeamNotification', () => {
   });
 
   it('shows native toast when notifications are enabled', async () => {
+    const toastListener = vi.fn();
+    manager.on('notification-toast', toastListener);
     await manager.addTeamNotification(makeTeamPayload());
-    expect(mockNotificationShow).toHaveBeenCalledOnce();
+    expect(toastListener).toHaveBeenCalledOnce();
   });
 
   it('stores notification but suppresses toast when suppressToast is true', async () => {
+    const toastListener = vi.fn();
+    manager.on('notification-toast', toastListener);
+
     const result = await manager.addTeamNotification(
       makeTeamPayload({ dedupeKey: 'suppress-test' }),
     );
-    // Clear from the first call
-    mockNotificationShow.mockClear();
+    toastListener.mockClear();
 
     const result2 = await manager.addTeamNotification(
       makeTeamPayload({ dedupeKey: 'suppress-test-2', suppressToast: true }),
@@ -142,10 +146,12 @@ describe('NotificationManager.addTeamNotification', () => {
     expect(result).not.toBeNull();
     expect(result2).not.toBeNull();
     // The second call with suppressToast=true should NOT show a toast
-    expect(mockNotificationShow).not.toHaveBeenCalled();
+    expect(toastListener).not.toHaveBeenCalled();
   });
 
   it('stores notification even when notifications are disabled (storage is unconditional)', async () => {
+    const toastListener = vi.fn();
+    manager.on('notification-toast', toastListener);
     const configMock = ConfigManager.getInstance().getConfig as ReturnType<typeof vi.fn>;
     configMock.mockReturnValue({
       notifications: {
@@ -162,10 +168,12 @@ describe('NotificationManager.addTeamNotification', () => {
     expect(result).not.toBeNull();
     expect(result!.category).toBe('team');
     // But no native toast
-    expect(mockNotificationShow).not.toHaveBeenCalled();
+    expect(toastListener).not.toHaveBeenCalled();
   });
 
   it('stores notification even when snoozed (storage is unconditional)', async () => {
+    const toastListener = vi.fn();
+    manager.on('notification-toast', toastListener);
     const configMock = ConfigManager.getInstance().getConfig as ReturnType<typeof vi.fn>;
     configMock.mockReturnValue({
       notifications: {
@@ -180,7 +188,7 @@ describe('NotificationManager.addTeamNotification', () => {
     const result = await manager.addTeamNotification(makeTeamPayload());
 
     expect(result).not.toBeNull();
-    expect(mockNotificationShow).not.toHaveBeenCalled();
+    expect(toastListener).not.toHaveBeenCalled();
   });
 
   it('deduplicates by dedupeKey — same key returns null on second call', async () => {
@@ -206,6 +214,9 @@ describe('NotificationManager.addTeamNotification', () => {
   });
 
   it('throttles native toast for same dedupeKey within 5s', async () => {
+    const toastListener = vi.fn();
+    manager.on('notification-toast', toastListener);
+
     // First call with a unique dedupeKey (not in storage yet) — shows toast
     const result1 = await manager.addTeamNotification(
       makeTeamPayload({ dedupeKey: 'throttle-key-a' })
@@ -219,7 +230,7 @@ describe('NotificationManager.addTeamNotification', () => {
     expect(result2).not.toBeNull();
 
     // Both should have shown toasts (different keys, not throttled)
-    expect(mockNotificationShow).toHaveBeenCalledTimes(2);
+    expect(toastListener).toHaveBeenCalledTimes(2);
   });
 
   it('is accessible via getNotifications', async () => {

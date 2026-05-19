@@ -197,7 +197,7 @@ describe('SkillDetailDialog', () => {
     });
 
     const openButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Open SKILL.md')
+      button.textContent?.includes('SKILL.md')
     ) as HTMLButtonElement;
     await act(async () => {
       openButton.click();
@@ -207,7 +207,7 @@ describe('SkillDetailDialog', () => {
     expect(openPathMock).toHaveBeenCalledWith(detail.item.skillFile, '/tmp/project-a');
 
     const deleteButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent === 'Delete'
+      button.textContent === '删除'
     ) as HTMLButtonElement;
     await act(async () => {
       deleteButton.click();
@@ -215,7 +215,7 @@ describe('SkillDetailDialog', () => {
     });
 
     const confirmDeleteButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent === 'Delete Skill'
+      button.textContent === '删除技能'
     ) as HTMLButtonElement;
     await act(async () => {
       confirmDeleteButton.click();
@@ -264,7 +264,7 @@ describe('SkillDetailDialog', () => {
     });
 
     const openButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Open SKILL.md')
+      button.textContent?.includes('SKILL.md')
     ) as HTMLButtonElement;
     await act(async () => {
       openButton.click();

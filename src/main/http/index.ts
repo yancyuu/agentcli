@@ -13,16 +13,21 @@ import { createLogger } from '@shared/utils/logger';
 
 import { registerConfigRoutes } from './config';
 import { registerCliInstallerRoutes } from './cliInstaller';
+import { registerContextRoutes } from './context';
+import { registerCrossTeamRoutes } from './crossTeam';
 import { registerEditorRoutes } from './editor';
 import { registerEventRoutes } from './events';
+import { registerExtensionRoutes } from './extensions';
 import { registerNotificationRoutes } from './notifications';
 import { registerProjectRoutes } from './projects';
+import { registerReviewRoutes } from './review';
+import { registerScheduleRoutes } from './schedule';
 import { registerSearchRoutes } from './search';
 import { registerSessionRoutes } from './sessions';
+import { registerSkillsRoutes } from './skills';
 import { registerSshRoutes } from './ssh';
 import { registerSubagentRoutes } from './subagents';
 import { registerTeamRoutes } from './teams';
-import { registerReviewRoutes } from './review';
 import { registerUpdaterRoutes } from './updater';
 import { registerUtilityRoutes } from './utility';
 import { registerValidationRoutes } from './validation';
@@ -33,7 +38,6 @@ import type {
   ProjectScanner,
   SessionParser,
   SubagentResolver,
-  UpdaterService,
 } from '../services';
 import type { SshConnectionManager } from '../services/infrastructure/SshConnectionManager';
 import type { TeamProvisioningService } from '../services/team/TeamProvisioningService';
@@ -48,7 +52,12 @@ export interface HttpServices {
   chunkBuilder: ChunkBuilder;
   dataCache: DataCache;
   recentProjectsFeature?: RecentProjectsFeatureFacade;
-  updaterService: UpdaterService;
+  updaterService: {
+    checkForUpdates: () => Promise<void>;
+    downloadUpdate: () => Promise<void>;
+    quitAndInstall: () => Promise<void>;
+    setMainWindow: (w: unknown) => void;
+  };
   sshConnectionManager: SshConnectionManager;
   teamProvisioningService?: TeamProvisioningService;
   teamDataService?: import('@main/services/team/TeamDataService').TeamDataService;
@@ -61,6 +70,17 @@ export interface HttpServices {
   changeExtractorService?: import('@main/services/team/ChangeExtractorService').ChangeExtractorService;
   reviewApplierService?: import('@main/services/team/ReviewApplierService').ReviewApplierService;
   fileContentResolverService?: import('@main/services/team/FileContentResolver').FileContentResolver;
+  extensionFacadeService?: import('../services/extensions/ExtensionFacadeService').ExtensionFacadeService;
+  pluginInstallService?: import('../services/extensions/install/PluginInstallService').PluginInstallService;
+  mcpInstallService?: import('../services/extensions/install/McpInstallService').McpInstallService;
+  mcpHealthDiagnosticsService?: import('../services/extensions/state/McpHealthDiagnosticsService').McpHealthDiagnosticsService;
+  skillsCatalogService?: import('../services/extensions/skills/SkillsCatalogService').SkillsCatalogService;
+  skillsMutationService?: import('../services/extensions/skills/SkillsMutationService').SkillsMutationService;
+  skillSourceService?: import('../services/extensions/skills/SkillSourceService').SkillSourceService;
+  skillsWatcherService?: import('../services/extensions/skills/SkillsWatcherService').SkillsWatcherService;
+  contextRegistry?: import('../services/infrastructure/ServiceContextRegistry').ServiceContextRegistry;
+  schedulerService?: import('../services/schedule/SchedulerService').SchedulerService;
+  crossTeamService?: import('../services/team/CrossTeamService').CrossTeamService;
 }
 
 export function registerHttpRoutes(
@@ -90,6 +110,19 @@ export function registerHttpRoutes(
     registerRecentProjectsHttp(app, services.recentProjectsFeature);
   }
   registerEventRoutes(app);
+  if (services.extensionFacadeService) {
+    registerExtensionRoutes(app, services);
+  }
+  if (services.skillsCatalogService) {
+    registerSkillsRoutes(app, services);
+  }
+  registerContextRoutes(app, services);
+  if (services.schedulerService) {
+    registerScheduleRoutes(app, services);
+  }
+  if (services.crossTeamService) {
+    registerCrossTeamRoutes(app, services);
+  }
 
   logger.info('All HTTP routes registered');
 }

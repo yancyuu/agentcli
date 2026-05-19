@@ -34,7 +34,6 @@ import type { HttpServer } from './services/infrastructure/HttpServer';
 import type { NotificationManager } from './services/infrastructure/NotificationManager';
 import type { ServiceContext } from './services/infrastructure/ServiceContext';
 import type { SshConnectionManager } from './services/infrastructure/SshConnectionManager';
-import type { UpdaterService } from './services/infrastructure/UpdaterService';
 
 const logger = createLogger('Standalone');
 
@@ -84,6 +83,14 @@ const sshConnectionManagerStub = {
   emit: () => false,
 } as unknown as SshConnectionManager;
 
+/** UpdaterService type for standalone stub */
+type UpdaterService = {
+  checkForUpdates: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
+  quitAndInstall: () => Promise<void>;
+  setMainWindow: (w: unknown) => void;
+};
+
 // =============================================================================
 // Application State
 // =============================================================================
@@ -91,6 +98,7 @@ const sshConnectionManagerStub = {
 let localContext: ServiceContext;
 let notificationManager: NotificationManager;
 let httpServer: HttpServer;
+let schedulerService: import('./services/schedule/SchedulerService').SchedulerService;
 
 // =============================================================================
 // Lifecycle
@@ -143,6 +151,24 @@ async function start(): Promise<void> {
   // Initialize team service (no SSH/runtime adapters in standalone)
   const { TeamProvisioningService } = await import('./services/team/TeamProvisioningService');
   const teamProvisioningService = new TeamProvisioningService() as TeamProvisioningService;
+
+  // Wire team change events to SSE broadcast (progress, member spawns, state changes)
+  const { broadcastEvent } = await import('./http/events');
+  teamProvisioningService.setTeamChangeEmitter((event) => {
+    broadcastEvent('team-change', event);
+    // Emit provisioning progress as a dedicated event for SSE listeners
+    if (event.type === 'process') {
+      // Try to parse as JSON (our structured progress events)
+      try {
+        const parsed = JSON.parse(event.detail as string);
+        if (parsed && typeof parsed === 'object' && 'runId' in parsed) {
+          broadcastEvent('provisioning-progress', parsed);
+        }
+      } catch {
+        // detail is not JSON — ignore
+      }
+    }
+  });
 
   // Initialize team data service for HTTP API (read team data, tasks, messages)
   const { TeamDataService } = await import('./services/team/TeamDataService');
@@ -208,6 +234,93 @@ async function start(): Promise<void> {
   const fileContentResolver = new FileContentResolver(teamMemberLogsFinder, gitDiffFallback);
   const reviewApplier = new ReviewApplierService();
 
+  // Extension Store services (pure Node.js, no Electron deps)
+  const { PluginCatalogService } =
+    await import('./services/extensions/catalog/PluginCatalogService');
+  const { PluginInstallationStateService } =
+    await import('./services/extensions/state/PluginInstallationStateService');
+  const { OfficialMcpRegistryService } =
+    await import('./services/extensions/catalog/OfficialMcpRegistryService');
+  const { GlamaMcpEnrichmentService } =
+    await import('./services/extensions/catalog/GlamaMcpEnrichmentService');
+  const { McpCatalogAggregator } =
+    await import('./services/extensions/catalog/McpCatalogAggregator');
+  const { createExtensionsRuntimeAdapter } =
+    await import('./services/extensions/runtime/ExtensionsRuntimeAdapter');
+  const { McpInstallationStateService } =
+    await import('./services/extensions/state/McpInstallationStateService');
+  const { McpHealthDiagnosticsService } =
+    await import('./services/extensions/state/McpHealthDiagnosticsService');
+  const { ExtensionFacadeService } = await import('./services/extensions/ExtensionFacadeService');
+  const { PluginInstallService } =
+    await import('./services/extensions/install/PluginInstallService');
+  const { McpInstallService } = await import('./services/extensions/install/McpInstallService');
+  const { SkillsCatalogService } =
+    await import('./services/extensions/skills/SkillsCatalogService');
+  const { SkillsMutationService } =
+    await import('./services/extensions/skills/SkillsMutationService');
+  const { SkillSourceService } = await import('./services/extensions/skills/SkillSourceService');
+  const { SkillsWatcherService } =
+    await import('./services/extensions/skills/SkillsWatcherService');
+
+  const pluginCatalogService = new PluginCatalogService();
+  const pluginStateService = new PluginInstallationStateService();
+  const officialMcpRegistry = new OfficialMcpRegistryService();
+  const glamaMcpService = new GlamaMcpEnrichmentService();
+  const mcpAggregator = new McpCatalogAggregator(officialMcpRegistry, glamaMcpService);
+  const extensionsRuntimeAdapter = createExtensionsRuntimeAdapter();
+  const mcpStateService = new McpInstallationStateService(extensionsRuntimeAdapter);
+  const mcpHealthDiagnosticsService = new McpHealthDiagnosticsService(extensionsRuntimeAdapter);
+  const extensionFacadeService = new ExtensionFacadeService(
+    pluginCatalogService,
+    pluginStateService,
+    mcpAggregator,
+    mcpStateService
+  );
+  const pluginInstallService = new PluginInstallService(
+    pluginCatalogService,
+    extensionsRuntimeAdapter
+  );
+  const mcpInstallService = new McpInstallService(mcpAggregator, extensionsRuntimeAdapter);
+  const skillsCatalogService = new SkillsCatalogService();
+  const skillsMutationService = new SkillsMutationService();
+  const skillSourceService = new SkillSourceService();
+  const skillsWatcherService = new SkillsWatcherService();
+
+  // Wire skills watcher to SSE broadcast
+  skillsWatcherService.setEmitter((event) => {
+    httpServer.broadcast('skills:changed', event);
+  });
+
+  // Context registry (single local context in standalone mode)
+  const { ServiceContextRegistry } =
+    await import('./services/infrastructure/ServiceContextRegistry');
+  const contextRegistry = new ServiceContextRegistry();
+  contextRegistry.registerContext(localContext);
+
+  // Scheduler service (pure Node.js, no Electron deps)
+  const { JsonScheduleRepository } = await import('./services/schedule/JsonScheduleRepository');
+  const { ScheduledTaskExecutor } = await import('./services/schedule/ScheduledTaskExecutor');
+  const { SchedulerService } = await import('./services/schedule/SchedulerService');
+  schedulerService = new SchedulerService(
+    new JsonScheduleRepository(),
+    new ScheduledTaskExecutor()
+  );
+  schedulerService.setChangeEmitter((event) => {
+    httpServer.broadcast('schedule:change', event);
+  });
+
+  // Cross-team service (reuses existing team services)
+  const { TeamConfigReader } = await import('./services/team/TeamConfigReader');
+  const { TeamInboxWriter } = await import('./services/team/TeamInboxWriter');
+  const { CrossTeamService } = await import('./services/team/CrossTeamService');
+  const crossTeamService = new CrossTeamService(
+    new TeamConfigReader(),
+    teamDataService,
+    new TeamInboxWriter(),
+    teamProvisioningService
+  );
+
   // Build services for HTTP routes
   const services: HttpServices = {
     projectScanner: localContext.projectScanner,
@@ -224,6 +337,17 @@ async function start(): Promise<void> {
     fileContentResolverService: fileContentResolver,
     updaterService: updaterServiceStub,
     sshConnectionManager: sshConnectionManagerStub,
+    extensionFacadeService,
+    pluginInstallService,
+    mcpInstallService,
+    mcpHealthDiagnosticsService,
+    skillsCatalogService,
+    skillsMutationService,
+    skillSourceService,
+    skillsWatcherService,
+    contextRegistry,
+    schedulerService,
+    crossTeamService,
   };
 
   // No-op mode switch handler (no SSH in standalone)
@@ -232,6 +356,11 @@ async function start(): Promise<void> {
   // Start the server
   const port = await httpServer.start(services, modeSwitchHandler, PORT, HOST);
   logger.info(`Standalone server running at http://${HOST}:${port}`);
+
+  // Start scheduler after server is ready
+  await schedulerService.start();
+  logger.info('Scheduler started');
+
   logger.info('Open in your browser to view Claude Code sessions');
 }
 
@@ -240,6 +369,10 @@ async function shutdown(): Promise<void> {
 
   if (httpServer?.isRunning()) {
     await httpServer.stop();
+  }
+
+  if (schedulerService) {
+    await schedulerService.stop();
   }
 
   if (localContext) {

@@ -139,7 +139,7 @@ describe('team model availability Codex catalog integration', () => {
 
     expect(getAvailableTeamProviderModels('codex', providerStatus)).toEqual(['gpt-5.5']);
     expect(getAvailableTeamProviderModelOptions('codex', providerStatus)).toEqual([
-      { value: '', label: 'Default', badgeLabel: 'Default' },
+      { value: '', label: '默认', badgeLabel: '默认' },
       {
         value: 'gpt-5.5',
         label: '5.5',
@@ -299,28 +299,27 @@ describe('team model availability Codex catalog integration', () => {
     expect(getAvailableTeamProviderModels('anthropic', providerStatus)).toEqual([
       'haiku',
       'opus',
-      'claude-opus-4-6',
       'sonnet',
     ]);
     expect(getAvailableTeamProviderModelOptions('anthropic', providerStatus)).toEqual([
       {
         value: '',
-        label: 'Default',
-        badgeLabel: 'Default',
+        label: '默认',
+        badgeLabel: '默认',
         availabilityStatus: undefined,
         availabilityReason: undefined,
+      },
+      {
+        value: 'claude-opus-4-7[1m]',
+        label: 'Opus 4.7 (1M context)',
+        badgeLabel: 'Opus 4.7 1M',
+        availabilityStatus: null,
+        availabilityReason: null,
       },
       {
         value: 'opus',
         label: 'Opus 4.8',
         badgeLabel: 'Opus 4.8',
-        availabilityStatus: 'available',
-        availabilityReason: null,
-      },
-      {
-        value: 'claude-opus-4-6',
-        label: 'Opus 4.6',
-        badgeLabel: 'Opus 4.6',
         availabilityStatus: 'available',
         availabilityReason: null,
       },
@@ -356,13 +355,26 @@ describe('team model availability Codex catalog integration', () => {
         upgrade: false,
         source: 'static-fallback',
       },
+      {
+        id: 'sonnet',
+        launchModel: 'sonnet',
+        displayName: 'Sonnet 4.7',
+        hidden: false,
+        supportedReasoningEfforts: ['low', 'medium', 'high'],
+        defaultReasoningEffort: null,
+        inputModalities: ['text', 'image'],
+        supportsPersonality: false,
+        isDefault: false,
+        upgrade: false,
+        source: 'anthropic-models-api',
+      },
     ]);
 
     expect(isTeamModelAvailableForUi('anthropic', 'claude-sonnet-4-6[1m]', providerStatus)).toBe(
       true
     );
     expect(normalizeTeamModelForUi('anthropic', 'claude-sonnet-4-6[1m]', providerStatus)).toBe(
-      'claude-sonnet-4-6[1m]'
+      'sonnet'
     );
     expect(getTeamModelSelectionError('anthropic', 'claude-sonnet-4-6[1m]', providerStatus)).toBe(
       null

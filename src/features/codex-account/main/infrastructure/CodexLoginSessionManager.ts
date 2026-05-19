@@ -4,7 +4,8 @@ import {
   type CodexAppServerLoginAccountResponse,
   type CodexAppServerSession,
 } from '@main/services/infrastructure/codexAppServer';
-import { shell } from 'electron';
+// Electron shell stub — no-op in standalone/web builds
+const shell = { openExternal: async (_url: string) => {} };
 
 import type { CodexLoginStateDto } from '@features/codex-account/contracts';
 import type { CodexAppServerSessionFactory } from '@main/services/infrastructure/codexAppServer';

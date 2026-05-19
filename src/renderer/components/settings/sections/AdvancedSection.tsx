@@ -2,13 +2,11 @@
  * AdvancedSection - Advanced settings including config management and about info.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { api, isElectronMode } from '@renderer/api';
+import { api } from '@renderer/api';
 import appIcon from '@renderer/favicon.png';
-import { useStore } from '@renderer/store';
-import { CheckCircle, Code2, Download, FileEdit, Loader2, RefreshCw, Upload } from 'lucide-react';
-import { useShallow } from 'zustand/react/shallow';
+import { Download, FileEdit, RefreshCw, Upload } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components';
 
@@ -30,84 +28,12 @@ export const AdvancedSection = ({
   onImportConfig,
   onOpenInEditor,
 }: AdvancedSectionProps): React.JSX.Element => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const [version, setVersion] = useState<string>('');
   const [configEditorOpen, setConfigEditorOpen] = useState(false);
-  const { updateStatus, availableVersion, checkForUpdates, openUpdateDialog, installUpdate } =
-    useStore(
-      useShallow((s) => ({
-        updateStatus: s.updateStatus,
-        availableVersion: s.availableVersion,
-        checkForUpdates: s.checkForUpdates,
-        openUpdateDialog: s.openUpdateDialog,
-        installUpdate: s.installUpdate,
-      }))
-    );
-
-  // Auto-revert "not-available" / "error" status back to idle after a brief display
-  const revertTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => {
-    if (updateStatus === 'not-available' || updateStatus === 'error') {
-      revertTimerRef.current = setTimeout(() => {
-        useStore.setState({ updateStatus: 'idle' });
-      }, 3000);
-    }
-    return () => {
-      if (revertTimerRef.current) clearTimeout(revertTimerRef.current);
-    };
-  }, [updateStatus]);
 
   useEffect(() => {
     api.getAppVersion().then(setVersion).catch(console.error);
   }, []);
-
-  const handleCheckForUpdates = useCallback(() => {
-    if (updateStatus === 'downloaded') {
-      installUpdate();
-      return;
-    }
-    if (updateStatus === 'available') {
-      openUpdateDialog();
-      return;
-    }
-    checkForUpdates();
-  }, [checkForUpdates, installUpdate, openUpdateDialog, updateStatus]);
-
-  const getUpdateButtonContent = (): React.JSX.Element => {
-    switch (updateStatus) {
-      case 'checking':
-        return (
-          <>
-            <Loader2 className="size-3.5 animate-spin" />
-            Checking...
-          </>
-        );
-      case 'not-available':
-        return (
-          <>
-            <CheckCircle className="size-3.5" />
-            Up to date
-          </>
-        );
-      case 'available':
-      case 'downloaded':
-        return (
-          <>
-            <Download className="size-3.5" />
-            {updateStatus === 'downloaded'
-              ? 'Update ready'
-              : `v${availableVersion ?? 'unknown'} available`}
-          </>
-        );
-      default:
-        return (
-          <>
-            <RefreshCw className="size-3.5" />
-            检查更新
-          </>
-        );
-    }
-  };
 
   return (
     <div>
@@ -160,19 +86,6 @@ export const AdvancedSection = ({
           <Upload className="size-4" />
           导入配置
         </button>
-        {isElectron && (
-          <button
-            onClick={onOpenInEditor}
-            className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-white/5"
-            style={{
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            <Code2 className="size-4" />
-            在编辑器中打开
-          </button>
-        )}
       </div>
 
       <CliStatusSection />
@@ -185,35 +98,15 @@ export const AdvancedSection = ({
             <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
               Hermit
             </p>
-            {isElectron && (
-              <button
-                onClick={handleCheckForUpdates}
-                disabled={updateStatus === 'checking'}
-                className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                style={{
-                  borderColor: 'var(--color-border)',
-                  color:
-                    updateStatus === 'not-available'
-                      ? 'var(--color-text-muted)'
-                      : updateStatus === 'available' || updateStatus === 'downloaded'
-                        ? '#60a5fa'
-                        : 'var(--color-text-secondary)',
-                }}
-              >
-                {getUpdateButtonContent()}
-              </button>
-            )}
-            {!isElectron && (
-              <span
-                className="rounded-md border px-2.5 py-1 text-xs font-medium"
-                style={{
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                Standalone
-              </span>
-            )}
+            <span
+              className="rounded-md border px-2.5 py-1 text-xs font-medium"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Standalone
+            </span>
           </div>
           <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             Version {version || '...'}

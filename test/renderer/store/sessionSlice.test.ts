@@ -5,16 +5,58 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { installMockElectronAPI, type MockElectronAPI } from '../../mocks/electronAPI';
+const hoisted = vi.hoisted(() => ({
+  getSessionsPaginated: vi.fn(),
+  getSessionDetail: vi.fn(),
+  getSessions: vi.fn(),
+  getProjects: vi.fn(),
+  getRepositoryGroups: vi.fn(),
+  configGet: vi.fn(),
+  configPinSession: vi.fn(),
+  configUnpinSession: vi.fn(),
+  configHideSession: vi.fn(),
+  configUnhideSession: vi.fn(),
+  configHideSessions: vi.fn(),
+  configUnhideSessions: vi.fn(),
+  getSessionsByIds: vi.fn(),
+}));
+
+vi.mock('@renderer/api', () => ({
+  api: {
+    getSessionsPaginated: hoisted.getSessionsPaginated,
+    getSessionDetail: hoisted.getSessionDetail,
+    getSessions: hoisted.getSessions,
+    getProjects: hoisted.getProjects,
+    getRepositoryGroups: hoisted.getRepositoryGroups,
+    getSessionsByIds: hoisted.getSessionsByIds,
+    config: {
+      get: hoisted.configGet,
+      pinSession: hoisted.configPinSession,
+      unpinSession: hoisted.configUnpinSession,
+      hideSession: hoisted.configHideSession,
+      unhideSession: hoisted.configUnhideSession,
+      hideSessions: hoisted.configHideSessions,
+      unhideSessions: hoisted.configUnhideSessions,
+    },
+  },
+}));
 
 import { createTestStore, type TestStore } from './storeTestUtils';
 
 describe('sessionSlice', () => {
   let store: TestStore;
-  let mockAPI: MockElectronAPI;
 
   beforeEach(() => {
-    mockAPI = installMockElectronAPI();
+    hoisted.getSessionsPaginated.mockResolvedValue({
+      sessions: [],
+      nextCursor: null,
+      hasMore: false,
+      totalCount: 0,
+    });
+    hoisted.getSessionDetail.mockResolvedValue(null);
+    hoisted.configGet.mockResolvedValue({
+      sessions: { pinnedSessions: {}, hiddenSessions: {} },
+    });
     store = createTestStore();
   });
 
@@ -29,7 +71,7 @@ describe('sessionSlice', () => {
         { id: 'session-2', createdAt: '2024-01-14T10:00:00Z' },
       ];
 
-      mockAPI.getSessionsPaginated.mockResolvedValue({
+      hoisted.getSessionsPaginated.mockResolvedValue({
         sessions: mockSessions as never[],
         nextCursor: 'cursor-1',
         hasMore: true,
@@ -38,7 +80,7 @@ describe('sessionSlice', () => {
 
       await store.getState().fetchSessionsInitial('project-1');
 
-      expect(mockAPI.getSessionsPaginated).toHaveBeenCalledWith('project-1', null, 20, {
+      expect(hoisted.getSessionsPaginated).toHaveBeenCalledWith('project-1', null, 20, {
         includeTotalCount: false,
         prefilterAll: false,
         metadataLevel: 'deep',
@@ -51,7 +93,7 @@ describe('sessionSlice', () => {
     });
 
     it('should set loading state during fetch', async () => {
-      mockAPI.getSessionsPaginated.mockImplementation(
+      hoisted.getSessionsPaginated.mockImplementation(
         () =>
           new Promise((resolve) => {
             setTimeout(
@@ -79,7 +121,7 @@ describe('sessionSlice', () => {
     });
 
     it('should handle fetch error', async () => {
-      mockAPI.getSessionsPaginated.mockRejectedValue(new Error('Network error'));
+      hoisted.getSessionsPaginated.mockRejectedValue(new Error('Network error'));
 
       await store.getState().fetchSessionsInitial('project-1');
 
@@ -99,7 +141,7 @@ describe('sessionSlice', () => {
         sessionsLoadingMore: false,
       });
 
-      mockAPI.getSessionsPaginated.mockResolvedValue({
+      hoisted.getSessionsPaginated.mockResolvedValue({
         sessions: [{ id: 'session-2' }] as never[],
         nextCursor: 'cursor-2',
         hasMore: true,
@@ -121,7 +163,7 @@ describe('sessionSlice', () => {
 
       await store.getState().fetchSessionsMore();
 
-      expect(mockAPI.getSessionsPaginated).not.toHaveBeenCalled();
+      expect(hoisted.getSessionsPaginated).not.toHaveBeenCalled();
     });
 
     it('should not fetch if already loading', async () => {
@@ -134,7 +176,7 @@ describe('sessionSlice', () => {
 
       await store.getState().fetchSessionsMore();
 
-      expect(mockAPI.getSessionsPaginated).not.toHaveBeenCalled();
+      expect(hoisted.getSessionsPaginated).not.toHaveBeenCalled();
     });
   });
 
@@ -144,7 +186,7 @@ describe('sessionSlice', () => {
         selectedProjectId: 'project-1',
       });
 
-      mockAPI.getSessionDetail.mockResolvedValue({
+      hoisted.getSessionDetail.mockResolvedValue({
         session: { id: 'session-1' },
         chunks: [],
       } as never);
@@ -161,7 +203,7 @@ describe('sessionSlice', () => {
         sessionContextStats: new Map() as never,
       });
 
-      mockAPI.getSessionDetail.mockResolvedValue({
+      hoisted.getSessionDetail.mockResolvedValue({
         session: { id: 'session-2' },
         chunks: [],
       } as never);
@@ -199,7 +241,7 @@ describe('sessionSlice', () => {
         sessionsLoading: false,
       });
 
-      mockAPI.getSessionsPaginated.mockResolvedValue({
+      hoisted.getSessionsPaginated.mockResolvedValue({
         sessions: [{ id: 'session-1' }, { id: 'session-2' }] as never[],
         nextCursor: null,
         hasMore: false,
@@ -209,7 +251,7 @@ describe('sessionSlice', () => {
       await store.getState().refreshSessionsInPlace('project-1');
 
       expect(store.getState().sessions).toHaveLength(2);
-      expect(mockAPI.getSessionsPaginated).toHaveBeenCalledWith('project-1', null, 20, {
+      expect(hoisted.getSessionsPaginated).toHaveBeenCalledWith('project-1', null, 20, {
         includeTotalCount: false,
         prefilterAll: false,
         metadataLevel: 'deep',
@@ -225,7 +267,7 @@ describe('sessionSlice', () => {
 
       await store.getState().refreshSessionsInPlace('project-2');
 
-      expect(mockAPI.getSessionsPaginated).not.toHaveBeenCalled();
+      expect(hoisted.getSessionsPaginated).not.toHaveBeenCalled();
     });
 
     it('should ignore stale refresh responses and keep latest result', async () => {
@@ -237,7 +279,7 @@ describe('sessionSlice', () => {
       let resolveFirst: ((value: unknown) => void) | undefined;
       let resolveSecond: ((value: unknown) => void) | undefined;
 
-      mockAPI.getSessionsPaginated
+      hoisted.getSessionsPaginated
         .mockImplementationOnce(
           () =>
             new Promise((resolve) => {
@@ -278,7 +320,7 @@ describe('sessionSlice', () => {
         sessions: [{ id: 'seed' }] as never[],
       });
 
-      mockAPI.getSessionsPaginated
+      hoisted.getSessionsPaginated
         .mockRejectedValueOnce(
           new Error(
             "Error invoking remote method 'get-sessions-paginated': reply was never sent"
@@ -295,7 +337,7 @@ describe('sessionSlice', () => {
       await vi.advanceTimersByTimeAsync(150);
       await refreshPromise;
 
-      expect(mockAPI.getSessionsPaginated).toHaveBeenCalledTimes(2);
+      expect(hoisted.getSessionsPaginated).toHaveBeenCalledTimes(2);
       expect(store.getState().sessions[0]?.id).toBe('recovered');
       vi.useRealTimers();
     });
@@ -310,7 +352,7 @@ describe('sessionSlice', () => {
       let resolveFirst: ((value: unknown) => void) | undefined;
       let resolveSecond: ((value: unknown) => void) | undefined;
 
-      mockAPI.getSessionDetail
+      hoisted.getSessionDetail
         .mockImplementationOnce(
           () =>
             new Promise((resolve) => {

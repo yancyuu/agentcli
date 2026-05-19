@@ -29,6 +29,8 @@ import type {
   CreateScheduleInput,
   CreateTaskRequest,
   CrossTeamAPI,
+  CrossTeamMessage,
+  CrossTeamSendResult,
   ElectronAPI,
   FileChangeEvent,
   GlobalTask,
@@ -45,6 +47,7 @@ import type {
   ReplaceMembersRequest,
   RepositoryGroup,
   Schedule,
+  ScheduleChangeEvent,
   ScheduleRun,
   SearchSessionsResult,
   SendMessageRequest,
@@ -100,8 +103,29 @@ import type {
   RejectResult,
   TaskChangeSetV2,
 } from '@shared/types/review';
+import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { AgentConfig } from '@shared/types/api';
 import type { EditorAPI, ProjectAPI } from '@shared/types/editor';
+import type {
+  EnrichedPlugin,
+  InstalledMcpEntry,
+  McpCatalogItem,
+  McpCustomInstallRequest,
+  McpInstallRequest,
+  McpSearchResult,
+  McpServerDiagnostic,
+  OperationResult,
+  PluginInstallRequest,
+  SkillCatalogItem,
+  SkillDeleteRequest,
+  SkillDetail,
+  SkillImportRequest,
+  SkillReviewPreview,
+  SkillSource,
+  SkillSourcesSnapshot,
+  SkillUpsertRequest,
+  SkillWatcherEvent,
+} from '@shared/types/extensions';
 import type { ApplyReviewRequest } from '@shared/types/review';
 import type { TerminalAPI } from '@shared/types/terminal';
 
@@ -113,7 +137,8 @@ export class HttpAPIClient implements ElectronAPI {
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-    this.initEventSource();
+    // SSE is initialized lazily to avoid failing in test environments
+    // where EventSource is not available
   }
 
   // ---------------------------------------------------------------------------
@@ -121,6 +146,8 @@ export class HttpAPIClient implements ElectronAPI {
   // ---------------------------------------------------------------------------
 
   private initEventSource(): void {
+    if (this.eventSource) return;
+    if (typeof EventSource === 'undefined') return;
     this.eventSource = new EventSource(`${this.baseUrl}/api/events`);
     this.eventSource.onopen = () => console.log('[HttpAPIClient] SSE connected');
     this.eventSource.onerror = () => {
@@ -130,7 +157,9 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callbacks have varying signatures
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callbacks have varying signatures
   private addEventListener(channel: string, callback: (...args: any[]) => void): () => void {
+    this.initEventSource();
     if (!this.eventListeners.has(channel)) {
       this.eventListeners.set(channel, new Set());
       // Register SSE listener for this channel once
@@ -194,8 +223,24 @@ export class HttpAPIClient implements ElectronAPI {
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
+        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      return this.parseJson<T>(res);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async postLong<T>(path: string, body?: unknown, timeoutMs = 60_000): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
       return this.parseJson<T>(res);
@@ -531,9 +576,12 @@ export class HttpAPIClient implements ElectronAPI {
       return this.config.get();
     },
     getTriggers: async (): Promise<NotificationTrigger[]> => {
-      const result = await this.get<{ success: boolean; data?: NotificationTrigger[] }>(
-        '/api/config/triggers'
-      );
+      const result = await this.get<{
+        success: boolean;
+        data?: NotificationTrigger[];
+        error?: string;
+      }>('/api/config/triggers');
+      if (!result.success) throw new Error(result.error ?? 'Failed to get triggers');
       return result.data ?? [];
     },
     testTrigger: async (trigger: NotificationTrigger): Promise<TriggerTestResult> => {
@@ -546,8 +594,9 @@ export class HttpAPIClient implements ElectronAPI {
       return result.data!;
     },
     selectFolders: async (): Promise<string[]> => {
-      console.warn('[HttpAPIClient] selectFolders is not available in browser mode');
-      return [];
+      // In browser mode, return root path as default selection
+      // The UI will use the browse-dirs endpoint for interactive selection
+      return ['/data/project'];
     },
     selectClaudeRootFolder: async (): Promise<ClaudeRootFolderSelection | null> => {
       console.warn('[HttpAPIClient] selectClaudeRootFolder is not available in browser mode');
@@ -585,6 +634,24 @@ export class HttpAPIClient implements ElectronAPI {
       this.post('/api/config/add-custom-project-path', { projectPath }),
     removeCustomProjectPath: (projectPath: string): Promise<void> =>
       this.post('/api/config/remove-custom-project-path', { projectPath }),
+    getClaudeEnv: async (): Promise<Record<string, string>> => {
+      const result = await this.get<{
+        success: boolean;
+        data?: Record<string, string>;
+        error?: string;
+      }>('/api/config/claude-env');
+      if (!result.success) throw new Error(result.error ?? 'Failed to get claude env');
+      return result.data ?? {};
+    },
+    updateClaudeEnv: async (env: Record<string, string>): Promise<Record<string, string>> => {
+      const result = await this.post<{
+        success: boolean;
+        data?: Record<string, string>;
+        error?: string;
+      }>('/api/config/claude-env', env);
+      if (!result.success) throw new Error(result.error ?? 'Failed to update claude env');
+      return result.data ?? env;
+    },
   };
 
   // ---------------------------------------------------------------------------
@@ -675,12 +742,34 @@ export class HttpAPIClient implements ElectronAPI {
   // ---------------------------------------------------------------------------
 
   ssh: SshAPI = {
-    connect: (config: SshConnectionConfig): Promise<SshConnectionStatus> =>
-      this.post('/api/ssh/connect', config),
-    disconnect: (): Promise<SshConnectionStatus> => this.post('/api/ssh/disconnect'),
+    connect: async (config: SshConnectionConfig): Promise<SshConnectionStatus> => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SshConnectionStatus;
+        error?: string;
+      }>('/api/ssh/connect', config);
+      if (!result.success) throw new Error(result.error ?? 'SSH connect failed');
+      return result.data!;
+    },
+    disconnect: async (): Promise<SshConnectionStatus> => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SshConnectionStatus;
+        error?: string;
+      }>('/api/ssh/disconnect');
+      if (!result.success) throw new Error(result.error ?? 'SSH disconnect failed');
+      return result.data!;
+    },
     getState: (): Promise<SshConnectionStatus> => this.get('/api/ssh/state'),
-    test: (config: SshConnectionConfig): Promise<{ success: boolean; error?: string }> =>
-      this.post('/api/ssh/test', config),
+    test: async (config: SshConnectionConfig): Promise<{ success: boolean; error?: string }> => {
+      const result = await this.post<{
+        success: boolean;
+        data?: { success: boolean; error?: string };
+        error?: string;
+      }>('/api/ssh/test', config);
+      if (!result.success) return { success: false, error: result.error };
+      return result.data ?? { success: true };
+    },
     listMachines: async () => {
       const result = await this.get<{ success: boolean; data?: MachineProfile[] }>(
         '/api/ssh/machines'
@@ -809,9 +898,12 @@ export class HttpAPIClient implements ElectronAPI {
     permanentlyDeleteTeam: async (teamName: string): Promise<void> => {
       await this.del(`/api/teams/${encodeURIComponent(teamName)}/permanent`);
     },
-    getSavedRequest: async (_teamName: string): Promise<TeamCreateRequest | null> => {
-      console.warn('[HttpAPIClient] getSavedRequest is not available in browser mode');
-      return null;
+    getSavedRequest: async (teamName: string): Promise<TeamCreateRequest | null> => {
+      try {
+        return await this.get(`/api/teams/${encodeURIComponent(teamName)}/saved-request`);
+      } catch {
+        return null;
+      }
     },
     deleteDraft: async (teamName: string): Promise<void> => {
       await this.del(`/api/teams/${encodeURIComponent(teamName)}/draft`);
@@ -842,13 +934,13 @@ export class HttpAPIClient implements ElectronAPI {
       return this.post<TeamTemplateSourcesSnapshot>('/api/teams/templates/save', sources);
     },
     refreshTemplateSources: async (): Promise<TeamTemplateSourcesSnapshot> => {
-      return this.post<TeamTemplateSourcesSnapshot>('/api/teams/templates/refresh');
+      return this.postLong<TeamTemplateSourcesSnapshot>('/api/teams/templates/refresh');
     },
     createTeam: async (request: TeamCreateRequest): Promise<TeamCreateResponse> => {
-      return this.post<TeamCreateResponse>('/api/teams/create', request);
+      return this.postLong<TeamCreateResponse>('/api/teams/create', request, 120_000);
     },
     launchTeam: async (request: TeamLaunchRequest): Promise<TeamLaunchResponse> => {
-      return this.post<TeamLaunchResponse>(
+      return this.postLong<TeamLaunchResponse>(
         `/api/teams/${encodeURIComponent(request.teamName)}/launch`,
         request
       );
@@ -955,15 +1047,22 @@ export class HttpAPIClient implements ElectronAPI {
     processSend: async (teamName: string, message: string): Promise<void> => {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/process-send`, { message });
     },
-    processAlive: async (_teamName: string): Promise<boolean> => {
+    processAlive: async (teamName: string): Promise<boolean> => {
       try {
-        const alive = await this.get<string[]>('/api/teams/runtime/alive');
-        return alive.includes(_teamName);
+        const states = await this.get<
+          { teamName: string; isAlive: boolean; runId: string | null }[]
+        >('/api/teams/runtime/alive');
+        return states.some((s) => s.teamName === teamName && s.isAlive);
       } catch {
         return false;
       }
     },
-    aliveList: async (): Promise<string[]> => this.get<string[]>('/api/teams/runtime/alive'),
+    aliveList: async (): Promise<string[]> => {
+      const states = await this.get<{ teamName: string; isAlive: boolean; runId: string | null }[]>(
+        '/api/teams/runtime/alive'
+      );
+      return states.filter((s) => s.isAlive).map((s) => s.teamName);
+    },
     stop: async (teamName: string): Promise<void> => {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/stop`);
     },
@@ -1089,7 +1188,10 @@ export class HttpAPIClient implements ElectronAPI {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/members`, request);
     },
     replaceMembers: async (teamName: string, request: ReplaceMembersRequest): Promise<void> => {
-      await this.put(`/api/teams/${encodeURIComponent(teamName)}/members`, request);
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/members`, {
+        action: 'replace',
+        ...request,
+      });
     },
     removeMember: async (teamName: string, memberName: string): Promise<void> => {
       await this.del(
@@ -1246,9 +1348,11 @@ export class HttpAPIClient implements ElectronAPI {
       );
     },
     onProvisioningProgress: (
-      _callback: (event: unknown, data: TeamProvisioningProgress) => void
+      callback: (event: unknown, data: TeamProvisioningProgress) => void
     ): (() => void) => {
-      return () => {};
+      return this.addEventListener('provisioning-progress', (data: unknown) => {
+        callback(null, data as TeamProvisioningProgress);
+      });
     },
     respondToToolApproval: async (): Promise<void> => {
       throw new Error('Tool approval not available in browser mode');
@@ -1267,19 +1371,27 @@ export class HttpAPIClient implements ElectronAPI {
     },
   };
 
-  // Cross-team communication API stubs
+  // Cross-team communication API
   crossTeam: CrossTeamAPI = {
-    send: async () => {
-      throw new Error('Cross-team communication is not available in browser mode');
+    send: (request) => this.post<CrossTeamSendResult>('/api/cross-team/send', request),
+    listTargets: (excludeTeam?: string) => {
+      const params = new URLSearchParams();
+      if (excludeTeam) params.set('excludeTeam', excludeTeam);
+      const qs = params.toString();
+      return this.get<
+        {
+          teamName: string;
+          displayName: string;
+          description?: string;
+          color?: string;
+          leadName?: string;
+          leadColor?: string;
+          isOnline?: boolean;
+        }[]
+      >(qs ? `/api/cross-team/targets?${qs}` : '/api/cross-team/targets');
     },
-    listTargets: async () => {
-      console.warn('[HttpAPIClient] crossTeam.listTargets is not available in browser mode');
-      return [];
-    },
-    getOutbox: async () => {
-      console.warn('[HttpAPIClient] crossTeam.getOutbox is not available in browser mode');
-      return [];
-    },
+    getOutbox: (teamName: string) =>
+      this.get<CrossTeamMessage[]>(`/api/cross-team/outbox/${encodeURIComponent(teamName)}`),
   };
 
   // Review API
@@ -1405,12 +1517,26 @@ export class HttpAPIClient implements ElectronAPI {
           path: string | null;
           authenticated: boolean;
         }>('/api/cli/status');
+
+        // Fetch providers in parallel for Web mode
+        const providerIds = ['anthropic', 'codex', 'gemini', 'opencode'] as const;
+        const providerResults = await Promise.all(
+          providerIds.map(async (providerId): Promise<CliProviderStatus | null> => {
+            try {
+              return await this.get<CliProviderStatus>(`/api/cli/provider/${providerId}/status`);
+            } catch {
+              return null;
+            }
+          })
+        );
+        const providers = providerResults.filter((p): p is NonNullable<typeof p> => p !== null);
+
         return {
-          flavor: 'claude',
+          flavor: 'agent_teams_orchestrator',
           displayName: 'Agent CLI',
-          supportsSelfUpdate: true,
-          showVersionDetails: true,
-          showBinaryPath: true,
+          supportsSelfUpdate: false,
+          showVersionDetails: false,
+          showBinaryPath: false,
           installed: result.installed,
           installedVersion: result.version,
           binaryPath: result.path,
@@ -1418,17 +1544,17 @@ export class HttpAPIClient implements ElectronAPI {
           latestVersion: null,
           updateAvailable: false,
           authLoggedIn: result.authenticated,
-          authStatusChecking: false,
+          authStatusChecking: true,
           authMethod: null,
-          providers: [],
+          providers,
         };
       } catch {
         return {
-          flavor: 'claude',
+          flavor: 'agent_teams_orchestrator',
           displayName: 'Agent CLI',
-          supportsSelfUpdate: true,
-          showVersionDetails: true,
-          showBinaryPath: true,
+          supportsSelfUpdate: false,
+          showVersionDetails: false,
+          showBinaryPath: false,
           installed: false,
           installedVersion: null,
           binaryPath: null,
@@ -1442,12 +1568,24 @@ export class HttpAPIClient implements ElectronAPI {
         };
       }
     },
-    getProviderStatus: async (): Promise<null> => null,
+    getProviderStatus: async (providerId: string): Promise<CliProviderStatus | null> => {
+      try {
+        return await this.get(`/api/cli/provider/${encodeURIComponent(providerId)}/status`);
+      } catch {
+        return null;
+      }
+    },
     verifyProviderModels: async (): Promise<null> => null,
     install: async (): Promise<void> => {
       console.warn('[HttpAPIClient] CLI installer not available in browser mode');
     },
-    invalidateStatus: async (): Promise<void> => {},
+    invalidateStatus: async (): Promise<void> => {
+      try {
+        await this.post('/api/cli/invalidate-status');
+      } catch {
+        /* ignore */
+      }
+    },
     onProgress: (): (() => void) => {
       return () => {};
     },
@@ -1536,6 +1674,265 @@ export class HttpAPIClient implements ElectronAPI {
       },
     }),
   };
+  // ---------------------------------------------------------------------------
+  // Extensions (plugins, MCP registry, skills — HTTP API)
+  // ---------------------------------------------------------------------------
+
+  plugins = {
+    getAll: async (projectPath?: string, forceRefresh?: boolean) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      if (forceRefresh) params.set('forceRefresh', 'true');
+      const qs = params.toString();
+      const result = await this.get<{ success: boolean; data?: EnrichedPlugin[]; error?: string }>(
+        `/api/extensions/plugins${qs ? `?${qs}` : ''}`
+      );
+      if (!result.success) throw new Error(result.error ?? 'Failed to get plugins');
+      return result.data ?? [];
+    },
+    getReadme: async (pluginId: string) => {
+      const result = await this.get<{ success: boolean; data?: string | null; error?: string }>(
+        `/api/extensions/plugins/${encodeURIComponent(pluginId)}/readme`
+      );
+      if (!result.success) throw new Error(result.error ?? 'Failed to get readme');
+      return result.data ?? null;
+    },
+    install: async (request: PluginInstallRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: OperationResult;
+        error?: string;
+      }>('/api/extensions/plugins/install', request);
+      if (!result.success) return { state: 'error' as const, error: result.error };
+      return result.data!;
+    },
+    uninstall: async (pluginId: string, scope?: string, projectPath?: string) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: OperationResult;
+        error?: string;
+      }>('/api/extensions/plugins/uninstall', { pluginId, scope, projectPath });
+      if (!result.success) return { state: 'error' as const, error: result.error };
+      return result.data!;
+    },
+  };
+
+  mcpRegistry = {
+    search: async (query: string, limit?: number) => {
+      const params = new URLSearchParams({ q: query });
+      if (limit) params.set('limit', String(limit));
+      const result = await this.get<{
+        success: boolean;
+        data?: McpSearchResult;
+        error?: string;
+      }>(`/api/extensions/mcp/search?${params}`);
+      if (!result.success) {
+        return { servers: [], total: 0, warnings: [result.error ?? 'Search failed'] };
+      }
+      return result.data!;
+    },
+    browse: async (cursor?: string, limit?: number) => {
+      const params = new URLSearchParams();
+      if (cursor) params.set('cursor', cursor);
+      if (limit) params.set('limit', String(limit));
+      const qs = params.toString();
+      const result = await this.get<{
+        success: boolean;
+        data?: { servers: McpCatalogItem[]; nextCursor?: string };
+        error?: string;
+      }>(`/api/extensions/mcp/browse${qs ? `?${qs}` : ''}`);
+      if (!result.success) return { servers: [] };
+      return result.data!;
+    },
+    getById: async (registryId: string) => {
+      const result = await this.get<{
+        success: boolean;
+        data?: McpCatalogItem | null;
+        error?: string;
+      }>(`/api/extensions/mcp/${encodeURIComponent(registryId)}`);
+      if (!result.success) return null;
+      return result.data ?? null;
+    },
+    getInstalled: async (projectPath?: string) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      const qs = params.toString();
+      const result = await this.get<{
+        success: boolean;
+        data?: InstalledMcpEntry[];
+        error?: string;
+      }>(`/api/extensions/mcp/installed${qs ? `?${qs}` : ''}`);
+      if (!result.success) return [];
+      return result.data ?? [];
+    },
+    diagnose: async (projectPath?: string) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      const qs = params.toString();
+      const result = await this.get<{
+        success: boolean;
+        data?: McpServerDiagnostic[];
+        error?: string;
+      }>(`/api/extensions/mcp/diagnose${qs ? `?${qs}` : ''}`);
+      if (!result.success) return [];
+      return result.data ?? [];
+    },
+    install: async (request: McpInstallRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: OperationResult;
+        error?: string;
+      }>('/api/extensions/mcp/install', request);
+      if (!result.success) return { state: 'error' as const, error: result.error };
+      return result.data!;
+    },
+    installCustom: async (request: McpCustomInstallRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: OperationResult;
+        error?: string;
+      }>('/api/extensions/mcp/install-custom', request);
+      if (!result.success) return { state: 'error' as const, error: result.error };
+      return result.data!;
+    },
+    uninstall: async (name: string, scope?: string, projectPath?: string) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: OperationResult;
+        error?: string;
+      }>('/api/extensions/mcp/uninstall', { name, scope, projectPath });
+      if (!result.success) return { state: 'error' as const, error: result.error };
+      return result.data!;
+    },
+    githubStars: async (repositoryUrls: string[]) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: Record<string, number>;
+        error?: string;
+      }>('/api/extensions/mcp/github-stars', { repositoryUrls });
+      if (!result.success) return {};
+      return result.data ?? {};
+    },
+  };
+
+  skills = {
+    list: async (projectPath?: string) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      const qs = params.toString();
+      const result = await this.get<{
+        success: boolean;
+        data?: SkillCatalogItem[];
+        error?: string;
+      }>(`/api/extensions/skills${qs ? `?${qs}` : ''}`);
+      if (!result.success) return [];
+      return result.data ?? [];
+    },
+    getDetail: async (skillId: string, projectPath?: string) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      const qs = params.toString();
+      const result = await this.get<{
+        success: boolean;
+        data?: SkillDetail | null;
+        error?: string;
+      }>(`/api/extensions/skills/${encodeURIComponent(skillId)}${qs ? `?${qs}` : ''}`);
+      if (!result.success) return null;
+      return result.data ?? null;
+    },
+    previewUpsert: async (request: SkillUpsertRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SkillReviewPreview;
+        error?: string;
+      }>('/api/extensions/skills/preview-upsert', request);
+      if (!result.success) throw new Error(result.error ?? 'Preview failed');
+      return result.data!;
+    },
+    applyUpsert: async (request: SkillUpsertRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SkillDetail | null;
+        error?: string;
+      }>('/api/extensions/skills/apply-upsert', request);
+      if (!result.success) throw new Error(result.error ?? 'Apply failed');
+      return result.data ?? null;
+    },
+    previewImport: async (request: SkillImportRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SkillReviewPreview;
+        error?: string;
+      }>('/api/extensions/skills/preview-import', request);
+      if (!result.success) throw new Error(result.error ?? 'Preview import failed');
+      return result.data!;
+    },
+    applyImport: async (request: SkillImportRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: SkillDetail | null;
+        error?: string;
+      }>('/api/extensions/skills/apply-import', request);
+      if (!result.success) throw new Error(result.error ?? 'Apply import failed');
+      return result.data ?? null;
+    },
+    deleteSkill: async (request: SkillDeleteRequest) => {
+      const result = await this.post<{ success: boolean; error?: string }>(
+        '/api/extensions/skills/delete',
+        request
+      );
+      if (!result.success) throw new Error(result.error ?? 'Delete failed');
+    },
+    listSources: async () => {
+      const result = await this.get<{
+        success: boolean;
+        data?: SkillSourcesSnapshot;
+        error?: string;
+      }>('/api/extensions/skills/sources');
+      if (!result.success) return { sources: [] };
+      return result.data ?? { sources: [] };
+    },
+    saveSources: async (sources: SkillSource[]) => {
+      const result = await this.postLong<{
+        success: boolean;
+        data?: SkillSourcesSnapshot;
+        error?: string;
+      }>('/api/extensions/skills/sources/save', sources);
+      if (!result.success) throw new Error(result.error ?? 'Save failed');
+      return result.data ?? { sources: [] };
+    },
+    refreshSources: async () => {
+      const result = await this.postLong<{
+        success: boolean;
+        data?: SkillSourcesSnapshot;
+        error?: string;
+      }>('/api/extensions/skills/sources/refresh');
+      if (!result.success) throw new Error(result.error ?? 'Refresh failed');
+      return result.data ?? { sources: [] };
+    },
+    startWatching: async (projectPath?: string) => {
+      const params = new URLSearchParams();
+      if (projectPath) params.set('projectPath', projectPath);
+      const qs = params.toString();
+      const result = await this.post<{ success: boolean; data?: string; error?: string }>(
+        `/api/extensions/skills/watching/start${qs ? `?${qs}` : ''}`
+      );
+      if (!result.success) return '';
+      return result.data ?? '';
+    },
+    stopWatching: async (watchId: string) => {
+      const result = await this.post<{ success: boolean; error?: string }>(
+        '/api/extensions/skills/watching/stop',
+        { watchId }
+      );
+      if (!result.success) throw new Error(result.error ?? 'Stop watching failed');
+    },
+    onChanged: (callback: (event: SkillWatcherEvent) => void): (() => void) =>
+      this.addEventListener('skills:changed', (data: unknown) =>
+        callback(data as SkillWatcherEvent)
+      ),
+  };
+
   // ---------------------------------------------------------------------------
   // Terminal (not available in browser mode)
   // ---------------------------------------------------------------------------
@@ -1660,49 +2057,41 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   schedules: ElectronAPI['schedules'] = {
-    list: async () => {
-      console.warn('Schedules not available in browser mode');
-      return [] as Schedule[];
-    },
-    get: async (_id: string): Promise<Schedule | null> => {
-      console.warn('Schedules not available in browser mode');
-      return null;
-    },
-    create: async (_input: CreateScheduleInput): Promise<Schedule> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    update: async (_id: string, _patch: UpdateSchedulePatch): Promise<Schedule> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    delete: async (_id: string): Promise<void> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    pause: async (_id: string): Promise<void> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    resume: async (_id: string): Promise<void> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    triggerNow: async (_id: string): Promise<ScheduleRun> => {
-      throw new Error('Schedules not available in browser mode');
-    },
-    getRuns: async (
-      _scheduleId: string,
-      _opts?: { limit?: number; offset?: number }
+    list: (): Promise<Schedule[]> => this.get<Schedule[]>('/api/schedules'),
+    get: (id: string): Promise<Schedule | null> =>
+      this.get<Schedule | null>(`/api/schedules/${encodeURIComponent(id)}`),
+    create: (input: CreateScheduleInput): Promise<Schedule> =>
+      this.post<Schedule>('/api/schedules', input),
+    update: (id: string, patch: UpdateSchedulePatch): Promise<Schedule> =>
+      this.patch<Schedule>(`/api/schedules/${encodeURIComponent(id)}`, patch),
+    delete: (id: string): Promise<void> => this.del(`/api/schedules/${encodeURIComponent(id)}`),
+    pause: (id: string): Promise<void> =>
+      this.post(`/api/schedules/${encodeURIComponent(id)}/pause`),
+    resume: (id: string): Promise<void> =>
+      this.post(`/api/schedules/${encodeURIComponent(id)}/resume`),
+    triggerNow: (id: string): Promise<ScheduleRun> =>
+      this.post<ScheduleRun>(`/api/schedules/${encodeURIComponent(id)}/trigger`),
+    getRuns: (
+      scheduleId: string,
+      opts?: { limit?: number; offset?: number }
     ): Promise<ScheduleRun[]> => {
-      console.warn('Schedules not available in browser mode');
-      return [] as ScheduleRun[];
+      const params = new URLSearchParams();
+      if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.offset) params.set('offset', String(opts.offset));
+      const qs = params.toString();
+      const base = `/api/schedules/${encodeURIComponent(scheduleId)}/runs`;
+      return this.get<ScheduleRun[]>(qs ? `${base}?${qs}` : base);
     },
-    getRunLogs: async (
-      _scheduleId: string,
-      _runId: string
-    ): Promise<{ stdout: string; stderr: string }> => {
-      console.warn('Schedules not available in browser mode');
-      return { stdout: '', stderr: '' };
-    },
-    onScheduleChange: (): (() => void) => {
-      return () => {};
-    },
+    getRunLogs: (scheduleId: string, runId: string): Promise<{ stdout: string; stderr: string }> =>
+      this.get<{ stdout: string; stderr: string }>(
+        `/api/schedules/${encodeURIComponent(scheduleId)}/runs/${encodeURIComponent(runId)}/logs`
+      ),
+    onScheduleChange: (
+      callback: (event: unknown, data: ScheduleChangeEvent) => void
+    ): (() => void) =>
+      this.addEventListener('schedule:change', (data: unknown) =>
+        callback(null, data as ScheduleChangeEvent)
+      ),
   };
 
   getPathForFile = (_file: File): string => '';

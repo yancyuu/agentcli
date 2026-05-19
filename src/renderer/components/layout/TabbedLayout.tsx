@@ -20,23 +20,16 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { isElectronMode } from '@renderer/api';
-import { getTrafficLightPaddingForZoom } from '@renderer/constants/layout';
-import { useFullScreen } from '@renderer/hooks/useFullScreen';
 import { useKeyboardShortcuts } from '@renderer/hooks/useKeyboardShortcuts';
-import { useZoomFactor } from '@renderer/hooks/useZoomFactor';
 import { useStore } from '@renderer/store';
 import { useShallow } from 'zustand/react/shallow';
 
 import { CliInstallWarningBanner } from '../common/CliInstallWarningBanner';
 import { GlobalProviderStatusHeader } from '../common/GlobalProviderStatusHeader';
-import { UpdateBanner } from '../common/UpdateBanner';
-import { UpdateDialog } from '../common/UpdateDialog';
 import { WorkspaceIndicator } from '../common/WorkspaceIndicator';
 import { CommandPalette } from '../search/CommandPalette';
 import { GlobalTaskDetailDialog } from '../team/dialogs/GlobalTaskDetailDialog';
 
-import { CustomTitleBar } from './CustomTitleBar';
 import { PaneContainer } from './PaneContainer';
 import { Sidebar } from './Sidebar';
 import { DragOverlayTab } from './SortableTab';
@@ -47,13 +40,6 @@ import type { Tab } from '@renderer/types/tabs';
 
 export const TabbedLayout = (): React.JSX.Element => {
   useKeyboardShortcuts();
-  const zoomFactor = useZoomFactor();
-  const isFullScreen = useFullScreen();
-  const trafficLightPadding = !isElectronMode()
-    ? 0
-    : isFullScreen
-      ? 8
-      : getTrafficLightPaddingForZoom(zoomFactor);
 
   // --- DnD state (lifted from PaneContainer) ---
   const panes = useStore(useShallow((s) => s.paneLayout.panes));
@@ -148,14 +134,7 @@ export const TabbedLayout = (): React.JSX.Element => {
   );
 
   return (
-    <div
-      className="flex h-screen flex-col bg-claude-dark-bg text-claude-dark-text"
-      style={
-        { '--macos-traffic-light-padding-left': `${trafficLightPadding}px` } as React.CSSProperties
-      }
-    >
-      <CustomTitleBar />
-      <UpdateBanner />
+    <div className="flex h-screen flex-col bg-claude-dark-bg text-claude-dark-text">
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
@@ -187,7 +166,6 @@ export const TabbedLayout = (): React.JSX.Element => {
         </DragOverlay>
       </DndContext>
       <GlobalTaskDetailDialog />
-      <UpdateDialog />
       <WorkspaceIndicator />
     </div>
   );

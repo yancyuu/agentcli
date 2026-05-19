@@ -4,7 +4,6 @@ import {
   mergeCodexCliStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
-import { isElectronMode } from '@renderer/api';
 import { formatProviderStatusText } from '@renderer/components/runtime/providerConnectionUi';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
@@ -82,7 +81,6 @@ function areProviderIdListsEqual(nextIds: CliProviderId[], prevIds: CliProviderI
 }
 
 export const GlobalProviderStatusHeader = (): React.JSX.Element | null => {
-  const isElectron = useMemo(() => isElectronMode(), []);
   const {
     cliStatus,
     cliStatusLoading,
@@ -118,7 +116,6 @@ export const GlobalProviderStatusHeader = (): React.JSX.Element | null => {
 
   const codexAccount = useCodexAccountSnapshot({
     enabled:
-      isElectron &&
       multimodelEnabled &&
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
@@ -225,7 +222,6 @@ export const GlobalProviderStatusHeader = (): React.JSX.Element | null => {
   }, [cycleProviderIds, errorProviderIds, loadingProviderIds, providerStateMap]);
 
   if (
-    !isElectron ||
     isDashboardFocused ||
     !multimodelEnabled ||
     effectiveCliStatus?.flavor !== 'agent_teams_orchestrator' ||

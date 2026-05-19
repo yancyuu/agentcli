@@ -543,6 +543,67 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
     }
   });
 
+  // Get saved launch request (runtime settings from last launch)
+  app.get<{ Params: { teamName: string } }>(
+    '/api/teams/:teamName/saved-request',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const tn = validatedTeamName.value!;
+        const { TeamMetaStore } = await import('../services/team/TeamMetaStore');
+        const { TeamMembersMetaStore } = await import('../services/team/TeamMembersMetaStore');
+        const teamMetaStore = new TeamMetaStore();
+        const meta = await teamMetaStore.getMeta(tn);
+        if (!meta) {
+          return reply.send(null);
+        }
+        const membersStore = new TeamMembersMetaStore();
+        const membersMeta = await membersStore.getMeta(tn);
+        const members = membersMeta?.members ?? [];
+        const resolvedProviderId = meta.providerId ?? 'anthropic';
+        return reply.send({
+          teamName: tn,
+          displayName: meta.displayName,
+          description: meta.description,
+          color: meta.color,
+          cwd: meta.cwd,
+          prompt: meta.prompt,
+          providerId: resolvedProviderId,
+          providerBackendId: migrateProviderBackendId(
+            resolvedProviderId,
+            meta.providerBackendId ?? membersMeta?.providerBackendId
+          ),
+          model: meta.model,
+          effort: meta.effort,
+          fastMode: meta.fastMode,
+          skipPermissions: meta.skipPermissions,
+          worktree: meta.worktree,
+          extraCliArgs: meta.extraCliArgs,
+          limitContext: meta.limitContext,
+          members: members.map((m) => ({
+            name: m.name,
+            role: m.role,
+            workflow: m.workflow,
+            providerId: m.providerId,
+            model: m.model,
+            effort: m.effort,
+          })),
+        });
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in GET /api/teams/${request.params.teamName}/saved-request:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
+
   // Get messages page
   app.get<{ Params: { teamName: string }; Querystring: { cursor?: string; limit?: string } }>(
     '/api/teams/:teamName/messages',
@@ -1203,7 +1264,14 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
         if (!validatedTeamName.valid) {
           return reply.status(400).send({ error: validatedTeamName.error });
         }
-        await getTeamDataService(services).addMember(validatedTeamName.value!, request.body as any);
+        const body = request.body as Record<string, unknown>;
+        if (body.action === 'replace') {
+          await getTeamDataService(services).replaceMembers(validatedTeamName.value!, {
+            members: body.members as any,
+          });
+        } else {
+          await getTeamDataService(services).addMember(validatedTeamName.value!, body as any);
+        }
         return reply.send({ ok: true });
       } catch (error) {
         if (shouldLogError(error)) {

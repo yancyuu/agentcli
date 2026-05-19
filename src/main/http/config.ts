@@ -25,6 +25,7 @@
 
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
+import { getClaudeBasePath } from '@main/utils/pathDecoder';
 
 import { validateConfigUpdatePayload } from '../ipc/configValidation';
 import { validateTriggerId } from '../ipc/guards';
@@ -518,5 +519,51 @@ export function registerConfigRoutes(app: FastifyInstance): void {
   // Open in editor - no-op in browser mode
   app.post('/api/config/open-in-editor', async (): Promise<ConfigResult> => {
     return { success: true };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Claude settings.json env management
+  // ---------------------------------------------------------------------------
+
+  // GET /api/config/claude-env — read env from ~/.claude/settings.json
+  app.get('/api/config/claude-env', async () => {
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const settingsPath = path.join(getClaudeBasePath(), 'settings.json');
+      const raw = await fs.readFile(settingsPath, 'utf-8').catch(() => '{}');
+      const settings = JSON.parse(raw);
+      return { success: true, data: settings.env ?? {} };
+    } catch (error) {
+      logger.error('Error in GET /api/config/claude-env:', error);
+      return { success: false, error: getErrorMessage(error) };
+    }
+  });
+
+  // POST /api/config/claude-env — write env to ~/.claude/settings.json
+  app.post<{ Body: Record<string, string> }>('/api/config/claude-env', async (request) => {
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const newEnv = request.body;
+      if (!newEnv || typeof newEnv !== 'object') {
+        return { success: false, error: 'Body must be an object' };
+      }
+      const settingsPath = path.join(getClaudeBasePath(), 'settings.json');
+      let settings: Record<string, unknown> = {};
+      try {
+        const raw = await fs.readFile(settingsPath, 'utf-8');
+        settings = JSON.parse(raw);
+      } catch {
+        // File doesn't exist yet — start fresh
+      }
+      settings.env = newEnv;
+      await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+      return { success: true, data: newEnv };
+    } catch (error) {
+      logger.error('Error in POST /api/config/claude-env:', error);
+      return { success: false, error: getErrorMessage(error) };
+    }
   });
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   formatCodexCreditsValue,
@@ -41,7 +41,9 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import { useStore } from '@renderer/store';
 import { getProviderScopedTeamModelLabel } from '@renderer/utils/teamModelCatalog';
-import { AlertTriangle, Key, Link2, Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, Eye, EyeOff, Key, Link2, Loader2, Save, Trash2 } from 'lucide-react';
+
+import { api } from '@renderer/api';
 
 import {
   formatProviderAuthMethodLabelForProvider,
@@ -698,6 +700,14 @@ export const ProviderRuntimeSettingsDialog = ({
     useState<PendingConnectionAction>(null);
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
 
+  // Claude env vars state
+  const [claudeEnv, setClaudeEnv] = useState<Record<string, string>>({});
+  const [claudeEnvOriginal, setClaudeEnvOriginal] = useState<Record<string, string>>({});
+  const [claudeEnvLoaded, setClaudeEnvLoaded] = useState(false);
+  const [claudeEnvSaving, setClaudeEnvSaving] = useState(false);
+  const [claudeEnvSaved, setClaudeEnvSaved] = useState(false);
+  const [claudeEnvVisibleKeys, setClaudeEnvVisibleKeys] = useState<Set<string>>(new Set());
+
   const apiKeys = useStore((s) => s.apiKeys);
   const apiKeysLoading = useStore((s) => s.apiKeysLoading);
   const apiKeysError = useStore((s) => s.apiKeysError);
@@ -709,10 +719,21 @@ export const ProviderRuntimeSettingsDialog = ({
   const deleteApiKey = useStore((s) => s.deleteApiKey);
   const updateConfig = useStore((s) => s.updateConfig);
   const appConfig = useStore((s) => s.appConfig);
+  const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
+  const fetchCliStatus = useStore((s) => s.fetchCliStatus);
   const codexAccount = useCodexAccountSnapshot({
     enabled: open && selectedProviderId === 'codex',
     includeRateLimits: true,
   });
+
+  const refreshCliStatus = useCallback(() => {
+    const multimodelEnabled = appConfig?.general?.multimodelEnabled ?? false;
+    if (multimodelEnabled) {
+      void bootstrapCliStatus({ multimodelEnabled: true });
+    } else {
+      void fetchCliStatus();
+    }
+  }, [appConfig?.general?.multimodelEnabled, bootstrapCliStatus, fetchCliStatus]);
 
   useEffect(() => {
     if (!open) {
@@ -750,6 +771,22 @@ export const ProviderRuntimeSettingsDialog = ({
       setConnectionError(codexAccount.error);
     }
   }, [codexAccount.error, selectedProviderId]);
+
+  // Load Claude env vars when Anthropic provider is selected
+  useEffect(() => {
+    if (selectedProviderId === 'anthropic' && !claudeEnvLoaded) {
+      void api.config
+        .getClaudeEnv()
+        .then((data) => {
+          setClaudeEnv(data);
+          setClaudeEnvOriginal(data);
+          setClaudeEnvLoaded(true);
+        })
+        .catch(() => {
+          setClaudeEnvLoaded(true);
+        });
+    }
+  }, [selectedProviderId, claudeEnvLoaded]);
 
   const statusSelectedProvider = useMemo(() => {
     return (
@@ -1068,6 +1105,7 @@ export const ProviderRuntimeSettingsDialog = ({
     setActiveApiKeyFormProviderId(null);
     setApiKeyValue('');
 
+    refreshCliStatus();
     try {
       await onRefreshProvider?.(selectedProvider.providerId);
     } catch {
@@ -1092,6 +1130,7 @@ export const ProviderRuntimeSettingsDialog = ({
     setActiveApiKeyFormProviderId(null);
     setApiKeyValue('');
 
+    refreshCliStatus();
     try {
       await onRefreshProvider?.(selectedProvider.providerId);
     } catch {
@@ -1131,6 +1170,7 @@ export const ProviderRuntimeSettingsDialog = ({
       }
 
       updateSucceeded = true;
+      refreshCliStatus();
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : '更新连接失败');
     } finally {
@@ -1213,6 +1253,7 @@ export const ProviderRuntimeSettingsDialog = ({
           fastModeDefault: enabled,
         },
       });
+      refreshCliStatus();
       await onRefreshProvider?.('anthropic');
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : '更新 Anthropic Fast mode 失败');
@@ -1982,169 +2023,171 @@ export const ProviderRuntimeSettingsDialog = ({
                     className="space-y-3 rounded-md border p-3"
                     style={{ borderColor: 'var(--color-border-subtle)' }}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div
-                            data-testid="provider-api-key-icon"
-                            className="flex size-8 shrink-0 items-center justify-center rounded-md border"
-                            style={{
-                              borderColor: 'var(--color-border-subtle)',
-                              backgroundColor: 'rgba(255,255,255,0.03)',
-                            }}
-                          >
-                            <Key
-                              className="size-3.5"
-                              style={{ color: 'var(--color-text-muted)' }}
-                            />
-                          </div>
-                          <div>
-                            <div
-                              className="text-sm font-medium"
-                              style={{ color: 'var(--color-text)' }}
-                            >
-                              {apiKeyConfig.title}
-                            </div>
-                            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                              {apiKeyConfig.description}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      {!showApiKeyForm ? (
-                        <Button size="sm" variant="outline" onClick={handleStartApiKeyEdit}>
-                          {selectedApiKey ? '替换密钥' : '设置 API 密钥'}
-                        </Button>
-                      ) : null}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span
-                        className="rounded-full px-2 py-0.5"
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="flex size-8 shrink-0 items-center justify-center rounded-md border"
                         style={{
-                          color:
-                            selectedProvider.connection?.apiKeyConfigured || selectedApiKey
-                              ? '#86efac'
-                              : 'var(--color-text-muted)',
-                          backgroundColor:
-                            selectedProvider.connection?.apiKeyConfigured || selectedApiKey
-                              ? 'rgba(74, 222, 128, 0.14)'
-                              : 'rgba(255, 255, 255, 0.05)',
+                          borderColor: 'var(--color-border-subtle)',
+                          backgroundColor: 'rgba(255,255,255,0.03)',
                         }}
                       >
-                        {selectedProvider.connection?.apiKeyConfigured || selectedApiKey
-                          ? '已配置'
-                          : '未配置'}
-                      </span>
-                      {selectedApiKey ? (
-                        <span style={{ color: 'var(--color-text-secondary)' }}>
-                          {selectedApiKey.maskedValue} · {selectedApiKey.scope}
-                        </span>
-                      ) : selectedProvider.connection?.apiKeySource === 'environment' ? (
-                        <span style={{ color: 'var(--color-text-secondary)' }}>
-                          {selectedProvider.connection.apiKeySourceLabel}
-                        </span>
-                      ) : null}
-                      {apiKeyStorageStatus && selectedApiKey ? (
-                        <span style={{ color: 'var(--color-text-muted)' }}>
-                          存储于 {apiKeyStorageStatus.backend}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {showApiKeyForm ? (
-                      <div
-                        className="space-y-3 rounded-md border p-3"
-                        style={{ borderColor: 'var(--color-border-subtle)' }}
-                      >
-                        <div className="space-y-1.5">
-                          <Label
-                            htmlFor={`${selectedProvider.providerId}-api-key`}
-                            className="text-xs"
-                          >
-                            {apiKeyConfig.name}
-                          </Label>
-                          <Input
-                            ref={apiKeyInputRef}
-                            id={`${selectedProvider.providerId}-api-key`}
-                            type="password"
-                            value={apiKeyValue}
-                            onChange={(e) => setApiKeyValue(e.target.value)}
-                            placeholder={apiKeyConfig.placeholder}
-                            className="h-9 text-sm"
-                            autoFocus
-                          />
+                        <Key className="size-3.5" style={{ color: 'var(--color-text-muted)' }} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                          环境变量
                         </div>
-
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">范围</Label>
-                          <Select
-                            value={apiKeyScope}
-                            onValueChange={(value) => setApiKeyScope(value as 'user' | 'project')}
-                          >
-                            <SelectTrigger className="h-9 text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="user">用户</SelectItem>
-                              <SelectItem value="project">项目</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {(apiKeyError || apiKeysError) && (
-                          <div
-                            className="rounded-md border px-3 py-2 text-xs"
-                            style={{
-                              borderColor: 'rgba(248, 113, 113, 0.25)',
-                              backgroundColor: 'rgba(248, 113, 113, 0.06)',
-                              color: '#fca5a5',
-                            }}
-                          >
-                            {apiKeyError ?? apiKeysError}
-                          </div>
-                        )}
-
-                        <div className="flex justify-between gap-2">
-                          {selectedApiKey ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => void handleDeleteApiKey()}
-                              disabled={apiKeySaving}
-                            >
-                              <Trash2 className="mr-1 size-3.5" />
-                              删除
-                            </Button>
-                          ) : (
-                            <span />
-                          )}
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleCancelApiKeyEdit}
-                            >
-                              取消
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => void handleSaveApiKey()}
-                              disabled={apiKeySaving || !apiKeyValue.trim()}
-                            >
-                              {apiKeySaving
-                                ? '保存中...'
-                                : selectedApiKey
-                                  ? '更新密钥'
-                                  : '保存密钥'}
-                            </Button>
-                          </div>
+                        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                          配置 Claude Code CLI 运行时环境变量（写入 ~/.claude/settings.json）
                         </div>
                       </div>
-                    ) : null}
+                    </div>
+
+                    {!claudeEnvLoaded ? (
+                      <div
+                        className="flex items-center gap-2 text-xs"
+                        style={{ color: 'var(--color-text-muted)' }}
+                      >
+                        <Loader2 className="size-3 animate-spin" /> 加载中...
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {(
+                          [
+                            {
+                              key: 'ANTHROPIC_AUTH_TOKEN',
+                              label: '认证令牌',
+                              desc: 'API 认证 token 或密钥',
+                            },
+                            {
+                              key: 'ANTHROPIC_BASE_URL',
+                              label: 'API 地址',
+                              desc: '自定义 API 端点 URL',
+                            },
+                            { key: 'API_TIMEOUT_MS', label: '超时时间', desc: '请求超时（毫秒）' },
+                            {
+                              key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+                              label: '禁用遥测',
+                              desc: '设为 1 关闭非必要网络请求',
+                            },
+                            {
+                              key: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+                              label: 'Haiku 模型',
+                              desc: '替代 haiku 模型名称',
+                            },
+                            {
+                              key: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+                              label: 'Sonnet 模型',
+                              desc: '替代 sonnet 模型名称',
+                            },
+                            {
+                              key: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+                              label: 'Opus 模型',
+                              desc: '替代 opus 模型名称',
+                            },
+                          ] as const
+                        ).map(({ key, label, desc }) => {
+                          const isSecret = key === 'ANTHROPIC_AUTH_TOKEN';
+                          const visible = claudeEnvVisibleKeys.has(key);
+                          return (
+                            <div key={key} className="space-y-1">
+                              <div className="flex items-baseline justify-between">
+                                <Label
+                                  className="text-xs"
+                                  style={{ color: 'var(--color-text-secondary)' }}
+                                >
+                                  {label}
+                                </Label>
+                                <span
+                                  className="text-[10px]"
+                                  style={{ color: 'var(--color-text-muted)' }}
+                                >
+                                  {key}
+                                </span>
+                              </div>
+                              <div
+                                className="text-[10px]"
+                                style={{ color: 'var(--color-text-muted)' }}
+                              >
+                                {desc}
+                              </div>
+                              <div className="flex gap-1">
+                                <Input
+                                  type={isSecret && !visible ? 'password' : 'text'}
+                                  value={claudeEnv[key] ?? ''}
+                                  onChange={(e) => {
+                                    setClaudeEnv((prev) => ({ ...prev, [key]: e.target.value }));
+                                    setClaudeEnvSaved(false);
+                                  }}
+                                  placeholder={key}
+                                  className="h-8 text-xs"
+                                />
+                                {isSecret && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="shrink-0 px-2"
+                                    onClick={() => {
+                                      setClaudeEnvVisibleKeys((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(key)) next.delete(key);
+                                        else next.add(key);
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {visible ? (
+                                      <EyeOff
+                                        className="size-3.5"
+                                        style={{ color: 'var(--color-text-muted)' }}
+                                      />
+                                    ) : (
+                                      <Eye
+                                        className="size-3.5"
+                                        style={{ color: 'var(--color-text-muted)' }}
+                                      />
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={
+                              claudeEnvSaving ||
+                              JSON.stringify(claudeEnv) === JSON.stringify(claudeEnvOriginal)
+                            }
+                            onClick={async () => {
+                              setClaudeEnvSaving(true);
+                              try {
+                                const result = await api.config.updateClaudeEnv(claudeEnv);
+                                setClaudeEnvOriginal(result);
+                                setClaudeEnvSaved(true);
+                                setTimeout(() => setClaudeEnvSaved(false), 2000);
+                              } catch {
+                                /* ignore */
+                              }
+                              setClaudeEnvSaving(false);
+                            }}
+                          >
+                            {claudeEnvSaving ? (
+                              <Loader2 className="mr-1 size-3.5 animate-spin" />
+                            ) : claudeEnvSaved ? (
+                              <span style={{ color: '#4ade80' }}>已保存</span>
+                            ) : (
+                              <Save className="mr-1 size-3.5" />
+                            )}
+                            {claudeEnvSaving ? '保存中...' : claudeEnvSaved ? '' : '保存'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
 

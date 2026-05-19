@@ -1,34 +1,27 @@
 /**
- * NotificationManager service - Manages native notifications and notification history.
+ * NotificationManager service - Manages notification history and SSE event emission.
  *
  * Responsibilities:
  * - Store notification history at ~/.claude/agent-teams-notifications.json (max 100 entries)
- * - Show native notifications using Electron's Notification API (cross-platform)
  * - Two adapters: addError() for error notifications, addTeamNotification() for team events
- * - Shared internal pipeline: storeNotification() for unconditional storage + IPC emission
+ * - Shared internal pipeline: storeNotification() for unconditional storage + event emission
  * - Two-level dedup: dedupeKey for storage dedup, toast throttle (5s) for native toasts
  * - Storage is unconditional — enabled/snoozed only affect native OS toasts
  * - Respect config.notifications.enabled and snoozedUntil for toasts
  * - Filter errors matching ignoredRegex patterns (error-specific)
  * - Filter errors from ignoredProjects (error-specific)
  * - Auto-prune notifications over 100 on startup
- * - Emit IPC events to renderer: notification:new, notification:updated
+ * - Emit events via EventEmitter: notification-new, notification-updated, notification-clicked
+ *   (standalone.ts subscribes to these and broadcasts via SSE)
  */
 
-import { getAppIconPath } from '@main/utils/appIcon';
 import { getHomeDir } from '@main/utils/pathDecoder';
-import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
-import { stripMarkdown } from '@main/utils/textFormatting';
-import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { createLogger } from '@shared/utils/logger';
-import { Notification as ElectronNotification } from 'electron';
 import { EventEmitter } from 'events';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 
 import { type DetectedError } from '../error/ErrorMessageBuilder';
-
-import type { BrowserWindow, NotificationConstructorOptions } from 'electron';
 
 const logger = createLogger('Service:NotificationManager');
 import {
@@ -105,22 +98,6 @@ const LEGACY_NOTIFICATION_PATHS = LEGACY_NOTIFICATION_FILENAMES.map((filename) =
 interface LegacyNotificationData {
   path: string;
   data: string;
-}
-
-type NotificationEventName = 'click' | 'close' | 'show' | 'failed';
-
-interface NotificationInstance {
-  on(event: NotificationEventName, listener: (...args: unknown[]) => void): void;
-  show(): void;
-}
-
-interface NotificationClass {
-  new (options: NotificationConstructorOptions): NotificationInstance;
-  isSupported(): boolean;
-}
-
-function getNotificationClass(): NotificationClass | null {
-  return (ElectronNotification as NotificationClass | undefined) ?? null;
 }
 
 async function migrateLegacyNotificationPath(): Promise<string> {
@@ -278,16 +255,8 @@ export class NotificationManager extends EventEmitter {
   private static instance: NotificationManager | null = null;
   private notifications: StoredNotification[] = [];
   private configManager: ConfigManager;
-  private mainWindow: BrowserWindow | null = null;
   private throttleMap = new Map<string, number>();
   private isInitialized: boolean = false;
-  /**
-   * Prevents GC from collecting Notification objects before they are dismissed.
-   * On macOS, if the reference is lost, the notification may silently fail
-   * and click handlers stop working after ~1-2 minutes.
-   * @see https://blog.bloomca.me/2025/02/22/electron-mac-notifications.html
-   */
-  private activeNotifications = new Set<NotificationInstance>();
   /** Promise that resolves when async initialization is complete.
    *  Used by addError() to wait for notifications to be loaded from disk
    *  before writing, preventing a race where save overwrites unloaded data. */
@@ -353,10 +322,11 @@ export class NotificationManager extends EventEmitter {
   }
 
   /**
-   * Sets the main window reference for sending IPC events.
+   * No-op in web mode — notifications are delivered via EventEmitter/SSE,
+   * not through Electron's BrowserWindow IPC.
    */
-  setMainWindow(window: BrowserWindow | null): void {
-    this.mainWindow = window;
+  setMainWindow(_window: unknown): void {
+    // no-op
   }
 
   // ===========================================================================
@@ -555,211 +525,46 @@ export class NotificationManager extends EventEmitter {
   }
 
   // ===========================================================================
-  // Native Notifications
-  // ===========================================================================
-
-  /**
-   * Shows a native notification for an error.
-   * Closes over `stored` (StoredNotification) so click handler has full data.
-   */
-  private showErrorNativeNotification(stored: StoredNotification): void {
-    const NotificationClass = getNotificationClass();
-    if (!NotificationClass || !this.isNativeNotificationSupported()) return;
-
-    const config = this.configManager.getConfig();
-    const isMac = process.platform === 'darwin';
-    const truncatedMessage = stripMarkdown(stored.message).slice(0, 200);
-    const iconPath = isMac ? undefined : getAppIconPath();
-    const notification = new NotificationClass({
-      title: 'Claude Code Error',
-      ...(isMac ? { subtitle: stored.context.projectName } : {}),
-      body: isMac ? truncatedMessage : `${stored.context.projectName}\n${truncatedMessage}`,
-      sound: config.notifications.soundEnabled ? 'default' : undefined,
-      ...(iconPath ? { icon: iconPath } : {}),
-    });
-
-    // Hold a strong reference to prevent GC from collecting the notification
-    this.activeNotifications.add(notification);
-    const cleanup = (): void => {
-      this.activeNotifications.delete(notification);
-    };
-
-    notification.on('click', () => {
-      this.handleNativeNotificationClick(stored);
-      cleanup();
-    });
-    notification.on('close', cleanup);
-
-    notification.on('show', () => {
-      logger.debug(`[notification] shown: "Claude Code Error" — ${stored.context.projectName}`);
-    });
-    notification.on('failed', (_, error) => {
-      logger.warn(`[notification] failed: ${String(error)}`);
-      cleanup();
-    });
-
-    notification.show();
-  }
-
-  /**
-   * Shows a native notification for a team event.
-   * Uses team-specific formatting (title = team name, subtitle = summary).
-   */
-  private showTeamNativeNotification(
-    stored: StoredNotification,
-    payload: TeamNotificationPayload
-  ): void {
-    const NotificationClass = getNotificationClass();
-    if (!NotificationClass || !this.isNativeNotificationSupported()) {
-      logger.warn('[team-toast] native notifications not supported — skipping');
-      return;
-    }
-
-    try {
-      const config = this.configManager.getConfig();
-      const isMac = process.platform === 'darwin';
-      const truncatedBody = stripMarkdown(stripAgentBlocks(payload.body)).slice(0, 300);
-      const iconPath = isMac ? undefined : getAppIconPath();
-
-      logger.debug(
-        `[team-toast] creating: title="${payload.teamDisplayName}" summary="${payload.summary ?? ''}" bodyLen=${truncatedBody.length}`
-      );
-
-      const notification = new NotificationClass({
-        title: payload.teamDisplayName,
-        ...(isMac ? { subtitle: payload.summary } : {}),
-        body: !isMac && payload.summary ? `${payload.summary}\n${truncatedBody}` : truncatedBody,
-        sound: config.notifications.soundEnabled ? 'default' : undefined,
-        ...(iconPath ? { icon: iconPath } : {}),
-      });
-
-      // Hold a strong reference to prevent GC from collecting the notification
-      this.activeNotifications.add(notification);
-      const cleanup = (): void => {
-        this.activeNotifications.delete(notification);
-      };
-
-      notification.on('click', () => {
-        this.handleNativeNotificationClick(stored);
-        cleanup();
-      });
-      notification.on('close', cleanup);
-
-      notification.on('show', () => {
-        logger.debug(
-          `[team-toast] OS confirmed show: "${payload.teamDisplayName}" — ${payload.summary ?? ''}`
-        );
-      });
-      notification.on('failed', (_, error) => {
-        logger.warn(`[team-toast] OS failed: ${String(error)}`);
-        cleanup();
-      });
-
-      notification.show();
-      logger.debug('[team-toast] notification.show() called');
-    } catch (error) {
-      logger.error(`[team-toast] exception in showTeamNativeNotification: ${String(error)}`);
-    }
-  }
-
-  /**
-   * Shared click handler for native notifications — focuses window and emits deep-link.
-   */
-  private handleNativeNotificationClick(stored: StoredNotification): void {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.show();
-      this.mainWindow.focus();
-      safeSendToRenderer(this.mainWindow, 'notification:clicked', stored);
-    }
-    this.emit('notification-clicked', stored);
-  }
-
-  /**
-   * Guard: checks if Electron's Notification API is available.
-   */
-  private isNativeNotificationSupported(): boolean {
-    const Notification = getNotificationClass();
-    if (
-      !Notification ||
-      typeof Notification.isSupported !== 'function' ||
-      !Notification.isSupported()
-    ) {
-      logger.warn('Native notifications not supported');
-      return false;
-    }
-    return true;
-  }
-
-  // ===========================================================================
   // Test Notification
   // ===========================================================================
 
   /**
-   * Sends a test notification to verify that native notifications work.
-   * Returns a result object indicating success or failure reason.
+   * Sends a test notification. In web mode, this emits an event via SSE.
+   * Returns a result object indicating success.
    */
   sendTestNotification(): { success: boolean; error?: string } {
-    const NotificationClass = getNotificationClass();
-    if (!NotificationClass || !this.isNativeNotificationSupported()) {
-      logger.warn('[test-notification] native notifications not supported');
-      return { success: false, error: 'Native notifications are not supported on this platform' };
-    }
-
-    const isMac = process.platform === 'darwin';
-    const iconPath = isMac ? undefined : getAppIconPath();
-    logger.debug(`[test-notification] creating Notification (platform=${process.platform})`);
-    const notification = new NotificationClass({
-      title: 'Test Notification',
-      ...(isMac ? { subtitle: 'Hermit' } : {}),
-      body: isMac
-        ? 'Notifications are working correctly!'
-        : 'Hermit\nNotifications are working correctly!',
-      ...(iconPath ? { icon: iconPath } : {}),
-    });
-
-    // Hold a strong reference to prevent GC
-    this.activeNotifications.add(notification);
-    const cleanup = (): void => {
-      this.activeNotifications.delete(notification);
+    const testNotification: StoredNotification = {
+      id: `test-${Date.now()}`,
+      message: 'Notifications are working correctly!',
+      source: 'test',
+      sessionId: '',
+      projectId: '',
+      filePath: '',
+      context: { projectName: 'Hermit', cwd: '' },
+      timestamp: Date.now(),
+      isRead: false,
+      createdAt: Date.now(),
     };
 
-    notification.on('click', cleanup);
-    notification.on('close', cleanup);
-
-    notification.on('show', () => {
-      logger.debug('[notification] test notification shown successfully');
-    });
-    notification.on('failed', (_, error) => {
-      logger.warn(`[notification] test notification failed: ${String(error)}`);
-      cleanup();
-    });
-
-    notification.show();
+    this.emit('notification-new', testNotification);
     return { success: true };
   }
 
   // ===========================================================================
-  // IPC Event Emission
+  // Event Emission
   // ===========================================================================
 
   /**
-   * Emits a notification:new event to the renderer.
+   * Emits a notification-new event for SSE broadcast.
    */
   private emitNewNotification(notification: StoredNotification): void {
-    safeSendToRenderer(this.mainWindow, 'notification:new', notification);
-
     this.emit('notification-new', notification);
   }
 
   /**
-   * Emits a notification:updated event to the renderer.
+   * Emits a notification-updated event for SSE broadcast.
    */
   private emitNotificationUpdated(): void {
-    safeSendToRenderer(this.mainWindow, 'notification:updated', {
-      total: this.notifications.length,
-      unreadCount: this.getUnreadCountSync(),
-    });
-
     this.emit('notification-updated', {
       total: this.notifications.length,
       unreadCount: this.getUnreadCountSync(),
@@ -827,28 +632,28 @@ export class NotificationManager extends EventEmitter {
   }
 
   /**
-   * Adds an error notification. Storage is unconditional; native toast respects
+   * Adds an error notification. Storage is unconditional; event emission respects
    * enabled/snoozed, ignored repos, ignored regex, and 5s throttle.
    */
   async addError(error: DetectedError): Promise<StoredNotification | null> {
     const stored = await this.storeNotification(error);
     if (!stored) return null;
 
-    // Error-specific toast policy: repo filter + regex filter + enabled/snoozed + throttle
+    // Error-specific policy: repo filter + regex filter + enabled/snoozed + throttle
     if (
       this.areNotificationsEnabled() &&
       !(await this.isFromIgnoredRepository(error)) &&
       !this.matchesIgnoredRegex(error) &&
       !this.isToastThrottled(error)
     ) {
-      this.showErrorNativeNotification(stored);
+      this.emit('notification-toast', stored);
     }
 
     return stored;
   }
 
   /**
-   * Adds a team notification. Storage is unconditional; native toast respects
+   * Adds a team notification. Storage is unconditional; event emission respects
    * enabled/snoozed, suppressToast flag, and 5s dedupeKey-based throttle.
    * Skips repo/regex filters (not applicable to team events).
    */
@@ -870,7 +675,7 @@ export class NotificationManager extends EventEmitter {
       `[team-notification] toast decision: type=${payload.teamEventType} suppressToast=${String(payload.suppressToast ?? false)} enabled=${String(enabled)} throttled=${String(throttled)} → show=${String(shouldShow)}`
     );
     if (shouldShow) {
-      this.showTeamNativeNotification(stored, payload);
+      this.emit('notification-toast', stored);
     }
 
     return stored;

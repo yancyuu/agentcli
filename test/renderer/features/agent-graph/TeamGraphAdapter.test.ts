@@ -1300,7 +1300,7 @@ describe('TeamGraphAdapter particles', () => {
 
     expect(findNode(graph, 'member:my-team:alice')).toMatchObject({
       launchVisualState: 'settling',
-      launchStatusLabel: 'joining team',
+      launchStatusLabel: 'joining',
     });
   });
 

@@ -21,6 +21,7 @@ import {
   FileCode,
   FilePenLine,
   HelpCircle,
+  Loader2,
   Play,
   RotateCcw,
   Trash2,
@@ -439,33 +440,9 @@ export const KanbanTaskCard = memo(
             ) : null}
 
             {columnId === 'review' ? (
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                {isReviewManual ? (
-                  <div className="whitespace-nowrap text-[11px] text-[var(--color-text-muted)]">
-                    手动评审
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap items-center gap-2">
-                  <TaskActionIconButton
-                    label="通过"
-                    icon={<CheckCircle2 size={11} />}
-                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onApprove(task.id);
-                    }}
-                  />
-                  <TaskActionIconButton
-                    label="请求修改"
-                    icon={<FilePenLine size={11} />}
-                    variant="destructive"
-                    className="bg-red-500/90 text-white hover:bg-red-500"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRequestChanges(task.id);
-                    }}
-                  />
-                </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                <Loader2 size={11} className="animate-spin text-violet-400" />
+                <span className="whitespace-nowrap text-[11px] text-violet-400">Agent 审核中</span>
               </div>
             ) : null}
 

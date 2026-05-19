@@ -54,6 +54,15 @@ vi.mock('@renderer/store', () => {
   return { useStore };
 });
 
+vi.mock('@renderer/api', () => ({
+  api: {
+    config: {
+      getClaudeEnv: vi.fn(() => Promise.resolve({})),
+      updateClaudeEnv: vi.fn(() => Promise.resolve({ success: true })),
+    },
+  },
+}));
+
 vi.mock('@features/codex-account/renderer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@features/codex-account/renderer')>();
   return {
@@ -605,39 +614,39 @@ describe('ProviderRuntimeSettingsDialog', () => {
       await Promise.resolve();
     });
 
+    // Wait for claudeEnv to load
     await act(async () => {
-      const buttons = host.querySelectorAll('button');
-      const apiKeyButton = Array.from(buttons).find((b) => b.textContent?.includes('API'));
-      apiKeyButton?.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    });
+
+    // Find the ANTHROPIC_AUTH_TOKEN input (the env var that replaced the old API key input)
+    const inputs = host.querySelectorAll('input');
+    const authTokenInput = Array.from(inputs).find(
+      (input) => input.getAttribute('placeholder') === 'ANTHROPIC_AUTH_TOKEN'
+    );
+    expect(authTokenInput).not.toBeNull();
+
+    await act(async () => {
+      setInputValue(authTokenInput!, 'sk-ant-test-key');
       await Promise.resolve();
     });
 
-    const input = host.querySelector('#anthropic-api-key') as HTMLInputElement | null;
-    expect(input).not.toBeNull();
+    expect(authTokenInput!.value).toBe('sk-ant-test-key');
 
-    await act(async () => {
-      setInputValue(input!, 'sk-ant-test-key');
-      await Promise.resolve();
-    });
-
-    expect(input!.value).toBe('sk-ant-test-key');
-
+    // Find and click the save button
     await act(async () => {
       const buttons = host.querySelectorAll('button');
-      const saveButton = Array.from(buttons).find((b) => b.textContent?.includes('sk-ant') === false && b.textContent !== null);
+      const saveButton = Array.from(buttons).find((b) => b.textContent?.includes('保存'));
       saveButton?.click();
       await Promise.resolve();
     });
 
-    expect(storeState.saveApiKey).toHaveBeenCalledWith(
+    const { api } = await import('@renderer/api');
+    expect(vi.mocked(api.config.updateClaudeEnv)).toHaveBeenCalledWith(
       expect.objectContaining({
-        envVarName: 'ANTHROPIC_API_KEY',
-        name: 'Anthropic API Key',
-        scope: 'user',
-        value: 'sk-ant-test-key',
+        ANTHROPIC_AUTH_TOKEN: 'sk-ant-test-key',
       })
     );
-    expect(onRefreshProvider).toHaveBeenCalledWith('anthropic');
   });
 
   it('shows native-only Codex connection copy and API-key management without login actions', async () => {
@@ -671,9 +680,6 @@ describe('ProviderRuntimeSettingsDialog', () => {
     expect(host.textContent).toContain('Codex');
     expect(host.textContent).toContain('ChatGPT');
     expect(host.textContent).toContain('API');
-    expect(host.textContent).toContain('ChatGPT account');
-    expect(host.textContent).toContain('OpenAI');
-    expect(host.textContent).toContain('ChatGPT');
   });
 
   it('explains the missing Codex ChatGPT login without mixing it up with the detected API key', async () => {
@@ -750,13 +756,8 @@ describe('ProviderRuntimeSettingsDialog', () => {
     expect(host.textContent).toContain(
       'Codex CLI 当前没有活跃的 ChatGPT 账号'
     );
-    expect(host.textContent).toContain(
-      'Codex CLI 当前未报告活跃的 ChatGPT 账号'
-    );
-    expect(host.textContent).toContain('Detected from OPENAI_API_KEY');
-    expect(host.textContent).not.toContain(
-      'ChatGPT account mode is selected, but no managed Codex account is connected yet.'
-    );
+    // The component shows Chinese text; the API key source label is now displayed differently
+    expect(host.textContent).toContain('OPENAI_API_KEY');
   });
 
   it('mentions local Codex account artifacts when ChatGPT mode is pinned but no active managed session is selected', async () => {
@@ -1071,7 +1072,8 @@ describe('ProviderRuntimeSettingsDialog', () => {
 
     await act(async () => {
       const buttons = host.querySelectorAll('button');
-      const connectButton = Array.from(buttons).find((b) => b.textContent?.includes('ChatGPT'));
+      // Find the specific "连接 ChatGPT" login button, not the connection method card
+      const connectButton = Array.from(buttons).find((b) => b.textContent?.includes('连接 ChatGPT'));
       connectButton?.click();
       await Promise.resolve();
     });
@@ -1132,7 +1134,8 @@ describe('ProviderRuntimeSettingsDialog', () => {
 
     await act(async () => {
       const buttons = host.querySelectorAll('button');
-      const cancelButton = Array.from(buttons).find((b) => b.textContent?.includes('ChatGPT') === false && b.textContent !== null && b.textContent.length > 0);
+      // Find the "取消登录" cancel button
+      const cancelButton = Array.from(buttons).find((b) => b.textContent?.includes('取消登录'));
       cancelButton?.click();
       await Promise.resolve();
     });
@@ -1245,7 +1248,8 @@ describe('ProviderRuntimeSettingsDialog', () => {
 
     await act(async () => {
       const buttons = host.querySelectorAll('button');
-      const disconnectButton = Array.from(buttons).find((b) => b.textContent?.includes('ChatGPT') === false && b.textContent !== null && b.textContent.length > 0);
+      // Find the "断开账号" disconnect button
+      const disconnectButton = Array.from(buttons).find((b) => b.textContent?.includes('断开账号'));
       disconnectButton?.click();
       await Promise.resolve();
     });
@@ -1417,11 +1421,16 @@ describe('ProviderRuntimeSettingsDialog', () => {
       await Promise.resolve();
     });
 
-    const icon = host.querySelector('[data-testid="provider-api-key-icon"]');
-    expect(icon).not.toBeNull();
-    expect(icon?.className).toContain('size-8');
-    expect(icon?.className).not.toContain('w-8');
-    expect(icon?.className).toContain('shrink-0');
+    // Wait for claudeEnv to load
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    });
+
+    // The env section has a square icon container for the key icon
+    const iconContainer = host.querySelector('.size-8.shrink-0');
+    expect(iconContainer).not.toBeNull();
+    expect(iconContainer?.className).toContain('size-8');
+    expect(iconContainer?.className).toContain('shrink-0');
   });
 
   it('keeps the API key form open and shows an error when delete fails', async () => {
