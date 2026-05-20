@@ -20948,6 +20948,7 @@ export class TeamProvisioningService {
           : 'Team launched — process alive and ready';
       const progress = updateProgress(run, 'ready', readyMessage, {
         cliLogsTail: extractCliLogsFromRun(run),
+        configReady: true,
         messageSeverity: hasSpawnFailures || hasPendingBootstrap ? 'warning' : undefined,
       });
       run.onProgress(progress);

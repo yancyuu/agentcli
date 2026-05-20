@@ -94,6 +94,8 @@ import type {
   UpdateSchedulePatch,
   WaterfallData,
   WslClaudeRootCandidate,
+  MemberSpawnStatusesSnapshot,
+  TeamAgentRuntimeSnapshot,
 } from '@shared/types';
 import type {
   AgentChangeSet,
@@ -1247,16 +1249,15 @@ export class HttpAPIClient implements ElectronAPI {
     stopFeishuLeadChannel: async (channelId?: string) => {
       return this.post('/api/teams/lead-channel/feishu/stop', { channelId });
     },
-    getMemberSpawnStatuses: async () => {
-      return { statuses: {}, runId: null };
+    getMemberSpawnStatuses: async (teamName: string) => {
+      return this.get<MemberSpawnStatusesSnapshot>(
+        `/api/teams/${encodeURIComponent(teamName)}/member-spawn-statuses`
+      );
     },
     getTeamAgentRuntime: async (teamName: string) => {
-      return {
-        teamName,
-        updatedAt: new Date().toISOString(),
-        runId: null,
-        members: {},
-      };
+      return this.get<TeamAgentRuntimeSnapshot>(
+        `/api/teams/${encodeURIComponent(teamName)}/agent-runtime`
+      );
     },
     restartMember: async (teamName: string, memberName: string): Promise<void> => {
       await this.post(

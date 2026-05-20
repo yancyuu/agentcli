@@ -315,9 +315,12 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
         }
 
         const launchRequest = parseLaunchRequest(validatedTeamName.value!, request.body);
+        const { broadcastEvent } = await import('./events');
         const response = await getTeamProvisioningService(services).launchTeam(
           launchRequest,
-          () => undefined
+          (progress) => {
+            broadcastEvent('provisioning-progress', progress);
+          }
         );
         return reply.send(response);
       } catch (error) {
@@ -418,6 +421,56 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
       return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
     }
   });
+
+  // Get member spawn statuses (for team launch progress tracking)
+  app.get<{ Params: { teamName: string } }>(
+    '/api/teams/:teamName/member-spawn-statuses',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const result = await getTeamProvisioningService(services).getMemberSpawnStatuses(
+          validatedTeamName.value!
+        );
+        return reply.send(result);
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in GET /api/teams/${request.params.teamName}/member-spawn-statuses:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
+
+  // Get team agent runtime snapshot (for live member status)
+  app.get<{ Params: { teamName: string } }>(
+    '/api/teams/:teamName/agent-runtime',
+    async (request, reply) => {
+      try {
+        const validatedTeamName = validateTeamName(request.params.teamName);
+        if (!validatedTeamName.valid) {
+          return reply.status(400).send({ error: validatedTeamName.error });
+        }
+        const result = await getTeamProvisioningService(services).getTeamAgentRuntimeSnapshot(
+          validatedTeamName.value!
+        );
+        return reply.send(result);
+      } catch (error) {
+        if (shouldLogError(error)) {
+          logger.error(
+            `Error in GET /api/teams/${request.params.teamName}/agent-runtime:`,
+            getErrorMessage(error)
+          );
+        }
+        return reply.status(getStatusCode(error)).send({ error: getErrorMessage(error) });
+      }
+    }
+  );
 
   app.post<{ Params: { teamName: string }; Body: Record<string, unknown> }>(
     '/api/teams/:teamName/opencode/runtime/bootstrap-checkin',
@@ -531,6 +584,20 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
         return reply.status(400).send({ error: validatedTeamName.error });
       }
       const data = await getTeamDataService(services).getTeamData(validatedTeamName.value!);
+      // Merge isAlive from provisioning service (tracks CLI-spawned processes)
+      // with isAlive from processes.json (tracks registered processes).
+      if (!data.isAlive) {
+        try {
+          const runtimeState = await getTeamProvisioningService(services).getRuntimeState(
+            validatedTeamName.value!
+          );
+          if (runtimeState.isAlive) {
+            (data as unknown as Record<string, unknown>).isAlive = true;
+          }
+        } catch {
+          // provisioning service unavailable — keep data.isAlive as-is
+        }
+      }
       return reply.send(data);
     } catch (error) {
       if (shouldLogError(error)) {
@@ -1813,9 +1880,12 @@ export function registerTeamRoutes(app: FastifyInstance, services: HttpServices)
   // Create team (draft)
   app.post<{ Body: Record<string, unknown> }>('/api/teams/create', async (request, reply) => {
     try {
+      const { broadcastEvent } = await import('./events');
       const result = await getTeamProvisioningService(services).createTeam(
         request.body as unknown as TeamCreateRequest,
-        () => undefined
+        (progress) => {
+          broadcastEvent('provisioning-progress', progress);
+        }
       );
       return reply.send(result);
     } catch (error) {

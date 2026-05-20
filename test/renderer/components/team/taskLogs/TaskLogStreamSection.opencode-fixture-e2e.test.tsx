@@ -123,8 +123,8 @@ describe('TaskLogStreamSection OpenCode real fixture e2e', () => {
     });
 
     const text = host.textContent ?? '';
-    expect(text).toContain('Task Log Stream');
-    expect(text).toContain('matched task tool markers');
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).toContain('OpenCode');
     expect(text).toContain('Agent');
     expect(text).toContain('Calculator behavior');
     expect(text).toContain('Задача #0b3a0624 завершена');

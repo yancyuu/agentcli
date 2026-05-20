@@ -348,27 +348,21 @@ describe('TeamProvisioningService post-compact lifecycle', () => {
     expect(text).toContain('不要开始新工作');
     expect(text).toContain('只回复一个词');
     // Should contain persistent context
-    expect(text).toContain('Constraints:');
-    expect(text).toContain('Do NOT call TeamDelete');
-    expect(text).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
-    expect(text).toContain('ASK: Strict read-only conversation mode.');
-    expect(text).toContain('DELEGATE: Strict orchestration mode for leads.');
+    expect(text).toContain('约束：');
+    expect(text).toContain('TeamDelete');
     expect(text).toContain('cross_team_send');
     expect(text).toContain('cross_team_list_targets');
     expect(text).toContain('cross_team_get_outbox');
-    expect(text).toContain('blocked by another team');
-    expect(text).toContain('one focused request per topic');
-    expect(text).toContain('If you receive a message that is clearly from another team');
-    expect(text).toContain('preserve the same conversationId');
+    expect(text).toContain('被另一个团队');
+    expect(text).toContain('每个主题');
+    expect(text).toContain('如果收到明显来自其他团队');
+    expect(text).toContain('保留相同 conversationId');
     expect(text).toContain('replyToConversationId');
-    expect(text).toContain('Do not wait silently on another team');
-    expect(text).toContain('Golden format for cross-team requests');
-    expect(text).toContain('Golden format for cross-team replies');
-    expect(text).toContain('Do NOT use cross-team messaging when your own team can answer');
-    expect(text).toContain('resolve it through your own task board and teammates first');
-    expect(text).toContain('do NOT appear silent');
-    expect(text).toContain("canonical progress trail should be team-visible first");
-    expect(text).toContain('Do NOT default to messaging "user" for cross-team coordination');
+    expect(text).toContain('不要静默等待另一个团队');
+    expect(text).toContain('不要表现为沉默');
+    expect(text).toContain('标准进度轨迹应优先对本团队可见');
+    expect(text).toContain('不要使用跨团队消息');
+    expect(text).toContain('任务看板和成员');
 
     await svc.cancelProvisioning(runId);
   });

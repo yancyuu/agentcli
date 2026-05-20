@@ -9,6 +9,7 @@
  * - HOST: Bind address (default '0.0.0.0')
  * - PORT: Listen port (default 3456)
  * - CLAUDE_ROOT: Path to .claude directory (default ~/.claude)
+ * - HERMIT_HOME: Path to .hermit data directory (default ~/.hermit)
  * - CORS_ORIGIN: CORS origin policy (default '*')
  */
 
@@ -26,6 +27,7 @@ import { LocalFileSystemProvider } from './services/infrastructure/LocalFileSyst
 import {
   getProjectsBasePath,
   getTodosBasePath,
+  setAppDataBasePath,
   setClaudeBasePathOverride,
 } from './utils/pathDecoder';
 
@@ -44,6 +46,7 @@ const logger = createLogger('Standalone');
 const HOST = process.env.HOST ?? '0.0.0.0';
 const PORT = parseInt(process.env.PORT ?? '3456', 10);
 const CLAUDE_ROOT = process.env.CLAUDE_ROOT;
+const HERMIT_HOME = process.env.HERMIT_HOME;
 
 // Default CORS to allow all in standalone mode (Docker isolation replaces CORS)
 if (!process.env.CORS_ORIGIN) {
@@ -111,6 +114,12 @@ async function start(): Promise<void> {
   if (CLAUDE_ROOT) {
     setClaudeBasePathOverride(CLAUDE_ROOT);
     logger.info(`Using CLAUDE_ROOT: ${CLAUDE_ROOT}`);
+  }
+
+  // Apply Hermit data path override if set (default: ~/.hermit)
+  if (HERMIT_HOME) {
+    setAppDataBasePath(HERMIT_HOME);
+    logger.info(`Using HERMIT_HOME: ${HERMIT_HOME}`);
   }
 
   // Import services after applying CLAUDE_ROOT so ConfigManager picks up the correct base path.

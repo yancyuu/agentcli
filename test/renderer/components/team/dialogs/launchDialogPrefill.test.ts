@@ -47,8 +47,8 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
-      providerBackendId: undefined,
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
       fastMode: 'inherit',
@@ -92,8 +92,8 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
-      providerBackendId: undefined,
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
       fastMode: 'inherit',
@@ -123,7 +123,7 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
+      providerId: 'codex',
       providerBackendId: 'codex-native',
       model: 'gpt-5.3-codex',
       effort: 'high',
@@ -157,7 +157,7 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
+      providerId: 'codex',
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
@@ -190,8 +190,8 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
-      providerBackendId: undefined,
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
       fastMode: 'inherit',
@@ -316,9 +316,9 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
-      providerBackendId: undefined,
-      model: 'custom-model',
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'custom-model[1m]',
       effort: 'medium',
       fastMode: 'inherit',
       limitContext: false,
@@ -346,9 +346,9 @@ describe('resolveLaunchDialogPrefill', () => {
     });
 
     expect(result).toEqual({
-      providerId: 'anthropic',
-      providerBackendId: undefined,
-      model: 'custom-model',
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'custom-model[1m]',
       effort: 'medium',
       fastMode: 'inherit',
       limitContext: false,

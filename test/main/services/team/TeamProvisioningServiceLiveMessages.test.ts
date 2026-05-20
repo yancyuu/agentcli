@@ -114,6 +114,14 @@ vi.mock('agent-teams-controller', () => ({
   },
 }));
 
+vi.mock('../../../../src/main/services/team/LeadChannelListenerService', () => ({
+  getLeadChannelListenerService: () => ({
+    sendToRecentFeishuTarget: async () => true,
+    sendFeishuReply: async () => true,
+    getGlobalSnapshot: async () => ({}),
+  }),
+}));
+
 import type { TeamChangeEvent } from '@shared/types/team';
 import { ConfigManager } from '../../../../src/main/services/infrastructure/ConfigManager';
 import {
@@ -1010,7 +1018,7 @@ describe('TeamProvisioningService pre-ready live messages', () => {
     expect(live).toHaveLength(1);
     expect(live[0].from).toBe('lead');
     expect(live[0].source).toBe('cross_team_sent');
-    expect(live[0].to).toBe('team-best.lead');
+    expect(live[0].to).toBe('team-best.team-lead');
     expect(hoisted.sendInboxMessage).not.toHaveBeenCalled();
   });
 
@@ -1053,7 +1061,7 @@ describe('TeamProvisioningService pre-ready live messages', () => {
     const live = service.getLiveLeadProcessMessages('my-team');
     expect(live).toHaveLength(1);
     expect(live[0].source).toBe('cross_team_sent');
-    expect(live[0].to).toBe('team-best.lead');
+    expect(live[0].to).toBe('team-best.team-lead');
     expect(hoisted.sendInboxMessage).not.toHaveBeenCalled();
   });
 

@@ -36,7 +36,7 @@ describe('TeamMemberLogsFinder', () => {
           projectPath,
           leadSessionId,
           members: [
-            { name: 'lead', agentType: 'lead' },
+            { name: 'team-lead', agentType: 'team-lead' },
             { name: 'bob', agentType: 'general-purpose' },
           ],
         },
@@ -90,7 +90,7 @@ describe('TeamMemberLogsFinder', () => {
       expect(bobLogs[0].memberName?.toLowerCase()).toBe('bob');
     }
 
-    const leadLogs = await finder.findMemberLogs(teamName, 'lead');
+    const leadLogs = await finder.findMemberLogs(teamName, 'team-lead');
     expect(leadLogs.some((l) => l.kind === 'lead_session')).toBe(true);
     const lead = leadLogs.find((l) => l.kind === 'lead_session');
     expect(lead?.sessionId).toBe(leadSessionId);

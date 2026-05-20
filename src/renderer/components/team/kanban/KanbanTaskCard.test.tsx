@@ -86,7 +86,7 @@ describe('KanbanTaskCard change badge', () => {
     document.body.innerHTML = '';
   });
 
-  it('does not render a No changes badge when changePresence is no_changes', async () => {
+  it('renders the No changes badge when changePresence is no_changes', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -115,7 +115,7 @@ describe('KanbanTaskCard change badge', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).not.toContain('No changes');
+    expect(host.textContent).toContain('无变更');
 
     await act(async () => {
       root.unmount();
@@ -152,7 +152,7 @@ describe('KanbanTaskCard change badge', () => {
       await Promise.resolve();
     });
 
-    expect(host.querySelector('[aria-label="Changes"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="变更"]')).not.toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -189,7 +189,7 @@ describe('KanbanTaskCard change badge', () => {
       await Promise.resolve();
     });
 
-    expect(host.querySelector('[aria-label="Changes"]')).toBeNull();
+    expect(host.querySelector('[aria-label="变更"]')).toBeNull();
 
     await act(async () => {
       root.unmount();

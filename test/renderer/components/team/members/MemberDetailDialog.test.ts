@@ -312,7 +312,7 @@ describe('MemberDetailDialog activity count', () => {
     });
 
     copyButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Copy diagnostics')
+      button.textContent?.includes('复制诊断信息')
     );
     expect(copyButton).not.toBeUndefined();
 

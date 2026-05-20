@@ -214,7 +214,7 @@ function renderDialog(props: Partial<React.ComponentProps<typeof SendMessageDial
 
 function getSendButton(host: HTMLElement): HTMLButtonElement {
   const button = Array.from(host.querySelectorAll('button')).find(
-    (candidate) => candidate.textContent?.trim() === 'Send'
+    (candidate) => candidate.textContent?.trim() === '发送'
   );
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error('Send button not found');
@@ -269,7 +269,7 @@ describe('SendMessageDialog', () => {
       'Please verify the OpenCode delivery path',
       'Please verify the OpenCode delivery path',
       undefined,
-      'do',
+      undefined,
       []
     );
 

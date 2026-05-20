@@ -54,16 +54,16 @@ describe('adaptRecentProjectsSection', () => {
       primaryBranch: 'main',
       activeTeams: [activeTeam],
       pathSummary: {
-        badgeLabel: '2 paths',
+        badgeLabel: '2 个路径',
         description:
-          'This card merges recent activity from related worktrees and project paths.',
+          '此卡片合并了相关 worktree 和项目路径的最近活动。',
         paths: [
           {
-            label: 'Primary path',
+            label: '主路径',
             fullPath: '/Users/test/alpha',
           },
           {
-            label: 'Related path 1',
+            label: '相关路径 1',
             fullPath: '/Users/test/alpha-worktree',
           },
         ],

@@ -147,6 +147,14 @@ vi.mock('agent-teams-controller', () => ({
   },
 }));
 
+vi.mock('../../../../src/main/services/team/LeadChannelListenerService', () => ({
+  getLeadChannelListenerService: () => ({
+    sendToRecentFeishuTarget: async () => true,
+    sendFeishuReply: async () => {},
+    getGlobalSnapshot: async () => ({ channels: [] }),
+  }),
+}));
+
 import { buildLegacyInboxMessageId } from '../../../../src/main/services/team/inboxMessageIdentity';
 import { TeamProvisioningService } from '../../../../src/main/services/team/TeamProvisioningService';
 
@@ -155,13 +163,13 @@ function seedConfig(teamName: string): void {
     `/mock/teams/${teamName}/config.json`,
     JSON.stringify({
       name: 'My Team',
-      members: [{ name: 'lead', agentType: 'lead' }],
+      members: [{ name: 'team-lead', agentType: 'team-lead' }],
     })
   );
 }
 
 function seedLeadInbox(teamName: string, messages: unknown[]): void {
-  hoisted.files.set(`/mock/teams/${teamName}/inboxes/lead.json`, JSON.stringify(messages));
+  hoisted.files.set(`/mock/teams/${teamName}/inboxes/team-lead.json`, JSON.stringify(messages));
 }
 
 function seedMemberInbox(teamName: string, memberName: string, messages: unknown[]): void {
@@ -203,10 +211,11 @@ function attachAliveRun(
     teamName,
     request: {
       teamName,
-      members: [{ name: 'lead', role: 'lead' }],
+      members: [{ name: 'team-lead', role: 'team-lead' }],
     },
     startedAt: '2026-02-23T09:59:00.000Z',
     leadMsgSeq: 0,
+    leadActivityState: 'idle',
     pendingToolCalls: [],
     activeToolCalls: new Map(),
     pendingDirectCrossTeamSendRefresh: false,
@@ -317,7 +326,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     };
 
     run.leadRelayCapture = {
-      leadName: 'lead',
+      leadName: 'team-lead',
       startedAt: new Date().toISOString(),
       textParts: [],
       settled: true,
@@ -336,7 +345,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
 
       const live = service.getLiveLeadProcessMessages(teamName);
       expect(live).toHaveLength(1);
-      expect(live[0].to).toBeUndefined();
+      expect(live[0].to).toBe('user');
       expect(live[0].text).toBe('Late reply after relay completion.');
       expect(live[0].source).toBe('lead_process');
     } finally {
@@ -433,16 +442,21 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(first).toBe(0);
     expect(writeSpy).toHaveBeenCalledTimes(0);
 
+    // Clear in-flight message IDs left over from the failed relay attempt
+    (service as unknown as { inFlightLeadInboxMessageIds: Map<string, Set<string>> })
+      .inFlightLeadInboxMessageIds.delete(teamName);
+
     (service as unknown as { runs: Map<string, unknown> }).runs.set('run-1', {
       runId: 'run-1',
       teamName,
       request: {
         teamName,
-        members: [{ name: 'lead', role: 'lead' }],
+        members: [{ name: 'team-lead', role: 'team-lead' }],
       },
       activeToolCalls: new Map(),
       pendingToolCalls: [],
       leadMsgSeq: 0,
+      leadActivityState: 'idle',
       pendingDirectCrossTeamSendRefresh: false,
       lastLeadTextEmitMs: 0,
       activeCrossTeamReplyHints: [],
@@ -561,7 +575,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     await expect(relayPromise).resolves.toBe(0);
 
     const inbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     ) as Array<{ messageId?: string; read?: boolean }>;
     expect(inbox).toEqual([
       expect.objectContaining({
@@ -685,7 +699,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(writeSpy).toHaveBeenCalledTimes(0);
 
     const updatedInbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     ) as Array<{ messageId?: string }>;
     expect(updatedInbox).toHaveLength(1);
     expect(updatedInbox[0]?.messageId).toBe('m-cross-team-sent-1');
@@ -726,7 +740,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(writeSpy).toHaveBeenCalledTimes(0);
 
     const updatedInbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     ) as Array<{ messageId?: string; read?: boolean }>;
     expect(updatedInbox).toHaveLength(2);
     expect(updatedInbox[1]?.messageId).toBe('m-cross-team-reply-1');
@@ -1372,7 +1386,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
       JSON.stringify({
         name: 'My Team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'alice', role: 'developer' },
         ],
       })
@@ -1461,7 +1475,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(writeSpy).toHaveBeenCalledTimes(0);
 
     const inbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     ) as Array<{ messageId?: string; read?: boolean }>;
     expect(inbox).toEqual([
       expect.objectContaining({
@@ -1499,7 +1513,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(writeSpy).toHaveBeenCalledTimes(0);
 
     const inbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     ) as Array<{ messageId?: string; read?: boolean }>;
     expect(inbox).toEqual([
       expect.objectContaining({
@@ -1564,7 +1578,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
 
     expect(relayed).toBe(0);
     expect(writeSpy).toHaveBeenCalledTimes(0);
-    expect(nativeMatchSpy).toHaveBeenCalledWith(teamName, 'lead', []);
+    expect(nativeMatchSpy).toHaveBeenCalledWith(teamName, 'team-lead', []);
   });
 
   it('does not let cross-team idle-shaped payloads inherit passive idle handling', async () => {
@@ -1644,7 +1658,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -1694,7 +1708,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -1743,7 +1757,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -1809,7 +1823,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -1876,7 +1890,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -1969,7 +1983,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
           name: teamName,
           projectPath: '/tmp/my-team',
           members: [
-            { name: 'lead', agentType: 'lead' },
+            { name: 'team-lead', agentType: 'team-lead' },
             { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
           ],
         })
@@ -2054,7 +2068,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -2142,7 +2156,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -2183,7 +2197,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -2222,8 +2236,8 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         projectPath: '/tmp/my-team',
         members: [
           {
-            name: 'lead',
-            agentType: 'lead',
+            name: 'team-lead',
+            agentType: 'team-lead',
             providerId: 'opencode',
             model: 'openrouter/test',
           },
@@ -2241,7 +2255,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
       },
     ]);
 
-    const relay = await service.relayInboxFileToLiveRecipient(teamName, 'lead');
+    const relay = await service.relayInboxFileToLiveRecipient(teamName, 'team-lead');
 
     expect(relay).toMatchObject({ kind: 'opencode_lead_unsupported', relayed: 0 });
     expect(relay.diagnostics?.join('\n')).toContain('opencode_lead_runtime_session_missing');
@@ -2250,7 +2264,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     );
     vi.mocked(console.warn).mockClear();
     const rows = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/lead.json`) ?? '[]'
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
     );
     expect(rows[0].read).toBe(false);
   });
@@ -2264,7 +2278,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })
@@ -2313,7 +2327,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
         name: teamName,
         projectPath: '/tmp/my-team',
         members: [
-          { name: 'lead', agentType: 'lead' },
+          { name: 'team-lead', agentType: 'team-lead' },
           { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
         ],
       })

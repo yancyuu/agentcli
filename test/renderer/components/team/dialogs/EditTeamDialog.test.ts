@@ -494,7 +494,7 @@ describe('EditTeamDialog', () => {
 
     await act(async () => {
       Array.from(host.querySelectorAll('button'))
-        .find((button) => button.textContent === 'Save')
+        .find((button) => button.textContent === '保存')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
@@ -537,7 +537,7 @@ describe('EditTeamDialog', () => {
 
     const addButton = host.querySelector('[data-testid="add-new-member"]');
     const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Save');
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
 
     await act(async () => {
       addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -587,7 +587,7 @@ describe('EditTeamDialog', () => {
     expect(host.textContent).toBeTruthy();
 
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Save'
+      (button) => button.textContent === '保存'
     ) as HTMLButtonElement | undefined;
     expect(saveButton?.disabled).toBe(true);
 
@@ -641,7 +641,11 @@ describe('EditTeamDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.teams.restartMember).toHaveBeenCalledWith('live-team', 'alice');
+    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
+    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
+    // Restart is no longer called directly by handleSave; it shows a save outcome hint instead
+    expect(api.teams.restartMember).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('alice');
 
     await act(async () => {
       root.unmount();
@@ -722,7 +726,7 @@ describe('EditTeamDialog', () => {
     const addButton = host.querySelector('[data-testid="add-new-member"]');
     const removeButton = host.querySelector('[data-testid="remove-new-member"]');
     const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Save');
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
 
     await act(async () => {
       addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -827,7 +831,7 @@ describe('EditTeamDialog', () => {
 
     const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement | null;
     const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Save');
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
 
     await act(async () => {
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -963,9 +967,6 @@ describe('EditTeamDialog', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
     vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-    vi.mocked(api.teams.restartMember)
-      .mockRejectedValueOnce(new Error('restart failed'))
-      .mockResolvedValueOnce(undefined);
 
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -992,7 +993,7 @@ describe('EditTeamDialog', () => {
     });
 
     const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Save');
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
 
     await act(async () => {
       host
@@ -1006,7 +1007,10 @@ describe('EditTeamDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.teams.restartMember).toHaveBeenCalledTimes(1);
+    // handleSave no longer calls restartMember directly; it shows a save outcome hint
+    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
+    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
+    expect(api.teams.restartMember).not.toHaveBeenCalled();
 
     await act(async () => {
       root.render(
@@ -1032,7 +1036,6 @@ describe('EditTeamDialog', () => {
     });
 
     expect(api.teams.updateConfig).toHaveBeenCalledTimes(2);
-    expect(api.teams.restartMember).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       root.unmount();
@@ -1044,7 +1047,6 @@ describe('EditTeamDialog', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
     vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-    vi.mocked(api.teams.restartMember).mockRejectedValueOnce(new Error('restart failed'));
 
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -1069,7 +1071,7 @@ describe('EditTeamDialog', () => {
     });
 
     const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Save');
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
 
     await act(async () => {
       host
@@ -1083,7 +1085,10 @@ describe('EditTeamDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.teams.restartMember).toHaveBeenCalledTimes(1);
+    // handleSave no longer calls restartMember directly
+    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
+    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
+    expect(api.teams.restartMember).not.toHaveBeenCalled();
 
     await act(async () => {
       host
@@ -1097,7 +1102,9 @@ describe('EditTeamDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.teams.restartMember).toHaveBeenCalledTimes(1);
+    // Second save succeeds with reverted runtime, still no restartMember calls
+    expect(api.teams.updateConfig).toHaveBeenCalledTimes(2);
+    expect(api.teams.restartMember).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();

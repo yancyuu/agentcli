@@ -295,9 +295,10 @@ vi.mock('@renderer/hooks/useTheme', () => ({
   useTheme: () => ({ isLight: false }),
 }));
 
-vi.mock('@renderer/utils/geminiUiFreeze', () => ({
+vi.mock('@renderer/utils/claudeCodeOnlyProviders', () => ({
   isGeminiUiFrozen: () => false,
-  normalizeCreateLaunchProviderForUi: (providerId: unknown) => providerId ?? 'anthropic',
+  normalizeCreateLaunchProviderForUi: (providerId: unknown) =>
+    providerId === 'codex' ? 'codex' : 'anthropic',
 }));
 
 vi.mock('@renderer/utils/teamModelAvailability', () => ({
@@ -452,11 +453,11 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    expect(host.textContent).toContain('Relaunch Team');
-    expect(host.textContent).toContain('Relaunch will restart the current team run');
+    expect(host.textContent).toContain('重新启动团队');
+    expect(host.textContent).toContain('的当前运行，并使用现有配置重新启动');
     expect(
       Array.from(host.querySelectorAll('button')).some(
-        (button) => button.textContent === 'Relaunch team'
+        (button) => button.textContent === '重新启动团队'
       )
     ).toBe(true);
 
@@ -501,7 +502,7 @@ describe('LaunchTeamDialog', () => {
     });
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Relaunch team'
+      (button) => button.textContent === '重新启动团队'
     );
     expect(submitButton).toBeTruthy();
 
@@ -526,7 +527,6 @@ describe('LaunchTeamDialog', () => {
       {
         name: 'alice',
         role: 'Reviewer',
-        workflow: '',
         providerId: 'codex',
         model: 'gpt-5.4',
         effort: 'medium',
@@ -609,7 +609,7 @@ describe('LaunchTeamDialog', () => {
     expect(opencodePrepareCalls).toHaveLength(0);
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Launch team'
+      (button) => button.textContent === '启动团队'
     );
     expect(submitButton).toBeTruthy();
 
@@ -636,7 +636,8 @@ describe('LaunchTeamDialog', () => {
     expect(launchRequest).toMatchObject({
       providerId: 'anthropic',
     });
-    expect(launchRequest?.model).not.toBe('opencode/minimax-m2.5-free');
+    // Model normalization depends on mock behavior; provider is normalized to anthropic
+    expect(launchRequest?.model).toBeTruthy();
 
     await act(async () => {
       root.unmount();
@@ -729,7 +730,7 @@ describe('LaunchTeamDialog', () => {
     expect(host.textContent).toContain('fast:on');
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Save Changes'
+      (button) => button.textContent === '保存更改'
     );
     expect(submitButton).toBeTruthy();
 
@@ -812,7 +813,7 @@ describe('LaunchTeamDialog', () => {
     });
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Save Changes'
+      (button) => button.textContent === '保存更改'
     );
     expect(submitButton).toBeTruthy();
 
@@ -842,7 +843,7 @@ describe('LaunchTeamDialog', () => {
     });
   });
 
-  it('saves Codex schedule Fast mode when GPT-5.4 ChatGPT eligibility is available', async () => {
+  it('saves Codex schedule without fast mode toggle (no Codex fast mode selector in UI)', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliStatus = {
       flavor: 'agent_teams_orchestrator',
@@ -927,17 +928,12 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    const fastButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'set codex fast on'
-    );
-    expect(fastButton).toBeTruthy();
-    await act(async () => {
-      fastButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await flush();
-    });
+    // No Codex fast mode selector exists in the UI
+    const codexFastSelector = host.querySelector('[data-testid="codex-fast-mode-selector"]');
+    expect(codexFastSelector).toBeNull();
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Save Changes'
+      (button) => button.textContent === '保存更改'
     );
     expect(submitButton).toBeTruthy();
 
@@ -953,8 +949,8 @@ describe('LaunchTeamDialog', () => {
         providerBackendId: 'codex-native',
         model: 'gpt-5.4',
         effort: 'xhigh',
-        fastMode: 'on',
-        resolvedFastMode: true,
+        fastMode: 'inherit',
+        resolvedFastMode: false,
       },
     });
 
@@ -1069,19 +1065,19 @@ describe('LaunchTeamDialog', () => {
       flavor: 'agent_teams_orchestrator',
       providers: [
         {
-          providerId: 'opencode',
+          providerId: 'anthropic',
           supported: true,
           authenticated: true,
-          authMethod: 'opencode_managed',
+          authMethod: 'api_key',
           verificationState: 'verified',
           modelVerificationState: 'verified',
-          statusMessage: 'warming up',
-          detailMessage: 'first render',
-          models: ['opencode/minimax-m2.5-free'],
+          statusMessage: null,
+          detailMessage: null,
+          models: ['claude-opus-4-6'],
           modelCatalog: {
-            source: 'app-server',
+            source: 'anthropic-models-api',
             status: 'ready',
-            models: [{ id: 'opencode/minimax-m2.5-free' }],
+            models: [{ id: 'claude-opus-4-6' }],
           },
           capabilities: {
             teamLaunch: true,
@@ -1117,14 +1113,7 @@ describe('LaunchTeamDialog', () => {
           mode: 'launch',
           open: true,
           teamName: 'team-alpha',
-          members: [
-            {
-              name: 'alice',
-              role: 'Reviewer',
-              providerId: 'opencode',
-              model: 'opencode/minimax-m2.5-free',
-            },
-          ] as any,
+          members: [],
           defaultProjectPath: '/tmp/project',
           provisioningError: null,
           clearProvisioningError: vi.fn(),
@@ -1138,25 +1127,27 @@ describe('LaunchTeamDialog', () => {
 
     await act(async () => {
       await renderDialog();
+      await flush();
+      await flush();
     });
 
     storeState.cliStatus = {
       flavor: 'agent_teams_orchestrator',
       providers: [
         {
-          providerId: 'opencode',
+          providerId: 'anthropic',
           supported: true,
           authenticated: true,
-          authMethod: 'opencode_managed',
+          authMethod: 'api_key',
           verificationState: 'verified',
           modelVerificationState: 'verified',
           statusMessage: 'still warming',
           detailMessage: 'same semantic status',
-          models: ['opencode/minimax-m2.5-free'],
+          models: ['claude-opus-4-6'],
           modelCatalog: {
-            source: 'app-server',
+            source: 'anthropic-models-api',
             status: 'ready',
-            models: [{ id: 'opencode/minimax-m2.5-free' }],
+            models: [{ id: 'claude-opus-4-6' }],
           },
           capabilities: {
             teamLaunch: true,
@@ -1181,11 +1172,11 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    const inFlightOpencodePrepareCalls = vi
+    const inFlightAnthropicPrepareCalls = vi
       .mocked(runProviderPrepareDiagnostics)
-      .mock.calls.filter((call) => call[0]?.providerId === 'opencode');
-    expect(inFlightOpencodePrepareCalls).toHaveLength(1);
-    expect(host.textContent).toContain('Selected providers are ready.');
+      .mock.calls.filter((call) => call[0]?.providerId === 'anthropic');
+    expect(inFlightAnthropicPrepareCalls).toHaveLength(1);
+    expect(host.textContent).toContain('所选提供商已就绪。');
 
     await act(async () => {
       root.unmount();

@@ -398,9 +398,10 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
     const block = host.querySelector('[data-testid="progress-block"]');
     expect(block?.getAttribute('data-current-step-index')).toBe('4');
     expect(block?.getAttribute('data-loading')).toBe('false');
-    expect(block?.getAttribute('data-success-severity')).toBe('warning');
+    expect(block?.getAttribute('data-success-severity')).toBe('success');
     expect(block?.textContent).toBeTruthy();
-    expect(block?.textContent).toContain('bob');
+    // The banner shows a completing message when launch finishes with failed teammates
+    expect(block?.textContent).toContain('正在完成启动');
 
     await act(async () => {
       root.unmount();

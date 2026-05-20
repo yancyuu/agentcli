@@ -206,17 +206,11 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     );
 
     expect(writeSpy).toHaveBeenCalledTimes(1);
-    const bootstrapSpec = extractBootstrapSpec();
-    expect(bootstrapSpec.mode).toBe('create');
-    expect(bootstrapSpec.team).toMatchObject({
-      name: 'solo-team',
-      cwd: process.cwd(),
-    });
-    expect(bootstrapSpec.members).toEqual([]);
 
     const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
     expect(launchArgs).toContain('--mcp-config');
-    expect(launchArgs).toContain('--team-bootstrap-spec');
+    // Under LAZY_NATIVE_MEMBER_BOOTSTRAP, --team-bootstrap-spec is no longer emitted
+    expect(launchArgs).not.toContain('--team-bootstrap-spec');
     expect(launchArgs).not.toContain('--team-bootstrap-user-prompt-file');
     expect(launchArgs).not.toContain('--strict-mcp-config');
     expect(launchArgs).toContain('--disallowedTools');
@@ -325,18 +319,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     );
 
     expect(writeSpy).toHaveBeenCalledTimes(1);
-    const bootstrapSpec = extractBootstrapSpec();
-    expect(bootstrapSpec.mode).toBe('create');
-    expect(bootstrapSpec.members).toEqual([
-      expect.objectContaining({
-        name: 'alice',
-        agentType: 'agent-teams-member',
-        role: 'developer',
-        description: 'developer',
-        cwd: process.cwd(),
-      }),
-    ]);
+    // Under LAZY_NATIVE_MEMBER_BOOTSTRAP, no --team-bootstrap-spec is emitted
     const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+    expect(launchArgs).not.toContain('--team-bootstrap-spec');
     const agentsArg = launchArgs[launchArgs.indexOf('--agents') + 1] ?? '{}';
     expect(JSON.parse(agentsArg)).toMatchObject({
       'agent-teams-member': {
@@ -379,12 +364,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       () => {}
     );
 
-    const bootstrapSpec = extractBootstrapSpec();
-    expect(bootstrapSpec.members?.[0]).toEqual(
-      expect.objectContaining({ name: 'alice', isolation: 'worktree' })
-    );
-    expect(bootstrapSpec.members?.[1]).toEqual(expect.objectContaining({ name: 'bob' }));
-    expect(bootstrapSpec.members?.[1]).not.toHaveProperty('isolation');
+    // Under LAZY_NATIVE_MEMBER_BOOTSTRAP, no --team-bootstrap-spec is emitted
+    const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+    expect(launchArgs).not.toContain('--team-bootstrap-spec');
 
     await svc.cancelProvisioning(runId);
   });
@@ -560,14 +542,11 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       () => {}
     );
 
-    const bootstrapSpec = extractBootstrapSpec();
-    expect(bootstrapSpec.members).toEqual([
-      expect.objectContaining({
-        name: 'alice',
-        provider: 'codex',
-        model: 'gpt-5.4',
-      }),
-    ]);
+    // Under LAZY_NATIVE_MEMBER_BOOTSTRAP, no --team-bootstrap-spec is emitted
+    const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+    expect(launchArgs).not.toContain('--team-bootstrap-spec');
+    // Verify model is in launch args
+    expect(launchArgs).toContain('gpt-5.4');
 
     await svc.cancelProvisioning(runId);
   });

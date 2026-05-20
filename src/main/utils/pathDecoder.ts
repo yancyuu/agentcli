@@ -307,7 +307,16 @@ export function getHomeDir(): string {
     process.env.HOMEDRIVE && process.env.HOMEPATH
       ? `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`
       : null;
-  return process.env.HOME || process.env.USERPROFILE || windowsHome || os.homedir() || '/';
+  const resolved = process.env.HOME || process.env.USERPROFILE || windowsHome || os.homedir();
+  if (!resolved || resolved === '/') {
+    // In Docker/headless environments HOME may be unset and os.homedir() returns '/'.
+    // Set HERMIT_HOME explicitly to avoid writing to the filesystem root.
+    console.warn(
+      `[pathDecoder] Home directory resolved to '${resolved ?? 'undefined'}'. ` +
+        `Set HERMIT_HOME or HOME to avoid writing to /.hermit`
+    );
+  }
+  return resolved || '/';
 }
 
 let claudeBasePathOverride: string | null = null;

@@ -26,6 +26,10 @@ vi.mock('@renderer/components/team/activity/useNewItemKeys', () => ({
   useNewItemKeys: () => new Set<string>(),
 }));
 
+vi.mock('@renderer/api', () => ({
+  api: {},
+}));
+
 import { ActivityTimeline } from '@renderer/components/team/activity/ActivityTimeline';
 
 function makeMessage(overrides: Partial<InboxMessage> = {}): InboxMessage {

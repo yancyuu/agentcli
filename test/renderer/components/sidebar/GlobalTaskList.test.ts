@@ -191,24 +191,24 @@ describe('GlobalTaskList project grouping', () => {
     });
 
     expect(visibleSubjects(host)).toEqual(['Task 1', 'Task 2', 'Task 3', 'Task 4', 'Task 5']);
-    expect(findButton(host, 'Show more')).not.toBeNull();
-    expect(findButton(host, 'Show less')).toBeNull();
+    expect(findButton(host, '显示更多')).not.toBeNull();
+    expect(findButton(host, '收起')).toBeNull();
 
     await act(async () => {
-      findButton(host, 'Show more')?.click();
+      findButton(host, '显示更多')?.click();
       await flushMicrotasks();
     });
 
     expect(visibleSubjects(host)).toEqual(['Task 1', 'Task 2', 'Task 3', 'Task 4', 'Task 5', 'Task 6']);
-    expect(findButton(host, 'Show less')).not.toBeNull();
+    expect(findButton(host, '收起')).not.toBeNull();
 
     await act(async () => {
-      findButton(host, 'Show less')?.click();
+      findButton(host, '收起')?.click();
       await flushMicrotasks();
     });
 
     expect(visibleSubjects(host)).toEqual(['Task 1', 'Task 2', 'Task 3', 'Task 4', 'Task 5']);
-    expect(findButton(host, 'Show less')).toBeNull();
+    expect(findButton(host, '收起')).toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -230,12 +230,12 @@ describe('GlobalTaskList project grouping', () => {
     });
 
     await act(async () => {
-      findButton(host, 'Show more')?.click();
+      findButton(host, '显示更多')?.click();
       await flushMicrotasks();
     });
 
     expect(visibleSubjects(host)).toHaveLength(10);
-    expect(findButton(host, 'Show less')).not.toBeNull();
+    expect(findButton(host, '收起')).not.toBeNull();
 
     storeState.globalTasks = [
       makeTask(0, {
@@ -267,8 +267,8 @@ describe('GlobalTaskList project grouping', () => {
       'Task 9',
     ]);
     expect(visibleSubjects(host)).not.toContain('Task 10');
-    expect(findButton(host, 'Show more')).not.toBeNull();
-    expect(findButton(host, 'Show less')).not.toBeNull();
+    expect(findButton(host, '显示更多')).not.toBeNull();
+    expect(findButton(host, '收起')).not.toBeNull();
 
     await act(async () => {
       root.unmount();

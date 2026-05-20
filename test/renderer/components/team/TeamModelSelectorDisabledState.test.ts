@@ -129,7 +129,7 @@ describe('TeamModelSelector Anthropic-only surface', () => {
     });
 
     expect(host.textContent).toBeTruthy();
-    expect(host.textContent).toContain('Anthropic');
+    expect(host.textContent).toContain('Claude');
 
     await act(async () => {
       root.unmount();
@@ -317,7 +317,7 @@ describe('TeamModelSelector Anthropic-only surface', () => {
     });
 
     const text = host.textContent ?? '';
-    expect(text).toContain('Anthropic');
+    expect(text).toContain('Claude');
     expect(text).toContain('Opus 4.8');
     expect(text).toContain('Sonnet 4.7');
     expect(text).toContain('Haiku 4.6');
@@ -445,7 +445,7 @@ describe('TeamModelSelector Anthropic-only surface', () => {
     });
 
     const text = host.textContent ?? '';
-    expect(text).toContain('Anthropic');
+    expect(text).toContain('Claude');
     const tabButtons = Array.from(host.querySelectorAll('button[data-state]'));
     expect(tabButtons.length).toBeGreaterThanOrEqual(1);
 

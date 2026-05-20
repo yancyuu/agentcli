@@ -1039,8 +1039,8 @@ async function pollProvisioningStatus(
   runId: string,
   opts?: { maxAttempts?: number; initialDelayMs?: number }
 ): Promise<void> {
-  const maxAttempts = opts?.maxAttempts ?? 12;
-  let delayMs = opts?.initialDelayMs ?? 150;
+  const maxAttempts = opts?.maxAttempts ?? 60;
+  let delayMs = opts?.initialDelayMs ?? 500;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const state = getState();
     const current = state.provisioningRuns[runId];

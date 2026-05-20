@@ -70,7 +70,7 @@ vi.mock('@renderer/components/team/CollapsibleTeamSection', () => ({
         },
         title
       ),
-      title === 'Changes' && open ? React.createElement('div', null, children) : null
+      (title === 'Changes' || title === '变更') && open ? React.createElement('div', null, children) : null
     );
   },
 }));
@@ -237,7 +237,7 @@ function makeSummary(taskId: string): TaskChangeSetV2 {
 
 function clickChangesSection(host: HTMLElement): void {
   const button = [...host.querySelectorAll('button')].find(
-    (candidate) => candidate.textContent === 'Changes'
+    (candidate) => candidate.textContent === '变更' || candidate.textContent === 'Changes'
   );
   if (!button) {
     throw new Error('Changes section button not found');

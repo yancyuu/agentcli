@@ -123,7 +123,7 @@ async function createResolverBackedLeadFixture(options?: {
         projectPath: staleProjectPath,
         ...(leadSessionId ? { leadSessionId } : {}),
         ...(options?.sessionHistory ? { sessionHistory: options.sessionHistory } : {}),
-        members: [{ name: 'lead', agentType: 'lead', cwd: actualProjectPath }],
+        members: [{ name: 'team-lead', agentType: 'team-lead', cwd: actualProjectPath }],
       },
       null,
       2
@@ -4277,6 +4277,7 @@ describe('TeamDataService', () => {
     );
 
     const service = createResolverBackedService();
+
     const page = await service.getMessagesPage(fixture.teamName, { limit: 10 });
     const persistedConfig = JSON.parse(await fs.readFile(fixture.configPath, 'utf8')) as TeamConfig;
 
@@ -4480,8 +4481,8 @@ describe('TeamDataService', () => {
     const data = await harness.service.getTeamData('my-team');
 
     expect(data.members[0]).toMatchObject({
-      name: 'lead',
-      agentType: 'lead',
+      name: 'team-lead',
+      agentType: 'team-lead',
       role: 'Team Lead',
       providerId: 'codex',
       model: 'gpt-5.4',
@@ -4529,8 +4530,8 @@ describe('TeamDataService', () => {
     const data = await harness.service.getTeamData('my-team');
 
     expect(data.members[0]).toMatchObject({
-      name: 'lead',
-      agentType: 'lead',
+      name: 'team-lead',
+      agentType: 'team-lead',
       providerId: 'codex',
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',

@@ -87,6 +87,7 @@ describe('useRuntimeProviderManagement', () => {
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('uses a clicked model as the app default for new teams without a global success banner', async () => {
@@ -143,6 +144,7 @@ describe('useRuntimeProviderManagement', () => {
 
   it('lazy-loads provider directory and ignores stale search responses', async () => {
     let resolveFirst: ((value: unknown) => void) | null = null;
+    hoisted.loadProviderDirectory.mockReset();
     hoisted.loadView.mockResolvedValue({
       schemaVersion: 1,
       runtimeId: 'opencode',
