@@ -4,15 +4,33 @@
  * Used for detecting, downloading, verifying, and installing Claude Code CLI binary.
  */
 
-import type {
-  CodexAccountAppServerState,
-  CodexAccountAuthMode,
-  CodexAccountEffectiveAuthMode,
-  CodexLaunchReadinessState,
-  CodexLoginStateDto,
-  CodexManagedAccountDto,
-  CodexRateLimitSnapshotDto,
-} from '@features/codex-account/contracts';
+// Stub types for removed codex-account feature
+type CodexAccountAppServerState = string;
+type CodexAccountAuthMode = string;
+type CodexAccountEffectiveAuthMode = string;
+type CodexLaunchReadinessState = string;
+interface CodexLoginStateDto {
+  status: string;
+  error?: string | null;
+  [key: string]: unknown;
+}
+interface CodexManagedAccountDto {
+  type?: string;
+  planType?: string;
+  email?: string;
+  [key: string]: unknown;
+}
+interface CodexRateLimitWindowDto {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+}
+interface CodexRateLimitSnapshotDto {
+  primary: CodexRateLimitWindowDto;
+  secondary?: CodexRateLimitWindowDto | null;
+  credits?: unknown;
+  [key: string]: unknown;
+}
 
 // =============================================================================
 // Platform Detection

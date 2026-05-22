@@ -50,11 +50,9 @@ import type {
   CrossTeamMessage,
   CrossTeamSendRequest,
   CrossTeamSendResult,
-  GlobalLeadChannelSnapshot,
   GlobalTask,
   KanbanColumnId,
   LeadActivitySnapshot,
-  LeadChannelSnapshot,
   LeadContextUsageSnapshot,
   MemberFullStats,
   MemberLogSummary,
@@ -62,7 +60,6 @@ import type {
   MessagesPage,
   ProjectBranchChangeEvent,
   ReplaceMembersRequest,
-  SaveLeadChannelConfigRequest,
   SendMessageRequest,
   SendMessageResult,
   TaskAttachmentMeta,
@@ -97,9 +94,7 @@ import type {
 } from './team';
 import type { TerminalAPI } from './terminal';
 import type { WaterfallData } from './visualization';
-import type { CodexAccountElectronApi } from '@features/codex-account/contracts';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
-import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type {
   ConversationGroup,
   FileChangeEvent,
@@ -598,17 +593,6 @@ export interface TeamsAPI {
   killProcess: (teamName: string, pid: number) => Promise<void>;
   getLeadActivity: (teamName: string) => Promise<LeadActivitySnapshot>;
   getLeadContext: (teamName: string) => Promise<LeadContextUsageSnapshot>;
-  getLeadChannel: (teamName: string) => Promise<LeadChannelSnapshot>;
-  getGlobalLeadChannel: () => Promise<GlobalLeadChannelSnapshot>;
-  saveGlobalLeadChannel: (
-    request: SaveLeadChannelConfigRequest
-  ) => Promise<GlobalLeadChannelSnapshot>;
-  saveLeadChannel: (
-    teamName: string,
-    request: SaveLeadChannelConfigRequest
-  ) => Promise<LeadChannelSnapshot>;
-  startFeishuLeadChannel: (channelId?: string) => Promise<LeadChannelSnapshot | null>;
-  stopFeishuLeadChannel: (channelId?: string) => Promise<LeadChannelSnapshot | null>;
   getMemberSpawnStatuses: (teamName: string) => Promise<MemberSpawnStatusesSnapshot>;
   getTeamAgentRuntime: (teamName: string) => Promise<TeamAgentRuntimeSnapshot>;
   restartMember: (teamName: string, memberName: string) => Promise<void>;
@@ -808,7 +792,7 @@ export interface ReviewAPI {
 /**
  * Complete Electron API exposed to the renderer process via preload script.
  */
-export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElectronApi {
+export interface ElectronAPI extends RecentProjectsElectronApi {
   getAppVersion: () => Promise<string>;
   getProjects: () => Promise<Project[]>;
   getSessions: (projectId: string) => Promise<Session[]>;
@@ -937,9 +921,6 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
 
   // CLI Installer API
   cliInstaller: CliInstallerAPI;
-
-  // Runtime nested provider management API
-  runtimeProviderManagement: RuntimeProviderManagementApi;
 
   // Embedded Terminal API (xterm.js + node-pty)
   terminal: TerminalAPI;

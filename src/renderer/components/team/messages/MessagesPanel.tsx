@@ -112,6 +112,8 @@ interface MessagesPanelProps {
    * consumers (virtualization); unused in this release.
    */
   inlineScrollContainerRef?: RefObject<HTMLDivElement | null>;
+  /** Hide layout-switch controls when the parent owns placement. */
+  showPositionControls?: boolean;
 }
 
 export function reconcilePendingRepliesByMember(
@@ -189,6 +191,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   onRestartTeam,
   onTaskIdClick,
   inlineScrollContainerRef,
+  showPositionControls = true,
 }: MessagesPanelProps): React.JSX.Element {
   const {
     sendTeamMessage,
@@ -1272,42 +1275,44 @@ export const MessagesPanel = memo(function MessagesPanel({
         ) : undefined
       }
       headerExtra={
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  moveToBottomSheet();
-                }}
-                aria-label="将消息移到底部面板"
-              >
-                <PanelBottom size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">移到底部面板</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  moveToSidebar();
-                }}
-                aria-label="将消息移到侧边栏"
-              >
-                <PanelLeft size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">移到侧边栏</TooltipContent>
-          </Tooltip>
-        </div>
+        showPositionControls ? (
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveToBottomSheet();
+                  }}
+                  aria-label="将消息移到底部面板"
+                >
+                  <PanelBottom size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">移到底部面板</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveToSidebar();
+                  }}
+                  aria-label="将消息移到侧边栏"
+                >
+                  <PanelLeft size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">移到侧边栏</TooltipContent>
+            </Tooltip>
+          </div>
+        ) : undefined
       }
       defaultOpen
       action={<div className="flex items-center gap-2 px-2">{searchAndFilterBar}</div>}

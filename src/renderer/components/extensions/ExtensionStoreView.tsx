@@ -6,10 +6,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import {
-  mergeCodexProviderStatusWithSnapshot,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
+// Stubs for removed codex-account feature
+function useCodexAccountSnapshot(_opts: { enabled: boolean; includeRateLimits?: boolean }) {
+  return { snapshot: null, loading: false };
+}
+function mergeCodexProviderStatusWithSnapshot<T>(provider: T, _snapshot: unknown): T {
+  return provider;
+}
+
 import { api } from '@renderer/api';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { Badge } from '@renderer/components/ui/badge';

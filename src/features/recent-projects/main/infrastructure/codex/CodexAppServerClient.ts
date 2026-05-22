@@ -1,7 +1,26 @@
-import type {
-  JsonRpcSession,
-  JsonRpcStdioClient,
-} from '@main/services/infrastructure/codexAppServer';
+// ---------------------------------------------------------------------------
+// Inline type stubs for deleted codexAppServer module
+// ---------------------------------------------------------------------------
+
+/** Minimal stub for the deleted JsonRpcSession interface */
+interface JsonRpcSession {
+  request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
+  notify(method: string, params?: unknown): Promise<void>;
+}
+
+/** Minimal stub for the deleted JsonRpcStdioClient interface */
+interface JsonRpcStdioClient {
+  withSession<T>(
+    options: {
+      binaryPath: string;
+      args: string[];
+      requestTimeoutMs: number;
+      totalTimeoutMs: number;
+      label: string;
+    },
+    handler: (session: JsonRpcSession) => Promise<T>
+  ): Promise<T>;
+}
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 3_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 8_000;
@@ -66,50 +85,21 @@ export class CodexAppServerClient {
   constructor(private readonly rpcClient: JsonRpcStdioClient) {}
 
   async listRecentLiveThreads(
-    binaryPath: string,
-    options: {
+    _binaryPath: string,
+    _options: {
       limit: number;
       requestTimeoutMs?: number;
       initializeTimeoutMs?: number;
       totalTimeoutMs?: number;
     }
   ): Promise<CodexThreadSegmentResult> {
-    const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    const initializeTimeoutMs = options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
-    const totalTimeoutMs = Math.max(
-      options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS,
-      initializeTimeoutMs + requestTimeoutMs + MIN_SESSION_OVERHEAD_TIMEOUT_MS
-    );
-
-    return this.#withThreadListSession(
-      {
-        binaryPath,
-        requestTimeoutMs,
-        initializeTimeoutMs,
-        totalTimeoutMs,
-        label: 'codex app-server thread/list live',
-      },
-      async (session) => {
-        const live = await session.request<ThreadListResponse>(
-          'thread/list',
-          {
-            archived: false,
-            limit: options.limit,
-            sortKey: 'updated_at',
-          },
-          requestTimeoutMs
-        );
-
-        return {
-          threads: live.data ?? [],
-        };
-      }
-    );
+    // Codex app server module has been removed — return empty results
+    return { threads: [] };
   }
 
   async listRecentThreads(
-    binaryPath: string,
-    options: {
+    _binaryPath: string,
+    _options: {
       limit: number;
       liveRequestTimeoutMs?: number;
       archivedRequestTimeoutMs?: number;
@@ -117,119 +107,10 @@ export class CodexAppServerClient {
       totalTimeoutMs?: number;
     }
   ): Promise<CodexRecentThreadsResult> {
-    const liveRequestTimeoutMs = options.liveRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    const archivedRequestTimeoutMs = options.archivedRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    const sessionRequestTimeoutMs = Math.max(liveRequestTimeoutMs, archivedRequestTimeoutMs);
-    const initializeTimeoutMs = options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
-    const totalTimeoutMs = Math.max(
-      options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS,
-      initializeTimeoutMs +
-        liveRequestTimeoutMs +
-        archivedRequestTimeoutMs +
-        MIN_SESSION_OVERHEAD_TIMEOUT_MS
-    );
-
-    return this.#withThreadListSession(
-      {
-        binaryPath,
-        requestTimeoutMs: sessionRequestTimeoutMs,
-        initializeTimeoutMs,
-        totalTimeoutMs,
-        label: 'codex app-server thread/list',
-      },
-      async (session) => {
-        const live = await this.#requestThreadListSegment(session, {
-          archived: false,
-          limit: options.limit,
-          timeoutMs: liveRequestTimeoutMs,
-        });
-        if (live.error) {
-          return {
-            live,
-            archived: {
-              threads: [],
-              error: `Skipped archived thread/list after live thread/list failed: ${live.error}`,
-              skipped: true,
-            },
-          };
-        }
-
-        const archived = await this.#requestThreadListSegment(session, {
-          archived: true,
-          limit: options.limit,
-          timeoutMs: archivedRequestTimeoutMs,
-        });
-
-        return {
-          live,
-          archived,
-        };
-      }
-    );
-  }
-
-  async #requestThreadListSegment(
-    session: JsonRpcSession,
-    options: {
-      archived: boolean;
-      limit: number;
-      timeoutMs: number;
-    }
-  ): Promise<CodexThreadSegmentResult> {
-    try {
-      const response = await session.request<ThreadListResponse>(
-        'thread/list',
-        {
-          archived: options.archived,
-          limit: options.limit,
-          sortKey: 'updated_at',
-        },
-        options.timeoutMs
-      );
-
-      return {
-        threads: response.data ?? [],
-      };
-    } catch (error) {
-      return {
-        threads: [],
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  async #withThreadListSession<T>(
-    options: ThreadListSessionOptions,
-    handler: (session: JsonRpcSession) => Promise<T>
-  ): Promise<T> {
-    return this.rpcClient.withSession(
-      {
-        binaryPath: options.binaryPath,
-        args: ['app-server'],
-        requestTimeoutMs: options.requestTimeoutMs,
-        totalTimeoutMs: options.totalTimeoutMs,
-        label: options.label,
-      },
-      async (session) => {
-        await session.request(
-          'initialize',
-          {
-            clientInfo: {
-              name: 'hermit',
-              title: 'Hermit',
-              version: '0.1.0',
-            },
-            capabilities: {
-              experimentalApi: false,
-              optOutNotificationMethods: SUPPRESSED_NOTIFICATION_METHODS,
-            },
-          },
-          options.initializeTimeoutMs
-        );
-
-        await session.notify('initialized');
-        return handler(session);
-      }
-    );
+    // Codex app server module has been removed — return empty results
+    return {
+      live: { threads: [] },
+      archived: { threads: [] },
+    };
   }
 }

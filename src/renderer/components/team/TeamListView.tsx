@@ -35,7 +35,6 @@ import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { isLeadMember } from '@shared/utils/leadDetection';
 import {
   CheckCircle,
   Clock,
@@ -588,20 +587,10 @@ export const TeamListView = (): React.JSX.Element => {
           const data = await api.teams.getData(teamName);
           const existingNames = teams.map((t) => t.teamName);
           const uniqueName = generateUniqueName(teamName, existingNames);
-          const members = (data.members ?? [])
-            .filter((m) => !m.removedAt && !isLeadMember(m))
-            .map((m) => {
-              let role = m.role;
-              if (!role && m.agentType && m.agentType !== 'general-purpose') {
-                role = m.agentType;
-              }
-              return { name: m.name, role };
-            });
           setCopyData({
             teamName: uniqueName,
             description: data.config.description,
             color: data.config.color,
-            members,
           });
           setShowCreateDialog(true);
         } catch {
@@ -790,15 +779,6 @@ export const TeamListView = (): React.JSX.Element => {
         skipPermissions: template.skipPermissions,
         templateSourceId: template.sourceId,
         templateDirectoryId: template.templateDirectoryId,
-        members: template.members.map((member) => ({
-          name: member.name,
-          role: member.role,
-          workflow: member.workflow,
-          isolation: member.isolation,
-          providerId: member.providerId,
-          model: member.model,
-          effort: member.effort,
-        })),
       });
       setShowTemplateDialog(false);
       setShowCreateDialog(true);

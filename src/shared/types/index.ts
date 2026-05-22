@@ -1,12 +1,11 @@
 /**
- * Shared type definitions - re-exports types from main process for use in renderer.
+ * Shared type definitions.
  *
- * This module provides a stable import path (@shared/types) for types that
- * are shared between main and renderer processes, allowing proper boundary
- * separation while maintaining type safety.
+ * @main/types 提供 Session / Chunk / Process / ParsedMessage 等核心类型,
+ * @shared/types/* 下还包括 notifications / visualization 等。
  *
  * Usage:
- *   import type { Session, Chunk, ParsedMessage } from '@shared/types';
+ *   import type { Session } from '@shared/types';
  */
 
 // Re-export all types from main process types
@@ -35,6 +34,9 @@ export type * from './review';
 
 // Re-export CLI Installer types
 export type * from './cliInstaller';
+
+// Re-export Provider types (global AI model channels)
+export type * from './providers';
 
 // Re-export Terminal types
 export type * from './terminal';

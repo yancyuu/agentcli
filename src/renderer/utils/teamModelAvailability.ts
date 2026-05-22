@@ -402,11 +402,7 @@ export function isTeamModelAvailableForUi(
     return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';
   }
 
-  if (isTeamProviderModelVerificationPending(providerId, providerStatus)) {
-    return true;
-  }
-
-  return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';
+  return true;
 }
 
 export function normalizeExplicitTeamModelForUi(
@@ -441,21 +437,7 @@ export function normalizeTeamModelForUi(
     return isTeamModelAvailableForUi(providerId, trimmed, providerStatus) ? normalized : '';
   }
 
-  if (!providerStatus) {
-    return '';
-  }
-
-  if (isTeamProviderModelVerificationPending(providerId, providerStatus)) {
-    return normalized;
-  }
-
-  const visibleModels = getVisibleRuntimeModels(providerId, providerStatus);
-  if (!visibleModels.includes(trimmed)) {
-    return '';
-  }
-
-  const availability = getRuntimeModelAvailability(providerId, trimmed, providerStatus);
-  return availability === 'available' ? normalized : '';
+  return normalized;
 }
 
 export function getTeamModelSelectionError(
@@ -477,19 +459,6 @@ export function getTeamModelSelectionError(
     return isTeamModelAvailableForUi(providerId, trimmed, providerStatus)
       ? null
       : `模型“${trimmed}”不适用于当前 ${getTeamProviderLabel(providerId) ?? providerId} 运行时。请选择列表中的模型，或使用默认模型。`;
-  }
-
-  if (!providerStatus) {
-    return null;
-  }
-
-  if (isTeamProviderModelVerificationPending(providerId, providerStatus)) {
-    return null;
-  }
-
-  const visibleModels = getVisibleRuntimeModels(providerId, providerStatus);
-  if (!visibleModels.includes(trimmed)) {
-    return `模型“${trimmed}”不适用于当前 ${getTeamProviderLabel(providerId) ?? providerId} 运行时。请选择列表中的模型，或使用默认模型。`;
   }
 
   return null;

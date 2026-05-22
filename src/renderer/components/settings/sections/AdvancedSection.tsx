@@ -10,7 +10,6 @@ import { Download, FileEdit, RefreshCw, Upload } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components';
 
-import { CliStatusSection } from './CliStatusSection';
 import { ConfigEditorDialog } from './ConfigEditorDialog';
 
 interface AdvancedSectionProps {
@@ -88,33 +87,18 @@ export const AdvancedSection = ({
         </button>
       </div>
 
-      <CliStatusSection />
-
       <SettingsSectionHeader title="关于" />
       <div className="flex items-start gap-4 py-3">
         <img src={appIcon} alt="应用图标" className="size-10 rounded-lg" />
         <div>
-          <div className="flex items-center gap-3">
-            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              Hermit
-            </p>
-            <span
-              className="rounded-md border px-2.5 py-1 text-xs font-medium"
-              style={{
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              Standalone
-            </span>
-          </div>
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+            Hermit
+          </p>
           <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             Version {version || '...'}
           </p>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-            Assemble AI agent teams that work autonomously in parallel, communicate across teams,
-            and manage tasks on a kanban board — with built-in code review, live process monitoring,
-            and full tool visibility.
+            渠道与模型供应商统一由 sidecar 管理；团队成员由运行时按任务动态生成。
           </p>
         </div>
       </div>

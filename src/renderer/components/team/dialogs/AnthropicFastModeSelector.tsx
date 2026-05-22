@@ -1,9 +1,26 @@
 import React, { useMemo } from 'react';
 
-import {
-  resolveAnthropicFastMode,
-  resolveAnthropicRuntimeSelection,
-} from '@features/anthropic-runtime-profile/renderer';
+// Stubs for removed anthropic-runtime-profile feature
+function resolveAnthropicRuntimeSelection(_opts: {
+  source: { modelCatalog?: unknown; runtimeCapabilities?: unknown };
+  selectedModel?: string;
+  limitContext: boolean;
+}) {
+  return { fastModeAvailable: false };
+}
+function resolveAnthropicFastMode(_opts: {
+  selection: ReturnType<typeof resolveAnthropicRuntimeSelection>;
+  selectedFastMode: unknown;
+  providerFastModeDefault: boolean;
+}) {
+  return {
+    showFastModeControl: false,
+    resolvedFastMode: false,
+    selectable: false,
+    disabledReason: 'Fast mode is not available.',
+  };
+}
+
 import { Label } from '@renderer/components/ui/label';
 import { useEffectiveCliProviderStatus } from '@renderer/hooks/useEffectiveCliProviderStatus';
 import { cn } from '@renderer/lib/utils';

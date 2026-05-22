@@ -50,6 +50,8 @@ interface ProviderDef {
 const PROVIDERS: ProviderDef[] = [
   { id: 'anthropic', label: 'Claude Code', comingSoon: false },
   { id: 'codex', label: 'Codex', comingSoon: false, beta: true },
+  { id: 'gemini', label: 'Gemini', comingSoon: false, beta: true },
+  { id: 'opencode', label: 'OpenCode', comingSoon: false, beta: true },
 ];
 
 export function getTeamModelLabel(model: string): string {

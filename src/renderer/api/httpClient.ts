@@ -6,9 +6,7 @@
  * to run in a regular browser connected to an HTTP server.
  */
 
-import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
 import type { DashboardRecentProjectsPayload } from '@features/recent-projects/contracts';
-import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type {
   AddMemberRequest,
   AddTaskCommentRequest,
@@ -39,6 +37,7 @@ import type {
   KanbanColumnId,
   MachineProfile,
   MachineRuntimeProcess,
+  MemberFullStats,
   MemberLogSummary,
   NotificationsAPI,
   NotificationTrigger,
@@ -84,10 +83,12 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamTemplateSource,
-  SaveLeadChannelConfigRequest,
   TeamTemplateSourcesSnapshot,
   TeamUpdateConfigRequest,
   TeamViewSnapshot,
+  ToolApprovalEvent,
+  ToolApprovalFileContent,
+  ToolApprovalSettings,
   TriggerTestResult,
   UpdateKanbanPatch,
   UpdaterAPI,
@@ -101,12 +102,15 @@ import type {
   AgentChangeSet,
   ApplyReviewResult,
   ChangeStats,
+  ConflictCheckResult,
   FileChangeWithContent,
+  HunkDecision,
   RejectResult,
   TaskChangeSetV2,
 } from '@shared/types/review';
 import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { AgentConfig } from '@shared/types/api';
+import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 import type { EditorAPI, ProjectAPI } from '@shared/types/editor';
 import type {
   EnrichedPlugin,
@@ -304,29 +308,6 @@ export class HttpAPIClient implements ElectronAPI {
   // ---------------------------------------------------------------------------
 
   getAppVersion = (): Promise<string> => this.get<string>('/api/version');
-
-  getCodexAccountSnapshot = (): Promise<CodexAccountSnapshotDto> =>
-    Promise.reject(new Error('Codex account bridge is unavailable in browser mode'));
-
-  refreshCodexAccountSnapshot = (_options?: {
-    includeRateLimits?: boolean;
-    forceRefreshToken?: boolean;
-  }): Promise<CodexAccountSnapshotDto> =>
-    Promise.reject(new Error('Codex account bridge is unavailable in browser mode'));
-
-  startCodexChatgptLogin = (): Promise<CodexAccountSnapshotDto> =>
-    Promise.reject(new Error('Codex account bridge is unavailable in browser mode'));
-
-  cancelCodexChatgptLogin = (): Promise<CodexAccountSnapshotDto> =>
-    Promise.reject(new Error('Codex account bridge is unavailable in browser mode'));
-
-  logoutCodexAccount = (): Promise<CodexAccountSnapshotDto> =>
-    Promise.reject(new Error('Codex account bridge is unavailable in browser mode'));
-
-  onCodexAccountSnapshotChanged =
-    (_callback: (event: unknown, snapshot: CodexAccountSnapshotDto) => void): (() => void) =>
-    () =>
-      undefined;
 
   getDashboardRecentProjects = (): Promise<DashboardRecentProjectsPayload> =>
     this.get<DashboardRecentProjectsPayload>('/api/dashboard/recent-projects');
@@ -885,11 +866,15 @@ export class HttpAPIClient implements ElectronAPI {
       // Not available in browser mode — no-op.
     },
     getClaudeLogs: async (
-      _teamName: string,
-      _query?: TeamClaudeLogsQuery
+      teamName: string,
+      query?: TeamClaudeLogsQuery
     ): Promise<TeamClaudeLogsResponse> => {
-      console.warn('[HttpAPIClient] getClaudeLogs is not available in browser mode');
-      return { lines: [], total: 0, hasMore: false };
+      const params = new URLSearchParams();
+      if (typeof query?.offset === 'number') params.set('offset', String(query.offset));
+      if (typeof query?.limit === 'number') params.set('limit', String(query.limit));
+      const qs = params.toString();
+      const path = `/api/teams/${encodeURIComponent(teamName)}/claude-logs`;
+      return this.get<TeamClaudeLogsResponse>(qs ? `${path}?${qs}` : path);
     },
     deleteTeam: async (teamName: string): Promise<void> => {
       await this.del(`/api/teams/${encodeURIComponent(teamName)}`);
@@ -1147,29 +1132,12 @@ export class HttpAPIClient implements ElectronAPI {
         `/api/teams/${encodeURIComponent(teamName)}/exact-log-detail/${encodeURIComponent(taskId)}?${params}`
       );
     },
-    getMemberStats: async () => {
-      console.warn('[HttpAPIClient] getMemberStats is not available in browser mode');
-      return {
-        linesAdded: 0,
-        linesRemoved: 0,
-        filesTouched: [],
-        fileStats: {},
-        toolUsage: {},
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        costUsd: 0,
-        tasksCompleted: 0,
-        messageCount: 0,
-        totalDurationMs: 0,
-        sessionCount: 0,
-        computedAt: new Date().toISOString(),
-      };
+    getMemberStats: async (teamName: string, memberName: string) => {
+      return this.get<MemberFullStats>(
+        `/api/teams/${encodeURIComponent(teamName)}/member-stats/${encodeURIComponent(memberName)}`
+      );
     },
-    getAllTasks: async (): Promise<GlobalTask[]> => {
-      console.warn('[HttpAPIClient] getAllTasks is not available in browser mode');
-      return [];
-    },
+    getAllTasks: async (): Promise<GlobalTask[]> => this.get<GlobalTask[]>('/api/teams/tasks'),
     updateConfig: async (
       teamName: string,
       config: TeamUpdateConfigRequest
@@ -1231,24 +1199,6 @@ export class HttpAPIClient implements ElectronAPI {
     getLeadContext: async (teamName: string) => {
       return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-context`);
     },
-    getLeadChannel: async (teamName: string) => {
-      return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-channel`);
-    },
-    getGlobalLeadChannel: async () => {
-      return this.get('/api/teams/lead-channel/global');
-    },
-    saveGlobalLeadChannel: async (request: SaveLeadChannelConfigRequest) => {
-      return this.post('/api/teams/lead-channel/global/save', request);
-    },
-    saveLeadChannel: async (teamName: string, request: SaveLeadChannelConfigRequest) => {
-      return this.post(`/api/teams/${encodeURIComponent(teamName)}/lead-channel/save`, request);
-    },
-    startFeishuLeadChannel: async (channelId?: string) => {
-      return this.post('/api/teams/lead-channel/feishu/start', { channelId });
-    },
-    stopFeishuLeadChannel: async (channelId?: string) => {
-      return this.post('/api/teams/lead-channel/feishu/stop', { channelId });
-    },
     getMemberSpawnStatuses: async (teamName: string) => {
       return this.get<MemberSpawnStatusesSnapshot>(
         `/api/teams/${encodeURIComponent(teamName)}/member-spawn-statuses`
@@ -1283,11 +1233,14 @@ export class HttpAPIClient implements ElectronAPI {
       return this.get<TeamTask[]>(`/api/teams/${encodeURIComponent(teamName)}/deleted-tasks`);
     },
     setTaskClarification: async (
-      _teamName: string,
-      _taskId: string,
-      _value: 'lead' | 'user' | null
+      teamName: string,
+      taskId: string,
+      value: 'lead' | 'user' | null
     ): Promise<void> => {
-      // Not available via HTTP client — no-op
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/task-clarification/${encodeURIComponent(taskId)}`,
+        { value }
+      );
     },
     showMessageNotification: async (): Promise<void> => {
       // Not available via HTTP client — native notifications require Electron
@@ -1355,20 +1308,41 @@ export class HttpAPIClient implements ElectronAPI {
         callback(null, data as TeamProvisioningProgress);
       });
     },
-    respondToToolApproval: async (): Promise<void> => {
-      throw new Error('Tool approval not available in browser mode');
+    respondToToolApproval: async (
+      teamName: string,
+      runId: string,
+      requestId: string,
+      allow: boolean,
+      message?: string
+    ): Promise<void> => {
+      await this.post(`/api/teams/${encodeURIComponent(teamName)}/tool-approval/respond`, {
+        runId,
+        requestId,
+        allow,
+        message,
+      });
     },
-    validateCliArgs: async (): Promise<never> => {
-      throw new Error('CLI args validation not available in browser mode');
+    validateCliArgs: async (rawArgs: string): Promise<CliArgsValidationResult> => {
+      return this.post<CliArgsValidationResult>('/api/teams/validate-cli-args', { rawArgs });
     },
-    onToolApprovalEvent: (): (() => void) => {
-      return () => {};
+    onToolApprovalEvent: (
+      callback: (event: unknown, data: ToolApprovalEvent) => void
+    ): (() => void) => {
+      return this.addEventListener('tool-approval-event', (data: unknown) => {
+        callback(null, data as ToolApprovalEvent);
+      });
     },
-    updateToolApprovalSettings: async (): Promise<void> => {
-      console.warn('[HttpAPIClient] updateToolApprovalSettings is not available in browser mode');
+    updateToolApprovalSettings: async (
+      teamName: string,
+      settings: ToolApprovalSettings
+    ): Promise<void> => {
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tool-approval/settings`,
+        settings
+      );
     },
-    readFileForToolApproval: async () => {
-      throw new Error('Tool approval file read not available in browser mode');
+    readFileForToolApproval: async (filePath: string): Promise<ToolApprovalFileContent> => {
+      return this.post<ToolApprovalFileContent>('/api/teams/tool-approval/read-file', { filePath });
     },
   };
 
@@ -1455,8 +1429,11 @@ export class HttpAPIClient implements ElectronAPI {
         request
       );
     },
-    checkConflict: async (): Promise<never> => {
-      throw new Error('Review conflict check is not available in browser mode');
+    checkConflict: async (filePath: string, expectedModified: string) => {
+      return this.post<ConflictCheckResult>('/api/teams/review/check-conflict', {
+        filePath,
+        expectedModified,
+      });
     },
     rejectHunks: async (
       filePath: string,
@@ -1472,8 +1449,17 @@ export class HttpAPIClient implements ElectronAPI {
     rejectFile: async (filePath: string, original: string, modified: string) => {
       throw new Error('Review reject file is not available in browser mode');
     },
-    previewReject: async (): Promise<never> => {
-      throw new Error('Review preview reject is not available in browser mode');
+    previewReject: async (
+      filePath: string,
+      original: string,
+      modified: string,
+      hunkIndices: number[],
+      snippets: SnippetDiff[]
+    ) => {
+      return this.post<{ preview: string; hasConflicts: boolean }>(
+        '/api/teams/review/preview-reject',
+        { filePath, original, modified, hunkIndices, snippets }
+      );
     },
     saveEditedFile: async (filePath: string, content: string, projectPath?: string) => {
       return this.post<{ success: boolean }>('/api/teams/review/save-edited-file', {
@@ -1491,17 +1477,44 @@ export class HttpAPIClient implements ElectronAPI {
     onExternalFileChange: (): (() => void) => {
       return () => {};
     },
-    loadDecisions: async (): Promise<never> => {
-      throw new Error('Review decisions persistence is not available in browser mode');
+    loadDecisions: async (teamName: string, scopeKey: string, scopeToken?: string) => {
+      return this.post<{
+        hunkDecisions: Record<string, HunkDecision>;
+        fileDecisions: Record<string, HunkDecision>;
+        hunkContextHashesByFile?: Record<string, Record<number, string>>;
+      } | null>('/api/teams/review/decisions/load', { teamName, scopeKey, scopeToken });
     },
-    saveDecisions: async (): Promise<never> => {
-      throw new Error('Review decisions persistence is not available in browser mode');
+    saveDecisions: async (
+      teamName: string,
+      scopeKey: string,
+      scopeToken: string,
+      hunkDecisions: Record<string, HunkDecision>,
+      fileDecisions: Record<string, HunkDecision>,
+      hunkContextHashesByFile?: Record<string, Record<number, string>>
+    ): Promise<void> => {
+      await this.post('/api/teams/review/decisions/save', {
+        teamName,
+        scopeKey,
+        scopeToken,
+        hunkDecisions,
+        fileDecisions,
+        hunkContextHashesByFile,
+      });
     },
-    clearDecisions: async (): Promise<never> => {
-      throw new Error('Review decisions persistence is not available in browser mode');
+    clearDecisions: async (
+      teamName: string,
+      scopeKey: string,
+      scopeToken?: string
+    ): Promise<void> => {
+      await this.post('/api/teams/review/decisions/clear', { teamName, scopeKey, scopeToken });
     },
-    getGitFileLog: async (): Promise<never> => {
-      throw new Error('Review git file log is not available in browser mode');
+    getGitFileLog: async (projectPath: string, filePath: string) => {
+      const params = new URLSearchParams();
+      params.set('projectPath', projectPath);
+      params.set('filePath', filePath);
+      return this.get<{ hash: string; timestamp: string; message: string }[]>(
+        `/api/teams/review/git-file-log?${params}`
+      );
     },
   };
 
@@ -1592,89 +1605,6 @@ export class HttpAPIClient implements ElectronAPI {
     },
   };
 
-  runtimeProviderManagement: RuntimeProviderManagementApi = {
-    loadView: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'runtime-unhealthy',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    loadProviderDirectory: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'runtime-unhealthy',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    loadSetupForm: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'runtime-unhealthy',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    connectProvider: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    connectWithApiKey: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    forgetCredential: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    loadModels: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    testModel: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-    setDefaultModel: async (input) => ({
-      schemaVersion: 1,
-      runtimeId: input.runtimeId,
-      error: {
-        code: 'unsupported-action',
-        message: 'Runtime provider management is not available in browser mode.',
-        recoverable: true,
-      },
-    }),
-  };
   // ---------------------------------------------------------------------------
   // Extensions (plugins, MCP registry, skills — HTTP API)
   // ---------------------------------------------------------------------------

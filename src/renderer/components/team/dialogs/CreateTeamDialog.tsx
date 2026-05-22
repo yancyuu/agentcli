@@ -1,26 +1,42 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  reconcileAnthropicRuntimeSelections,
-  resolveAnthropicFastMode,
-  resolveAnthropicRuntimeSelection,
-} from '@features/anthropic-runtime-profile/renderer';
+// Stubs for removed anthropic-runtime-profile feature
+function resolveAnthropicRuntimeSelection(_opts: {
+  source: { modelCatalog?: unknown; runtimeCapabilities?: unknown };
+  selectedModel?: string;
+  limitContext: boolean;
+}) {
+  return { fastModeAvailable: false };
+}
+function resolveAnthropicFastMode(_opts: {
+  selection: ReturnType<typeof resolveAnthropicRuntimeSelection>;
+  selectedFastMode: unknown;
+  providerFastModeDefault: boolean;
+}) {
+  return {
+    showFastModeControl: false,
+    resolvedFastMode: false,
+    selectable: false,
+    disabledReason: null,
+  };
+}
+function reconcileAnthropicRuntimeSelections(_opts: {
+  selection: ReturnType<typeof resolveAnthropicRuntimeSelection>;
+  selectedEffort: string;
+  selectedFastMode: 'inherit' | 'on' | 'off';
+  providerFastModeDefault: boolean;
+}) {
+  return {
+    nextEffort: _opts.selectedEffort,
+    effortResetReason: null as string | null,
+    nextFastMode: _opts.selectedFastMode as 'inherit' | 'on' | 'off',
+    fastModeResetReason: null as string | null,
+  };
+}
+
 import { api } from '@renderer/api';
-import {
-  buildMemberDraftColorMap,
-  buildMemberDraftSuggestions,
-  buildMembersFromDrafts,
-  clearMemberModelOverrides,
-  createMemberDraft,
-  normalizeLeadProviderForMode,
-  normalizeMemberDraftForProviderMode,
-  normalizeProviderForMode,
-  validateMemberNameInline,
-} from '@renderer/components/team/members/MembersEditorSection';
-import { TeamRosterEditorSection } from '@renderer/components/team/members/TeamRosterEditorSection';
 import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
 import { Button } from '@renderer/components/ui/button';
-import { Checkbox } from '@renderer/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -42,11 +58,9 @@ import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import {
-  applyStoredCreateTeamMemberRuntimePreferences,
   getStoredCreateTeamEffort,
   getStoredCreateTeamFastMode as getStoredTeamFastMode,
   getStoredCreateTeamLimitContext,
-  getStoredCreateTeamMemberRuntimePreferences,
   getStoredCreateTeamModel as getStoredTeamModel,
   getStoredCreateTeamProvider as getStoredTeamProvider,
   getStoredCreateTeamSkipPermissions,
@@ -54,7 +68,6 @@ import {
   setStoredCreateTeamEffort,
   setStoredCreateTeamFastMode,
   setStoredCreateTeamLimitContext,
-  setStoredCreateTeamMemberRuntimePreferences,
   setStoredCreateTeamModel,
   setStoredCreateTeamProvider,
   setStoredCreateTeamSkipPermissions,
@@ -74,33 +87,18 @@ import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { CANONICAL_LEAD_MEMBER_NAME } from '@shared/utils/leadDetection';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { resolveTeamLeadColorName } from '@shared/utils/teamMemberColors';
-import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
+import { normalizeLeadProviderForMode } from '@renderer/components/team/members/MembersEditorSection';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
 import { AnthropicFastModeSelector } from './AnthropicFastModeSelector';
-import {
-  clearInheritedMemberModelsUnavailableForProvider,
-  resolveProviderScopedMemberModel,
-} from './memberModelScope';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
-import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
+import { runProviderPrepareDiagnostics } from './providerPrepareDiagnostics';
 import {
-  buildReusableProviderPrepareModelResults,
-  getProviderPrepareCachedSnapshot,
-  type ProviderPrepareDiagnosticsModelResult,
-  runProviderPrepareDiagnostics,
-} from './providerPrepareDiagnostics';
-import {
-  buildProviderPrepareMembersSignature,
   buildProviderPrepareRequestSignature,
   buildProviderPrepareRuntimeStatusSignature,
 } from './providerPrepareRequestSignature';
-import {
-  getShortLivedProviderPrepareModelResults,
-  storeShortLivedProviderPrepareModelResults,
-} from './providerPrepareShortLivedCache';
 import { getProvisioningModelIssue } from './provisioningModelIssues';
 import {
   deriveEffectiveProvisioningPrepareState,
@@ -119,8 +117,6 @@ import { analyzeTeammateRuntimeCompatibility } from './teammateRuntimeCompatibil
 import { TeammateRuntimeCompatibilityNotice } from './TeammateRuntimeCompatibilityNotice';
 import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 import { getNextSuggestedTeamName } from './teamNameSets';
-
-import type { MemberDraft } from '@renderer/components/team/members/MembersEditorSection';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -141,40 +137,10 @@ import type {
   TeamCreateRequest,
   TeamFastMode,
   TeamProviderId,
-  TeamProvisioningMemberInput,
 } from '@shared/types';
 
 function getProviderLabel(providerId: TeamProviderId): string {
   return getCatalogTeamProviderLabel(providerId) ?? 'Anthropic';
-}
-
-function isHardProvisioningPrepareFailure(
-  message: string | null | undefined,
-  checks: ProvisioningProviderCheck[]
-): boolean {
-  const combined = [message ?? '', ...checks.flatMap((check) => check.details)]
-    .join('\n')
-    .toLowerCase();
-
-  return (
-    combined.includes('working directory does not exist') ||
-    combined.includes('cwd must be an absolute path') ||
-    combined.includes('spawn ') ||
-    combined.includes(' enoent') ||
-    combined.includes('eacces') ||
-    combined.includes('enoexec') ||
-    combined.includes('bad cpu type in executable') ||
-    combined.includes('image not found') ||
-    combined.includes('claude cli not found') ||
-    combined.includes('cli binary missing') ||
-    combined.includes('cli binary could not be started')
-  );
-}
-
-function downgradeSoftProvisioningFailures(
-  checks: ProvisioningProviderCheck[]
-): ProvisioningProviderCheck[] {
-  return checks.map((check) => (check.status === 'failed' ? { ...check, status: 'notes' } : check));
 }
 
 function alignProvisioningChecks(
@@ -195,11 +161,17 @@ function alignProvisioningChecks(
   );
 }
 
+/**
+ * Initial-data payload used by both "copy team" and "use template" flows.
+ * In the workspace-scoped team model the dialog never pre-fills a roster:
+ * even if a template bundles members, they are ignored — the lead spawns
+ * members at runtime. `templateSourceId`/`templateDirectoryId` still flow
+ * through so the backend copies template skills/memory assets.
+ */
 export interface TeamCopyData {
   teamName: string;
   description?: string;
   color?: string;
-  members: TeamProvisioningMemberInput[];
   providerId?: TeamProviderId;
   model?: string;
   effort?: EffortLevel;
@@ -237,27 +209,9 @@ interface ValidationResult {
   valid: boolean;
   errors?: {
     teamName?: string;
-    members?: string;
     cwd?: string;
   };
 }
-
-import { CUSTOM_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
-
-const DEFAULT_MEMBERS: { name: string; roleSelection: string; workflow?: string }[] = [
-  {
-    name: 'alice',
-    roleSelection: 'reviewer',
-    workflow:
-      'Review every completed task in the project. Read the code changes, check for correctness, style, and potential issues. Approve the task or request changes with clear feedback.',
-  },
-  {
-    name: 'tom',
-    roleSelection: 'developer',
-  },
-  { name: 'bob', roleSelection: 'developer' },
-  { name: 'jack', roleSelection: 'developer' },
-];
 
 /** Mirrors Claude CLI's `zuA()` sanitization: non-alphanumeric → `-`, then lowercase. */
 function sanitizeTeamName(name: string): string {
@@ -266,7 +220,6 @@ function sanitizeTeamName(name: string): string {
     .replace(/[^a-zA-Z0-9]/g, '-')
     .replace(/-{2,}/g, '-')
     .toLowerCase();
-  // Trim leading/trailing dashes without backtracking-vulnerable regex
   while (result.startsWith('-')) result = result.slice(1);
   while (result.endsWith('-')) result = result.slice(0, -1);
   if (!result && trimmed) {
@@ -276,7 +229,6 @@ function sanitizeTeamName(name: string): string {
 }
 
 function buildUnicodeTeamSlug(name: string): string {
-  // Deterministic ASCII slug for non-Latin team names, keeps filesystem-safe IDs.
   let hash = 2166136261;
   for (const ch of name) {
     hash ^= ch.codePointAt(0) ?? 0;
@@ -304,60 +256,16 @@ function buildDefaultTeamDescription(teamName: string): string {
   return trimmedName.length > 0 ? `${trimmedName} 团队（用于任务编排）` : '用于任务编排的团队';
 }
 
-function validateRequest(
-  request: TeamCreateRequest,
-  options?: { requireCwd?: boolean }
-): ValidationResult {
-  const requireCwd = options?.requireCwd ?? true;
+function validateRequest(request: TeamCreateRequest): ValidationResult {
   const sanitized = sanitizeTeamName(request.teamName);
   if (!sanitized) {
-    return {
-      valid: false,
-      errors: {
-        teamName: '名称至少要包含一个字母或数字',
-      },
-    };
+    return { valid: false, errors: { teamName: '名称至少要包含一个字母或数字' } };
   }
   if (sanitized.length > 128) {
-    return {
-      valid: false,
-      errors: {
-        teamName: '名称过长（最多 128 个字符）',
-      },
-    };
+    return { valid: false, errors: { teamName: '名称过长（最多 128 个字符）' } };
   }
-  if (requireCwd && !request.cwd.trim()) {
-    return {
-      valid: false,
-      errors: {
-        cwd: '请选择工作目录（cwd）',
-      },
-    };
-  }
-  if (request.members.some((member) => !member.name.trim())) {
-    return {
-      valid: false,
-      errors: {
-        members: '成员名称不能为空',
-      },
-    };
-  }
-  if (request.members.some((member) => validateMemberNameInline(member.name.trim()) !== null)) {
-    return {
-      valid: false,
-      errors: {
-        members: '成员名称需以字母或数字开头，可使用中文、字母、数字、._-，最长 128 字符',
-      },
-    };
-  }
-  const uniqueNames = new Set(request.members.map((member) => member.name.trim().toLowerCase()));
-  if (uniqueNames.size !== request.members.length) {
-    return {
-      valid: false,
-      errors: {
-        members: '成员名称不能重复',
-      },
-    };
+  if (!request.cwd.trim()) {
+    return { valid: false, errors: { cwd: '请选择工作目录（cwd）' } };
   }
   return { valid: true };
 }
@@ -399,22 +307,12 @@ export const CreateTeamDialog = ({
   const {
     teamName,
     setTeamName,
-    members,
-    setMembers,
-    syncModelsWithLead,
-    setSyncModelsWithLead,
-    teammateWorktreeDefault,
-    setTeammateWorktreeDefault,
     cwdMode,
     setCwdMode,
     selectedProjectPath,
     setSelectedProjectPath,
     customCwd,
     setCustomCwd,
-    soloTeam,
-    setSoloTeam,
-    launchTeam,
-    setLaunchTeam,
     teamColor,
     setTeamColor,
     isLoaded: draftLoaded,
@@ -438,7 +336,6 @@ export const CreateTeamDialog = ({
   const lastAutoDescriptionRef = useRef<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     teamName?: string;
-    members?: string;
     cwd?: string;
   }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -549,13 +446,6 @@ export const CreateTeamDialog = ({
     resetUIState();
   };
 
-  const persistCurrentMemberRuntimePreferences = useCallback(
-    (nextMembers: readonly MemberDraft[] = members): void => {
-      setStoredCreateTeamMemberRuntimePreferences(nextMembers);
-    },
-    [members]
-  );
-
   const selectedProjectCwd = isEphemeralProjectPath(selectedProjectPath)
     ? ''
     : selectedProjectPath.trim();
@@ -575,29 +465,12 @@ export const CreateTeamDialog = ({
     }
   }, [open, clearProvisioningError, dialogTeamNameKey]);
 
-  const effectiveMemberDrafts = useMemo(
-    () =>
-      (syncModelsWithLead ? members.map(clearMemberModelOverrides) : members).map((member) =>
-        member.providerId === selectedProviderId
-          ? member
-          : { ...member, providerId: selectedProviderId }
-      ),
-    [members, selectedProviderId, syncModelsWithLead]
+  // Workspace-scoped teams only have one provider (the lead's). All teammates
+  // are dynamically spawned at runtime, so we only prepare the lead provider.
+  const selectedMemberProviders = useMemo<TeamProviderId[]>(
+    () => [selectedProviderId],
+    [selectedProviderId]
   );
-
-  const selectedMemberProviders = useMemo<TeamProviderId[]>(() => {
-    if (soloTeam || syncModelsWithLead) {
-      return [selectedProviderId];
-    }
-    return Array.from(
-      new Set([
-        selectedProviderId,
-        ...members.flatMap((member) =>
-          !member.removedAt && isTeamProviderId(member.providerId) ? [member.providerId] : []
-        ),
-      ])
-    );
-  }, [members, selectedProviderId, soloTeam, syncModelsWithLead]);
 
   const runtimeBackendSummaryByProvider = useMemo(() => {
     const entries: (readonly [TeamProviderId, string | null])[] = (
@@ -630,25 +503,11 @@ export const CreateTeamDialog = ({
   );
   const runtimeBackendSummaryByProviderRef = useRef(runtimeBackendSummaryByProvider);
   const prepareChecksRef = useRef<ProvisioningProviderCheck[]>([]);
-  const prepareModelResultsCacheRef = useRef(
-    new Map<string, Record<string, ProviderPrepareDiagnosticsModelResult>>()
-  );
   const lastPrepareRequestSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     runtimeBackendSummaryByProviderRef.current = runtimeBackendSummaryByProvider;
   }, [runtimeBackendSummaryByProvider]);
-
-  useEffect(() => {
-    const sanitized = clearInheritedMemberModelsUnavailableForProvider({
-      members,
-      selectedProviderId,
-      runtimeProviderStatusById,
-    });
-    if (sanitized.changed) {
-      setMembers(sanitized.members);
-    }
-  }, [members, runtimeProviderStatusById, selectedProviderId, setMembers]);
 
   useEffect(() => {
     prepareChecksRef.current = prepareChecks;
@@ -668,10 +527,6 @@ export const CreateTeamDialog = ({
       ),
     [runtimeProviderStatusById, selectedMemberProviders]
   );
-  const prepareMembersSignature = useMemo(
-    () => buildProviderPrepareMembersSignature(effectiveMemberDrafts),
-    [effectiveMemberDrafts]
-  );
   const prepareRequestSignature = useMemo(
     () =>
       buildProviderPrepareRequestSignature({
@@ -681,12 +536,11 @@ export const CreateTeamDialog = ({
         selectedMemberProviders,
         limitContext,
         runtimeStatusSignature: prepareRuntimeStatusSignature,
-        membersSignature: prepareMembersSignature,
+        membersSignature: '',
       }),
     [
       effectiveCwd,
       limitContext,
-      prepareMembersSignature,
       prepareRuntimeStatusSignature,
       selectedMemberProviders,
       selectedModel,
@@ -706,7 +560,7 @@ export const CreateTeamDialog = ({
   }, [bootstrapCliStatus, cliStatus, cliStatusLoading, fetchCliStatus, multimodelEnabled, open]);
 
   useEffect(() => {
-    if (!open || !canCreate || !launchTeam) {
+    if (!open || !canCreate) {
       prepareRequestSeqRef.current += 1;
       lastPrepareRequestSignatureRef.current = null;
       return;
@@ -768,66 +622,25 @@ export const CreateTeamDialog = ({
           } else if (selectedProviderId === providerId && supportsProviderDefaultCheck) {
             hasDefaultSelection = true;
           }
-          for (const member of effectiveMemberDrafts) {
-            if (member.removedAt) {
-              continue;
-            }
-            const scopedModel = resolveProviderScopedMemberModel({
-              memberProviderId: member.providerId,
-              memberModel: member.model,
-              selectedProviderId,
-              runtimeProviderStatusById,
-            });
-            if (scopedModel.providerId !== providerId) {
-              continue;
-            }
-            if (scopedModel.model) {
-              next.add(scopedModel.model);
-            } else if (supportsProviderDefaultCheck) {
-              hasDefaultSelection = true;
-            }
-          }
           if (supportsProviderDefaultCheck && hasDefaultSelection) {
             next.add(DEFAULT_PROVIDER_MODEL_SELECTION);
           }
           return Array.from(next);
         })();
         const backendSummary = runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null;
-        const cacheKey = buildProviderPrepareModelCacheKey({
-          cwd: effectiveCwd,
-          providerId,
-          backendSummary,
-          limitContext,
-          runtimeStatusSignature: prepareRuntimeStatusSignature,
-        });
-        const cachedModelResultsById = {
-          ...getShortLivedProviderPrepareModelResults({
-            providerId,
-            cacheKey,
-          }),
-          ...(prepareModelResultsCacheRef.current.get(cacheKey) ?? {}),
-        };
-        const cachedSnapshot = getProviderPrepareCachedSnapshot({
-          providerId,
-          selectedModelIds: selectedModelChecks,
-          cachedModelResultsById,
-        });
         return {
           providerId,
           selectedModelChecks,
           backendSummary,
-          cacheKey,
-          cachedModelResultsById,
-          cachedSnapshot,
         };
       });
 
       try {
         for (const plan of providerPlans) {
           checks = updateProviderCheck(checks, plan.providerId, {
-            status: plan.selectedModelChecks.length > 0 ? plan.cachedSnapshot.status : 'checking',
+            status: 'checking',
             backendSummary: plan.backendSummary,
-            details: plan.cachedSnapshot.details,
+            details: [],
           });
         }
         if (prepareRequestSeqRef.current === requestSeq) {
@@ -841,7 +654,6 @@ export const CreateTeamDialog = ({
               selectedModelIds: plan.selectedModelChecks,
               prepareProvisioning: api.teams.prepareProvisioning,
               limitContext,
-              cachedModelResultsById: plan.cachedModelResultsById,
               onModelProgress: ({ status, details }) => {
                 checks = updateProviderCheck(checks, plan.providerId, {
                   status,
@@ -873,17 +685,6 @@ export const CreateTeamDialog = ({
           } else if (plan.prepResult.status === 'notes') {
             anyNotes = true;
           }
-          if (prepareRequestSeqRef.current === requestSeq) {
-            const reusableModelResults = buildReusableProviderPrepareModelResults(
-              plan.prepResult.modelResultsById
-            );
-            prepareModelResultsCacheRef.current.set(plan.cacheKey, reusableModelResults);
-            storeShortLivedProviderPrepareModelResults({
-              providerId: plan.providerId,
-              cacheKey: plan.cacheKey,
-              modelResultsById: plan.prepResult.modelResultsById,
-            });
-          }
           checks = updateProviderCheck(checks, plan.providerId, {
             status: plan.prepResult.status,
             backendSummary: plan.backendSummary,
@@ -896,22 +697,17 @@ export const CreateTeamDialog = ({
         if (prepareRequestSeqRef.current !== requestSeq) return;
         const failureMessage =
           getPrimaryProvisioningFailureDetail(checks) ?? '部分提供商状态异常，请先处理。';
-        const hasHardFailure =
-          anyFailure && isHardProvisioningPrepareFailure(failureMessage, checks);
-        const displayChecks = hasHardFailure ? checks : downgradeSoftProvisioningFailures(checks);
-        setPrepareChecks(displayChecks);
-        setPrepareState(hasHardFailure ? 'failed' : 'ready');
+        setPrepareChecks(checks);
+        setPrepareState(anyFailure ? 'failed' : 'ready');
         setPrepareMessage(
-          hasHardFailure
+          anyFailure
             ? failureMessage
-            : anyFailure
-              ? '预检发现提示，但不会阻止创建。实际启动将使用当前 CLI/runtime 配置。'
-              : anyNotes
-                ? '所选提供商已就绪（含提示信息）。'
-                : '所选提供商已就绪。'
+            : anyNotes
+              ? '所选提供商已就绪（含提示信息）。'
+              : '所选提供商已就绪。'
         );
         setPrepareWarnings(
-          anyFailure && !hasHardFailure
+          anyFailure
             ? Array.from(new Set([...collectedWarnings, failureMessage]))
             : collectedWarnings
         );
@@ -927,9 +723,7 @@ export const CreateTeamDialog = ({
   }, [
     open,
     canCreate,
-    launchTeam,
     effectiveCwd,
-    effectiveMemberDrafts,
     limitContext,
     prepareRequestSignature,
     runtimeProviderStatusById,
@@ -956,9 +750,6 @@ export const CreateTeamDialog = ({
           return;
         }
 
-        // If defaultProjectPath is set but not in the fetched list (e.g. new project
-        // without Claude sessions), add it as a synthetic entry so the Combobox can
-        // display and select it.
         const normalizedDefaultProjectPath = defaultProjectPath
           ? normalizePath(defaultProjectPath)
           : null;
@@ -998,101 +789,41 @@ export const CreateTeamDialog = ({
     };
   }, [open, defaultProjectPath]);
 
+  // Apply initialData (copy team / use template) — name, description, color,
+  // and lead runtime settings only. Any bundled members are intentionally
+  // ignored in workspace-scoped mode; the lead spawns teammates dynamically.
   useEffect(() => {
-    if (!open || !draftLoaded) {
+    if (!open || !draftLoaded || !initialData) {
       return;
     }
-
-    if (initialData) {
-      const nextSyncModelsWithLead = !initialData.members.some(
-        (member) => member.providerId || member.model || member.effort
-      );
-      setTeamName(initialData.teamName);
-      descriptionDraft.setValue(initialData.description ?? '');
-      setTeamColor(initialData.color ?? '');
-      const initialProviderId = normalizeLeadProviderForMode(
-        initialData.providerId ?? 'anthropic',
-        multimodelEnabled
-      );
-      setSelectedProviderIdRaw(initialProviderId);
-      setSelectedModelRaw(
-        normalizeExplicitTeamModelForUi(
-          initialProviderId,
-          initialData.model ?? getStoredTeamModel(initialProviderId)
-        )
-      );
-      setSelectedEffortRaw(initialData.effort ?? getStoredCreateTeamEffort());
-      setSelectedFastModeRaw(initialData.fastMode ?? getStoredTeamFastMode());
-      if (typeof initialData.limitContext === 'boolean') {
-        setLimitContextRaw(initialData.limitContext);
-      } else if (initialProviderId !== 'anthropic') {
-        setLimitContextRaw(false);
-      } else {
-        setLimitContextRaw(getStoredCreateTeamLimitContext());
-      }
-      if (typeof initialData.skipPermissions === 'boolean') {
-        setSkipPermissionsRaw(initialData.skipPermissions);
-      }
-      setMembers(
-        initialData.members.map((m) => {
-          const presetRoles: readonly string[] = PRESET_ROLES;
-          const isPreset = m.role != null && presetRoles.includes(m.role);
-          const isCustom = m.role != null && m.role.length > 0 && !isPreset;
-          return normalizeMemberDraftForProviderMode(
-            createMemberDraft({
-              name: m.name,
-              roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
-              customRole: isCustom ? m.role : '',
-              workflow: m.workflow,
-              isolation: m.isolation === 'worktree' ? 'worktree' : undefined,
-              providerId: normalizeOptionalTeamProviderId(m.providerId),
-              model: m.model ?? '',
-              effort: m.effort,
-            }),
-            multimodelEnabled
-          );
-        })
-      );
-      setTeammateWorktreeDefault(
-        initialData.members.length > 0 &&
-          initialData.members.every((member) => member.isolation === 'worktree')
-      );
-      setSyncModelsWithLead(nextSyncModelsWithLead, { persistStoredPreference: false });
-      return;
-    }
-
-    if (members.length > 0) {
-      return;
-    }
-
-    const nextDefaultMembers = DEFAULT_MEMBERS.map((member) =>
-      createMemberDraft({
-        name: member.name,
-        roleSelection: member.roleSelection,
-        workflow: member.workflow,
-      })
+    setTeamName(initialData.teamName);
+    descriptionDraft.setValue(initialData.description ?? '');
+    setTeamColor(initialData.color ?? '');
+    const initialProviderId = normalizeLeadProviderForMode(
+      initialData.providerId ?? 'anthropic',
+      multimodelEnabled
     );
-    setMembers(
-      syncModelsWithLead
-        ? nextDefaultMembers
-        : applyStoredCreateTeamMemberRuntimePreferences(nextDefaultMembers)
+    setSelectedProviderIdRaw(initialProviderId);
+    setSelectedModelRaw(
+      normalizeExplicitTeamModelForUi(
+        initialProviderId,
+        initialData.model ?? getStoredTeamModel(initialProviderId)
+      )
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData is checked once on open/draftLoaded
+    setSelectedEffortRaw(initialData.effort ?? getStoredCreateTeamEffort());
+    setSelectedFastModeRaw(initialData.fastMode ?? getStoredTeamFastMode());
+    if (typeof initialData.limitContext === 'boolean') {
+      setLimitContextRaw(initialData.limitContext);
+    } else if (initialProviderId !== 'anthropic') {
+      setLimitContextRaw(false);
+    } else {
+      setLimitContextRaw(getStoredCreateTeamLimitContext());
+    }
+    if (typeof initialData.skipPermissions === 'boolean') {
+      setSkipPermissionsRaw(initialData.skipPermissions);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData processed once per open
   }, [open, draftLoaded]);
-
-  useEffect(() => {
-    if (!open || !draftLoaded || initialData || syncModelsWithLead || members.length === 0) {
-      return;
-    }
-    persistCurrentMemberRuntimePreferences(members);
-  }, [
-    draftLoaded,
-    initialData,
-    members,
-    open,
-    persistCurrentMemberRuntimePreferences,
-    syncModelsWithLead,
-  ]);
 
   useEffect(() => {
     if (!open || initialData || !draftLoaded) {
@@ -1125,19 +856,13 @@ export const CreateTeamDialog = ({
     }
   }, [descriptionDraft, initialData, open, suggestedTeamName, teamName]);
 
-  // Pre-select defaultProjectPath when projects loaded (only while dialog is open)
+  // Pre-select defaultProjectPath when projects loaded
   useEffect(() => {
     if (!open) return;
-    if (cwdMode !== 'project') {
-      return;
-    }
-    if (selectedProjectPath) {
-      return;
-    }
+    if (cwdMode !== 'project') return;
+    if (selectedProjectPath) return;
     const selectableProjects = projects.filter((project) => !isEphemeralProjectPath(project.path));
-    if (selectableProjects.length === 0) {
-      return;
-    }
+    if (selectableProjects.length === 0) return;
     if (defaultProjectPath && !isEphemeralProjectPath(defaultProjectPath)) {
       const normalizedDefaultProjectPath = normalizePath(defaultProjectPath);
       const match = selectableProjects.find(
@@ -1168,21 +893,17 @@ export const CreateTeamDialog = ({
 
   const description = descriptionDraft.value;
   const prompt = promptDraft.value;
-  const memberColorMap = useMemo(() => buildMemberDraftColorMap(members), [members]);
 
   const mentionSuggestions = useMemo(
-    () =>
-      soloTeam
-        ? [
-            {
-              id: CANONICAL_LEAD_MEMBER_NAME,
-              name: CANONICAL_LEAD_MEMBER_NAME,
-              subtitle: '团队负责人',
-              color: resolveTeamLeadColorName(),
-            },
-          ]
-        : buildMemberDraftSuggestions(members, memberColorMap),
-    [memberColorMap, members, soloTeam]
+    () => [
+      {
+        id: CANONICAL_LEAD_MEMBER_NAME,
+        name: CANONICAL_LEAD_MEMBER_NAME,
+        subtitle: '团队负责人',
+        color: resolveTeamLeadColorName(),
+      },
+    ],
+    []
   );
 
   const effectiveModel = useMemo(
@@ -1195,24 +916,18 @@ export const CreateTeamDialog = ({
       ),
     [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
+  // Workspace-scoped teams are always lead-only at startup; pass solo=true so
+  // the analysis only validates the lead's own runtime compatibility.
   const teammateRuntimeCompatibility = useMemo(
     () =>
       analyzeTeammateRuntimeCompatibility({
         leadProviderId: selectedProviderId,
         leadProviderBackendId: selectedProviderBackendId,
-        members: effectiveMemberDrafts,
-        soloTeam: soloTeam || !canCreate,
-        extraCliArgs: launchTeam ? buildLaunchExtraCliArgs(customArgs) : undefined,
+        members: [],
+        soloTeam: true,
+        extraCliArgs: buildLaunchExtraCliArgs(customArgs),
       }),
-    [
-      customArgs,
-      effectiveMemberDrafts,
-      launchTeam,
-      canCreate,
-      selectedProviderBackendId,
-      selectedProviderId,
-      soloTeam,
-    ]
+    [customArgs, selectedProviderBackendId, selectedProviderId]
   );
   const anthropicRuntimeSelection = useMemo(
     () =>
@@ -1254,10 +969,7 @@ export const CreateTeamDialog = ({
       selection:
         anthropicRuntimeSelection ??
         resolveAnthropicRuntimeSelection({
-          source: {
-            modelCatalog: null,
-            runtimeCapabilities: null,
-          },
+          source: { modelCatalog: null, runtimeCapabilities: null },
           selectedModel,
           limitContext,
         }),
@@ -1313,7 +1025,7 @@ export const CreateTeamDialog = ({
       displayName: teamName.trim() || undefined,
       description: description.trim() || undefined,
       color: teamColor || undefined,
-      members: soloTeam ? [] : buildMembersFromDrafts(effectiveMemberDrafts),
+      members: [],
       cwd: effectiveCwd,
       executionTarget,
       prompt: prompt.trim() || undefined,
@@ -1325,16 +1037,15 @@ export const CreateTeamDialog = ({
       limitContext,
       skipPermissions,
       worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
-      extraCliArgs: launchTeam ? buildLaunchExtraCliArgs(customArgs) : undefined,
+      extraCliArgs: buildLaunchExtraCliArgs(customArgs),
       templateSourceId: initialData?.templateSourceId,
       templateDirectoryId: initialData?.templateDirectoryId,
     };
   }, [
     sanitizedTeamName,
+    teamName,
     description,
     teamColor,
-    soloTeam,
-    effectiveMemberDrafts,
     effectiveCwd,
     executionTarget,
     prompt,
@@ -1342,50 +1053,25 @@ export const CreateTeamDialog = ({
     selectedProviderBackendId,
     effectiveModel,
     selectedEffort,
-    anthropicRuntimeSelection,
     selectedFastMode,
     limitContext,
     skipPermissions,
     worktreeEnabled,
     worktreeName,
     customArgs,
-    launchTeam,
+    initialData?.templateSourceId,
+    initialData?.templateDirectoryId,
   ]);
-  const requestValidation = useMemo(
-    () => validateRequest(request, { requireCwd: launchTeam }),
-    [request, launchTeam]
+  const requestValidation = useMemo(() => validateRequest(request), [request]);
+  const modelValidationError = useMemo(
+    () =>
+      getTeamModelSelectionError(
+        selectedProviderId,
+        selectedModel,
+        runtimeProviderStatusById.get(selectedProviderId)
+      ),
+    [runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
-  const modelValidationError = useMemo(() => {
-    const leadError = getTeamModelSelectionError(
-      selectedProviderId,
-      selectedModel,
-      runtimeProviderStatusById.get(selectedProviderId)
-    );
-    if (leadError) {
-      return leadError;
-    }
-
-    for (const member of effectiveMemberDrafts) {
-      if (member.removedAt) {
-        continue;
-      }
-
-      const providerId = normalizeOptionalTeamProviderId(member.providerId) ?? selectedProviderId;
-      const memberError = getTeamModelSelectionError(
-        providerId,
-        member.model,
-        runtimeProviderStatusById.get(providerId)
-      );
-      if (!memberError) {
-        continue;
-      }
-
-      const memberName = member.name.trim();
-      return memberName ? `${memberName}: ${memberError}` : memberError;
-    }
-
-    return null;
-  }, [effectiveMemberDrafts, runtimeProviderStatusById, selectedModel, selectedProviderId]);
   const leadModelIssueText = useMemo(() => {
     const issue = getProvisioningModelIssue(
       prepareChecks,
@@ -1394,31 +1080,6 @@ export const CreateTeamDialog = ({
     );
     return issue?.reason ?? issue?.detail ?? null;
   }, [effectiveModel, prepareChecks, selectedModel, selectedProviderId]);
-  const memberModelIssueById = useMemo(() => {
-    const next: Record<string, string> = {};
-    for (const member of effectiveMemberDrafts) {
-      if (member.removedAt) {
-        continue;
-      }
-      if (syncModelsWithLead && leadModelIssueText) {
-        next[member.id] = leadModelIssueText;
-        continue;
-      }
-      const providerId = normalizeOptionalTeamProviderId(member.providerId) ?? selectedProviderId;
-      const issue = getProvisioningModelIssue(prepareChecks, providerId, member.model);
-      const issueText = issue?.reason ?? issue?.detail ?? null;
-      if (issueText) {
-        next[member.id] = issueText;
-      }
-    }
-    return next;
-  }, [
-    effectiveMemberDrafts,
-    leadModelIssueText,
-    prepareChecks,
-    selectedProviderId,
-    syncModelsWithLead,
-  ]);
   const hasCreateFormErrors =
     !!teamNameInlineError ||
     isNameTakenByExistingTeam ||
@@ -1449,7 +1110,6 @@ export const CreateTeamDialog = ({
     return args;
   }, [
     anthropicFastModeResolution?.resolvedFastMode,
-    anthropicRuntimeSelection,
     effectiveModel,
     selectedEffort,
     selectedProviderId,
@@ -1463,11 +1123,10 @@ export const CreateTeamDialog = ({
     if (selectedProviderId === 'anthropic') {
       if (selectedFastMode === 'on') summary.push('快速模式');
       else if (selectedFastMode === 'off') summary.push('快速模式关闭');
-      else if (selectedProviderId === 'anthropic' && anthropicProviderFastModeDefault) {
+      else if (anthropicProviderFastModeDefault) {
         summary.push('快速默认');
       }
     }
-    summary.push('Members: 进程内子 agent');
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree：${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('自定义 CLI 参数');
     return summary;
@@ -1489,35 +1148,6 @@ export const CreateTeamDialog = ({
     return summary;
   }, [description, teamColor]);
 
-  const handleSyncModelsWithLeadChange = useCallback(
-    (checked: boolean): void => {
-      setSyncModelsWithLead(checked);
-      if (checked) {
-        persistCurrentMemberRuntimePreferences(members);
-        setMembers(members.map(clearMemberModelOverrides));
-        return;
-      }
-
-      if (getStoredCreateTeamMemberRuntimePreferences().length === 0) {
-        return;
-      }
-
-      const nextMembers = applyStoredCreateTeamMemberRuntimePreferences(members);
-      const hasRuntimeChanges = nextMembers.some((member, index) => {
-        const previousMember = members[index];
-        return (
-          member.providerId !== previousMember?.providerId ||
-          member.model !== previousMember?.model ||
-          member.effort !== previousMember?.effort
-        );
-      });
-      if (hasRuntimeChanges) {
-        setMembers(nextMembers);
-      }
-    },
-    [members, persistCurrentMemberRuntimePreferences, setMembers, setSyncModelsWithLead]
-  );
-
   const activeError =
     localError ?? modelValidationError ?? provisioningErrorsByTeam[request.teamName] ?? null;
   const effectivePrepare = useMemo(
@@ -1534,11 +1164,10 @@ export const CreateTeamDialog = ({
     activeError?.includes('Team already exists') === true && request.teamName.length > 0;
 
   const conflictingTeam = useMemo(() => {
-    if (!launchTeam) return null;
     if (!activeTeams?.length || !effectiveCwd) return null;
     const norm = normalizePath(effectiveCwd);
     return activeTeams.find((t) => normalizePath(t.projectPath) === norm) ?? null;
-  }, [activeTeams, effectiveCwd, launchTeam]);
+  }, [activeTeams, effectiveCwd]);
 
   // Reset dismiss when conflict target changes
   useEffect(() => {
@@ -1552,7 +1181,7 @@ export const CreateTeamDialog = ({
       setLocalError(msg);
       return;
     }
-    const validation = validateRequest(request, { requireCwd: launchTeam });
+    const validation = validateRequest(request);
     if (!validation.valid) {
       const errors = validation.errors ?? {};
       setFieldErrors(errors);
@@ -1572,45 +1201,8 @@ export const CreateTeamDialog = ({
     setLocalError(null);
     setIsSubmitting(true);
 
-    if (!launchTeam) {
-      void (async () => {
-        try {
-          if (!syncModelsWithLead) {
-            persistCurrentMemberRuntimePreferences(members);
-          }
-          await api.teams.createConfig({
-            teamName: request.teamName,
-            displayName: request.displayName,
-            description: request.description,
-            color: request.color,
-            members: request.members,
-            cwd: effectiveCwd || undefined,
-            executionTarget: request.executionTarget,
-            providerId: request.providerId,
-            providerBackendId: request.providerBackendId,
-            model: request.model,
-            effort: request.effort,
-            fastMode: request.fastMode,
-            templateSourceId: request.templateSourceId,
-            templateDirectoryId: request.templateDirectoryId,
-          });
-          onOpenTeam(request.teamName, effectiveCwd || undefined);
-          resetFormState();
-          onClose();
-        } catch (error) {
-          setLocalError(error instanceof Error ? error.message : '创建团队配置失败');
-        } finally {
-          setIsSubmitting(false);
-        }
-      })();
-      return;
-    }
-
     void (async () => {
       try {
-        if (!syncModelsWithLead) {
-          persistCurrentMemberRuntimePreferences(members);
-        }
         await onCreate(request);
         onOpenTeam(request.teamName, effectiveCwd || undefined);
         resetFormState();
@@ -1638,6 +1230,10 @@ export const CreateTeamDialog = ({
       return rest;
     });
   };
+
+  const hasTemplateSource = Boolean(
+    initialData?.templateSourceId && initialData?.templateDirectoryId
+  );
 
   return (
     <Dialog
@@ -1744,7 +1340,7 @@ export const CreateTeamDialog = ({
               <div className="mb-2">
                 <p className="text-xs font-medium text-[var(--color-text)]">团队运行时</p>
                 <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                  Provider 作用于整个团队；成员只选择模型，默认继承这里的 provider。
+                  Provider 作用于整个团队；成员由负责人在运行时动态生成，并默认继承这里的 provider。
                 </p>
               </div>
               <TeamModelSelector
@@ -1761,74 +1357,23 @@ export const CreateTeamDialog = ({
             </div>
           </div>
 
-          <div className="md:col-span-2">
-            <TeamRosterEditorSection
-              members={members}
-              onMembersChange={setMembers}
-              fieldError={fieldErrors.members}
-              validateMemberName={validateMemberNameInline}
-              showWorkflow
-              showJsonEditor
-              draftKeyPrefix={initialData ? undefined : 'createTeam'}
-              projectPath={effectiveCwd || null}
-              taskSuggestions={taskSuggestions}
-              teamSuggestions={teamMentionSuggestions}
-              defaultProviderId={selectedProviderId}
-              inheritedProviderId={selectedProviderId}
-              inheritedModel={selectedModel}
-              inheritedEffort={(selectedEffort as EffortLevel) || undefined}
-              inheritModelSettingsByDefault
-              lockProviderModel={syncModelsWithLead}
-              forceInheritedModelSettings={syncModelsWithLead}
-              modelLockReason="该成员当前与团队负责人模型保持同步。关闭同步后可单独设置提供商、模型与思考强度。"
-              hideMembersContent={soloTeam}
-              providerId={selectedProviderId}
-              model={selectedModel}
-              effort={(selectedEffort as EffortLevel) || undefined}
-              limitContext={limitContext}
-              onProviderChange={setSelectedProviderId}
-              onModelChange={setSelectedModel}
-              onEffortChange={setSelectedEffort}
-              onLimitContextChange={setLimitContext}
-              syncModelsWithTeammates={syncModelsWithLead}
-              onSyncModelsWithTeammatesChange={handleSyncModelsWithLeadChange}
-              showWorktreeIsolationControls={!soloTeam}
-              teammateWorktreeDefault={teammateWorktreeDefault}
-              onTeammateWorktreeDefaultChange={setTeammateWorktreeDefault}
-              disableGeminiOption={true}
-              leadModelIssueText={leadModelIssueText}
-              teamName={sanitizedTeamName || teamName.trim()}
-              memberWarningById={teammateRuntimeCompatibility.memberWarningById}
-              memberModelIssueById={memberModelIssueById}
-              hideLeadProviderTabs
-              headerTop={
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="solo-team"
-                    checked={soloTeam}
-                    onCheckedChange={(checked) => setSoloTeam(checked === true)}
-                  />
-                  <Label
-                    htmlFor="solo-team"
-                    className="cursor-pointer text-xs font-normal text-text-secondary"
-                  >
-                    单人团队
-                  </Label>
-                </div>
-              }
-              headerBottom={
-                soloTeam ? (
-                  <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
-                    <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
-                    <p className="text-[11px] leading-relaxed text-sky-300">
-                      仅启动团队负责人（主进程），不会拉起其他成员。体验上类似普通 Claude 会话，
-                      但可使用任务看板进行规划。因为没有成员协作开销，能明显节省 token。后续可在
-                      团队设置里再添加成员。
-                    </p>
-                  </div>
-                ) : null
-              }
-            />
+          <div className="space-y-2 md:col-span-2">
+            <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
+              <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
+              <p className="text-[11px] leading-relaxed text-sky-300">
+                当前为目录工作空间模式：团队不再预置固定成员，目录中的文件就是团队长期记忆；启动后由负责人按任务动态生成子
+                agent。
+              </p>
+            </div>
+            {hasTemplateSource ? (
+              <div className="flex items-start gap-2 rounded-md border border-violet-500/20 bg-violet-500/5 px-3 py-2">
+                <Info className="mt-0.5 size-3.5 shrink-0 text-violet-400" />
+                <p className="text-[11px] leading-relaxed text-violet-300">
+                  已应用团队模板：模板自带的 skills / memory
+                  文件会复制到工作目录；模板里的成员不会预置，由负责人按需创建。
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div
@@ -1839,118 +1384,90 @@ export const CreateTeamDialog = ({
                 : 'var(--color-surface-overlay)',
             }}
           >
-            <div className="flex items-start gap-3">
-              <Checkbox
-                id="launch-team"
-                className="mt-1 shrink-0"
-                checked={launchTeam}
-                onCheckedChange={(checked) => setLaunchTeam(checked === true)}
+            <div className="space-y-4">
+              <ProjectPathSelector
+                cwdMode={cwdMode}
+                onCwdModeChange={setCwdMode}
+                selectedProjectPath={selectedProjectPath}
+                onSelectedProjectPathChange={setSelectedProjectPath}
+                customCwd={customCwd}
+                onCustomCwdChange={setCustomCwd}
+                projects={projects}
+                projectsLoading={projectsLoading}
+                projectsError={projectsError}
+                fieldError={fieldErrors.cwd}
               />
-              <div className="space-y-1">
-                <Label htmlFor="launch-team" className="cursor-pointer text-sm font-semibold">
-                  创建后立即启动
-                </Label>
-                <p
-                  className="text-xs"
-                  style={{
-                    color: isLight
-                      ? 'color-mix(in srgb, var(--color-text-muted) 54%, var(--color-text) 46%)'
-                      : 'var(--color-text-muted)',
-                  }}
-                >
-                  创建完成后，立即通过本地 Agent CLI 启动团队。
-                </p>
-              </div>
-            </div>
 
-            {launchTeam ? (
-              <div className="mt-4 space-y-4">
-                <ProjectPathSelector
-                  cwdMode={cwdMode}
-                  onCwdModeChange={setCwdMode}
-                  selectedProjectPath={selectedProjectPath}
-                  onSelectedProjectPathChange={setSelectedProjectPath}
-                  customCwd={customCwd}
-                  onCustomCwdChange={setCustomCwd}
-                  projects={projects}
-                  projectsLoading={projectsLoading}
-                  projectsError={projectsError}
-                  fieldError={fieldErrors.cwd}
-                />
-
-                <OptionalSettingsSection
-                  title="可选启动设置"
-                  description="需要时可在这里配置提示词、安全策略和 CLI 覆盖参数。"
-                  summary={launchOptionalSummary}
-                >
-                  <div className="space-y-4">
-                    {selectedProviderId === 'anthropic' ? (
-                      <div className="space-y-2">
-                        <AnthropicFastModeSelector
-                          value={selectedFastMode}
-                          onValueChange={setSelectedFastMode}
-                          providerFastModeDefault={anthropicProviderFastModeDefault}
-                          model={selectedModel}
-                          limitContext={limitContext}
-                          id="create-fast-mode"
-                        />
-                        {anthropicRuntimeNotice ? (
-                          <div className="bg-amber-500/8 flex items-start gap-2 rounded-md border border-amber-500/25 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
-                            <Info className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
-                            <p>{anthropicRuntimeNotice}</p>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="space-y-1.5">
-                      <Label htmlFor="team-prompt" className="label-optional">
-                        团队负责人提示词（可选）
-                      </Label>
-                      <MentionableTextarea
-                        id="team-prompt"
-                        className="text-xs"
-                        minRows={3}
-                        maxRows={12}
-                        value={prompt}
-                        onValueChange={promptDraft.setValue}
-                        suggestions={soloTeam ? [] : mentionSuggestions}
-                        teamSuggestions={teamMentionSuggestions}
-                        taskSuggestions={taskSuggestions}
-                        projectPath={effectiveCwd || null}
-                        chips={promptChipDraft.chips}
-                        onChipRemove={promptChipDraft.removeChip}
-                        onFileChipInsert={promptChipDraft.addChip}
-                        placeholder="填写给团队负责人的启动说明..."
-                        footerRight={
-                          promptDraft.isSaved ? (
-                            <span className="text-[10px] text-[var(--color-text-muted)]">
-                              已保存
-                            </span>
-                          ) : null
-                        }
+              <OptionalSettingsSection
+                title="可选启动设置"
+                description="需要时可在这里配置提示词、安全策略和 CLI 覆盖参数。"
+                summary={launchOptionalSummary}
+              >
+                <div className="space-y-4">
+                  {selectedProviderId === 'anthropic' ? (
+                    <div className="space-y-2">
+                      <AnthropicFastModeSelector
+                        value={selectedFastMode}
+                        onValueChange={setSelectedFastMode}
+                        providerFastModeDefault={anthropicProviderFastModeDefault}
+                        model={selectedModel}
+                        limitContext={limitContext}
+                        id="create-fast-mode"
                       />
+                      {anthropicRuntimeNotice ? (
+                        <div className="bg-amber-500/8 flex items-start gap-2 rounded-md border border-amber-500/25 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+                          <Info className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+                          <p>{anthropicRuntimeNotice}</p>
+                        </div>
+                      ) : null}
                     </div>
-
-                    <SkipPermissionsCheckbox
-                      id="create-skip-permissions"
-                      checked={skipPermissions}
-                      onCheckedChange={setSkipPermissions}
-                    />
-
-                    <AdvancedCliSection
-                      teamName={advancedKey}
-                      internalArgs={internalArgs}
-                      worktreeEnabled={worktreeEnabled}
-                      onWorktreeEnabledChange={setWorktreeEnabled}
-                      worktreeName={worktreeName}
-                      onWorktreeNameChange={setWorktreeName}
-                      customArgs={customArgs}
-                      onCustomArgsChange={setCustomArgs}
+                  ) : null}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="team-prompt" className="label-optional">
+                      团队负责人提示词（可选）
+                    </Label>
+                    <MentionableTextarea
+                      id="team-prompt"
+                      className="text-xs"
+                      minRows={3}
+                      maxRows={12}
+                      value={prompt}
+                      onValueChange={promptDraft.setValue}
+                      suggestions={mentionSuggestions}
+                      teamSuggestions={teamMentionSuggestions}
+                      taskSuggestions={taskSuggestions}
+                      projectPath={effectiveCwd || null}
+                      chips={promptChipDraft.chips}
+                      onChipRemove={promptChipDraft.removeChip}
+                      onFileChipInsert={promptChipDraft.addChip}
+                      placeholder="填写给团队负责人的启动说明..."
+                      footerRight={
+                        promptDraft.isSaved ? (
+                          <span className="text-[10px] text-[var(--color-text-muted)]">已保存</span>
+                        ) : null
+                      }
                     />
                   </div>
-                </OptionalSettingsSection>
-              </div>
-            ) : null}
+
+                  <SkipPermissionsCheckbox
+                    id="create-skip-permissions"
+                    checked={skipPermissions}
+                    onCheckedChange={setSkipPermissions}
+                  />
+
+                  <AdvancedCliSection
+                    teamName={advancedKey}
+                    internalArgs={internalArgs}
+                    worktreeEnabled={worktreeEnabled}
+                    onWorktreeEnabledChange={setWorktreeEnabled}
+                    worktreeName={worktreeName}
+                    onWorktreeNameChange={setWorktreeName}
+                    customArgs={customArgs}
+                    onCustomArgsChange={setCustomArgs}
+                  />
+                </div>
+              </OptionalSettingsSection>
+            </div>
           </div>
 
           <div className="md:col-span-2">
@@ -2029,7 +1546,6 @@ export const CreateTeamDialog = ({
         <DialogFooter className="pt-4 sm:justify-between">
           <div className="min-w-0">
             {canCreate &&
-            launchTeam &&
             (effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading') ? (
               <>
                 <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
@@ -2050,7 +1566,7 @@ export const CreateTeamDialog = ({
               </>
             ) : null}
 
-            {canCreate && launchTeam && effectivePrepare.state === 'ready' ? (
+            {canCreate && effectivePrepare.state === 'ready' ? (
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
                   <CheckCircle2 className="size-3.5 shrink-0" />
@@ -2079,7 +1595,7 @@ export const CreateTeamDialog = ({
               </div>
             ) : null}
 
-            {canCreate && launchTeam && effectivePrepare.state === 'failed' ? (
+            {canCreate && effectivePrepare.state === 'failed' ? (
               <div className="text-xs">
                 <div className="flex items-start gap-2 text-red-300">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -2146,8 +1662,7 @@ export const CreateTeamDialog = ({
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" />
                   创建中...
                 </>
-              ) : launchTeam &&
-                (effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading') ? (
+              ) : effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading' ? (
                 '跳过预检并创建'
               ) : (
                 '创建'

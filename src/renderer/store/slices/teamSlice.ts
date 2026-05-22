@@ -2154,6 +2154,7 @@ export interface TeamSlice {
   createTeam: (request: TeamCreateRequest) => Promise<string>;
   launchTeam: (request: TeamLaunchRequest) => Promise<string>;
   cancelProvisioning: (runId: string) => Promise<void>;
+  cancelCurrentProvisioning: (teamName: string, runIdHint?: string) => Promise<void>;
   getProvisioningStatus: (runId: string) => Promise<TeamProvisioningProgress>;
   clearMissingProvisioningRun: (runId: string) => void;
   onProvisioningProgress: (progress: TeamProvisioningProgress) => void;
@@ -4212,7 +4213,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   addMember: async (teamName: string, request: AddMemberRequest) => {
     await unwrapIpc('team:addMember', () => api.teams.addMember(teamName, request));
-    await get().refreshTeamData(teamName);
+    await Promise.allSettled([
+      get().refreshTeamData(teamName),
+      get().fetchMemberSpawnStatuses(teamName),
+      get().fetchTeamAgentRuntime(teamName),
+    ]);
   },
 
   restartMember: async (teamName: string, memberName: string) => {
@@ -4793,6 +4798,32 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   cancelProvisioning: async (runId: string) => {
     await unwrapIpc('team:cancelProvisioning', () => api.teams.cancelProvisioning(runId));
+  },
+
+  cancelCurrentProvisioning: async (teamName: string, runIdHint?: string) => {
+    const state = get();
+    const activeRunId =
+      state.currentProvisioningRunIdByTeam[teamName] ??
+      state.currentRuntimeRunIdByTeam[teamName] ??
+      runIdHint;
+
+    const resolveFallbackRunId = (): string | null => {
+      const latest = Object.values(get().provisioningRuns)
+        .filter((run) => run.teamName === teamName && !TERMINAL_PROVISIONING_STATES.has(run.state))
+        .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+      return latest?.runId ?? null;
+    };
+
+    const targetRunId = activeRunId ?? resolveFallbackRunId();
+
+    if (targetRunId) {
+      await get().cancelProvisioning(targetRunId);
+      return;
+    }
+
+    // Fallback: if run bookkeeping is stale but process is alive,
+    // stop team by name so the user-visible "取消" action still works.
+    await unwrapIpc('team:stop', () => api.teams.stop(teamName));
   },
 
   onProvisioningProgress: (progress: TeamProvisioningProgress) => {

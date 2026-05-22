@@ -55,12 +55,6 @@ export function clearInheritedMemberModelsUnavailableForProvider(input: {
     if (member.removedAt || member.providerId || !member.model?.trim()) {
       return member;
     }
-    if (
-      input.selectedProviderId !== 'anthropic' &&
-      !input.runtimeProviderStatusById.get(input.selectedProviderId)
-    ) {
-      return member;
-    }
 
     const scoped = resolveProviderScopedMemberModel({
       memberProviderId: member.providerId,

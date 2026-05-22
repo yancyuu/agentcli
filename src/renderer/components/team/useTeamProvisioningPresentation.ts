@@ -13,18 +13,26 @@ import type { TeamProvisioningPresentation } from '@renderer/utils/teamProvision
 export function useTeamProvisioningPresentation(teamName: string): {
   presentation: TeamProvisioningPresentation | null;
   cancelProvisioning: ((runId: string) => Promise<void>) | null;
+  cancelCurrentProvisioning: ((teamName: string, runIdHint?: string) => Promise<void>) | null;
   runInstanceKey: string | null;
 } {
-  const { progress, cancelProvisioning, teamMembers, memberSpawnStatuses, memberSpawnSnapshot } =
-    useStore(
-      useShallow((s) => ({
-        progress: getCurrentProvisioningProgressForTeam(s, teamName),
-        cancelProvisioning: s.cancelProvisioning,
-        teamMembers: selectTeamMemberSnapshotsForName(s, teamName),
-        memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
-        memberSpawnSnapshot: s.memberSpawnSnapshotsByTeam[teamName],
-      }))
-    );
+  const {
+    progress,
+    cancelProvisioning,
+    cancelCurrentProvisioning,
+    teamMembers,
+    memberSpawnStatuses,
+    memberSpawnSnapshot,
+  } = useStore(
+    useShallow((s) => ({
+      progress: getCurrentProvisioningProgressForTeam(s, teamName),
+      cancelProvisioning: s.cancelProvisioning,
+      cancelCurrentProvisioning: s.cancelCurrentProvisioning,
+      teamMembers: selectTeamMemberSnapshotsForName(s, teamName),
+      memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
+      memberSpawnSnapshot: s.memberSpawnSnapshotsByTeam[teamName],
+    }))
+  );
 
   const presentation = useMemo(
     () =>
@@ -40,6 +48,7 @@ export function useTeamProvisioningPresentation(teamName: string): {
   return {
     presentation,
     cancelProvisioning,
+    cancelCurrentProvisioning,
     runInstanceKey: progress ? `${teamName}:${progress.runId}:${progress.startedAt}` : null,
   };
 }

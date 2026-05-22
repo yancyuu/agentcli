@@ -36,11 +36,38 @@ const MAX_DIAGNOSTIC_ITEMS = 20;
 const SECRET_FLAG_PATTERN =
   /(--(?:api-key|token|password|secret|authorization|auth-token)(?:=|\s+))("[^"]*"|'[^']*'|\S+)/gi;
 
+function normalizeDiagnosticValue(value: unknown): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    typeof value === 'symbol'
+  ) {
+    return String(value);
+  }
+  try {
+    const json = JSON.stringify(value);
+    return typeof json === 'string' ? json : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function boundedString(
-  value: string | undefined,
+  value: unknown,
   maxLength = MAX_DIAGNOSTIC_STRING_LENGTH
 ): string | undefined {
-  const trimmed = value?.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeDiagnosticValue(value);
+  const trimmed = normalized?.replace(/\s+/g, ' ').trim();
   if (!trimmed) return undefined;
   const redacted = trimmed.replace(SECRET_FLAG_PATTERN, '$1[redacted]');
   return redacted.length > maxLength

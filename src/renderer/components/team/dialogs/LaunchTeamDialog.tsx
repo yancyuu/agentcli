@@ -1,10 +1,39 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  reconcileAnthropicRuntimeSelections,
-  resolveAnthropicFastMode,
-  resolveAnthropicRuntimeSelection,
-} from '@features/anthropic-runtime-profile/renderer';
+// Stubs for removed anthropic-runtime-profile feature
+function resolveAnthropicRuntimeSelection(_opts: {
+  source: { modelCatalog?: unknown; runtimeCapabilities?: unknown };
+  selectedModel?: string;
+  limitContext: boolean;
+}) {
+  return { fastModeAvailable: false };
+}
+function resolveAnthropicFastMode(_opts: {
+  selection: ReturnType<typeof resolveAnthropicRuntimeSelection>;
+  selectedFastMode: unknown;
+  providerFastModeDefault: boolean;
+}) {
+  return {
+    showFastModeControl: false,
+    resolvedFastMode: false,
+    selectable: false,
+    disabledReason: null,
+  };
+}
+function reconcileAnthropicRuntimeSelections(_opts: {
+  selection: ReturnType<typeof resolveAnthropicRuntimeSelection>;
+  selectedEffort: string;
+  selectedFastMode: 'inherit' | 'on' | 'off';
+  providerFastModeDefault: boolean;
+}) {
+  return {
+    nextEffort: _opts.selectedEffort,
+    effortResetReason: null as string | null,
+    nextFastMode: _opts.selectedFastMode as 'inherit' | 'on' | 'off',
+    fastModeResetReason: null as string | null,
+  };
+}
+
 import { api } from '@renderer/api';
 import { SkipPermissionsCheckbox } from '@renderer/components/team/dialogs/SkipPermissionsCheckbox';
 import {
@@ -88,22 +117,12 @@ import {
 } from './memberModelScope';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
-import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
-import {
-  buildReusableProviderPrepareModelResults,
-  getProviderPrepareCachedSnapshot,
-  type ProviderPrepareDiagnosticsModelResult,
-  runProviderPrepareDiagnostics,
-} from './providerPrepareDiagnostics';
+import { runProviderPrepareDiagnostics } from './providerPrepareDiagnostics';
 import {
   buildProviderPrepareModelChecksSignature,
   buildProviderPrepareRequestSignature,
   buildProviderPrepareRuntimeStatusSignature,
 } from './providerPrepareRequestSignature';
-import {
-  getShortLivedProviderPrepareModelResults,
-  storeShortLivedProviderPrepareModelResults,
-} from './providerPrepareShortLivedCache';
 import { getProvisioningModelIssue } from './provisioningModelIssues';
 import {
   deriveEffectiveProvisioningPrepareState,
@@ -159,6 +178,8 @@ function alignProvisioningChecks(
       }
   );
 }
+
+const WORKSPACE_SCOPED_TEAM_MODE = true;
 
 // =============================================================================
 // Props — discriminated union
@@ -445,24 +466,28 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [scheduleHydrationKey, setScheduleHydrationKey] = useState<string | null>(null);
   const effectiveMemberDrafts = useMemo(
     () =>
-      (syncModelsWithLead ? membersDrafts.map(clearMemberModelOverrides) : membersDrafts).map(
-        (member) =>
-          member.providerId === selectedProviderId
-            ? member
-            : { ...member, providerId: selectedProviderId }
-      ),
+      WORKSPACE_SCOPED_TEAM_MODE
+        ? []
+        : (syncModelsWithLead ? membersDrafts.map(clearMemberModelOverrides) : membersDrafts).map(
+            (member) =>
+              member.providerId === selectedProviderId
+                ? member
+                : { ...member, providerId: selectedProviderId }
+          ),
     [membersDrafts, selectedProviderId, syncModelsWithLead]
   );
   const selectedMemberProviders = useMemo<TeamProviderId[]>(
     () =>
-      Array.from(
-        new Set([
-          selectedProviderId,
-          ...effectiveMemberDrafts.flatMap((member) =>
-            !member.removedAt && isTeamProviderId(member.providerId) ? [member.providerId] : []
+      WORKSPACE_SCOPED_TEAM_MODE
+        ? [selectedProviderId]
+        : Array.from(
+            new Set([
+              selectedProviderId,
+              ...effectiveMemberDrafts.flatMap((member) =>
+                !member.removedAt && isTeamProviderId(member.providerId) ? [member.providerId] : []
+              ),
+            ])
           ),
-        ])
-      ),
     [effectiveMemberDrafts, selectedProviderId]
   );
 
@@ -480,9 +505,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   }, [effectiveCliStatus?.providers]);
   const runtimeBackendSummaryByProviderRef = useRef(runtimeBackendSummaryByProvider);
   const prepareChecksRef = useRef<ProvisioningProviderCheck[]>([]);
-  const prepareModelResultsCacheRef = useRef(
-    new Map<string, Record<string, ProviderPrepareDiagnosticsModelResult>>()
-  );
   const lastPrepareRequestSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -888,7 +910,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       analyzeTeammateRuntimeCompatibility({
         leadProviderId: selectedProviderId,
         leadProviderBackendId: selectedProviderBackendId,
-        members: isLaunchMode ? effectiveMemberDrafts : [],
+        members: WORKSPACE_SCOPED_TEAM_MODE ? [] : isLaunchMode ? effectiveMemberDrafts : [],
         extraCliArgs: isLaunchMode ? buildLaunchExtraCliArgs(customArgs) : undefined,
       }),
     [customArgs, effectiveMemberDrafts, isLaunchMode, selectedProviderBackendId, selectedProviderId]
@@ -1305,41 +1327,19 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       const providerPlans = selectedMemberProviders.map((providerId) => {
         const selectedModelChecks = selectedModelChecksByProvider.get(providerId) ?? [];
         const backendSummary = runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null;
-        const cacheKey = buildProviderPrepareModelCacheKey({
-          cwd: effectiveCwd,
-          providerId,
-          backendSummary,
-          limitContext,
-          runtimeStatusSignature: prepareRuntimeStatusSignature,
-        });
-        const cachedModelResultsById = {
-          ...getShortLivedProviderPrepareModelResults({
-            providerId,
-            cacheKey,
-          }),
-          ...(prepareModelResultsCacheRef.current.get(cacheKey) ?? {}),
-        };
-        const cachedSnapshot = getProviderPrepareCachedSnapshot({
-          providerId,
-          selectedModelIds: selectedModelChecks,
-          cachedModelResultsById,
-        });
         return {
           providerId,
           selectedModelChecks,
           backendSummary,
-          cacheKey,
-          cachedModelResultsById,
-          cachedSnapshot,
         };
       });
 
       try {
         for (const plan of providerPlans) {
           checks = updateProviderCheck(checks, plan.providerId, {
-            status: plan.selectedModelChecks.length > 0 ? plan.cachedSnapshot.status : 'checking',
+            status: 'checking',
             backendSummary: plan.backendSummary,
-            details: plan.cachedSnapshot.details,
+            details: [],
           });
         }
         if (prepareRequestSeqRef.current === requestSeq) {
@@ -1353,7 +1353,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               selectedModelIds: plan.selectedModelChecks,
               prepareProvisioning: api.teams.prepareProvisioning,
               limitContext,
-              cachedModelResultsById: plan.cachedModelResultsById,
               onModelProgress: ({ status, details }) => {
                 checks = updateProviderCheck(checks, plan.providerId, {
                   status,
@@ -1384,17 +1383,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             anyFailure = true;
           } else if (plan.prepResult.status === 'notes') {
             anyNotes = true;
-          }
-          if (prepareRequestSeqRef.current === requestSeq) {
-            const reusableModelResults = buildReusableProviderPrepareModelResults(
-              plan.prepResult.modelResultsById
-            );
-            prepareModelResultsCacheRef.current.set(plan.cacheKey, reusableModelResults);
-            storeShortLivedProviderPrepareModelResults({
-              providerId: plan.providerId,
-              cacheKey: plan.cacheKey,
-              modelResultsById: plan.prepResult.modelResultsById,
-            });
           }
           checks = updateProviderCheck(checks, plan.providerId, {
             status: plan.prepResult.status,
@@ -1625,7 +1613,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     }
     if (selectedProviderId === 'anthropic' && limitContext) summary.push('上下文限制为 200K');
     if (skipPermissions) summary.push('自动批准工具');
-    summary.push('Members: 进程内子 agent');
+    summary.push(WORKSPACE_SCOPED_TEAM_MODE ? '成员由运行时动态生成' : 'Members: 进程内子 agent');
     if (clearContext) summary.push('全新会话');
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree：${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('自定义 CLI 参数');
@@ -1742,13 +1730,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const hasInvalidLaunchMemberNames = useMemo(
     () =>
       isLaunchMode &&
+      !WORKSPACE_SCOPED_TEAM_MODE &&
       membersDrafts.some(
         (member) => !member.name.trim() || validateMemberNameInline(member.name.trim()) !== null
       ),
     [isLaunchMode, membersDrafts]
   );
   const hasDuplicateLaunchMemberNames = useMemo(() => {
-    if (!isLaunchMode) return false;
+    if (!isLaunchMode || WORKSPACE_SCOPED_TEAM_MODE) return false;
     const activeNames = membersDrafts
       .map((member) => member.name.trim().toLowerCase())
       .filter(Boolean);
@@ -1847,7 +1836,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             worktree: saved?.worktree,
             extraCliArgs: saved?.extraCliArgs,
           };
-          const nextMembers = relaunchMembers ?? [];
+          const nextMembers = WORKSPACE_SCOPED_TEAM_MODE ? [] : (relaunchMembers ?? []);
           await props.onRelaunch(launchRequest, nextMembers);
           openTeamTab(effectiveTeamName, relaunchProjectPath || defaultProjectPath);
           closeDialog();
@@ -1880,6 +1869,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     }
     if (
       isLaunchMode &&
+      !WORKSPACE_SCOPED_TEAM_MODE &&
       membersDrafts.some(
         (member) => !member.name.trim() || validateMemberNameInline(member.name.trim()) !== null
       )
@@ -1887,7 +1877,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setLocalError('请先修正成员名称再启动');
       return;
     }
-    if (isLaunchMode) {
+    if (isLaunchMode && !WORKSPACE_SCOPED_TEAM_MODE) {
       const activeNames = membersDrafts
         .map((member) => member.name.trim().toLowerCase())
         .filter(Boolean);
@@ -1902,7 +1892,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     void (async () => {
       try {
         if (isLaunchMode) {
-          const nextMembers = buildMembersFromDrafts(effectiveMemberDrafts);
+          const nextMembers = WORKSPACE_SCOPED_TEAM_MODE
+            ? []
+            : buildMembersFromDrafts(effectiveMemberDrafts);
           const launchEffort = resolveTeamEffortForLaunch({
             providerId: selectedProviderId,
             selectedEffort,
@@ -2031,8 +2023,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     : isLaunchMode
       ? isSubmitting ||
         launchInFlight ||
-        !effectiveCliStatus ||
-        (cliStatusLoading && !cliStatus) ||
         validationErrors.length > 0 ||
         !!modelValidationError ||
         hasInvalidLaunchMemberNames ||
@@ -2451,46 +2441,55 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       ) : null}
                     </div>
                   ) : null}
-                  <TeamRosterEditorSection
-                    members={membersDrafts}
-                    onMembersChange={setMembersDrafts}
-                    validateMemberName={validateMemberNameInline}
-                    showWorkflow
-                    showJsonEditor
-                    draftKeyPrefix={`launchTeam:${effectiveTeamName}`}
-                    projectPath={effectiveCwd || null}
-                    taskSuggestions={taskSuggestions}
-                    teamSuggestions={teamMentionSuggestions}
-                    existingMembers={members}
-                    defaultProviderId={selectedProviderId}
-                    inheritedProviderId={selectedProviderId}
-                    inheritedModel={selectedModel}
-                    inheritedEffort={(selectedEffort as EffortLevel) || undefined}
-                    inheritModelSettingsByDefault
-                    lockProviderModel={syncModelsWithLead}
-                    forceInheritedModelSettings={syncModelsWithLead}
-                    modelLockReason="该成员当前与团队负责人模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。"
-                    providerId={selectedProviderId}
-                    model={selectedModel}
-                    effort={(selectedEffort as EffortLevel) || undefined}
-                    limitContext={limitContext}
-                    onProviderChange={setSelectedProviderId}
-                    onModelChange={setSelectedModel}
-                    onEffortChange={setSelectedEffort}
-                    onLimitContextChange={setLimitContext}
-                    syncModelsWithTeammates={syncModelsWithLead}
-                    onSyncModelsWithTeammatesChange={setSyncModelsWithLead}
-                    showWorktreeIsolationControls
-                    teammateWorktreeDefault={teammateWorktreeDefault}
-                    onTeammateWorktreeDefaultChange={setTeammateWorktreeDefault}
-                    leadWarningText={leadRuntimeWarningText}
-                    memberWarningById={combinedMemberRuntimeWarningById}
-                    leadModelIssueText={leadModelIssueText}
-                    memberModelIssueById={memberModelIssueById}
-                    hideLeadProviderTabs
-                    softDeleteMembers
-                    disableGeminiOption={true}
-                  />
+                  {WORKSPACE_SCOPED_TEAM_MODE ? (
+                    <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
+                      <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
+                      <p className="text-[11px] leading-relaxed text-sky-300">
+                        当前为目录工作空间模式：启动时不再写入预置成员，目录文件即记忆，成员会由负责人在运行中动态生成。
+                      </p>
+                    </div>
+                  ) : (
+                    <TeamRosterEditorSection
+                      members={membersDrafts}
+                      onMembersChange={setMembersDrafts}
+                      validateMemberName={validateMemberNameInline}
+                      showWorkflow
+                      showJsonEditor
+                      draftKeyPrefix={`launchTeam:${effectiveTeamName}`}
+                      projectPath={effectiveCwd || null}
+                      taskSuggestions={taskSuggestions}
+                      teamSuggestions={teamMentionSuggestions}
+                      existingMembers={members}
+                      defaultProviderId={selectedProviderId}
+                      inheritedProviderId={selectedProviderId}
+                      inheritedModel={selectedModel}
+                      inheritedEffort={(selectedEffort as EffortLevel) || undefined}
+                      inheritModelSettingsByDefault
+                      lockProviderModel={syncModelsWithLead}
+                      forceInheritedModelSettings={syncModelsWithLead}
+                      modelLockReason="该成员当前与团队负责人模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。"
+                      providerId={selectedProviderId}
+                      model={selectedModel}
+                      effort={(selectedEffort as EffortLevel) || undefined}
+                      limitContext={limitContext}
+                      onProviderChange={setSelectedProviderId}
+                      onModelChange={setSelectedModel}
+                      onEffortChange={setSelectedEffort}
+                      onLimitContextChange={setLimitContext}
+                      syncModelsWithTeammates={syncModelsWithLead}
+                      onSyncModelsWithTeammatesChange={setSyncModelsWithLead}
+                      showWorktreeIsolationControls
+                      teammateWorktreeDefault={teammateWorktreeDefault}
+                      onTeammateWorktreeDefaultChange={setTeammateWorktreeDefault}
+                      leadWarningText={leadRuntimeWarningText}
+                      memberWarningById={combinedMemberRuntimeWarningById}
+                      leadModelIssueText={leadModelIssueText}
+                      memberModelIssueById={memberModelIssueById}
+                      hideLeadProviderTabs
+                      softDeleteMembers
+                      disableGeminiOption={true}
+                    />
+                  )}
 
                   <div className="space-y-1.5">
                     <Label htmlFor="dialog-prompt" className="label-optional">

@@ -2,18 +2,11 @@ import {
   type DashboardRecentProjectsPayload,
   normalizeDashboardRecentProjectsPayload,
 } from '@features/recent-projects/contracts';
-import {
-  CodexBinaryResolver,
-  JsonRpcStdioClient,
-} from '@main/services/infrastructure/codexAppServer';
 
 import { ListDashboardRecentProjectsUseCase } from '../../core/application/use-cases/ListDashboardRecentProjectsUseCase';
 import { DashboardRecentProjectsPresenter } from '../adapters/output/presenters/DashboardRecentProjectsPresenter';
 import { ClaudeRecentProjectsSourceAdapter } from '../adapters/output/sources/ClaudeRecentProjectsSourceAdapter';
-import { CodexRecentProjectsSourceAdapter } from '../adapters/output/sources/CodexRecentProjectsSourceAdapter';
 import { InMemoryRecentProjectsCache } from '../infrastructure/cache/InMemoryRecentProjectsCache';
-import { CodexAppServerClient } from '../infrastructure/codex/CodexAppServerClient';
-import { RecentProjectIdentityResolver } from '../infrastructure/identity/RecentProjectIdentityResolver';
 
 import type { ClockPort } from '../../core/application/ports/ClockPort';
 import type { LoggerPort } from '../../core/application/ports/LoggerPort';
@@ -31,20 +24,7 @@ export function createRecentProjectsFeature(deps: {
   const cache = new InMemoryRecentProjectsCache<DashboardRecentProjectsPayload>();
   const presenter = new DashboardRecentProjectsPresenter();
   const clock: ClockPort = { now: () => Date.now() };
-  const jsonRpcStdioClient = new JsonRpcStdioClient(deps.logger);
-  const codexAppServerClient = new CodexAppServerClient(jsonRpcStdioClient);
-  const identityResolver = new RecentProjectIdentityResolver();
-  const sources = [
-    new ClaudeRecentProjectsSourceAdapter(deps.getActiveContext, deps.logger),
-    new CodexRecentProjectsSourceAdapter({
-      getActiveContext: deps.getActiveContext,
-      getLocalContext: deps.getLocalContext,
-      resolveBinary: () => CodexBinaryResolver.resolve(),
-      appServerClient: codexAppServerClient,
-      identityResolver,
-      logger: deps.logger,
-    }),
-  ];
+  const sources = [new ClaudeRecentProjectsSourceAdapter(deps.getActiveContext, deps.logger)];
   const useCase = new ListDashboardRecentProjectsUseCase({
     sources,
     cache,

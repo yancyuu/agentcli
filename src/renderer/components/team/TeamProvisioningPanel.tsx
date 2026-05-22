@@ -22,7 +22,7 @@ export const TeamProvisioningPanel = memo(function TeamProvisioningPanel({
   className,
   defaultLogsOpen,
 }: TeamProvisioningPanelProps): React.JSX.Element | null {
-  const { presentation, cancelProvisioning, runInstanceKey } =
+  const { presentation, cancelProvisioning, cancelCurrentProvisioning, runInstanceKey } =
     useTeamProvisioningPresentation(teamName);
   const [dismissed, setDismissed] = useState(false);
   const lastActiveStepRef = useRef(-1);
@@ -66,9 +66,12 @@ export const TeamProvisioningPanel = memo(function TeamProvisioningPanel({
       defaultLiveOutputOpen={presentation.defaultLiveOutputOpen}
       defaultLogsOpen={defaultLogsOpen}
       onCancel={
-        presentation.canCancel && cancelProvisioning
+        presentation.canCancel && (cancelCurrentProvisioning ?? cancelProvisioning)
           ? () => {
-              void cancelProvisioning(presentation.progress.runId);
+              void (cancelCurrentProvisioning ?? cancelProvisioning)?.(
+                teamName,
+                presentation.progress.runId
+              );
             }
           : null
       }

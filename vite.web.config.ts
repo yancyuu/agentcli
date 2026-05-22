@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const ROOT = __dirname;
-const standalonePort = process.env.VITE_STANDALONE_PORT?.trim() || '3456';
+// 默认指向 bin/hermit-mvp/server.mjs(5680);用 cc-connect sidecar 作为后端
+const standalonePort = process.env.VITE_STANDALONE_PORT?.trim() || '5680';
 const webPort = Number.parseInt(process.env.VITE_WEB_PORT?.trim() || '5174', 10);
 const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as { version: string };
 
@@ -43,4 +44,12 @@ export default defineConfig({
       '@claude-teams/agent-graph': resolve(ROOT, 'packages/agent-graph/src/index.ts'),
     },
   },
+  // top-level await 在 splash scene 入口里被使用,默认 esbuild target 太老
+  build: {
+    target: 'es2022',
+  },
+  esbuild: {
+    target: 'es2022',
+  },
 });
+

@@ -1,25 +1,66 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  formatCodexCreditsValue,
-  formatCodexRemainingPercent,
-  formatCodexResetWindowLabel,
-  formatCodexUsageExplanation,
-  formatCodexUsagePercent,
-  formatCodexUsageWindowLabel,
-  formatCodexWindowDurationLong,
-  mergeCodexProviderStatusWithSnapshot,
-  normalizeCodexResetTimestamp,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
-import {
-  CODEX_FAST_CREDIT_COST_MULTIPLIER,
-  CODEX_FAST_MODEL_ID,
-  CODEX_FAST_SPEED_MULTIPLIER,
-  resolveCodexFastMode,
-  resolveCodexRuntimeSelection,
-} from '@features/codex-runtime-profile/renderer';
-import { RuntimeProviderManagementPanel } from '@features/runtime-provider-management/renderer';
+// Stubs for removed codex-account feature
+function formatCodexCreditsValue(..._args: unknown[]): string {
+  return '';
+}
+function formatCodexRemainingPercent(..._args: unknown[]): string | null {
+  return null;
+}
+function formatCodexResetWindowLabel(..._args: unknown[]): string {
+  return '';
+}
+function formatCodexUsageExplanation(..._args: unknown[]): string {
+  return '';
+}
+function formatCodexUsagePercent(..._args: unknown[]): string {
+  return '';
+}
+function formatCodexUsageWindowLabel(..._args: unknown[]): string {
+  return '';
+}
+function formatCodexWindowDurationLong(..._args: unknown[]): string | null {
+  return null;
+}
+function mergeCodexProviderStatusWithSnapshot<T>(provider: T, _snapshot: unknown): T {
+  return provider;
+}
+function normalizeCodexResetTimestamp(_ts: unknown): number | null {
+  return null;
+}
+function useCodexAccountSnapshot(_opts: { enabled: boolean; includeRateLimits?: boolean }) {
+  return {
+    snapshot: null,
+    loading: false,
+    error: null as string | null,
+    refresh: async (_options?: { includeRateLimits?: boolean; forceRefreshToken?: boolean }) => {},
+    startChatgptLogin: async () => false,
+    cancelChatgptLogin: async () => false as boolean,
+    logout: async () => false as boolean,
+  };
+}
+
+// Stubs for removed codex-runtime-profile feature
+const CODEX_FAST_CREDIT_COST_MULTIPLIER = 5;
+const CODEX_FAST_MODEL_ID = 'codex-fast';
+const CODEX_FAST_SPEED_MULTIPLIER = 2;
+function resolveCodexFastMode(_opts: unknown) {
+  return {
+    showFastModeControl: false,
+    resolvedFastMode: false,
+    selectable: false,
+    disabledReason: 'Not available.',
+  };
+}
+function resolveCodexRuntimeSelection(_opts: unknown) {
+  return { fastModeAvailable: false };
+}
+
+// Stub for removed runtime-provider-management feature
+function RuntimeProviderManagementPanel(_props: Record<string, unknown>) {
+  return null;
+}
+
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { Button } from '@renderer/components/ui/button';
 import {

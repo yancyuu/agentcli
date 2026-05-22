@@ -12,8 +12,8 @@ export function filterMainScreenCliProviders<
     providerId: CliProviderId;
   },
 >(providers: readonly T[]): T[] {
-  return providers.filter(
-    (provider) => provider.providerId === 'anthropic' || provider.providerId === 'codex'
+  return providers.filter((provider) =>
+    ['anthropic', 'codex', 'gemini', 'opencode'].includes(provider.providerId)
   );
 }
 
@@ -110,12 +110,17 @@ export function normalizeCreateLaunchProviderForUi(
   providerId: TeamProviderId | undefined,
   _multimodelEnabled: boolean
 ): TeamProviderId {
-  return providerId === 'codex' ? 'codex' : 'anthropic';
+  return providerId === 'anthropic' ||
+    providerId === 'codex' ||
+    providerId === 'gemini' ||
+    providerId === 'opencode'
+    ? providerId
+    : 'anthropic';
 }
 
 export function isCreateLaunchProviderDisabled(
   providerId: TeamProviderId,
   _multimodelEnabled: boolean
 ): boolean {
-  return providerId !== 'anthropic' && providerId !== 'codex';
+  return !['anthropic', 'codex', 'gemini', 'opencode'].includes(providerId);
 }

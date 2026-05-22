@@ -9,13 +9,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import {
-  formatCodexRemainingPercent,
-  formatCodexWindowDuration,
-  mergeCodexProviderStatusWithSnapshot,
-  normalizeCodexResetTimestamp,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
+// Stubs for removed codex-account feature
+function formatCodexRemainingPercent(_usedPercent: number | null | undefined): string | null {
+  return null;
+}
+function formatCodexWindowDuration(_mins: number | null | undefined): string | null {
+  return null;
+}
+function mergeCodexProviderStatusWithSnapshot<T>(provider: T, _snapshot: unknown): T {
+  return provider;
+}
+function normalizeCodexResetTimestamp(_ts: number | null | undefined): number | null {
+  return null;
+}
+function useCodexAccountSnapshot(_opts: { enabled: boolean; includeRateLimits?: boolean }) {
+  return { snapshot: null, loading: false, startChatgptLogin: async () => false };
+}
+
 import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';

@@ -50,7 +50,6 @@ interface TeamRosterEditorSectionProps {
   showWorktreeIsolationControls?: boolean;
   teammateWorktreeDefault?: boolean;
   onTeammateWorktreeDefaultChange?: (enabled: boolean) => void;
-  teamName?: string;
 }
 
 export const TeamRosterEditorSection = ({
@@ -96,7 +95,6 @@ export const TeamRosterEditorSection = ({
   showWorktreeIsolationControls = false,
   teammateWorktreeDefault = false,
   onTeammateWorktreeDefaultChange,
-  teamName,
 }: TeamRosterEditorSectionProps): React.JSX.Element => {
   return (
     <MembersEditorSection
@@ -144,7 +142,6 @@ export const TeamRosterEditorSection = ({
             warningText={leadWarningText}
             disableGeminiOption={disableGeminiOption}
             modelIssueText={leadModelIssueText}
-            teamName={teamName}
             hideProviderTabs={hideLeadProviderTabs}
           />
           {headerBottom}

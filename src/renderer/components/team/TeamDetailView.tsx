@@ -26,7 +26,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
 import { useBranchSync } from '@renderer/hooks/useBranchSync';
-import { useResizablePanel } from '@renderer/hooks/useResizablePanel';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
@@ -59,26 +58,26 @@ import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   AlertTriangle,
-  BellRing,
+  CheckCircle2,
   Clock,
-  Code,
   Columns3,
   FolderOpen,
   GitBranch,
   History,
-  Network,
+  MessageCircle,
   Pencil,
   Play,
+  PlugZap,
   Plus,
+  Radio,
+  Rocket,
   Square,
   Terminal,
   Trash2,
-  UserPlus,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { AddMemberDialog } from './dialogs/AddMemberDialog';
 import { CreateTaskDialog } from './dialogs/CreateTaskDialog';
 import { EditTeamDialog } from './dialogs/EditTeamDialog';
 import { LaunchTeamDialog, type TeamLaunchDialogMode } from './dialogs/LaunchTeamDialog';
@@ -90,34 +89,23 @@ import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { KanbanSearchInput } from './kanban/KanbanSearchInput';
 import { TrashDialog } from './kanban/TrashDialog';
-import { LeadChannelPanel } from './members/LeadChannelPanel';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
 import { type MemberActivityFilter, type MemberDetailTab } from './members/memberDetailTypes';
 
-import type { AddMemberEntry } from './dialogs/AddMemberDialog';
 import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
-import type { ComponentProps, CSSProperties } from 'react';
+import type { ComponentProps } from 'react';
 
 const ProjectEditorOverlay = lazy(() =>
   import('./editor/ProjectEditorOverlay').then((m) => ({ default: m.ProjectEditorOverlay }))
-);
-const TeamGraphOverlay = lazy(() =>
-  import('@features/agent-graph/renderer').then((m) => ({
-    default: m.TeamGraphOverlay,
-  }))
 );
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
 import { ScheduleSection } from './schedule/ScheduleSection';
-import { TeamSidebarHost } from './sidebar/TeamSidebarHost';
-import { TeamSidebarPortalSource } from './sidebar/TeamSidebarPortalSource';
-import { TeamSidebarRail } from './sidebar/TeamSidebarRail';
 import {
   getTeamPendingRepliesState,
   setTeamPendingRepliesState,
 } from './sidebar/teamSidebarUiState';
-import { ClaudeLogsSection } from './ClaudeLogsSection';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { ProcessesSection } from './ProcessesSection';
 import { getLaunchJoinMilestonesFromMembers, getLaunchJoinState } from './provisioningSteps';
@@ -135,6 +123,7 @@ import type { Session } from '@renderer/types/data';
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type {
   EffortLevel,
+  GlobalProvider,
   MemberSpawnStatusEntry,
   ResolvedTeamMember,
   TaskRef,
@@ -144,6 +133,7 @@ import type {
   TeamLaunchRequest,
   TeamProviderId,
   TeamTaskWithKanban,
+  TeamViewSnapshot,
 } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
 import type { ContextUsageLike } from '@shared/utils/contextMetrics';
@@ -273,6 +263,164 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
   );
 });
 
+interface CoworkWorkspaceConsoleProps {
+  data: TeamViewSnapshot;
+  activeMembers: readonly ResolvedTeamMember[];
+  isTeamProvisioning: boolean;
+  stoppingTeam: boolean;
+  onLaunch: () => void;
+  onStop: () => void;
+  onCreateTask: () => void;
+}
+
+function CoworkMetricCard({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  hint: string;
+}): React.JSX.Element {
+  return (
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-sm">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--color-text-muted)]">
+        <span className="rounded-lg bg-[var(--color-surface-raised)] p-1 text-[var(--color-text-secondary)]">
+          {icon}
+        </span>
+        {label}
+      </div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--color-text)]">
+        {value}
+      </div>
+      <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{hint}</p>
+    </div>
+  );
+}
+
+function CoworkStatusPill({
+  children,
+  tone = 'neutral',
+}: {
+  children: React.ReactNode;
+  tone?: 'neutral' | 'good' | 'warn' | 'info';
+}): React.JSX.Element {
+  const toneClass =
+    tone === 'good'
+      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-500'
+      : tone === 'warn'
+        ? 'border-amber-500/25 bg-amber-500/10 text-amber-500'
+        : tone === 'info'
+          ? 'border-sky-500/25 bg-sky-500/10 text-sky-500'
+          : 'border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text-secondary)]';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px]',
+        toneClass
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+const CoworkWorkspaceConsole = memo(function CoworkWorkspaceConsole({
+  data,
+  activeMembers,
+  isTeamProvisioning,
+  stoppingTeam,
+  onLaunch,
+  onStop,
+  onCreateTask,
+}: CoworkWorkspaceConsoleProps): React.JSX.Element {
+  const activeTeammates = activeMembers.filter((member) => !isLeadMember(member));
+  const completedTasks = data.tasks.filter(
+    (task: TeamTaskWithKanban) => task.status === 'completed'
+  ).length;
+  const activeTasks = data.tasks.filter(
+    (task: TeamTaskWithKanban) => task.status === 'in_progress'
+  ).length;
+  const reviewTasks = data.tasks.filter(
+    (task: TeamTaskWithKanban) => data.kanbanState.tasks[task.id]?.column === 'review'
+  ).length;
+  return (
+    <section className="mb-4 overflow-hidden rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
+      <div className="relative overflow-hidden border-b border-[var(--color-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent)] p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <CoworkStatusPill
+                tone={data.isAlive ? 'good' : isTeamProvisioning ? 'warn' : 'neutral'}
+              >
+                <Radio size={12} />
+                {data.isAlive ? '团队运行中' : isTeamProvisioning ? '启动中' : '待启动'}
+              </CoworkStatusPill>
+              <CoworkStatusPill tone="info">
+                <PlugZap size={12} />
+                目录即记忆
+              </CoworkStatusPill>
+            </div>
+            <h3 className="text-xl font-semibold tracking-tight text-[var(--color-text)]">
+              任务看板工作台
+            </h3>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">
+              保持任务看板为核心：不同团队只由工作目录区分，负责人会按任务动态创建并调度子 agent。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!data.isAlive && !isTeamProvisioning ? (
+              <Button size="sm" className="h-9 rounded-full px-4 text-xs" onClick={onLaunch}>
+                <Rocket size={13} className="mr-1" />
+                启动团队
+              </Button>
+            ) : null}
+            {data.isAlive ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 rounded-full px-4 text-xs text-red-400"
+                onClick={onStop}
+                disabled={stoppingTeam}
+              >
+                <Square size={13} className="mr-1" />
+                停止
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-full px-4 text-xs"
+              onClick={onCreateTask}
+            >
+              <Plus size={13} className="mr-1" />
+              新任务
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 p-4 lg:grid-cols-1">
+        <CoworkMetricCard
+          icon={<CheckCircle2 size={14} />}
+          label="任务看板"
+          value={data.tasks.length}
+          hint={`${activeTasks} 进行中 · ${reviewTasks} 待审 · ${completedTasks} 已完成`}
+        />
+      </div>
+      <div className="px-4 pb-4">
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-xs text-[var(--color-text-muted)]">
+          运行策略：不预置默认成员，负责人在执行任务时动态创建子
+          agent；团队差异只由工作目录区分，文件即长期记忆。 工作空间入口已放到任务侧边栏。当前已识别{' '}
+          {activeTeammates.length} 名动态成员。
+        </div>
+      </div>
+    </section>
+  );
+});
+
 type TeamMessagesPanelBridgeProps = Omit<
   ComponentProps<typeof MessagesPanel>,
   'leadActivity' | 'leadContextUpdatedAt'
@@ -288,12 +436,6 @@ type TeamMemberDetailDialogBridgeProps = Omit<
   ComponentProps<typeof MemberDetailDialog>,
   'leadActivity' | 'spawnEntry' | 'runtimeEntry'
 >;
-type TeamSidebarRailBridgeProps = Omit<
-  ComponentProps<typeof TeamSidebarRail>,
-  'messagesPanelProps'
-> & {
-  messagesPanelProps: SharedTeamMessagesPanelProps;
-};
 interface LeadContextWatcherProps {
   teamName: string;
   tabId: string | null;
@@ -820,28 +962,6 @@ const TeamMessagesPanelBridge = memo(function TeamMessagesPanelBridge({
   );
 });
 
-const TeamSidebarRailBridge = memo(function TeamSidebarRailBridge({
-  messagesPanelProps,
-  ...props
-}: TeamSidebarRailBridgeProps): React.JSX.Element {
-  const { leadActivity, leadContextUpdatedAt } = useStore(
-    useShallow((s) => ({
-      leadActivity: s.leadActivityByTeam[messagesPanelProps.teamName],
-      leadContextUpdatedAt: s.leadContextByTeam[messagesPanelProps.teamName]?.updatedAt,
-    }))
-  );
-  const bridgedMessagesPanelProps = useMemo(
-    () => ({
-      ...messagesPanelProps,
-      leadActivity,
-      leadContextUpdatedAt,
-    }),
-    [leadActivity, leadContextUpdatedAt, messagesPanelProps]
-  );
-
-  return <TeamSidebarRail {...props} messagesPanelProps={bridgedMessagesPanelProps} />;
-});
-
 const TeamMemberDetailDialogBridge = memo(function TeamMemberDetailDialogBridge({
   teamName,
   member,
@@ -922,8 +1042,6 @@ export const TeamDetailView = ({
     defaultOwner: '',
   });
   const [creatingTask, setCreatingTask] = useState(false);
-  const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
-  const [addingMemberLoading, setAddingMemberLoading] = useState(false);
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -943,7 +1061,6 @@ export const TeamDetailView = ({
       cancelled = true;
     };
   }, [editDialogOpen, teamName]);
-  const [leadChannelDialogOpen, setLeadChannelDialogOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
     mode: TeamLaunchDialogMode;
@@ -952,64 +1069,20 @@ export const TeamDetailView = ({
     mode: 'launch',
   });
   const [editorOpen, setEditorOpen] = useState(false);
-  const [graphOpen, setGraphOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [messagesPanelMountPoint, setMessagesPanelMountPoint] = useState<HTMLDivElement | null>(
-    null
-  );
   const provisioningBannerRef = useRef<HTMLDivElement>(null);
   const wasProvisioningRef = useRef(false);
-  const handleOpenGraphTab = useCallback(() => {
-    const state = useStore.getState();
-    const displayName = state.teamByName[teamName]?.displayName ?? teamName;
-    state.openTab({
-      type: 'graph',
-      label: `${displayName} Graph`,
-      teamName,
-    });
-  }, [teamName]);
-  const visualizeButtonStyle = useMemo<CSSProperties>(
-    () =>
-      isLight
-        ? {
-            background:
-              'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(34,197,94,0.16) 100%)',
-            borderColor: 'rgba(59,130,246,0.30)',
-            color: '#0f172a',
-            boxShadow: '0 10px 24px rgba(59,130,246,0.12)',
-          }
-        : {
-            background:
-              'linear-gradient(135deg, rgba(56,189,248,0.18) 0%, rgba(16,185,129,0.16) 100%)',
-            borderColor: 'rgba(56,189,248,0.34)',
-            color: 'rgba(236,253,255,0.96)',
-            boxShadow: '0 12px 28px rgba(8,145,178,0.22)',
-          },
-    [isLight]
-  );
 
-  // Set inert on background content when editor/graph overlay is open (a11y focus trap)
+  // Set inert on background content when editor overlay is open (a11y focus trap)
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    if (editorOpen || graphOpen) {
+    if (editorOpen) {
       el.setAttribute('inert', '');
     } else {
       el.removeAttribute('inert');
     }
-  }, [editorOpen, graphOpen]);
-
-  // Listen for Cmd+Shift+G keyboard shortcut — opens graph tab
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.teamName === teamName) {
-        handleOpenGraphTab();
-      }
-    };
-    window.addEventListener('toggle-team-graph', handler);
-    return () => window.removeEventListener('toggle-team-graph', handler);
-  }, [handleOpenGraphTab, teamName]);
+  }, [editorOpen]);
 
   // Listen for graph tab actions (open task, send message)
   useEffect(() => {
@@ -1213,6 +1286,7 @@ export const TeamDetailView = ({
     createTeamTask,
     startTaskByUser,
     deleteTeam,
+    openTeamTab,
     openTeamsTab,
     closeTab,
     sendingMessage,
@@ -1221,7 +1295,6 @@ export const TeamDetailView = ({
     sendMessageDebugDetails,
     lastSendMessageResult,
     reviewActionError,
-    addMember,
     restartMember,
     skipMemberForLaunch,
     removeMember,
@@ -1241,15 +1314,10 @@ export const TeamDetailView = ({
     fetchDeletedTasks,
     deletedTasks,
     launchParams,
-    messagesPanelMode,
-    messagesPanelWidth,
-    sidebarLogsHeight,
-    setMessagesPanelMode,
-    setMessagesPanelWidth,
-    setSidebarLogsHeight,
     selectReviewFile,
     pendingReviewRequest,
     setPendingReviewRequest,
+    teams,
   } = useStore(
     useShallow((s) => ({
       projects: s.projects,
@@ -1265,6 +1333,7 @@ export const TeamDetailView = ({
       createTeamTask: s.createTeamTask,
       startTaskByUser: s.startTaskByUser,
       deleteTeam: s.deleteTeam,
+      openTeamTab: s.openTeamTab,
       openTeamsTab: s.openTeamsTab,
       closeTab: s.closeTab,
       sendingMessage: s.sendingMessage,
@@ -1273,7 +1342,6 @@ export const TeamDetailView = ({
       sendMessageDebugDetails: s.sendMessageDebugDetails,
       lastSendMessageResult: s.lastSendMessageResult,
       reviewActionError: s.reviewActionError,
-      addMember: s.addMember,
       restartMember: s.restartMember,
       skipMemberForLaunch: s.skipMemberForLaunch,
       removeMember: s.removeMember,
@@ -1297,15 +1365,10 @@ export const TeamDetailView = ({
       fetchDeletedTasks: s.fetchDeletedTasks,
       deletedTasks: s.deletedTasks,
       launchParams: teamName ? s.launchParamsByTeam[teamName] : undefined,
-      messagesPanelMode: s.messagesPanelMode,
-      messagesPanelWidth: s.messagesPanelWidth,
-      sidebarLogsHeight: s.sidebarLogsHeight,
-      setMessagesPanelMode: s.setMessagesPanelMode,
-      setMessagesPanelWidth: s.setMessagesPanelWidth,
-      setSidebarLogsHeight: s.setSidebarLogsHeight,
       selectReviewFile: s.selectReviewFile,
       pendingReviewRequest: s.pendingReviewRequest,
       setPendingReviewRequest: s.setPendingReviewRequest,
+      teams: s.teams,
     }))
   );
 
@@ -1314,29 +1377,7 @@ export const TeamDetailView = ({
   const isThisTabActive = tabId ? activeTabId === tabId : false;
   const wasInteractiveRef = useRef(false);
 
-  // Messages panel resize
-  const { isResizing: isMessagesPanelResizing, handleProps: messagesPanelHandleProps } =
-    useResizablePanel({
-      width: messagesPanelWidth,
-      onWidthChange: setMessagesPanelWidth,
-      minWidth: 280,
-      maxWidth: 600,
-      side: 'left',
-    });
-  const { isResizing: isLogsPanelResizing, handleProps: logsPanelHandleProps } = useResizablePanel({
-    height: sidebarLogsHeight,
-    onHeightChange: setSidebarLogsHeight,
-    minHeight: 120,
-    maxHeight: 520,
-    side: 'top',
-  });
-
-  const changeMessagesPanelMode = useCallback(
-    (mode: TeamMessagesPanelMode) => {
-      setMessagesPanelMode(mode);
-    },
-    [setMessagesPanelMode]
-  );
+  const keepMessagesInline = useCallback((_mode: TeamMessagesPanelMode) => {}, []);
 
   useEffect(() => {
     if (tabId) {
@@ -1361,6 +1402,34 @@ export const TeamDetailView = ({
   }, [isTeamProvisioning]);
 
   const [kanbanSearch, setKanbanSearch] = useState('');
+  const [expandedWorkspaceTeam, setExpandedWorkspaceTeam] = useState<string | null>(teamName);
+
+  const workspaceTeams = useMemo(() => {
+    const normalizedCurrentTeam = teamName.trim().toLowerCase();
+    return teams
+      .filter((team) => typeof team.projectPath === 'string' && team.projectPath.trim().length > 0)
+      .map((team) => {
+        const projectPath = team.projectPath!.trim();
+        const folderName =
+          projectPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? projectPath;
+        return {
+          teamName: team.teamName,
+          displayName: team.displayName?.trim() || team.teamName,
+          projectPath,
+          folderName,
+          isCurrent: team.teamName.trim().toLowerCase() === normalizedCurrentTeam,
+        };
+      })
+      .sort((left, right) => {
+        if (left.isCurrent && !right.isCurrent) return -1;
+        if (!left.isCurrent && right.isCurrent) return 1;
+        return left.displayName.localeCompare(right.displayName, 'zh-CN');
+      });
+  }, [teamName, teams]);
+
+  useEffect(() => {
+    setExpandedWorkspaceTeam(teamName);
+  }, [teamName]);
 
   // Open editor overlay when a file reveal is requested (e.g. from chip click)
   const pendingRevealFile = useStore((s) => s.editorPendingRevealFile);
@@ -2031,8 +2100,8 @@ export const TeamDetailView = ({
   const sharedMessagesPanelProps = useMemo<SharedTeamMessagesPanelProps>(
     () => ({
       teamName,
-      onPositionChange: changeMessagesPanelMode,
-      mountPoint: messagesPanelMountPoint,
+      onPositionChange: keepMessagesInline,
+      mountPoint: null,
       members: activeMembers,
       tasks: data?.tasks ?? [],
       isTeamAlive: data?.isAlive,
@@ -2048,6 +2117,7 @@ export const TeamDetailView = ({
       onRestartTeam: handleRestartTeam,
       onTaskIdClick: handleTaskIdClick,
       inlineScrollContainerRef: contentRef,
+      showPositionControls: false,
     }),
     [
       activeMembers,
@@ -2060,12 +2130,11 @@ export const TeamDetailView = ({
       handleRestartTeam,
       handleSelectMember,
       handleTaskIdClick,
-      messagesPanelMountPoint,
       pendingRepliesByMember,
       teamName,
       teamSessionIds,
       timeWindow,
-      changeMessagesPanelMode,
+      keepMessagesInline,
     ]
   );
 
@@ -2126,7 +2195,6 @@ export const TeamDetailView = ({
     if (error === 'TEAM_DRAFT') {
       const draftTeamSummary = useStore.getState().teamByName[teamName];
       const draftDisplayName = draftTeamSummary?.displayName || teamName;
-      const draftMemberCount = draftTeamSummary?.memberCount ?? 0;
 
       return (
         <>
@@ -2138,15 +2206,15 @@ export const TeamDetailView = ({
               <div className="max-w-md text-center">
                 <p className="text-sm font-medium text-text">团队尚未启动</p>
                 <p className="mt-2 text-xs text-text-secondary">
-                  这是一个草稿团队。<strong>{draftDisplayName}</strong> 已配置 {draftMemberCount}{' '}
-                  名成员， 但尚未通过 CLI 完成编排。点击“启动”后即可选择模型并开始运行团队。
+                  这是一个草稿团队。<strong>{draftDisplayName}</strong>{' '}
+                  尚未完成启动，点击“启动团队”后即可选择模型并进入动态编排。
                 </p>
                 <div className="mt-4 flex justify-center gap-2">
                   <button
                     className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
                     onClick={() => openLaunchDialog('launch')}
                   >
-                    启动
+                    启动团队
                   </button>
                   <button
                     className="rounded-md bg-surface-raised px-4 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text"
@@ -2182,6 +2250,15 @@ export const TeamDetailView = ({
           <div className="text-center">
             <p className="text-sm font-medium text-red-400">团队加载失败</p>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">{error}</p>
+            <div className="mt-4">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void selectTeam(teamName, { allowReloadWhileProvisioning: true })}
+              >
+                重试加载
+              </Button>
+            </div>
           </div>
         </div>
       );
@@ -2214,30 +2291,6 @@ export const TeamDetailView = ({
             leadSessionId={leadSessionId}
             fallbackProjectRoot={data.config.projectPath}
           />
-
-          {/* Messages sidebar (left, after context panel) */}
-          <TeamSidebarHost
-            teamName={teamName}
-            surface="team"
-            isActive={isThisTabActive}
-            isFocused={isPaneFocused}
-          >
-            <TeamSidebarPortalSource
-              teamName={teamName}
-              isActive={isThisTabActive}
-              isFocused={isPaneFocused}
-            >
-              <TeamSidebarRailBridge
-                teamName={teamName}
-                messagesPanelProps={sharedMessagesPanelProps}
-                isResizing={isMessagesPanelResizing}
-                onResizeMouseDown={messagesPanelHandleProps.onMouseDown}
-                logsHeight={sidebarLogsHeight}
-                isLogsResizing={isLogsPanelResizing}
-                onLogsResizeMouseDown={logsPanelHandleProps.onMouseDown}
-              />
-            </TeamSidebarPortalSource>
-          </TeamSidebarHost>
 
           <div className="relative min-h-0 min-w-0 flex-1">
             <div
@@ -2367,17 +2420,6 @@ export const TeamDetailView = ({
                             </span>
                           </TooltipContent>
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => setEditorOpen(true)}
-                              className="ml-1 flex items-center gap-0.5 rounded border border-[var(--color-border-emphasis)] bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
-                            >
-                              <Code size={10} className="shrink-0" /> 查看工作空间
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>在内置编辑器中打开项目</TooltipContent>
-                        </Tooltip>
                       </span>
                     )}
                     {leadBranch && (
@@ -2390,44 +2432,6 @@ export const TeamDetailView = ({
                       </span>
                     )}
                   </div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          '-mt-2 h-8 shrink-0 self-start rounded-full border px-3 text-xs font-semibold tracking-[0.02em] transition-all',
-                          'border-sky-500/30 bg-sky-500/10 text-sky-200 hover:border-sky-400/50 hover:bg-sky-500/15'
-                        )}
-                        onClick={() => setLeadChannelDialogOpen(true)}
-                      >
-                        <BellRing size={13} className="shrink-0" />
-                        渠道监听
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">为团队负责人绑定或启动渠道监听</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          '-mt-2 h-8 shrink-0 self-start rounded-full border px-3.5 text-xs font-semibold tracking-[0.02em] transition-all',
-                          'hover:-translate-y-0.5 hover:brightness-[1.03] active:translate-y-0 active:brightness-[0.98]',
-                          isLight
-                            ? 'hover:border-sky-400/50'
-                            : 'hover:border-cyan-300/50 hover:shadow-[0_14px_32px_rgba(8,145,178,0.28)]'
-                        )}
-                        style={visualizeButtonStyle}
-                        onClick={handleOpenGraphTab}
-                      >
-                        <Network size={13} className="shrink-0" />
-                        可视化
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">打开团队关系图</TooltipContent>
-                  </Tooltip>
                 </div>
                 {(() => {
                   const currentPath = data.config.projectPath;
@@ -2460,6 +2464,16 @@ export const TeamDetailView = ({
                 <TeamProvisioningBanner teamName={teamName} />
               </div>
 
+              <CoworkWorkspaceConsole
+                data={data}
+                activeMembers={activeMembers}
+                isTeamProvisioning={isTeamProvisioning}
+                stoppingTeam={stoppingTeam}
+                onLaunch={() => openLaunchDialog('launch')}
+                onStop={() => void handleStopTeam()}
+                onCreateTask={() => openCreateTaskDialog()}
+              />
+
               {data.warnings?.some((warning) => warning.toLowerCase().includes('kanban')) ? (
                 <div className="mb-3 rounded-md border border-[var(--step-warning-border)] bg-[var(--step-warning-bg)] px-3 py-2 text-xs text-[var(--step-warning-text)]">
                   看板未完整加载，当前展示的是安全回退数据。
@@ -2477,22 +2491,6 @@ export const TeamDetailView = ({
                 icon={<Users size={14} />}
                 badge={activeTeammateCount === 0 ? '单人' : activeTeammateCount}
                 defaultOpen
-                action={
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAddMemberDialogOpen(true);
-                      }}
-                    >
-                      <UserPlus size={12} />
-                      成员
-                    </Button>
-                  </div>
-                }
               >
                 <TeamMemberListBridge
                   teamName={teamName}
@@ -2513,25 +2511,17 @@ export const TeamDetailView = ({
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
-                sectionId="sessions"
-                title="会话"
-                icon={<History size={14} />}
-                defaultOpen={false}
+                sectionId="messages"
+                title="消息"
+                icon={<MessageCircle size={14} />}
+                defaultOpen
               >
-                <TeamSessionsSection
-                  sessions={teamSessions}
-                  sessionsLoading={sessionsLoading}
-                  sessionsError={sessionsError}
-                  leadSessionId={data.config.leadSessionId}
-                  selectedSessionId={kanbanFilter.sessionId}
-                  onSelectSession={(id) => setKanbanFilter((prev) => ({ ...prev, sessionId: id }))}
-                  projectPath={data.config.projectPath}
-                />
+                <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
                 sectionId="kanban"
-                title="看板"
+                title="任务"
                 icon={<Columns3 size={14} />}
                 badge={filteredTasks.length}
                 defaultOpen
@@ -2551,168 +2541,278 @@ export const TeamDetailView = ({
                   </Button>
                 }
               >
-                <KanbanBoard
-                  tasks={kanbanDisplayTasks}
-                  teamName={teamName}
-                  kanbanState={data.kanbanState}
-                  filter={kanbanFilter}
-                  sort={kanbanSort}
-                  sessions={teamSessions}
-                  leadSessionId={data.config.leadSessionId}
-                  members={activeMembers}
-                  onFilterChange={setKanbanFilter}
-                  onSortChange={setKanbanSort}
-                  toolbarLeft={
-                    <KanbanSearchInput
-                      value={kanbanSearch}
-                      onChange={setKanbanSearch}
-                      tasks={filteredTasks}
-                      members={activeMembers}
-                    />
-                  }
-                  onRequestReview={(taskId) => {
-                    void (async () => {
-                      try {
-                        await requestReview(teamName, taskId);
-                      } catch {
-                        // error via store
-                      }
-                    })();
-                  }}
-                  onApprove={(taskId) => {
-                    void (async () => {
-                      try {
-                        await updateKanban(teamName, taskId, {
-                          op: 'set_column',
-                          column: 'approved',
-                        });
-                      } catch {
-                        // error via store
-                      }
-                    })();
-                  }}
-                  onRequestChanges={(taskId) => {
-                    setRequestChangesTaskId(taskId);
-                  }}
-                  onMoveBackToDone={(taskId) => {
-                    void (async () => {
-                      try {
-                        await updateKanban(teamName, taskId, { op: 'remove' });
-                        await updateTaskStatus(teamName, taskId, 'completed');
-                      } catch {
-                        // error via store
-                      }
-                    })();
-                  }}
-                  onStartTask={(taskId) => {
-                    void (async () => {
-                      try {
-                        const result = await startTaskByUser(teamName, taskId);
-                        if (data?.isAlive) {
-                          const task = data.tasks.find((t) => t.id === taskId);
-                          try {
-                            if (result.notifiedOwner && task?.owner) {
-                              await api.teams.processSend(
-                                teamName,
-                                `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
-                              );
-                            } else if (!result.notifiedOwner) {
-                              const desc = task?.description?.trim()
-                                ? `\nDescription: ${task.description.trim()}`
-                                : '';
-                              await api.teams.processSend(
-                                teamName,
-                                `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
-                              );
-                            }
-                          } catch {
-                            // best-effort
+                <div className="grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
+                  <aside className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2.5">
+                    <div className="mb-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5">
+                      <div className="mb-2 px-0.5">
+                        <p className="text-sm font-semibold text-[var(--color-text)]">会话</p>
+                        <p className="text-[11px] text-[var(--color-text-muted)]">
+                          已移动到任务侧边栏
+                        </p>
+                      </div>
+                      <div className="max-h-[280px] overflow-y-auto pr-0.5">
+                        <TeamSessionsSection
+                          sessions={teamSessions}
+                          sessionsLoading={sessionsLoading}
+                          sessionsError={sessionsError}
+                          leadSessionId={data.config.leadSessionId}
+                          selectedSessionId={kanbanFilter.sessionId}
+                          onSelectSession={(id) =>
+                            setKanbanFilter((prev) => ({ ...prev, sessionId: id }))
                           }
-                        }
-                      } catch {
-                        // error via store
+                          projectPath={data.config.projectPath}
+                        />
+                      </div>
+                    </div>
+                    <div className="mb-2 px-1">
+                      <p className="text-sm font-semibold text-[var(--color-text)]">工作空间</p>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        点开查看各个团队的文件夹
+                      </p>
+                    </div>
+                    {workspaceTeams.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-[var(--color-border)] px-2.5 py-3 text-[11px] text-[var(--color-text-muted)]">
+                        暂无可用团队目录。
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {workspaceTeams.map((workspaceTeam) => {
+                          const expanded = expandedWorkspaceTeam === workspaceTeam.teamName;
+                          return (
+                            <div
+                              key={workspaceTeam.teamName}
+                              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+                            >
+                              <button
+                                type="button"
+                                className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-xs"
+                                onClick={() =>
+                                  setExpandedWorkspaceTeam((prev) =>
+                                    prev === workspaceTeam.teamName ? null : workspaceTeam.teamName
+                                  )
+                                }
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  <FolderOpen
+                                    size={12}
+                                    className="shrink-0 text-[var(--color-text-muted)]"
+                                  />
+                                  <span className="truncate font-medium text-[var(--color-text)]">
+                                    {workspaceTeam.displayName}
+                                  </span>
+                                  {workspaceTeam.isCurrent ? (
+                                    <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                                      当前
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="max-w-24 truncate text-[10px] text-[var(--color-text-muted)]">
+                                  {workspaceTeam.folderName}
+                                </span>
+                              </button>
+                              {expanded ? (
+                                <div className="space-y-2 border-t border-[var(--color-border)] px-2.5 py-2">
+                                  <p className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                                    {formatProjectPath(workspaceTeam.projectPath)}
+                                  </p>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 px-2 text-[10px]"
+                                      onClick={() =>
+                                        openTeamTab(
+                                          workspaceTeam.teamName,
+                                          workspaceTeam.projectPath
+                                        )
+                                      }
+                                    >
+                                      进入团队
+                                    </Button>
+                                    {workspaceTeam.isCurrent ? (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 px-2 text-[10px]"
+                                        onClick={() => setEditorOpen(true)}
+                                      >
+                                        打开文件夹
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </aside>
+                  <div className="min-w-0">
+                    <KanbanBoard
+                      tasks={kanbanDisplayTasks}
+                      teamName={teamName}
+                      kanbanState={data.kanbanState}
+                      filter={kanbanFilter}
+                      sort={kanbanSort}
+                      sessions={teamSessions}
+                      leadSessionId={data.config.leadSessionId}
+                      members={activeMembers}
+                      onFilterChange={setKanbanFilter}
+                      onSortChange={setKanbanSort}
+                      toolbarLeft={
+                        <KanbanSearchInput
+                          value={kanbanSearch}
+                          onChange={setKanbanSearch}
+                          tasks={filteredTasks}
+                          members={activeMembers}
+                        />
                       }
-                    })();
-                  }}
-                  onCompleteTask={(taskId) => {
-                    void (async () => {
-                      try {
-                        await updateTaskStatus(teamName, taskId, 'completed');
-                      } catch {
-                        // error via store
-                      }
-                    })();
-                  }}
-                  onCancelTask={(taskId) => {
-                    void (async () => {
-                      try {
-                        const task = data?.tasks.find((t) => t.id === taskId);
-                        await updateTaskStatus(teamName, taskId, 'pending');
-
-                        // Notify assignee directly via inbox — they'll see it immediately
-                        if (task?.owner) {
+                      onRequestReview={(taskId) => {
+                        void (async () => {
                           try {
-                            await api.teams.sendMessage(teamName, {
-                              member: task.owner,
-                              text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
-                              summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
+                            await requestReview(teamName, taskId);
+                          } catch {
+                            // error via store
+                          }
+                        })();
+                      }}
+                      onApprove={(taskId) => {
+                        void (async () => {
+                          try {
+                            await updateKanban(teamName, taskId, {
+                              op: 'set_column',
+                              column: 'approved',
                             });
                           } catch {
-                            // best-effort
+                            // error via store
                           }
-                        }
-
-                        // Also notify team lead so they can reassign/coordinate
-                        if (data?.isAlive) {
+                        })();
+                      }}
+                      onRequestChanges={(taskId) => {
+                        setRequestChangesTaskId(taskId);
+                      }}
+                      onMoveBackToDone={(taskId) => {
+                        void (async () => {
                           try {
-                            const ownerSuffix = task?.owner
-                              ? ` ${task.owner} has been notified to stop.`
-                              : '';
-                            await api.teams.processSend(
-                              teamName,
-                              `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
-                            );
+                            await updateKanban(teamName, taskId, { op: 'remove' });
+                            await updateTaskStatus(teamName, taskId, 'completed');
                           } catch {
-                            // best-effort
+                            // error via store
                           }
+                        })();
+                      }}
+                      onStartTask={(taskId) => {
+                        void (async () => {
+                          try {
+                            const result = await startTaskByUser(teamName, taskId);
+                            if (data?.isAlive) {
+                              const task = data.tasks.find((t) => t.id === taskId);
+                              try {
+                                if (result.notifiedOwner && task?.owner) {
+                                  await api.teams.processSend(
+                                    teamName,
+                                    `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
+                                  );
+                                } else if (!result.notifiedOwner) {
+                                  const desc = task?.description?.trim()
+                                    ? `\nDescription: ${task.description.trim()}`
+                                    : '';
+                                  await api.teams.processSend(
+                                    teamName,
+                                    `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
+                                  );
+                                }
+                              } catch {
+                                // best-effort
+                              }
+                            }
+                          } catch {
+                            // error via store
+                          }
+                        })();
+                      }}
+                      onCompleteTask={(taskId) => {
+                        void (async () => {
+                          try {
+                            await updateTaskStatus(teamName, taskId, 'completed');
+                          } catch {
+                            // error via store
+                          }
+                        })();
+                      }}
+                      onCancelTask={(taskId) => {
+                        void (async () => {
+                          try {
+                            const task = data?.tasks.find((t) => t.id === taskId);
+                            await updateTaskStatus(teamName, taskId, 'pending');
+
+                            // Notify assignee directly via inbox — they'll see it immediately
+                            if (task?.owner) {
+                              try {
+                                await api.teams.sendMessage(teamName, {
+                                  member: task.owner,
+                                  text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
+                                  summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
+                                });
+                              } catch {
+                                // best-effort
+                              }
+                            }
+
+                            // Also notify team lead so they can reassign/coordinate
+                            if (data?.isAlive) {
+                              try {
+                                const ownerSuffix = task?.owner
+                                  ? ` ${task.owner} has been notified to stop.`
+                                  : '';
+                                await api.teams.processSend(
+                                  teamName,
+                                  `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
+                                );
+                              } catch {
+                                // best-effort
+                              }
+                            }
+                          } catch {
+                            // error via store
+                          }
+                        })();
+                      }}
+                      onColumnOrderChange={(columnId, orderedTaskIds) => {
+                        void (async () => {
+                          try {
+                            await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
+                          } catch {
+                            // error via store
+                          }
+                        })();
+                      }}
+                      onScrollToTask={(taskId) => {
+                        const el = document.querySelector(`[data-task-id="${taskId}"]`);
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                          el.classList.remove('kanban-card-focus-pulse');
+                          void (el as HTMLElement).offsetWidth;
+                          el.classList.add('kanban-card-focus-pulse');
+                          el.addEventListener(
+                            'animationend',
+                            () => el.classList.remove('kanban-card-focus-pulse'),
+                            { once: true }
+                          );
                         }
-                      } catch {
-                        // error via store
+                      }}
+                      onTaskClick={(task) => setSelectedTask(task)}
+                      onViewChanges={handleViewChanges}
+                      onAddTask={(startImmediately) =>
+                        openCreateTaskDialog('', '', '', startImmediately)
                       }
-                    })();
-                  }}
-                  onColumnOrderChange={(columnId, orderedTaskIds) => {
-                    void (async () => {
-                      try {
-                        await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
-                      } catch {
-                        // error via store
-                      }
-                    })();
-                  }}
-                  onScrollToTask={(taskId) => {
-                    const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                    if (el) {
-                      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                      el.classList.remove('kanban-card-focus-pulse');
-                      void (el as HTMLElement).offsetWidth;
-                      el.classList.add('kanban-card-focus-pulse');
-                      el.addEventListener(
-                        'animationend',
-                        () => el.classList.remove('kanban-card-focus-pulse'),
-                        { once: true }
-                      );
-                    }
-                  }}
-                  onTaskClick={(task) => setSelectedTask(task)}
-                  onViewChanges={handleViewChanges}
-                  onAddTask={(startImmediately) =>
-                    openCreateTaskDialog('', '', '', startImmediately)
-                  }
-                  onDeleteTask={handleDeleteTask}
-                  deletedTaskCount={deletedTasks.length}
-                  onOpenTrash={() => setTrashOpen(true)}
-                />
+                      onDeleteTask={handleDeleteTask}
+                      deletedTaskCount={deletedTasks.length}
+                      onOpenTrash={() => setTrashOpen(true)}
+                    />
+                  </div>
+                </div>
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
@@ -2749,12 +2849,6 @@ export const TeamDetailView = ({
                     processes={data.processes}
                   />
                 </CollapsibleTeamSection>
-              )}
-
-              {messagesPanelMode !== 'sidebar' && <ClaudeLogsSection teamName={teamName} />}
-
-              {messagesPanelMode === 'inline' && (
-                <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
               )}
 
               <ReviewDialog
@@ -2879,60 +2973,6 @@ export const TeamDetailView = ({
                 onRestartTeam={handleRestartTeamFromEdit}
                 onSaveAndRestart={handleSaveAndRestartFromEdit}
               />
-
-              <AddMemberDialog
-                open={addMemberDialogOpen}
-                teamName={teamName}
-                existingNames={membersWithLiveBranches.map((m) => m.name)}
-                existingMembers={membersWithLiveBranches}
-                projectPath={data.config.projectPath}
-                adding={addingMemberLoading}
-                onClose={() => setAddMemberDialogOpen(false)}
-                onAdd={(entries: AddMemberEntry[]) => {
-                  setAddingMemberLoading(true);
-                  void (async () => {
-                    try {
-                      for (const entry of entries) {
-                        await addMember(teamName, {
-                          name: entry.name,
-                          role: entry.role,
-                          workflow: entry.workflow,
-                          isolation: entry.isolation,
-                          providerId: entry.providerId,
-                          model: entry.model,
-                          effort: entry.effort,
-                        });
-                      }
-                      setAddMemberDialogOpen(false);
-                    } catch {
-                      // error shown via store
-                    } finally {
-                      setAddingMemberLoading(false);
-                    }
-                  })();
-                }}
-              />
-
-              <Dialog open={leadChannelDialogOpen} onOpenChange={setLeadChannelDialogOpen}>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>负责人渠道监听</DialogTitle>
-                    <DialogDescription>
-                      给当前团队负责人绑定并启动已接入的外部渠道。团队创建完成后也可以随时调整。
-                    </DialogDescription>
-                  </DialogHeader>
-                  <LeadChannelPanel teamName={teamName} />
-                  <DialogFooter>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setLeadChannelDialogOpen(false)}
-                    >
-                      关闭
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
 
               <Dialog
                 open={removeMemberConfirm !== null}
@@ -3137,13 +3177,6 @@ export const TeamDetailView = ({
                 onEditorAction={handleEditorAction}
               />
             </div>
-            <div
-              ref={setMessagesPanelMountPoint}
-              className="pointer-events-none absolute inset-0 z-30"
-            />
-            {messagesPanelMode === 'bottom-sheet' && (
-              <TeamMessagesPanelBridge position="bottom-sheet" {...sharedMessagesPanelProps} />
-            )}
           </div>
         </div>
 
@@ -3153,41 +3186,6 @@ export const TeamDetailView = ({
               projectPath={data.config.projectPath}
               onClose={() => setEditorOpen(false)}
               onEditorAction={handleEditorAction}
-            />
-          </Suspense>
-        )}
-
-        {graphOpen && (
-          <Suspense fallback={null}>
-            <TeamGraphOverlay
-              teamName={teamName}
-              onClose={() => setGraphOpen(false)}
-              onPinAsTab={() => {
-                setGraphOpen(false);
-                useStore
-                  .getState()
-                  .openTab({ type: 'graph', label: `${data.config.name} Graph`, teamName });
-              }}
-              onSendMessage={(memberName) => {
-                setSendDialogRecipient(memberName);
-                setSendDialogDefaultText(undefined);
-                setSendDialogDefaultChip(undefined);
-                setSendDialogOpen(true);
-              }}
-              onOpenTaskDetail={(taskId) => {
-                const task = data.tasks.find((t) => t.id === taskId);
-                if (task) setSelectedTask(task);
-              }}
-              onOpenMemberProfile={(memberName, options) => {
-                const member = members.find((m) => m.name === memberName);
-                if (member) {
-                  setSelectedMember(member);
-                  setSelectedMemberView({
-                    initialTab: options?.initialTab,
-                    initialActivityFilter: options?.initialActivityFilter,
-                  });
-                }
-              }}
             />
           </Suspense>
         )}

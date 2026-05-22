@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-electron/
 dist-standalone/
+dist-renderer/
 out/
 release/
 coverage/

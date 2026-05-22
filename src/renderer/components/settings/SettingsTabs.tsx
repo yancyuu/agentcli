@@ -36,7 +36,8 @@ const tabs: TabConfig[] = [
     id: 'channels',
     label: '渠道',
     icon: PlugZap,
-    description: '管理飞书、Webhook 等外部渠道集成，负责人可选择监听这些渠道。',
+    description:
+      '管理团队可用的 AI 模型渠道（Claude / Codex / Gemini / OpenCode 等），支持预设市场和 cc-switch 导入。',
   },
   {
     id: 'notifications',

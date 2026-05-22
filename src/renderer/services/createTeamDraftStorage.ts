@@ -1,52 +1,34 @@
 /**
  * Atomic draft storage for CreateTeamDialog form snapshots.
  *
- * Stores the full form state (team name, members, paths, flags) under a single
- * IndexedDB key so that navigating away from the Teams tab and back preserves
- * user input.  No TTL — drafts persist until explicitly cleared on successful
- * team creation.
+ * Stores the form state (team name, paths, color) under a single IndexedDB
+ * key so navigating away from the Teams tab and back preserves user input.
+ * No TTL — drafts persist until explicitly cleared on successful team creation.
  *
  * Pattern mirrors `composerDraftStorage.ts`.
  */
 
-import { isTeamEffortLevel } from '@shared/utils/effortLevels';
-import { isTeamProviderId } from '@shared/utils/teamProvider';
 import { del, get, set } from 'idb-keyval';
-
-import type { TeamProviderId } from '@shared/types';
-import type { EffortLevel } from '@shared/types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Current snapshot schema version. Bump when shape changes. */
-const SNAPSHOT_VERSION = 1;
-
-/** Serializable subset of MemberDraft — excludes transient `workflowChips`. */
-export interface SerializedMemberDraft {
-  id: string;
-  name: string;
-  roleSelection: string;
-  customRole: string;
-  workflow?: string;
-  isolation?: 'worktree';
-  providerId?: TeamProviderId;
-  model?: string;
-  effort?: EffortLevel;
-}
+/**
+ * Current snapshot schema version. Bump when shape changes.
+ *
+ * v2 (2026-05-22): dropped `members`, `syncModelsWithLead`,
+ * `teammateWorktreeDefault`, `soloTeam`, `launchTeam` — workspace-scoped
+ * teams have no upfront roster and always auto-launch.
+ */
+const SNAPSHOT_VERSION = 2;
 
 export interface CreateTeamDraftSnapshot {
   version: number;
   teamName: string;
-  members: SerializedMemberDraft[];
-  syncModelsWithLead?: boolean;
-  teammateWorktreeDefault?: boolean;
   cwdMode: 'project' | 'custom';
   selectedProjectPath: string;
   customCwd: string;
-  soloTeam: boolean;
-  launchTeam: boolean;
   teamColor: string;
   updatedAt: number;
 }
@@ -61,21 +43,6 @@ const STORAGE_KEY = 'createTeamDraft:form';
 // Validation
 // ---------------------------------------------------------------------------
 
-function isValidMember(m: unknown): m is SerializedMemberDraft {
-  if (typeof m !== 'object' || m === null) return false;
-  const obj = m as Record<string, unknown>;
-  return (
-    typeof obj.id === 'string' &&
-    typeof obj.name === 'string' &&
-    typeof obj.roleSelection === 'string' &&
-    typeof obj.customRole === 'string' &&
-    (obj.isolation === undefined || obj.isolation === 'worktree') &&
-    (obj.providerId === undefined || isTeamProviderId(obj.providerId)) &&
-    (obj.model === undefined || typeof obj.model === 'string') &&
-    (obj.effort === undefined || isTeamEffortLevel(obj.effort))
-  );
-}
-
 function isValidSnapshot(data: unknown): data is CreateTeamDraftSnapshot {
   if (typeof data !== 'object' || data === null) return false;
   const obj = data as Record<string, unknown>;
@@ -83,16 +50,9 @@ function isValidSnapshot(data: unknown): data is CreateTeamDraftSnapshot {
     typeof obj.version === 'number' &&
     obj.version === SNAPSHOT_VERSION &&
     typeof obj.teamName === 'string' &&
-    Array.isArray(obj.members) &&
-    obj.members.every(isValidMember) &&
-    (obj.syncModelsWithLead === undefined || typeof obj.syncModelsWithLead === 'boolean') &&
-    (obj.teammateWorktreeDefault === undefined ||
-      typeof obj.teammateWorktreeDefault === 'boolean') &&
     (obj.cwdMode === 'project' || obj.cwdMode === 'custom') &&
     typeof obj.selectedProjectPath === 'string' &&
     typeof obj.customCwd === 'string' &&
-    typeof obj.soloTeam === 'boolean' &&
-    typeof obj.launchTeam === 'boolean' &&
     typeof obj.teamColor === 'string' &&
     typeof obj.updatedAt === 'number'
   );
@@ -141,7 +101,7 @@ async function loadSnapshot(): Promise<CreateTeamDraftSnapshot | null> {
     const data = await get<unknown>(STORAGE_KEY);
     if (data == null) return null;
     if (isValidSnapshot(data)) return data;
-    // Invalid shape — discard silently
+    // Invalid shape (including older versions) — discard silently
     void del(STORAGE_KEY);
     return null;
   } catch {
@@ -171,14 +131,9 @@ function emptySnapshot(): CreateTeamDraftSnapshot {
   return {
     version: SNAPSHOT_VERSION,
     teamName: '',
-    members: [],
-    syncModelsWithLead: true,
-    teammateWorktreeDefault: false,
     cwdMode: 'project',
     selectedProjectPath: '',
     customCwd: '',
-    soloTeam: false,
-    launchTeam: true,
     teamColor: '',
     updatedAt: Date.now(),
   };

@@ -4,10 +4,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import {
-  mergeCodexProviderStatusWithSnapshot,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
+// Stubs for removed codex-account feature
+function useCodexAccountSnapshot(_opts: { enabled: boolean }) {
+  return { snapshot: null, loading: false };
+}
+function mergeCodexProviderStatusWithSnapshot<T>(provider: T, _snapshot: unknown): T {
+  return provider;
+}
+
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';

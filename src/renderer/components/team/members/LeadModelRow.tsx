@@ -16,11 +16,9 @@ import { cn } from '@renderer/lib/utils';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
 import { isAnthropicHaikuTeamModel } from '@renderer/utils/teamModelCatalog';
 import { resolveTeamLeadColorName } from '@shared/utils/teamMemberColors';
-import { AlertTriangle, BellRing, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Info } from 'lucide-react';
 
 import { Button } from '../../ui/button';
-
-import { LeadChannelPanel } from './LeadChannelPanel';
 
 import type { EffortLevel, TeamProviderId } from '@shared/types';
 
@@ -38,7 +36,6 @@ interface LeadModelRowProps {
   warningText?: string | null;
   disableGeminiOption?: boolean;
   modelIssueText?: string | null;
-  teamName?: string;
   hideProviderTabs?: boolean;
 }
 
@@ -56,12 +53,10 @@ export const LeadModelRow = ({
   warningText,
   disableGeminiOption = false,
   modelIssueText,
-  teamName,
   hideProviderTabs = false,
 }: LeadModelRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const [modelExpanded, setModelExpanded] = useState(false);
-  const [channelExpanded, setChannelExpanded] = useState(false);
   const leadColorSet = getTeamColorSet(resolveTeamLeadColorName());
   const modelButtonLabel = model.trim()
     ? getProviderScopedTeamModelLabel(providerId, model.trim())
@@ -137,20 +132,6 @@ export const LeadModelRow = ({
             <span className="min-w-0 flex-1 truncate">{modelButtonLabel}</span>
             {hasModelIssue ? <AlertTriangle className="size-3.5 shrink-0 text-red-300" /> : null}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              'h-8 shrink-0 gap-1 px-2',
-              channelExpanded && 'border-sky-500/45 bg-sky-500/10 text-sky-100 hover:bg-sky-500/15'
-            )}
-            title="配置负责人渠道监听"
-            aria-label="配置负责人渠道监听"
-            onClick={() => setChannelExpanded((prev) => !prev)}
-          >
-            <BellRing className="size-3.5" />
-            渠道
-          </Button>
         </div>
       </div>
       {warningText ? (
@@ -194,13 +175,6 @@ export const LeadModelRow = ({
             <p className="text-[11px] leading-relaxed text-sky-300">
               这些设置控制团队负责人，并作为未单独覆盖设置的成员默认运行时。
             </p>
-          </div>
-        </div>
-      ) : null}
-      {channelExpanded ? (
-        <div className="md:col-span-3">
-          <div className="ml-3 rounded-md border border-sky-500/25 bg-sky-500/5 p-3">
-            <LeadChannelPanel teamName={teamName} />
           </div>
         </div>
       ) : null}

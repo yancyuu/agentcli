@@ -99,27 +99,8 @@ function parseQualifiedRecipient(
   };
 }
 
-function buildExternalChannelSourceLabel(message: InboxMessage): string | null {
-  const channel = message.externalChannel;
-  if (channel?.provider !== 'feishu') {
-    return null;
-  }
-  const channelName = channel.channelName?.trim() || channel.channelId;
-  const sender = channel.senderId?.trim() || 'unknown';
-  return `${channelName} · ${sender}`;
-}
-
 function buildLeadSourceTooltip(message: InboxMessage, leadLabel: string): string {
   const parts = [`发送者：${leadLabel}`, `消息来源：${message.source ?? 'unknown'}`];
-  const channel = message.externalChannel;
-  if (channel?.provider === 'feishu') {
-    parts.push(`渠道：${channel.channelName?.trim() || channel.channelId}`);
-    parts.push(`渠道 ID：${channel.channelId}`);
-    parts.push(`Chat ID：${channel.chatId}`);
-    if (channel.senderId) {
-      parts.push(`发送人 ID：${channel.senderId}`);
-    }
-  }
   if (message.leadSessionId) {
     parts.push(`Session：${message.leadSessionId}`);
   }
@@ -724,7 +705,6 @@ export const ActivityItem = memo(
     const crossTeamSentTarget = getCrossTeamSentTarget(message.to, teamName, localMemberNames);
     const crossTeamSentMemberName = getCrossTeamSentMemberName(message.to);
     const isCrossTeam = message.source === CROSS_TEAM_SOURCE || parsedCrossTeamPrefix !== null;
-    const externalChannelSourceLabel = buildExternalChannelSourceLabel(message);
     const isCrossTeamSent =
       message.source === CROSS_TEAM_SENT_SOURCE || crossTeamSentTarget !== null;
     const isCrossTeamAny = isCrossTeam || isCrossTeamSent;
@@ -1038,20 +1018,6 @@ export const ActivityItem = memo(
       </span>
     ) : null;
 
-    const leadSourceBadge =
-      externalChannelSourceLabel && !isSlashCommandResult ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex max-w-48 items-center rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">
-              <span className="truncate">{externalChannelSourceLabel}</span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 whitespace-pre-line text-xs">
-            {buildLeadSourceTooltip(message, message.from)}
-          </TooltipContent>
-        </Tooltip>
-      ) : null;
-
     const statusBadge = rateLimited ? (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
         <AlertTriangle size={10} />
@@ -1224,7 +1190,7 @@ export const ActivityItem = memo(
                   ) : null}
                   {senderBadge}
                   {messageTypeBadge}
-                  {leadSourceBadge}
+
                   {statusBadge}
                   {recipientBadge}
                 </div>
@@ -1307,7 +1273,7 @@ export const ActivityItem = memo(
                   </span>
                 ) : null}
                 {messageTypeBadge}
-                {leadSourceBadge}
+
                 {statusBadge}
                 {recipientBadge}
                 <div className="relative ml-auto flex shrink-0 items-center">
@@ -1388,7 +1354,6 @@ export const ActivityItem = memo(
                 </span>
               ) : null}
               {messageTypeBadge}
-              {leadSourceBadge}
               {statusBadge}
               {recipientBadge}
               <span className="min-w-0 flex-1 truncate text-xs" style={{ color: CARD_TEXT_LIGHT }}>

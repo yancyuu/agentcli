@@ -1,13 +1,20 @@
 import { useMemo } from 'react';
 
-import {
-  mergeCodexCliStatusWithSnapshot,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 
 import type { CliInstallationStatus, CliProviderId, CliProviderStatus } from '@shared/types';
+
+// Stubs for removed codex-account feature
+function useCodexAccountSnapshot(_opts: { enabled: boolean }) {
+  return { snapshot: null, pending: false };
+}
+function mergeCodexCliStatusWithSnapshot(
+  cliStatus: CliInstallationStatus | null | undefined,
+  _snapshot: unknown
+): CliInstallationStatus | null {
+  return cliStatus ?? null;
+}
 
 export interface EffectiveCliProviderStatusSnapshot {
   cliStatus: CliInstallationStatus | null;
