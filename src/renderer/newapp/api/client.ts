@@ -162,6 +162,30 @@ async function del<T>(path: string): Promise<T> {
 // hermit-managed
 // ---------------------------------------------------------------------------
 
+export type HermitConfig = {
+  ccBaseUrl: string;
+  ccToken: string; // 脱敏显示
+  ccTokenSet: boolean;
+  ccBridgeUrl: string;
+};
+
+export async function getHermitConfig(): Promise<HermitConfig> {
+  const r = await get<{ ok: boolean; data: HermitConfig }>('/api/hermit-config');
+  return r.data;
+}
+
+export async function saveHermitConfig(patch: {
+  ccBaseUrl?: string;
+  ccToken?: string;
+  ccBridgeUrl?: string;
+}): Promise<{ ccBaseUrl: string; ccTokenSet: boolean }> {
+  const r = await post<{ ok: boolean; data: { ccBaseUrl: string; ccTokenSet: boolean } }>(
+    '/api/hermit-config',
+    patch
+  );
+  return r.data;
+}
+
 export async function getStatus() {
   return get<{ ok: true; data: CcStatus }>('/api/status');
 }

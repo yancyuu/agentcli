@@ -35,6 +35,7 @@ import type {
   CcSession,
   CcSkillPreset,
   GroupMessage,
+  HermitConfig,
   Member,
   Task,
   Team,
@@ -1005,12 +1006,13 @@ function SkillCard({ skill }: { skill: CcSkillPreset }) {
 // Settings page
 // ---------------------------------------------------------------------------
 
-type SettingsTab = 'providers' | 'projects' | 'system';
+type SettingsTab = 'connection' | 'providers' | 'projects' | 'system';
 
 function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>('providers');
+  const [tab, setTab] = useState<SettingsTab>('connection');
 
   const tabs: { id: SettingsTab; label: string; Icon: React.ElementType }[] = [
+    { id: 'connection', label: '连接', Icon: Zap },
     { id: 'providers', label: 'Providers', Icon: Cpu },
     { id: 'projects', label: 'Projects', Icon: Bot },
     { id: 'system', label: '系统', Icon: SlidersHorizontal },
@@ -1045,10 +1047,205 @@ function SettingsPage() {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
+        {tab === 'connection' && <ConnectionPanel />}
         {tab === 'providers' && <ProvidersPanel />}
         {tab === 'projects' && <ProjectsPanel />}
         {tab === 'system' && <SystemPanel />}
       </div>
+    </div>
+  );
+}
+
+// Connection panel
+function ConnectionPanel() {
+  const { data: cfg, loading, error, reload } = useAsync(api.getHermitConfig, []);
+  const [baseUrl, setBaseUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [bridgeUrl, setBridgeUrl] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  // Populate fields once config loads
+  useEffect(() => {
+    if (cfg) {
+      setBaseUrl(cfg.ccBaseUrl);
+      setBridgeUrl(cfg.ccBridgeUrl);
+      setToken(''); // don't pre-fill token (masked)
+    }
+  }, [cfg]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveErr(null);
+    setSaved(false);
+    try {
+      const patch: { ccBaseUrl?: string; ccToken?: string; ccBridgeUrl?: string } = {
+        ccBaseUrl: baseUrl,
+        ccBridgeUrl: bridgeUrl,
+      };
+      // Only send token if user typed something new
+      if (token) patch.ccToken = token;
+      await api.saveHermitConfig(patch);
+      setSaved(true);
+      setToken('');
+      reload();
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="h-full max-w-lg space-y-4 overflow-y-auto p-4">
+      {/* Explanation */}
+      <div
+        className="rounded-lg p-3 text-xs leading-relaxed"
+        style={{
+          background: 'rgba(129,140,248,0.08)',
+          border: '1px solid rgba(129,140,248,0.2)',
+          color: 'var(--color-text-secondary)',
+        }}
+      >
+        <p className="mb-1 font-medium" style={{ color: 'var(--color-accent)' }}>
+          关于 cc-connect
+        </p>
+        <p>
+          Hermit 使用 cc-connect 作为 AI Agent 的运行后端。 cc-connect 在本机独立运行（默认端口
+          9820），Hermit 通过 HTTP API 与它通信。
+        </p>
+        <p className="mt-1">
+          <strong>Token</strong> 是可选的 — 如果你的 cc-connect 没有开启鉴权，留空即可。 只有在
+          cc-connect 配置了 <code>management_token</code> 时才需要填写。
+        </p>
+      </div>
+
+      {loading && <LoadingState />}
+      {error && <ErrorState message={error} onRetry={reload} />}
+
+      {!loading && (
+        <div className="space-y-3">
+          {/* Connection status indicator */}
+          <ConnectionStatus baseUrl={baseUrl || cfg?.ccBaseUrl || 'http://127.0.0.1:9820'} />
+
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Management API 地址
+            </label>
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="http://127.0.0.1:9820"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1"
+              style={{
+                background: 'var(--color-surface-raised)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border)',
+              }}
+            />
+          </div>
+
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Bridge WebSocket 地址
+            </label>
+            <input
+              value={bridgeUrl}
+              onChange={(e) => setBridgeUrl(e.target.value)}
+              placeholder="ws://127.0.0.1:9810/bridge/ws"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1"
+              style={{
+                background: 'var(--color-surface-raised)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border)',
+              }}
+            />
+          </div>
+
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Token（可选）
+              {cfg?.ccTokenSet && (
+                <span
+                  className="ml-2 rounded px-1.5 py-0.5 text-xs"
+                  style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e' }}
+                >
+                  已配置 {cfg.ccToken}
+                </span>
+              )}
+            </label>
+            <input
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              type="password"
+              placeholder={cfg?.ccTokenSet ? '留空则不修改当前 Token' : '无需 Token 则留空'}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1"
+              style={{
+                background: 'var(--color-surface-raised)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border)',
+              }}
+            />
+          </div>
+
+          {saveErr && <ErrorState message={saveErr} />}
+          {saved && (
+            <p className="text-xs" style={{ color: '#22c55e' }}>
+              ✓ 配置已保存，后续请求立即生效
+            </p>
+          )}
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40"
+            style={{ background: 'var(--color-accent)', color: 'white' }}
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : null}
+            {saving ? '保存中…' : '保存配置'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConnectionStatus({ baseUrl }: { baseUrl: string }) {
+  const { data, loading, error } = useAsync(api.cc.getStatus, []);
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+      style={{
+        background: 'var(--color-surface-raised)',
+        border: `1px solid ${error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.2)'}`,
+      }}
+    >
+      {loading ? (
+        <Loader2 size={11} className="animate-spin" style={{ color: 'var(--color-text-muted)' }} />
+      ) : (
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ background: error ? '#ef4444' : '#22c55e' }}
+        />
+      )}
+      <span style={{ color: 'var(--color-text-secondary)' }}>
+        {loading
+          ? '连接检测中…'
+          : error
+            ? `无法连接 cc-connect (${baseUrl})`
+            : `已连接 · v${(data as { version?: string })?.version ?? '?'}`}
+      </span>
     </div>
   );
 }

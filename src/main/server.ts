@@ -24,6 +24,8 @@
  *   STATIC_DIR                 静态资源目录,默认 dist-renderer/(若不存在,/ 返回 503 提示)
  */
 
+import { existsSync as _existsSync2, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,7 +44,53 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number.parseInt(process.env.PORT ?? '5680', 10);
 const STATIC_DIR = process.env.STATIC_DIR ?? path.resolve(REPO_ROOT, 'dist-renderer');
 
-const cc = new CcConnectClient();
+// ===========================================================================
+// Hermit runtime config — ~/.hermit/config.json
+// Priority: file > env vars > defaults
+// ===========================================================================
+
+const HERMIT_HOME = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit');
+const HERMIT_CONFIG_FILE = path.join(HERMIT_HOME, 'config.json');
+
+interface HermitConfig {
+  ccBaseUrl: string;
+  ccToken: string;
+  ccBridgeUrl: string;
+}
+
+function loadConfig(): HermitConfig {
+  const defaults: HermitConfig = {
+    ccBaseUrl: process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820',
+    ccToken: process.env.CC_CONNECT_TOKEN ?? process.env.CC_CONNECT_MANAGEMENT_TOKEN ?? '',
+    ccBridgeUrl: process.env.CC_CONNECT_BRIDGE_URL ?? 'ws://127.0.0.1:9810/bridge/ws',
+  };
+  try {
+    if (_existsSync2(HERMIT_CONFIG_FILE)) {
+      const raw = JSON.parse(readFileSync(HERMIT_CONFIG_FILE, 'utf-8')) as Partial<HermitConfig>;
+      return { ...defaults, ...raw };
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+  return defaults;
+}
+
+function saveConfig(patch: Partial<HermitConfig>): HermitConfig {
+  const current = loadConfig();
+  const next = { ...current, ...patch };
+  mkdirSync(HERMIT_HOME, { recursive: true });
+  writeFileSync(HERMIT_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf-8');
+  return next;
+}
+
+// Mutable runtime config — updated via /api/hermit-config POST
+let runtimeConfig = loadConfig();
+
+const cc = new CcConnectClient({
+  baseUrl: runtimeConfig.ccBaseUrl,
+  token: runtimeConfig.ccToken,
+  bridgeUrl: runtimeConfig.ccBridgeUrl,
+});
 const bridge = new CcConnectBridge();
 const svc = new TeamProvisioningService(cc, bridge);
 
@@ -62,12 +110,8 @@ await app.register(cors, {
 // ===========================================================================
 
 app.all('/api/cc/*', async (request, reply) => {
-  const baseUrl = (process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820').replace(/\/+$/, '');
-  const token = (
-    process.env.CC_CONNECT_TOKEN ??
-    process.env.CC_CONNECT_MANAGEMENT_TOKEN ??
-    ''
-  ).trim();
+  const baseUrl = runtimeConfig.ccBaseUrl.replace(/\/+$/, '');
+  const token = runtimeConfig.ccToken;
 
   const url = request.url; // e.g. /api/cc/projects?foo=1
   const subPath = url.replace(/^\/api\/cc/, '') || '/';
@@ -102,6 +146,41 @@ app.all('/api/cc/*', async (request, reply) => {
       upstream.headers.get('content-type') ?? 'application/json; charset=utf-8'
     )
     .send(body);
+});
+
+// ===========================================================================
+// Hermit config (read/write ~/.hermit/config.json)
+// ===========================================================================
+
+app.get('/api/hermit-config', async () => ({
+  ok: true,
+  data: {
+    ccBaseUrl: runtimeConfig.ccBaseUrl,
+    // mask token: show only first 4 chars if present
+    ccToken: runtimeConfig.ccToken ? runtimeConfig.ccToken.slice(0, 4) + '****' : '',
+    ccTokenSet: runtimeConfig.ccToken.length > 0,
+    ccBridgeUrl: runtimeConfig.ccBridgeUrl,
+  },
+}));
+
+app.post<{
+  Body: { ccBaseUrl?: string; ccToken?: string; ccBridgeUrl?: string };
+}>('/api/hermit-config', async (request, reply) => {
+  const { ccBaseUrl, ccToken, ccBridgeUrl } = request.body ?? {};
+  const patch: Partial<HermitConfig> = {};
+  if (ccBaseUrl !== undefined) patch.ccBaseUrl = ccBaseUrl.trim() || 'http://127.0.0.1:9820';
+  if (ccToken !== undefined) patch.ccToken = ccToken.trim();
+  if (ccBridgeUrl !== undefined)
+    patch.ccBridgeUrl = ccBridgeUrl.trim() || 'ws://127.0.0.1:9810/bridge/ws';
+
+  runtimeConfig = saveConfig(patch);
+  // Hot-update the cc client so subsequent requests use new config immediately
+  cc.updateConfig({ baseUrl: runtimeConfig.ccBaseUrl, token: runtimeConfig.ccToken });
+
+  return {
+    ok: true,
+    data: { ccBaseUrl: runtimeConfig.ccBaseUrl, ccTokenSet: runtimeConfig.ccToken.length > 0 },
+  };
 });
 
 // ===========================================================================
