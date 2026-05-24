@@ -16,12 +16,10 @@ import { PanelLeft } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { DateGroupedSessions } from '../sidebar/DateGroupedSessions';
-import { GlobalTaskList } from '../sidebar/GlobalTaskList';
-import { defaultTaskFiltersState } from '../sidebar/taskFiltersState';
+import { SidebarSessions } from '../sidebar/SidebarSessions';
+import { WorkspaceBrowser } from '../sidebar/WorkspaceBrowser';
 
-import type { TaskFiltersState } from '../sidebar/taskFiltersState';
-
-type SidebarTab = 'tasks' | 'sessions';
+type SidebarTab = 'workspace' | 'sessions';
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 500;
@@ -36,9 +34,7 @@ export const Sidebar = (): React.JSX.Element => {
   );
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tasks');
-  const [taskFilters, setTaskFilters] = useState<TaskFiltersState>(defaultTaskFiltersState);
-  const [taskFiltersPopoverOpen, setTaskFiltersPopoverOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('workspace');
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -127,23 +123,25 @@ export const Sidebar = (): React.JSX.Element => {
             <button
               type="button"
               role="tab"
-              aria-selected={sidebarTab === 'tasks'}
-              aria-controls="sidebar-tasks-panel"
-              id="sidebar-tab-tasks"
+              aria-selected={sidebarTab === 'workspace'}
+              aria-controls="sidebar-workspace-panel"
+              id="sidebar-tab-workspace"
               className={`relative px-3 py-1.5 text-[11px] font-medium transition-colors ${
-                sidebarTab === 'tasks' ? 'text-text' : 'text-text-muted hover:text-text-secondary'
+                sidebarTab === 'workspace'
+                  ? 'text-text'
+                  : 'text-text-muted hover:text-text-secondary'
               }`}
               style={
-                sidebarTab === 'tasks'
+                sidebarTab === 'workspace'
                   ? {
                       borderBottom: '2px solid var(--color-text)',
                       marginBottom: '-1px',
                     }
                   : undefined
               }
-              onClick={() => setSidebarTab('tasks')}
+              onClick={() => setSidebarTab('workspace')}
             >
-              任务
+              工作空间
             </button>
             <button
               type="button"
@@ -172,21 +170,15 @@ export const Sidebar = (): React.JSX.Element => {
           <div className="flex-1" />
         </div>
 
-        {/* Content: Tasks list or Sessions list */}
+        {/* Content: Workspace or Sessions list */}
         <div
-          id="sidebar-tasks-panel"
+          id="sidebar-workspace-panel"
           role="tabpanel"
-          aria-labelledby="sidebar-tab-tasks"
-          hidden={sidebarTab !== 'tasks'}
+          aria-labelledby="sidebar-tab-workspace"
+          hidden={sidebarTab !== 'workspace'}
           className="min-w-0 flex-1 overflow-hidden"
         >
-          <GlobalTaskList
-            hideHeader
-            filters={taskFilters}
-            onFiltersChange={setTaskFilters}
-            filtersPopoverOpen={taskFiltersPopoverOpen}
-            onFiltersPopoverOpenChange={setTaskFiltersPopoverOpen}
-          />
+          <WorkspaceBrowser />
         </div>
         <div
           id="sidebar-sessions-panel"
@@ -195,7 +187,7 @@ export const Sidebar = (): React.JSX.Element => {
           hidden={sidebarTab !== 'sessions'}
           className="min-w-0 flex-1 overflow-hidden"
         >
-          <DateGroupedSessions />
+          <SidebarSessions />
         </div>
       </div>
 

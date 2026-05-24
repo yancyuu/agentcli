@@ -1,3 +1,3 @@
-export type MemberDetailTab = 'tasks' | 'workspace' | 'activity' | 'stats' | 'logs';
+export type MemberDetailTab = 'tasks' | 'workspace' | 'activity' | 'stats';
 
 export type MemberActivityFilter = 'all' | 'messages' | 'comments';

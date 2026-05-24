@@ -17,23 +17,13 @@ import {
   resolveMemberRuntimeSummary,
 } from '@renderer/utils/memberRuntimeSummary';
 import { isLeadMember } from '@shared/utils/leadDetection';
-import {
-  BarChart3,
-  FileText,
-  FolderOpen,
-  ListPlus,
-  Loader2,
-  MessageSquare,
-  RotateCcw,
-  UserMinus,
-} from 'lucide-react';
+import { BarChart3, FolderOpen, Loader2 } from 'lucide-react';
 
 import { buildMemberActivityEntries } from './memberActivityEntries';
 import { MemberDetailHeader } from './MemberDetailHeader';
 import { MemberDetailStats } from './MemberDetailStats';
 import { type MemberActivityFilter, type MemberDetailTab } from './memberDetailTypes';
 import { MemberLaunchDiagnosticsButton } from './MemberLaunchDiagnosticsButton';
-import { MemberLogsTab } from './MemberLogsTab';
 import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
 import { MemberTasksTab } from './MemberTasksTab';
@@ -214,8 +204,6 @@ export const MemberDetailDialog = ({
           <MemberDetailStats
             totalTasks={memberTasks.length}
             inProgressTasks={inProgressTasks}
-            completedTasks={completedTasks}
-            activityCount={memberActivityCount}
             totalTokens={totalTokens}
             statsLoading={statsLoading}
             statsComputedAt={memberStats?.computedAt}
@@ -253,10 +241,6 @@ export const MemberDetailDialog = ({
               <BarChart3 size={12} />
               Stats
             </TabsTrigger>
-            <TabsTrigger value="logs" className="flex-1 gap-1.5">
-              <FileText size={12} />
-              Logs
-            </TabsTrigger>
           </TabsList>
           <TabsContent value="tasks">
             <MemberTasksTab tasks={memberTasks} onTaskClick={onTaskClick} />
@@ -290,16 +274,13 @@ export const MemberDetailDialog = ({
               onShowAllFiles={() => onViewMemberChanges?.(member.name)}
             />
           </TabsContent>
-          <TabsContent value="logs" className="min-w-0 overflow-hidden">
-            <MemberLogsTab teamName={teamName} memberName={member.name} />
-          </TabsContent>
         </Tabs>
 
         <DialogFooter>
           {restartError ? (
-            <div className="mr-auto text-xs text-red-400">{restartError}</div>
+            <div className="text-xs text-red-400">{restartError}</div>
           ) : launchErrorMessage ? (
-            <div className="mr-auto flex min-w-0 items-center gap-2 text-xs text-red-400">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-red-400">
               <span className="min-w-0 truncate" title={launchErrorMessage}>
                 {launchErrorMessage}
               </span>
@@ -312,69 +293,11 @@ export const MemberDetailDialog = ({
               ) : null}
             </div>
           ) : runtimeEntry?.pid ? (
-            <div className="mr-auto text-xs text-[var(--color-text-muted)]">
+            <div className="text-xs text-[var(--color-text-muted)]">
               PID {runtimeEntry.pid}
               {memorySourceLabel ? ` · ${memorySourceLabel}` : ''}
             </div>
-          ) : (
-            <div className="mr-auto" />
-          )}
-          {member.removedAt ? (
-            <span className="text-xs text-[var(--color-text-muted)]">
-              已移除 {new Date(member.removedAt).toLocaleDateString()}
-            </span>
-          ) : (
-            <>
-              {onRestartMember &&
-                !isLeadMember(member) &&
-                (isTeamAlive || isTeamProvisioning) &&
-                runtimeEntry?.restartable !== false && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={restarting || restartInFlight}
-                    onClick={async () => {
-                      setRestartError(null);
-                      setRestarting(true);
-                      try {
-                        await onRestartMember(member.name);
-                      } catch (error) {
-                        setRestartError(error instanceof Error ? error.message : '重启成员失败');
-                      } finally {
-                        setRestarting(false);
-                      }
-                    }}
-                  >
-                    {restarting ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <RotateCcw size={14} />
-                    )}
-                    Restart
-                  </Button>
-                )}
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={onSendMessage}>
-                <MessageSquare size={14} />
-                Send Message
-              </Button>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={onAssignTask}>
-                <ListPlus size={14} />
-                Assign Task
-              </Button>
-              {onRemoveMember && !isLeadMember(member) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                  onClick={onRemoveMember}
-                >
-                  <UserMinus size={14} />
-                  Remove
-                </Button>
-              )}
-            </>
-          )}
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

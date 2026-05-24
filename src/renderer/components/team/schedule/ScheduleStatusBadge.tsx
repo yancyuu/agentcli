@@ -11,7 +11,7 @@ const SCHEDULE_STATUS_CONFIG: Record<ScheduleStatus, { label: string; className:
     label: '启用',
     className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
   },
-  paused: { label: '已暂停', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+  paused: { label: '已停止', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
   disabled: { label: '已禁用', className: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/20' },
 };
 

@@ -1,6 +1,7 @@
 import type { TeamColorSet } from '@renderer/constants/teamColors';
 
 function hashStringToHue(str: string): number {
+  if (!str) return 0;
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -16,6 +17,7 @@ export interface ProjectColorSet {
 }
 
 export function projectColor(name: string, isLight = false): ProjectColorSet {
+  if (!name) name = '';
   const hue = hashStringToHue(name);
   if (isLight) {
     return {
@@ -35,6 +37,7 @@ export function projectColor(name: string, isLight = false): ProjectColorSet {
 
 /** Generate a TeamColorSet from any name (deterministic hue). */
 export function nameColorSet(name: string, isLight = false): TeamColorSet {
+  if (!name) name = '';
   const hue = hashStringToHue(name);
   if (isLight) {
     return {

@@ -52,15 +52,12 @@ export const TeamSessionsSection = ({
     [projects, repositoryGroups, projectPath]
   );
 
-  // Sort: lead session first, then by most recent
+  // Sort by most recent first.
   const sortedSessions = useMemo(() => {
-    if (!leadSessionId) return sessions;
     return [...sessions].sort((a, b) => {
-      if (a.id === leadSessionId) return -1;
-      if (b.id === leadSessionId) return 1;
       return b.createdAt - a.createdAt;
     });
-  }, [sessions, leadSessionId]);
+  }, [sessions]);
 
   const handleSessionClick = useCallback(
     (session: Session) => {

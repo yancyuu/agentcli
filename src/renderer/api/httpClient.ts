@@ -97,7 +97,10 @@ import type {
   WslClaudeRootCandidate,
   MemberSpawnStatusesSnapshot,
   TeamAgentRuntimeSnapshot,
+  CcSession,
+  CcSessionDetail,
 } from '@shared/types';
+
 import type {
   AgentChangeSet,
   ApplyReviewResult,
@@ -111,7 +114,7 @@ import type {
 import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { AgentConfig } from '@shared/types/api';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
-import type { EditorAPI, ProjectAPI } from '@shared/types/editor';
+import type { EditorAPI, ProjectAPI, WorkspaceListResponse } from '@shared/types/editor';
 import type {
   EnrichedPlugin,
   InstalledMcpEntry,
@@ -203,18 +206,35 @@ export class HttpAPIClient implements ElectronAPI {
     return value;
   }
 
+  private createTimeoutController(timeoutMs: number): {
+    controller: AbortController;
+    timeout: ReturnType<typeof setTimeout>;
+  } {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort(new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`));
+    }, timeoutMs);
+    return { controller, timeout };
+  }
+
   private async parseJson<T>(res: Response): Promise<T> {
     const text = await res.text();
     if (!res.ok) {
-      const parsed = JSON.parse(text) as { error?: string };
-      throw new Error(parsed.error ?? `HTTP ${res.status}`);
+      if (!text.trim()) throw new Error(`HTTP ${res.status}`);
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        throw new Error(parsed.error ?? `HTTP ${res.status}`);
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        throw e;
+      }
     }
+    if (!text.trim()) return undefined as unknown as T;
     return JSON.parse(text, (key, value) => HttpAPIClient.reviveDates(key, value)) as T;
   }
 
   private async get<T>(path: string): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const { controller, timeout } = this.createTimeoutController(10_000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
       return this.parseJson<T>(res);
@@ -224,8 +244,7 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   private async post<T>(path: string, body?: unknown): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const { controller, timeout } = this.createTimeoutController(10_000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
@@ -240,8 +259,7 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   private async postLong<T>(path: string, body?: unknown, timeoutMs = 60_000): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
@@ -256,8 +274,7 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   private async del<T>(path: string, body?: unknown): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const { controller, timeout } = this.createTimeoutController(10_000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'DELETE',
@@ -272,8 +289,7 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   private async put<T>(path: string, body?: unknown): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const { controller, timeout } = this.createTimeoutController(10_000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PUT',
@@ -288,8 +304,7 @@ export class HttpAPIClient implements ElectronAPI {
   }
 
   private async patch<T>(path: string, body?: unknown): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const { controller, timeout } = this.createTimeoutController(10_000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PATCH',
@@ -303,11 +318,224 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
+  private async delete<T>(path: string): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(10_000);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+      return this.parseJson<T>(res);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Core session/project APIs
   // ---------------------------------------------------------------------------
 
   getAppVersion = (): Promise<string> => this.get<string>('/api/version');
+
+  hermitConfig = {
+    get: async (): Promise<{
+      ccBaseUrl: string;
+      ccBridgeUrl: string;
+      ccToken: string;
+      ccTokenSet: boolean;
+    }> => {
+      const res = await this.get<{
+        ok: boolean;
+        data: { ccBaseUrl: string; ccBridgeUrl: string; ccToken: string; ccTokenSet: boolean };
+      }>('/api/hermit-config');
+      return res.data;
+    },
+    update: async (patch: {
+      ccBaseUrl?: string;
+      ccToken?: string;
+      ccBridgeUrl?: string;
+    }): Promise<void> => {
+      await this.post('/api/hermit-config', patch);
+    },
+    getRaw: async (): Promise<{ path: string; content: string }> => {
+      const res = await this.get<{ ok: boolean; data: { path: string; content: string } }>(
+        '/api/hermit-config/raw'
+      );
+      return res.data;
+    },
+    updateRaw: async (content: string): Promise<void> => {
+      await this.post('/api/hermit-config/raw', { content });
+    },
+  };
+
+  ccConfig = {
+    get: async (): Promise<Record<string, unknown>> => {
+      const res = await this.get<{ ok: boolean; data: Record<string, unknown> }>('/api/cc-config');
+      return res.data;
+    },
+    update: async (patch: Record<string, unknown>): Promise<{ needsRestart: boolean }> => {
+      const res = await this.post<{ ok: boolean; data: { needsRestart: boolean } }>(
+        '/api/cc-config',
+        patch
+      );
+      return res.data;
+    },
+    getRaw: async (): Promise<{ path: string; content: string }> => {
+      const res = await this.get<{ ok: boolean; data: { path: string; content: string } }>(
+        '/api/cc-config/raw'
+      );
+      return res.data;
+    },
+    updateRaw: async (content: string): Promise<void> => {
+      await this.post('/api/cc-config/raw', { content });
+    },
+  };
+
+  ccSettings = {
+    get: async (): Promise<Record<string, unknown>> => {
+      const res = await this.get<{ ok: boolean; data: Record<string, unknown> }>(
+        '/api/cc-settings'
+      );
+      return res.data;
+    },
+    patch: async (patch: Record<string, unknown>): Promise<void> => {
+      await this.patch('/api/cc-settings', patch);
+    },
+    restart: async (): Promise<void> => {
+      await this.post('/api/cc-restart', {});
+    },
+    reload: async (): Promise<void> => {
+      await this.post('/api/cc-reload', {});
+    },
+  };
+
+  // cc-connect setup flows (QR code + manual platform binding)
+  ccSetup = {
+    feishuBegin: async (): Promise<{
+      device_code: string;
+      qr_url: string;
+      base_url?: string;
+      interval: number;
+      expires_in: number;
+    }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: {
+          device_code: string;
+          qr_url: string;
+          base_url?: string;
+          interval: number;
+          expires_in: number;
+        };
+      }>('/api/setup/feishu/begin', {});
+      return res.data;
+    },
+    feishuPoll: async (
+      deviceCode: string,
+      baseUrl?: string
+    ): Promise<{
+      status: string;
+      base_url?: string;
+      app_id?: string;
+      app_secret?: string;
+      platform?: string;
+      owner_open_id?: string;
+      slow_down?: boolean;
+      error?: string;
+    }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: {
+          status: string;
+          base_url?: string;
+          app_id?: string;
+          app_secret?: string;
+          platform?: string;
+          owner_open_id?: string;
+          slow_down?: boolean;
+          error?: string;
+        };
+      }>('/api/setup/feishu/poll', { device_code: deviceCode, base_url: baseUrl });
+      return res.data;
+    },
+    feishuSave: async (params: {
+      project: string;
+      app_id: string;
+      app_secret: string;
+      platform_type?: string;
+      owner_open_id?: string;
+      work_dir?: string;
+      agent_type?: string;
+    }): Promise<{ message: string; restart_required: boolean }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: { message: string; restart_required: boolean };
+      }>('/api/setup/feishu/save', params);
+      return res.data;
+    },
+
+    weixinBegin: async (apiUrl?: string): Promise<{ qr_key: string; qr_url: string }> => {
+      const res = await this.post<{ ok: boolean; data: { qr_key: string; qr_url: string } }>(
+        '/api/setup/weixin/begin',
+        { api_url: apiUrl }
+      );
+      return res.data;
+    },
+    weixinPoll: async (
+      qrKey: string,
+      apiUrl?: string
+    ): Promise<{
+      status: string;
+      bot_token?: string;
+      ilink_bot_id?: string;
+      base_url?: string;
+      ilink_user_id?: string;
+    }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: {
+          status: string;
+          bot_token?: string;
+          ilink_bot_id?: string;
+          base_url?: string;
+          ilink_user_id?: string;
+        };
+      }>('/api/setup/weixin/poll', { qr_key: qrKey, api_url: apiUrl });
+      return res.data;
+    },
+    weixinSave: async (params: {
+      project: string;
+      token: string;
+      base_url?: string;
+      ilink_bot_id?: string;
+      ilink_user_id?: string;
+      work_dir?: string;
+      agent_type?: string;
+    }): Promise<{ message: string; restart_required: boolean }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: { message: string; restart_required: boolean };
+      }>('/api/setup/weixin/save', params);
+      return res.data;
+    },
+
+    addPlatform: async (
+      projectName: string,
+      body: {
+        type: string;
+        options?: Record<string, unknown>;
+        work_dir?: string;
+        agent_type?: string;
+      }
+    ): Promise<{ message: string; restart_required: boolean }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: { message: string; restart_required: boolean };
+      }>(`/api/projects/${encodeURIComponent(projectName)}/add-platform`, body);
+      return res.data;
+    },
+  };
 
   getDashboardRecentProjects = (): Promise<DashboardRecentProjectsPayload> =>
     this.get<DashboardRecentProjectsPayload>('/api/dashboard/recent-projects');
@@ -577,9 +805,19 @@ export class HttpAPIClient implements ElectronAPI {
       return result.data!;
     },
     selectFolders: async (): Promise<string[]> => {
-      // In browser mode, return root path as default selection
-      // The UI will use the browse-dirs endpoint for interactive selection
-      return ['/data/project'];
+      // Fallback: return home directory as default
+      return [process.env.HOME ?? '/'];
+    },
+    browseFolders: async (
+      dirPath?: string
+    ): Promise<{ path: string; dirs: string[]; hasParent: boolean }> => {
+      const res = await this.post<{
+        success: boolean;
+        data?: { path: string; dirs: string[]; hasParent: boolean };
+        error?: string;
+      }>('/api/config/browse-folders', { path: dirPath ?? '' });
+      if (!res.success) throw new Error(res.error ?? '无法浏览目录');
+      return res.data!;
     },
     selectClaudeRootFolder: async (): Promise<ClaudeRootFolderSelection | null> => {
       console.warn('[HttpAPIClient] selectClaudeRootFolder is not available in browser mode');
@@ -944,9 +1182,10 @@ export class HttpAPIClient implements ElectronAPI {
       teamName: string,
       request: SendMessageRequest
     ): Promise<SendMessageResult> =>
-      this.post<SendMessageResult>(
+      this.postLong<SendMessageResult>(
         `/api/teams/${encodeURIComponent(teamName)}/send-message`,
-        request
+        request,
+        30_000
       ),
     getMessagesPage: async (
       teamName: string,
@@ -1033,6 +1272,11 @@ export class HttpAPIClient implements ElectronAPI {
       ),
     processSend: async (teamName: string, message: string): Promise<void> => {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/process-send`, { message });
+    },
+    setCollaboration: async (teamName: string, collaboration: boolean): Promise<void> => {
+      await this.patch(`/api/teams/${encodeURIComponent(teamName)}/collaboration`, {
+        collaboration,
+      });
     },
     processAlive: async (teamName: string): Promise<boolean> => {
       try {
@@ -1220,8 +1464,8 @@ export class HttpAPIClient implements ElectronAPI {
       );
     },
     softDeleteTask: async (teamName: string, taskId: string): Promise<void> => {
-      await this.del(
-        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}`
+      await this.post(
+        `/api/teams/${encodeURIComponent(teamName)}/tasks/${encodeURIComponent(taskId)}/soft-delete`
       );
     },
     restoreTask: async (teamName: string, taskId: string): Promise<void> => {
@@ -1296,6 +1540,25 @@ export class HttpAPIClient implements ElectronAPI {
     onProjectBranchChange: (): (() => void) => {
       return () => {};
     },
+    getTeamSessions: async (teamName: string): Promise<CcSession[]> =>
+      this.get<CcSession[]>(`/api/teams/${encodeURIComponent(teamName)}/sessions`),
+    getSessionDetail: async (
+      teamName: string,
+      sessionId: string,
+      historyLimit: number = 50
+    ): Promise<CcSessionDetail> => {
+      const params = new URLSearchParams();
+      if (historyLimit) params.set('history_limit', String(historyLimit));
+      const qs = params.toString();
+      const suffix = qs ? `?${qs}` : '';
+      return this.get<CcSessionDetail>(
+        `/api/teams/${encodeURIComponent(teamName)}/sessions/${encodeURIComponent(sessionId)}${suffix}`
+      );
+    },
+    cancelSession: async (teamName: string, sessionId: string): Promise<void> =>
+      await this.delete(
+        `/api/teams/${encodeURIComponent(teamName)}/sessions/${encodeURIComponent(sessionId)}`
+      ),
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       return this.addEventListener('team-change', (data: unknown) =>
         callback(null, data as TeamChangeEvent)
@@ -1888,6 +2151,15 @@ export class HttpAPIClient implements ElectronAPI {
       const params = new URLSearchParams({ root: projectPath });
       return this.get(`/api/editor/listFiles?${params}`);
     },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Workspace (file system browsing)
+  // ---------------------------------------------------------------------------
+
+  workspace = {
+    list: async (dirPath: string): Promise<WorkspaceListResponse> =>
+      this.post('/api/workspace/list', { dirPath }),
   };
 
   // ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ export const PendingRepliesBlock = ({
 }: PendingRepliesBlockProps): React.JSX.Element | null => {
   const { isLight } = useTheme();
   const pendingApprovals = useStore(useShallow((s) => s.pendingApprovals));
+  const teamByName = useStore(useShallow((s) => s.teamByName));
   const colorMap = buildMemberColorMap(members);
   const avatarMap = buildMemberAvatarMap(members);
   const memberPending = Object.entries(pendingRepliesByMember)
@@ -177,7 +178,8 @@ export const PendingRepliesBlock = ({
         }
 
         if (entry.kind === 'team') {
-          const colors = nameColorSet(entry.teamName, isLight);
+          const teamDisplayName = teamByName[entry.teamName]?.displayName || entry.teamName;
+          const colors = nameColorSet(teamDisplayName, isLight);
           return (
             <article
               key={`pending-reply:team:${entry.teamName}:${entry.sentAtMs}`}
@@ -205,7 +207,7 @@ export const PendingRepliesBlock = ({
                   }}
                   title={entry.teamName}
                 >
-                  {entry.teamName}
+                  {teamDisplayName}
                 </span>
                 <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                   external team

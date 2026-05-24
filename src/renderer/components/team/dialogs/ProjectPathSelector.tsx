@@ -1,12 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import { Combobox } from '@renderer/components/ui/combobox';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { cn } from '@renderer/lib/utils';
-import { Check, FolderOpen } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Folder, FolderOpen, Loader2 } from 'lucide-react';
 
 import { buildProjectPathOptions } from './projectPathOptions';
 
@@ -155,39 +162,11 @@ export const ProjectPathSelector = ({
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <FolderOpen size={16} className="shrink-0 text-[var(--color-text-muted)]" />
-                  <Input
-                    className="h-8 flex-1 text-xs"
-                    value={customCwd}
-                    aria-label="自定义工作目录"
-                    onChange={(event) => onCustomCwdChange(event.target.value)}
-                    placeholder="/absolute/path/to/project"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          const paths = await api.config.selectFolders();
-                          if (paths.length > 0) {
-                            onCustomCwdChange(paths[0]);
-                          }
-                        } catch {
-                          // IPC error - dialog may have been cancelled or failed
-                        }
-                      })();
-                    }}
-                  >
-                    浏览
-                  </Button>
-                </div>
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  如果目录不存在，将自动创建。
-                </p>
-              </div>
+              <FolderBrowser
+                value={customCwd}
+                onChange={onCustomCwdChange}
+                fieldError={fieldError}
+              />
             )}
           </div>
         </div>
@@ -197,6 +176,159 @@ export const ProjectPathSelector = ({
           {fieldError}
         </p>
       ) : null}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// FolderBrowser — inline directory browser using server browseFolders endpoint
+// ---------------------------------------------------------------------------
+
+interface FolderBrowserProps {
+  value: string;
+  onChange: (path: string) => void;
+  fieldError?: string | null;
+}
+
+const FolderBrowser = ({ value, onChange, fieldError }: FolderBrowserProps): React.JSX.Element => {
+  const [open, setOpen] = useState(false);
+  const [currentPath, setCurrentPath] = useState(value || '');
+  const [dirs, setDirs] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const browse = async (dirPath: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.config.browseFolders(dirPath || undefined);
+      setCurrentPath(result.path);
+      setDirs(result.dirs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法访问目录');
+      setDirs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpen = () => {
+    setOpen(true);
+    void browse(value || '');
+  };
+
+  const handleSelect = (dir: string) => {
+    onChange(dir);
+    setOpen(false);
+  };
+
+  const handleConfirm = () => {
+    if (currentPath) {
+      onChange(currentPath);
+    }
+    setOpen(false);
+  };
+
+  const handleNavigateUp = () => {
+    if (currentPath) {
+      const parent = currentPath.split('/').slice(0, -1).join('/') || '/';
+      void browse(parent);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <FolderOpen size={16} className="shrink-0 text-[var(--color-text-muted)]" />
+        <Input
+          className="h-8 flex-1 text-xs"
+          value={value}
+          aria-label="自定义工作目录"
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="/absolute/path/to/project"
+        />
+        <Button variant="outline" size="sm" onClick={handleOpen}>
+          浏览
+        </Button>
+      </div>
+      <p className="text-[11px] text-[var(--color-text-muted)]">如果目录不存在，将自动创建。</p>
+      {fieldError && (
+        <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
+          {fieldError}
+        </p>
+      )}
+
+      <Dialog
+        open={open}
+        onOpenChange={(o: boolean) => {
+          if (!o) setOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>选择目录</DialogTitle>
+          </DialogHeader>
+
+          {/* Path breadcrumb */}
+          <div className="flex items-center gap-1 truncate text-xs text-[var(--color-text-muted)]">
+            <button
+              type="button"
+              className="shrink-0 hover:text-[var(--color-text)]"
+              onClick={handleNavigateUp}
+              disabled={!currentPath || currentPath === '/'}
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="truncate font-mono">{currentPath || '/'}</span>
+          </div>
+
+          {/* Directory list */}
+          <div className="max-h-64 overflow-auto rounded-md border border-[var(--color-border)]">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-6 text-xs text-[var(--color-text-muted)]">
+                <Loader2 className="size-4 animate-spin" />
+                加载中…
+              </div>
+            )}
+            {error && <div className="px-3 py-4 text-xs text-red-400">{error}</div>}
+            {!loading && !error && dirs.length === 0 && (
+              <div className="px-3 py-4 text-xs text-[var(--color-text-muted)]">
+                此目录下没有子目录。可手动输入路径。
+              </div>
+            )}
+            {!loading && !error && dirs.length > 0 && (
+              <ul className="divide-y divide-[var(--color-border)]">
+                {dirs.map((dir) => (
+                  <li key={dir}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-raised)]"
+                      onClick={() => void browse(dir)}
+                      onDoubleClick={() => handleSelect(dir)}
+                    >
+                      <Folder size={14} className="shrink-0 text-[var(--color-text-muted)]" />
+                      <span className="truncate">{dir}</span>
+                      <ChevronRight
+                        size={14}
+                        className="ml-auto shrink-0 text-[var(--color-text-muted)]"
+                      />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleConfirm} disabled={!currentPath}>
+              选择
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

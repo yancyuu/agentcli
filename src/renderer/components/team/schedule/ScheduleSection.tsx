@@ -9,17 +9,15 @@ import {
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
-  Pause,
   Pencil,
   Play,
   Plus,
+  Square,
   Trash2,
-  Zap,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { LaunchTeamDialog } from '../dialogs/LaunchTeamDialog';
-
+import { CcCronScheduleDialog } from './CcCronScheduleDialog';
 import { ScheduleEmptyState } from './ScheduleEmptyState';
 import { ScheduleRunLogDialog } from './ScheduleRunLogDialog';
 import { ScheduleRunRow } from './ScheduleRunRow';
@@ -45,7 +43,6 @@ interface ScheduleRowProps {
   onDelete: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
-  onTriggerNow: (id: string) => Promise<ScheduleRun>;
 }
 
 const ScheduleRow = ({
@@ -54,7 +51,6 @@ const ScheduleRow = ({
   onDelete,
   onPause,
   onResume,
-  onTriggerNow,
 }: ScheduleRowProps): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [selectedRun, setSelectedRun] = useState<ScheduleRun | null>(null);
@@ -69,15 +65,6 @@ const ScheduleRow = ({
       void fetchRunHistory(schedule.id);
     }
   }, [expanded, runs.length, runsLoading, fetchRunHistory, schedule.id]);
-
-  const handleTriggerNow = useCallback(() => {
-    void (async () => {
-      const run = await onTriggerNow(schedule.id);
-      setExpanded(true);
-      setSelectedRun(run);
-      void fetchRunHistory(schedule.id);
-    })();
-  }, [fetchRunHistory, onTriggerNow, schedule.id]);
 
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] font-sans">
@@ -118,21 +105,6 @@ const ScheduleRow = ({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-7 p-0"
-                onClick={handleTriggerNow}
-                disabled={schedule.status !== 'active'}
-              >
-                <Zap className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">立即运行</TooltipContent>
-          </Tooltip>
-
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="sm" className="size-7 p-0">
@@ -154,8 +126,8 @@ const ScheduleRow = ({
                   className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-raised)]"
                   onClick={() => onPause(schedule.id)}
                 >
-                  <Pause className="mr-2 size-3.5" />
-                  暂停
+                  <Square className="mr-2 size-3.5" />
+                  停止
                 </button>
               ) : (
                 <button
@@ -164,7 +136,7 @@ const ScheduleRow = ({
                   onClick={() => onResume(schedule.id)}
                 >
                   <Play className="mr-2 size-3.5" />
-                  恢复
+                  启用
                 </button>
               )}
               <button
@@ -217,17 +189,15 @@ const ScheduleRow = ({
 // =============================================================================
 
 export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.Element => {
-  const { schedules, pauseSchedule, resumeSchedule, deleteSchedule, triggerNow, fetchSchedules } =
-    useStore(
-      useShallow((s) => ({
-        schedules: s.schedules.filter((sch) => sch.teamName === teamName),
-        pauseSchedule: s.pauseSchedule,
-        resumeSchedule: s.resumeSchedule,
-        deleteSchedule: s.deleteSchedule,
-        triggerNow: s.triggerNow,
-        fetchSchedules: s.fetchSchedules,
-      }))
-    );
+  const { schedules, pauseSchedule, resumeSchedule, deleteSchedule, fetchSchedules } = useStore(
+    useShallow((s) => ({
+      schedules: s.schedules.filter((sch) => sch.teamName === teamName),
+      pauseSchedule: s.pauseSchedule,
+      resumeSchedule: s.resumeSchedule,
+      deleteSchedule: s.deleteSchedule,
+      fetchSchedules: s.fetchSchedules,
+    }))
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
@@ -263,14 +233,6 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
     [deleteSchedule]
   );
 
-  const handleTriggerNow = useCallback(
-    async (id: string) => {
-      const run = await triggerNow(id);
-      return run;
-    },
-    [triggerNow]
-  );
-
   return (
     <div className="space-y-2 p-3">
       {/* Header with create button */}
@@ -302,15 +264,12 @@ export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.E
               onDelete={(id) => void handleDelete(id)}
               onPause={(id) => void pauseSchedule(id)}
               onResume={(id) => void resumeSchedule(id)}
-              onTriggerNow={handleTriggerNow}
             />
           ))}
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
-      <LaunchTeamDialog
-        mode="schedule"
+      <CcCronScheduleDialog
         open={dialogOpen}
         teamName={teamName}
         schedule={editingSchedule}

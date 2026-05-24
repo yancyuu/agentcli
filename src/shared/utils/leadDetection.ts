@@ -16,6 +16,7 @@ const LEAD_AGENT_TYPES = new Set([
   LEGACY_LEAD_MEMBER_NAME,
   'orchestrator',
 ]);
+const LEAD_MEMBER_ROLES = new Set(['lead']);
 
 function normalizeLeadIdentity(value: string | undefined | null): string {
   return value?.trim().toLowerCase() ?? '';
@@ -42,10 +43,23 @@ export function isLeadAgentType(agentType: string | undefined | null): boolean {
 }
 
 /**
+ * Returns true if the role string identifies a team lead.
+ */
+export function isLeadMemberRole(role: string | undefined | null): boolean {
+  return LEAD_MEMBER_ROLES.has(normalizeLeadIdentity(role));
+}
+
+/**
  * Returns true if the member is a team lead, checking both agentType
  * and the canonical internal lead name as a fallback.
  */
-export function isLeadMember(member: { agentType?: unknown; name?: unknown }): boolean {
+export function isLeadMember(member: {
+  agentType?: unknown;
+  name?: unknown;
+  role?: unknown;
+}): boolean {
+  const role = typeof member.role === 'string' ? member.role : null;
+  if (isLeadMemberRole(role)) return true;
   const agentType = typeof member.agentType === 'string' ? member.agentType : null;
   if (isLeadAgentType(agentType)) return true;
   const name = typeof member.name === 'string' ? member.name : null;

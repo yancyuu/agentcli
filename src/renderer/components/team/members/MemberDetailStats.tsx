@@ -5,8 +5,6 @@ import type { MemberDetailTab } from './memberDetailTypes';
 interface MemberDetailStatsProps {
   totalTasks: number;
   inProgressTasks: number;
-  completedTasks: number;
-  activityCount: number;
   totalTokens: number | null;
   statsLoading?: boolean;
   statsComputedAt?: string;
@@ -50,8 +48,6 @@ const StatBlock = ({
 export const MemberDetailStats = ({
   totalTasks,
   inProgressTasks,
-  completedTasks,
-  activityCount,
   totalTokens,
   statsLoading,
   statsComputedAt,
@@ -66,22 +62,12 @@ export const MemberDetailStats = ({
     !statsLoading && statsComputedAt ? `updated ${formatRelativeTime(statsComputedAt)}` : undefined;
 
   return (
-    <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
+    <div className="grid min-w-0 flex-1 grid-cols-2 gap-1.5">
       <StatBlock
         label="Tasks"
         value={totalTasks}
-        sub={inProgressTasks > 0 ? `in progress: ${inProgressTasks}` : undefined}
+        sub={inProgressTasks > 0 ? `进行中: ${inProgressTasks}` : undefined}
         onClick={onTabChange ? () => onTabChange('tasks') : undefined}
-      />
-      <StatBlock
-        label="Completed"
-        value={completedTasks}
-        onClick={onTabChange ? () => onTabChange('tasks') : undefined}
-      />
-      <StatBlock
-        label="Activity"
-        value={activityCount}
-        onClick={onTabChange ? () => onTabChange('activity') : undefined}
       />
       <StatBlock
         label="Tokens"

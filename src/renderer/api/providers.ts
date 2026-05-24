@@ -15,10 +15,8 @@ function getBaseUrl(): string {
   const params = new URLSearchParams(window.location.search);
   const explicitPort = params.get('port');
   if (explicitPort) return `http://127.0.0.1:${parseInt(explicitPort, 10)}`;
-  const backendPort = 3456;
+  const backendPort = 5680;
   if (window.location.port && window.location.port !== String(backendPort)) {
-    // Keep provider API aligned with main HttpAPIClient behavior in dev mode.
-    // Some hosts (0.0.0.0/LAN/IPv6) may not map to backend loopback binding.
     return `http://127.0.0.1:${backendPort}`;
   }
   return window.location.origin;

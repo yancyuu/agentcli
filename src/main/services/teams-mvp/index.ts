@@ -1,8 +1,9 @@
 /**
- * Hermit team workspace + provisioning services.
+ * Hermit team workspace + provisioning services (v2).
  *
- * - TeamWorkspaceService: 托管目录(team.json / mappings.json / messages/group.jsonl / tasks/board.json)
- * - TeamProvisioningService: 把团队操作翻译成 cc-connect 调用(group chat 共享 session_key)
+ * 设计：一个 Team = 一个 cc-connect project，无 Member 子层级。
+ * - TeamWorkspaceService: 本地目录管理（team.json / messages / tasks/board.json）
+ * - TeamProvisioningService: 组合 cc-connect，含 Task Dispatcher
  */
 
 export {
@@ -10,15 +11,11 @@ export {
   toSlug,
   teamsRoot,
   teamRoot,
-  memberWorkDir,
   groupSessionKey,
 } from './TeamWorkspaceService';
 
 export type {
-  TeamMember,
-  TeamMemberInput,
   TeamManifest,
-  TeamMode,
   CreateTeamInput,
   GroupMessage,
   AppendGroupMessageInput,
@@ -27,4 +24,3 @@ export type {
 } from './TeamWorkspaceService';
 
 export { TeamProvisioningService } from './TeamProvisioningService';
-export type { GroupSendResult } from './TeamProvisioningService';

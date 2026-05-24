@@ -47,6 +47,7 @@ import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner, normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
+import { getCronDescription } from '@renderer/utils/scheduleFormatters';
 import {
   buildTaskChangeRequestOptions,
   type TaskChangeRequestOptions,
@@ -58,20 +59,13 @@ import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   AlertTriangle,
-  CheckCircle2,
-  Clock,
   Columns3,
   FolderOpen,
   GitBranch,
   History,
-  MessageCircle,
   Pencil,
   Play,
-  PlugZap,
   Plus,
-  Radio,
-  Rocket,
-  Square,
   Terminal,
   Trash2,
   Users,
@@ -101,7 +95,6 @@ const ProjectEditorOverlay = lazy(() =>
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
-import { ScheduleSection } from './schedule/ScheduleSection';
 import {
   getTeamPendingRepliesState,
   setTeamPendingRepliesState,
@@ -114,7 +107,6 @@ import {
   isLeadSessionMissing,
   shouldSuppressMissingLeadSessionFetch,
 } from './teamSessionFetchGuards';
-import { TeamSessionsSection } from './TeamSessionsSection';
 
 import type { KanbanFilterState } from './kanban/KanbanFilterPopover';
 import type { KanbanSortState } from './kanban/KanbanSortPopover';
@@ -132,6 +124,8 @@ import type {
   TeamFastMode,
   TeamLaunchRequest,
   TeamProviderId,
+  Schedule,
+  ScheduleRunStatus,
   TeamTaskWithKanban,
   TeamViewSnapshot,
 } from '@shared/types';
@@ -153,6 +147,21 @@ interface CreateTaskDialogState {
 }
 
 const TEAM_PENDING_REPLY_REFRESH_DELAY_MS = 10_000;
+const SCHEDULE_TASK_ID_PREFIX = 'schedule:';
+const SCHEDULE_IN_PROGRESS_STATUSES = new Set<ScheduleRunStatus>([
+  'pending',
+  'warming_up',
+  'warm',
+  'running',
+]);
+
+function isScheduleBoardTaskId(taskId: string): boolean {
+  return taskId.startsWith(SCHEDULE_TASK_ID_PREFIX);
+}
+
+function getScheduleIdFromBoardTaskId(taskId: string): string | null {
+  return isScheduleBoardTaskId(taskId) ? taskId.slice(SCHEDULE_TASK_ID_PREFIX.length) : null;
+}
 
 function areResolvedMembersEqual(
   prev: readonly ResolvedTeamMember[],
@@ -260,164 +269,6 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
         启动
       </Button>
     </div>
-  );
-});
-
-interface CoworkWorkspaceConsoleProps {
-  data: TeamViewSnapshot;
-  activeMembers: readonly ResolvedTeamMember[];
-  isTeamProvisioning: boolean;
-  stoppingTeam: boolean;
-  onLaunch: () => void;
-  onStop: () => void;
-  onCreateTask: () => void;
-}
-
-function CoworkMetricCard({
-  icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-  hint: string;
-}): React.JSX.Element {
-  return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-sm">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--color-text-muted)]">
-        <span className="rounded-lg bg-[var(--color-surface-raised)] p-1 text-[var(--color-text-secondary)]">
-          {icon}
-        </span>
-        {label}
-      </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--color-text)]">
-        {value}
-      </div>
-      <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{hint}</p>
-    </div>
-  );
-}
-
-function CoworkStatusPill({
-  children,
-  tone = 'neutral',
-}: {
-  children: React.ReactNode;
-  tone?: 'neutral' | 'good' | 'warn' | 'info';
-}): React.JSX.Element {
-  const toneClass =
-    tone === 'good'
-      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-500'
-      : tone === 'warn'
-        ? 'border-amber-500/25 bg-amber-500/10 text-amber-500'
-        : tone === 'info'
-          ? 'border-sky-500/25 bg-sky-500/10 text-sky-500'
-          : 'border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text-secondary)]';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px]',
-        toneClass
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-const CoworkWorkspaceConsole = memo(function CoworkWorkspaceConsole({
-  data,
-  activeMembers,
-  isTeamProvisioning,
-  stoppingTeam,
-  onLaunch,
-  onStop,
-  onCreateTask,
-}: CoworkWorkspaceConsoleProps): React.JSX.Element {
-  const activeTeammates = activeMembers.filter((member) => !isLeadMember(member));
-  const completedTasks = data.tasks.filter(
-    (task: TeamTaskWithKanban) => task.status === 'completed'
-  ).length;
-  const activeTasks = data.tasks.filter(
-    (task: TeamTaskWithKanban) => task.status === 'in_progress'
-  ).length;
-  const reviewTasks = data.tasks.filter(
-    (task: TeamTaskWithKanban) => data.kanbanState.tasks[task.id]?.column === 'review'
-  ).length;
-  return (
-    <section className="mb-4 overflow-hidden rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
-      <div className="relative overflow-hidden border-b border-[var(--color-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent)] p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <CoworkStatusPill
-                tone={data.isAlive ? 'good' : isTeamProvisioning ? 'warn' : 'neutral'}
-              >
-                <Radio size={12} />
-                {data.isAlive ? '团队运行中' : isTeamProvisioning ? '启动中' : '待启动'}
-              </CoworkStatusPill>
-              <CoworkStatusPill tone="info">
-                <PlugZap size={12} />
-                目录即记忆
-              </CoworkStatusPill>
-            </div>
-            <h3 className="text-xl font-semibold tracking-tight text-[var(--color-text)]">
-              任务看板工作台
-            </h3>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">
-              保持任务看板为核心：不同团队只由工作目录区分，负责人会按任务动态创建并调度子 agent。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {!data.isAlive && !isTeamProvisioning ? (
-              <Button size="sm" className="h-9 rounded-full px-4 text-xs" onClick={onLaunch}>
-                <Rocket size={13} className="mr-1" />
-                启动团队
-              </Button>
-            ) : null}
-            {data.isAlive ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-9 rounded-full px-4 text-xs text-red-400"
-                onClick={onStop}
-                disabled={stoppingTeam}
-              >
-                <Square size={13} className="mr-1" />
-                停止
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-9 rounded-full px-4 text-xs"
-              onClick={onCreateTask}
-            >
-              <Plus size={13} className="mr-1" />
-              新任务
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-3 p-4 lg:grid-cols-1">
-        <CoworkMetricCard
-          icon={<CheckCircle2 size={14} />}
-          label="任务看板"
-          value={data.tasks.length}
-          hint={`${activeTasks} 进行中 · ${reviewTasks} 待审 · ${completedTasks} 已完成`}
-        />
-      </div>
-      <div className="px-4 pb-4">
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-xs text-[var(--color-text-muted)]">
-          运行策略：不预置默认成员，负责人在执行任务时动态创建子
-          agent；团队差异只由工作目录区分，文件即长期记忆。 工作空间入口已放到任务侧边栏。当前已识别{' '}
-          {activeTeammates.length} 名动态成员。
-        </div>
-      </div>
-    </section>
   );
 });
 
@@ -1232,7 +1083,6 @@ export const TeamDetailView = ({
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [stoppingTeam, setStoppingTeam] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [sendDialogDefaultText, setSendDialogDefaultText] = useState<string | undefined>(undefined);
@@ -1286,7 +1136,6 @@ export const TeamDetailView = ({
     createTeamTask,
     startTaskByUser,
     deleteTeam,
-    openTeamTab,
     openTeamsTab,
     closeTab,
     sendingMessage,
@@ -1318,6 +1167,14 @@ export const TeamDetailView = ({
     pendingReviewRequest,
     setPendingReviewRequest,
     teams,
+    schedules,
+    scheduleRuns,
+    scheduleRunsLoading,
+    fetchSchedules,
+    fetchRunHistory,
+    triggerScheduleNow,
+    removeSchedule,
+    fetchTeams,
   } = useStore(
     useShallow((s) => ({
       projects: s.projects,
@@ -1333,7 +1190,6 @@ export const TeamDetailView = ({
       createTeamTask: s.createTeamTask,
       startTaskByUser: s.startTaskByUser,
       deleteTeam: s.deleteTeam,
-      openTeamTab: s.openTeamTab,
       openTeamsTab: s.openTeamsTab,
       closeTab: s.closeTab,
       sendingMessage: s.sendingMessage,
@@ -1369,6 +1225,14 @@ export const TeamDetailView = ({
       pendingReviewRequest: s.pendingReviewRequest,
       setPendingReviewRequest: s.setPendingReviewRequest,
       teams: s.teams,
+      schedules: s.schedules,
+      scheduleRuns: s.scheduleRuns,
+      scheduleRunsLoading: s.scheduleRunsLoading,
+      fetchSchedules: s.fetchSchedules,
+      fetchRunHistory: s.fetchRunHistory,
+      triggerScheduleNow: s.triggerNow,
+      removeSchedule: s.deleteSchedule,
+      fetchTeams: s.fetchTeams,
     }))
   );
 
@@ -1402,34 +1266,6 @@ export const TeamDetailView = ({
   }, [isTeamProvisioning]);
 
   const [kanbanSearch, setKanbanSearch] = useState('');
-  const [expandedWorkspaceTeam, setExpandedWorkspaceTeam] = useState<string | null>(teamName);
-
-  const workspaceTeams = useMemo(() => {
-    const normalizedCurrentTeam = teamName.trim().toLowerCase();
-    return teams
-      .filter((team) => typeof team.projectPath === 'string' && team.projectPath.trim().length > 0)
-      .map((team) => {
-        const projectPath = team.projectPath!.trim();
-        const folderName =
-          projectPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? projectPath;
-        return {
-          teamName: team.teamName,
-          displayName: team.displayName?.trim() || team.teamName,
-          projectPath,
-          folderName,
-          isCurrent: team.teamName.trim().toLowerCase() === normalizedCurrentTeam,
-        };
-      })
-      .sort((left, right) => {
-        if (left.isCurrent && !right.isCurrent) return -1;
-        if (!left.isCurrent && right.isCurrent) return 1;
-        return left.displayName.localeCompare(right.displayName, 'zh-CN');
-      });
-  }, [teamName, teams]);
-
-  useEffect(() => {
-    setExpandedWorkspaceTeam(teamName);
-  }, [teamName]);
 
   // Open editor overlay when a file reveal is requested (e.g. from chip click)
   const pendingRevealFile = useStore((s) => s.editorPendingRevealFile);
@@ -1446,6 +1282,56 @@ export const TeamDetailView = ({
     void selectTeam(teamName);
     void fetchDeletedTasks(teamName);
   }, [teamName, selectTeam, fetchDeletedTasks]);
+
+  useEffect(() => {
+    void fetchSchedules();
+  }, [fetchSchedules]);
+
+  const teamSchedules = useMemo(
+    () => schedules.filter((schedule) => schedule.teamName === teamName),
+    [schedules, teamName]
+  );
+
+  useEffect(() => {
+    for (const schedule of teamSchedules) {
+      if (scheduleRuns[schedule.id] || scheduleRunsLoading[schedule.id]) {
+        continue;
+      }
+      void fetchRunHistory(schedule.id);
+    }
+  }, [fetchRunHistory, scheduleRuns, scheduleRunsLoading, teamSchedules]);
+
+  const scheduleKanbanTasks = useMemo<TeamTaskWithKanban[]>(() => {
+    return teamSchedules.map((schedule: Schedule) => {
+      const latestRun = (scheduleRuns[schedule.id] ?? [])[0];
+      const isInProgress = latestRun ? SCHEDULE_IN_PROGRESS_STATUSES.has(latestRun.status) : false;
+      const status: TeamTaskWithKanban['status'] = isInProgress ? 'in_progress' : 'pending';
+      const title = schedule.label?.trim() || getCronDescription(schedule.cronExpression);
+      const latestRunText = latestRun
+        ? `最近运行：${latestRun.status}${latestRun.startedAt ? ` (${new Date(latestRun.startedAt).toLocaleString('zh-CN')})` : ''}`
+        : null;
+      const nextRunText = schedule.nextRunAt
+        ? `下次执行：${new Date(schedule.nextRunAt).toLocaleString('zh-CN')}`
+        : null;
+
+      return {
+        id: `${SCHEDULE_TASK_ID_PREFIX}${schedule.id}`,
+        displayId: `SCH-${schedule.id.slice(0, 6)}`,
+        subject: `[定时] ${title}`,
+        description: [
+          `Cron: ${schedule.cronExpression}`,
+          `时区: ${schedule.timezone}`,
+          nextRunText,
+          latestRunText,
+        ]
+          .filter((item): item is string => Boolean(item))
+          .join('\n'),
+        status,
+        createdAt: schedule.createdAt,
+        updatedAt: latestRun?.startedAt ?? schedule.updatedAt,
+      };
+    });
+  }, [scheduleRuns, teamSchedules]);
 
   // Recovery: after HMR, all mounted TeamDetailView effects re-run simultaneously.
   // With CSS display-toggle (all tabs stay mounted), the last selectTeam() call wins
@@ -1667,8 +1553,6 @@ export const TeamDetailView = ({
   }, [data?.config.leadSessionId, data?.config.sessionHistory]);
 
   const teamSessions = useMemo(() => {
-    // If no session IDs known (backward compat), show all sessions
-    if (teamSessionIds.size === 0) return sessions;
     return sessions.filter((s) => teamSessionIds.has(s.id));
   }, [sessions, teamSessionIds]);
 
@@ -1723,11 +1607,16 @@ export const TeamDetailView = ({
 
   const activeMembers = useStableActiveMembers(membersWithLiveBranches);
 
+  const mergedKanbanTasks = useMemo(
+    () => [...filteredTasks, ...scheduleKanbanTasks],
+    [filteredTasks, scheduleKanbanTasks]
+  );
+
   const kanbanDisplayTasks = useMemo(() => {
     const query = kanbanSearch.trim();
-    if (!query) return filteredTasks;
-    return filterKanbanTasks(filteredTasks, query);
-  }, [filteredTasks, kanbanSearch]);
+    if (!query) return mergedKanbanTasks;
+    return filterKanbanTasks(mergedKanbanTasks, query);
+  }, [mergedKanbanTasks, kanbanSearch]);
 
   const activeTeammateCount = useMemo(
     () => activeMembers.filter((m) => !isLeadMember(m)).length,
@@ -1790,8 +1679,9 @@ export const TeamDetailView = ({
   const handleLaunchDialogSubmit = useCallback(
     async (request: TeamLaunchRequest): Promise<void> => {
       await launchTeam(request);
+      await Promise.all([fetchTeams(), selectTeam(teamName)]);
     },
-    [launchTeam]
+    [fetchTeams, launchTeam, selectTeam, teamName]
   );
 
   const handleRelaunchDialogSubmit = useCallback(
@@ -1809,8 +1699,9 @@ export const TeamDetailView = ({
           api.teams.replaceMembers(nextTeamName, nextRequest),
         launchTeam,
       });
+      await Promise.all([fetchTeams(), selectTeam(teamName)]);
     },
-    [data?.isAlive, launchTeam, teamName]
+    [data?.isAlive, fetchTeams, launchTeam, selectTeam, teamName]
   );
 
   const handleRestartTeamFromEdit = useCallback(async (): Promise<void> => {
@@ -1822,7 +1713,8 @@ export const TeamDetailView = ({
       teamName,
       cwd: data.config.projectPath,
     });
-  }, [data?.config.projectPath, launchTeam, teamName]);
+    await Promise.all([fetchTeams(), selectTeam(teamName)]);
+  }, [data?.config.projectPath, fetchTeams, launchTeam, selectTeam, teamName]);
 
   const handleSaveAndRestartFromEdit = useCallback(
     async (runtimeConfig: {
@@ -1937,25 +1829,6 @@ export const TeamDetailView = ({
     []
   );
 
-  const [stopError, setStopError] = useState<string | null>(null);
-
-  const handleStopTeam = useCallback(async (): Promise<void> => {
-    setStoppingTeam(true);
-    setStopError(null);
-    try {
-      await api.teams.stop(teamName);
-      // Backend sends 'disconnected' progress which triggers store refresh,
-      // but refresh here too as a safety net (e.g. if progress event is missed).
-      await refreshTeamData(teamName);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '停止团队失败';
-      console.error('Failed to stop team:', err);
-      setStopError(message);
-    } finally {
-      setStoppingTeam(false);
-    }
-  }, [teamName, refreshTeamData]);
-
   // Pick up pending review request from GlobalTaskDetailDialog
   useEffect(() => {
     if (!pendingReviewRequest) return;
@@ -1987,23 +1860,33 @@ export const TeamDetailView = ({
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       void (async () => {
+        const scheduleId = getScheduleIdFromBoardTaskId(taskId);
+        const isScheduleTask = scheduleId !== null;
+        const title = isScheduleTask ? '删除定时任务' : '删除任务';
+        const message = isScheduleTask
+          ? '将该定时任务从看板中删除（会同时删除计划）？'
+          : `将任务 #${deriveTaskDisplayId(taskId)} 移入废纸篓？`;
         const confirmed = await confirm({
-          title: '删除任务',
-          message: `将任务 #${deriveTaskDisplayId(taskId)} 移入废纸篓？`,
+          title,
+          message,
           confirmLabel: '删除',
           cancelLabel: '取消',
           variant: 'danger',
         });
         if (confirmed) {
           try {
-            await softDeleteTask(teamName, taskId);
+            if (scheduleId) {
+              await removeSchedule(scheduleId);
+            } else {
+              await softDeleteTask(teamName, taskId);
+            }
           } catch {
             // error via store
           }
         }
       })();
     },
-    [teamName, softDeleteTask]
+    [teamName, softDeleteTask, removeSchedule]
   );
 
   const handleViewChanges = useCallback(
@@ -2280,6 +2163,24 @@ export const TeamDetailView = ({
     const headerColorSet = data.config.color
       ? getTeamColorSet(data.config.color)
       : nameColorSet(data.config.name);
+    const rawTeamSettings = (data.settings ?? {}) as Record<string, unknown>;
+    const currentManagedSources =
+      data.config.managedSources ??
+      (typeof rawTeamSettings.admin_from === 'string' ? rawTeamSettings.admin_from : '*');
+    const currentDisabledCommands =
+      data.config.disabledCommands ??
+      (Array.isArray(rawTeamSettings.disabled_commands)
+        ? rawTeamSettings.disabled_commands.filter(
+            (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0
+          )
+        : []);
+    const currentPlatformAllowFrom =
+      data.config.platformAllowFrom ??
+      (typeof rawTeamSettings.platform_allow_from === 'object' &&
+      rawTeamSettings.platform_allow_from !== null &&
+      !Array.isArray(rawTeamSettings.platform_allow_from)
+        ? (rawTeamSettings.platform_allow_from as Record<string, string>)
+        : {});
 
     return (
       <>
@@ -2331,28 +2232,6 @@ export const TeamDetailView = ({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    {data.isAlive && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            disabled={stoppingTeam}
-                            onClick={() => void handleStopTeam()}
-                          >
-                            <Square size={12} className={stoppingTeam ? 'animate-pulse' : ''} />
-                            停止
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">停止团队</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {stopError && (
-                      <span className="max-w-48 truncate text-xs text-red-400" title={stopError}>
-                        {stopError}
-                      </span>
-                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -2464,16 +2343,6 @@ export const TeamDetailView = ({
                 <TeamProvisioningBanner teamName={teamName} />
               </div>
 
-              <CoworkWorkspaceConsole
-                data={data}
-                activeMembers={activeMembers}
-                isTeamProvisioning={isTeamProvisioning}
-                stoppingTeam={stoppingTeam}
-                onLaunch={() => openLaunchDialog('launch')}
-                onStop={() => void handleStopTeam()}
-                onCreateTask={() => openCreateTaskDialog()}
-              />
-
               {data.warnings?.some((warning) => warning.toLowerCase().includes('kanban')) ? (
                 <div className="mb-3 rounded-md border border-[var(--step-warning-border)] bg-[var(--step-warning-bg)] px-3 py-2 text-xs text-[var(--step-warning-text)]">
                   看板未完整加载，当前展示的是安全回退数据。
@@ -2511,15 +2380,6 @@ export const TeamDetailView = ({
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
-                sectionId="messages"
-                title="消息"
-                icon={<MessageCircle size={14} />}
-                defaultOpen
-              >
-                <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
-              </CollapsibleTeamSection>
-
-              <CollapsibleTeamSection
                 sectionId="kanban"
                 title="任务"
                 icon={<Columns3 size={14} />}
@@ -2541,288 +2401,194 @@ export const TeamDetailView = ({
                   </Button>
                 }
               >
-                <div className="grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
-                  <aside className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2.5">
-                    <div className="mb-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5">
-                      <div className="mb-2 px-0.5">
-                        <p className="text-sm font-semibold text-[var(--color-text)]">会话</p>
-                        <p className="text-[11px] text-[var(--color-text-muted)]">
-                          已移动到任务侧边栏
-                        </p>
-                      </div>
-                      <div className="max-h-[280px] overflow-y-auto pr-0.5">
-                        <TeamSessionsSection
-                          sessions={teamSessions}
-                          sessionsLoading={sessionsLoading}
-                          sessionsError={sessionsError}
-                          leadSessionId={data.config.leadSessionId}
-                          selectedSessionId={kanbanFilter.sessionId}
-                          onSelectSession={(id) =>
-                            setKanbanFilter((prev) => ({ ...prev, sessionId: id }))
-                          }
-                          projectPath={data.config.projectPath}
-                        />
-                      </div>
-                    </div>
-                    <div className="mb-2 px-1">
-                      <p className="text-sm font-semibold text-[var(--color-text)]">工作空间</p>
-                      <p className="text-[11px] text-[var(--color-text-muted)]">
-                        点开查看各个团队的文件夹
-                      </p>
-                    </div>
-                    {workspaceTeams.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-[var(--color-border)] px-2.5 py-3 text-[11px] text-[var(--color-text-muted)]">
-                        暂无可用团队目录。
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {workspaceTeams.map((workspaceTeam) => {
-                          const expanded = expandedWorkspaceTeam === workspaceTeam.teamName;
-                          return (
-                            <div
-                              key={workspaceTeam.teamName}
-                              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
-                            >
-                              <button
-                                type="button"
-                                className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-xs"
-                                onClick={() =>
-                                  setExpandedWorkspaceTeam((prev) =>
-                                    prev === workspaceTeam.teamName ? null : workspaceTeam.teamName
-                                  )
-                                }
-                              >
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                  <FolderOpen
-                                    size={12}
-                                    className="shrink-0 text-[var(--color-text-muted)]"
-                                  />
-                                  <span className="truncate font-medium text-[var(--color-text)]">
-                                    {workspaceTeam.displayName}
-                                  </span>
-                                  {workspaceTeam.isCurrent ? (
-                                    <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
-                                      当前
-                                    </span>
-                                  ) : null}
-                                </span>
-                                <span className="max-w-24 truncate text-[10px] text-[var(--color-text-muted)]">
-                                  {workspaceTeam.folderName}
-                                </span>
-                              </button>
-                              {expanded ? (
-                                <div className="space-y-2 border-t border-[var(--color-border)] px-2.5 py-2">
-                                  <p className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
-                                    {formatProjectPath(workspaceTeam.projectPath)}
-                                  </p>
-                                  <div className="flex items-center gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-6 px-2 text-[10px]"
-                                      onClick={() =>
-                                        openTeamTab(
-                                          workspaceTeam.teamName,
-                                          workspaceTeam.projectPath
-                                        )
-                                      }
-                                    >
-                                      进入团队
-                                    </Button>
-                                    {workspaceTeam.isCurrent ? (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 px-2 text-[10px]"
-                                        onClick={() => setEditorOpen(true)}
-                                      >
-                                        打开文件夹
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </aside>
-                  <div className="min-w-0">
-                    <KanbanBoard
-                      tasks={kanbanDisplayTasks}
-                      teamName={teamName}
-                      kanbanState={data.kanbanState}
-                      filter={kanbanFilter}
-                      sort={kanbanSort}
-                      sessions={teamSessions}
-                      leadSessionId={data.config.leadSessionId}
-                      members={activeMembers}
-                      onFilterChange={setKanbanFilter}
-                      onSortChange={setKanbanSort}
-                      toolbarLeft={
-                        <KanbanSearchInput
-                          value={kanbanSearch}
-                          onChange={setKanbanSearch}
-                          tasks={filteredTasks}
-                          members={activeMembers}
-                        />
-                      }
-                      onRequestReview={(taskId) => {
-                        void (async () => {
+                <div className="min-w-0">
+                  <KanbanBoard
+                    tasks={kanbanDisplayTasks}
+                    teamName={teamName}
+                    kanbanState={data.kanbanState}
+                    filter={kanbanFilter}
+                    sort={kanbanSort}
+                    sessions={teamSessions}
+                    leadSessionId={data.config.leadSessionId}
+                    members={activeMembers}
+                    onFilterChange={setKanbanFilter}
+                    onSortChange={setKanbanSort}
+                    toolbarLeft={
+                      <KanbanSearchInput
+                        value={kanbanSearch}
+                        onChange={setKanbanSearch}
+                        tasks={filteredTasks}
+                        members={activeMembers}
+                      />
+                    }
+                    onRequestReview={(taskId) => {
+                      void (async () => {
+                        try {
+                          await requestReview(teamName, taskId);
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onApprove={(taskId) => {
+                      void (async () => {
+                        try {
+                          await updateKanban(teamName, taskId, {
+                            op: 'set_column',
+                            column: 'approved',
+                          });
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onRequestChanges={(taskId) => {
+                      setRequestChangesTaskId(taskId);
+                    }}
+                    onMoveBackToDone={(taskId) => {
+                      void (async () => {
+                        try {
+                          await updateKanban(teamName, taskId, { op: 'remove' });
+                          await updateTaskStatus(teamName, taskId, 'completed');
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onStartTask={(taskId) => {
+                      void (async () => {
+                        const scheduleId = getScheduleIdFromBoardTaskId(taskId);
+                        if (scheduleId) {
                           try {
-                            await requestReview(teamName, taskId);
+                            await triggerScheduleNow(scheduleId);
+                            await fetchRunHistory(scheduleId);
                           } catch {
                             // error via store
                           }
-                        })();
-                      }}
-                      onApprove={(taskId) => {
-                        void (async () => {
-                          try {
-                            await updateKanban(teamName, taskId, {
-                              op: 'set_column',
-                              column: 'approved',
-                            });
-                          } catch {
-                            // error via store
-                          }
-                        })();
-                      }}
-                      onRequestChanges={(taskId) => {
-                        setRequestChangesTaskId(taskId);
-                      }}
-                      onMoveBackToDone={(taskId) => {
-                        void (async () => {
-                          try {
-                            await updateKanban(teamName, taskId, { op: 'remove' });
-                            await updateTaskStatus(teamName, taskId, 'completed');
-                          } catch {
-                            // error via store
-                          }
-                        })();
-                      }}
-                      onStartTask={(taskId) => {
-                        void (async () => {
-                          try {
-                            const result = await startTaskByUser(teamName, taskId);
-                            if (data?.isAlive) {
-                              const task = data.tasks.find((t) => t.id === taskId);
-                              try {
-                                if (result.notifiedOwner && task?.owner) {
-                                  await api.teams.processSend(
-                                    teamName,
-                                    `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
-                                  );
-                                } else if (!result.notifiedOwner) {
-                                  const desc = task?.description?.trim()
-                                    ? `\nDescription: ${task.description.trim()}`
-                                    : '';
-                                  await api.teams.processSend(
-                                    teamName,
-                                    `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
-                                  );
-                                }
-                              } catch {
-                                // best-effort
-                              }
-                            }
-                          } catch {
-                            // error via store
-                          }
-                        })();
-                      }}
-                      onCompleteTask={(taskId) => {
-                        void (async () => {
-                          try {
-                            await updateTaskStatus(teamName, taskId, 'completed');
-                          } catch {
-                            // error via store
-                          }
-                        })();
-                      }}
-                      onCancelTask={(taskId) => {
-                        void (async () => {
-                          try {
-                            const task = data?.tasks.find((t) => t.id === taskId);
-                            await updateTaskStatus(teamName, taskId, 'pending');
-
-                            // Notify assignee directly via inbox — they'll see it immediately
-                            if (task?.owner) {
-                              try {
-                                await api.teams.sendMessage(teamName, {
-                                  member: task.owner,
-                                  text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
-                                  summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
-                                });
-                              } catch {
-                                // best-effort
-                              }
-                            }
-
-                            // Also notify team lead so they can reassign/coordinate
-                            if (data?.isAlive) {
-                              try {
-                                const ownerSuffix = task?.owner
-                                  ? ` ${task.owner} has been notified to stop.`
+                          return;
+                        }
+                        try {
+                          const result = await startTaskByUser(teamName, taskId);
+                          if (data?.isAlive) {
+                            const task = data.tasks.find((t) => t.id === taskId);
+                            try {
+                              if (result.notifiedOwner && task?.owner) {
+                                await api.teams.processSend(
+                                  teamName,
+                                  `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
+                                );
+                              } else if (!result.notifiedOwner) {
+                                const desc = task?.description?.trim()
+                                  ? `\nDescription: ${task.description.trim()}`
                                   : '';
                                 await api.teams.processSend(
                                   teamName,
-                                  `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
+                                  `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
                                 );
-                              } catch {
-                                // best-effort
                               }
+                            } catch {
+                              // best-effort
                             }
-                          } catch {
-                            // error via store
                           }
-                        })();
-                      }}
-                      onColumnOrderChange={(columnId, orderedTaskIds) => {
-                        void (async () => {
-                          try {
-                            await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
-                          } catch {
-                            // error via store
-                          }
-                        })();
-                      }}
-                      onScrollToTask={(taskId) => {
-                        const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                        if (el) {
-                          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                          el.classList.remove('kanban-card-focus-pulse');
-                          void (el as HTMLElement).offsetWidth;
-                          el.classList.add('kanban-card-focus-pulse');
-                          el.addEventListener(
-                            'animationend',
-                            () => el.classList.remove('kanban-card-focus-pulse'),
-                            { once: true }
-                          );
+                        } catch {
+                          // error via store
                         }
-                      }}
-                      onTaskClick={(task) => setSelectedTask(task)}
-                      onViewChanges={handleViewChanges}
-                      onAddTask={(startImmediately) =>
-                        openCreateTaskDialog('', '', '', startImmediately)
+                      })();
+                    }}
+                    onCompleteTask={(taskId) => {
+                      void (async () => {
+                        if (isScheduleBoardTaskId(taskId)) {
+                          return;
+                        }
+                        try {
+                          await updateTaskStatus(teamName, taskId, 'completed');
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onCancelTask={(taskId) => {
+                      void (async () => {
+                        if (isScheduleBoardTaskId(taskId)) {
+                          return;
+                        }
+                        try {
+                          const task = data?.tasks.find((t) => t.id === taskId);
+                          await updateTaskStatus(teamName, taskId, 'pending');
+
+                          // Notify assignee directly via inbox — they'll see it immediately
+                          if (task?.owner) {
+                            try {
+                              await api.teams.sendMessage(teamName, {
+                                member: task.owner,
+                                text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
+                                summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
+                              });
+                            } catch {
+                              // best-effort
+                            }
+                          }
+
+                          // Also notify team lead so they can reassign/coordinate
+                          if (data?.isAlive) {
+                            try {
+                              const ownerSuffix = task?.owner
+                                ? ` ${task.owner} has been notified to stop.`
+                                : '';
+                              await api.teams.processSend(
+                                teamName,
+                                `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
+                              );
+                            } catch {
+                              // best-effort
+                            }
+                          }
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onColumnOrderChange={(columnId, orderedTaskIds) => {
+                      void (async () => {
+                        try {
+                          await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onScrollToTask={(taskId) => {
+                      const el = document.querySelector(`[data-task-id="${taskId}"]`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        el.classList.remove('kanban-card-focus-pulse');
+                        void (el as HTMLElement).offsetWidth;
+                        el.classList.add('kanban-card-focus-pulse');
+                        el.addEventListener(
+                          'animationend',
+                          () => el.classList.remove('kanban-card-focus-pulse'),
+                          { once: true }
+                        );
                       }
-                      onDeleteTask={handleDeleteTask}
-                      deletedTaskCount={deletedTasks.length}
-                      onOpenTrash={() => setTrashOpen(true)}
-                    />
-                  </div>
+                    }}
+                    onTaskClick={(task) => {
+                      if (isScheduleBoardTaskId(task.id)) {
+                        return;
+                      }
+                      setSelectedTask(task);
+                    }}
+                    onViewChanges={handleViewChanges}
+                    onAddTask={(startImmediately) =>
+                      openCreateTaskDialog('', '', '', startImmediately)
+                    }
+                    onDeleteTask={handleDeleteTask}
+                    deletedTaskCount={deletedTasks.length}
+                    onOpenTrash={() => setTrashOpen(true)}
+                  />
                 </div>
               </CollapsibleTeamSection>
 
-              <CollapsibleTeamSection
-                sectionId="schedules"
-                title="定时计划"
-                icon={<Clock size={14} />}
-                defaultOpen={false}
-              >
-                <ScheduleSection teamName={teamName} />
-              </CollapsibleTeamSection>
+              <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
 
               {(data.processes?.length ?? 0) > 0 && (
                 <CollapsibleTeamSection
@@ -2961,6 +2727,36 @@ export const TeamDetailView = ({
                 currentName={data.config.name}
                 currentDescription={data.config.description ?? ''}
                 currentColor={data.config.color ?? ''}
+                currentAgentType={data.config.agentType ?? data.harness ?? 'cursor'}
+                currentWorkDir={data.workDir ?? data.config.projectPath ?? ''}
+                currentPermissionMode={
+                  data.config.permissionMode ?? data.permissionMode ?? 'default'
+                }
+                currentLanguage={
+                  data.config.language ??
+                  (typeof rawTeamSettings.language === 'string' ? rawTeamSettings.language : 'zh')
+                }
+                currentShowContextIndicator={
+                  data.config.showContextIndicator ??
+                  (typeof rawTeamSettings.show_context_indicator === 'boolean'
+                    ? rawTeamSettings.show_context_indicator
+                    : true)
+                }
+                currentReplyFooter={
+                  data.config.replyFooter ??
+                  (typeof rawTeamSettings.reply_footer === 'boolean'
+                    ? rawTeamSettings.reply_footer
+                    : true)
+                }
+                currentInjectSender={
+                  data.config.injectSender ??
+                  (typeof rawTeamSettings.inject_sender === 'boolean'
+                    ? rawTeamSettings.inject_sender
+                    : false)
+                }
+                currentManagedSources={currentManagedSources}
+                currentDisabledCommands={currentDisabledCommands}
+                currentPlatformAllowFrom={currentPlatformAllowFrom}
                 currentMembers={membersWithLiveBranches.filter((m) => !isLeadMember(m))}
                 leadMember={membersWithLiveBranches.find((m) => isLeadMember(m)) ?? null}
                 resolvedMemberColorMap={resolvedMemberColorMap}
@@ -2969,7 +2765,11 @@ export const TeamDetailView = ({
                 projectPath={data.config.projectPath}
                 savedLaunchRequest={savedLaunchRequest}
                 onClose={() => setEditDialogOpen(false)}
-                onSaved={() => void selectTeam(teamName)}
+                onSaved={() => {
+                  void fetchTeams();
+                  void selectTeam(teamName);
+                }}
+                onDeleteTeam={handleDeleteTeam}
                 onRestartTeam={handleRestartTeamFromEdit}
                 onSaveAndRestart={handleSaveAndRestartFromEdit}
               />

@@ -25,8 +25,6 @@ export const KANBAN_COLUMNS: { id: KanbanColumnId; label: string; color: string 
   { id: 'todo', label: '待处理', color: 'rgb(59, 130, 246)' },
   { id: 'in_progress', label: '进行中', color: 'rgb(234, 179, 8)' },
   { id: 'done', label: '已完成', color: 'rgb(34, 197, 94)' },
-  { id: 'review', label: '评审中', color: 'rgb(139, 92, 246)' },
-  { id: 'approved', label: '已通过', color: 'rgb(22, 163, 74)' },
 ];
 
 interface KanbanFilterPopoverProps {

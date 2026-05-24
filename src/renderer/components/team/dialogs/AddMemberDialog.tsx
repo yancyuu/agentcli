@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import { useStore } from '@renderer/store';
 import { CANONICAL_LEAD_MEMBER_NAME, isLeadMemberName } from '@shared/utils/leadDetection';
 import { Loader2 } from 'lucide-react';
 
@@ -93,6 +94,7 @@ export const AddMemberDialog = ({
   );
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(open);
+  const teamDisplayName = useStore((s) => s.teamByName[teamName]?.displayName || teamName);
 
   // Combine existing names + names already in the draft list for duplicate validation
   const allNames = useMemo(() => {
@@ -184,7 +186,7 @@ export const AddMemberDialog = ({
       <DialogContent className={`${DIALOG_WIDTH} max-w-[90vw]`}>
         <DialogHeader>
           <DialogTitle>添加成员</DialogTitle>
-          <DialogDescription>向 {teamName} 添加新成员</DialogDescription>
+          <DialogDescription>向 {teamDisplayName} 添加新成员</DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[60vh] overflow-y-auto py-2">

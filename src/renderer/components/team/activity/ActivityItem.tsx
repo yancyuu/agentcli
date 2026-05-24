@@ -173,6 +173,7 @@ const CrossTeamTeamBadge = ({
   teamName: string;
   onClick?: (teamName: string) => void;
 }): React.JSX.Element => {
+  const displayName = useStore((s) => s.teamByName[teamName]?.displayName || teamName);
   if (onClick) {
     return (
       <button
@@ -190,7 +191,7 @@ const CrossTeamTeamBadge = ({
           onClick(teamName);
         }}
       >
-        {teamName}
+        {displayName}
       </button>
     );
   }
@@ -199,7 +200,35 @@ const CrossTeamTeamBadge = ({
       className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
       style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}
     >
-      {teamName}
+      {displayName}
+    </span>
+  );
+};
+
+const SessionSourceBadge = ({ message }: { message: InboxMessage }): React.JSX.Element | null => {
+  const session = message.session;
+  if (!session?.key && !session?.title && !session?.platform) {
+    return null;
+  }
+  const label =
+    session?.title ||
+    session?.chatName ||
+    session?.userName ||
+    session?.key ||
+    session?.platform ||
+    'Session';
+  const platform = session?.platform ? `${session.platform} · ` : '';
+  return (
+    <span
+      className="inline-flex max-w-[180px] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+      title={`${platform}${label}${session?.key ? ` (${session.key})` : ''}`}
+      style={{
+        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+        color: '#93c5fd',
+      }}
+    >
+      {platform}
+      {label}
     </span>
   );
 };
@@ -1110,7 +1139,7 @@ export const ActivityItem = memo(
       <article
         className="group overflow-hidden rounded-md"
         style={{
-          marginLeft: isSlashCommandResult ? 26 : isUserSent ? 15 : undefined,
+          marginLeft: isSlashCommandResult ? 26 : undefined,
           backgroundColor:
             rateLimited || isApiError
               ? 'var(--tool-result-error-bg)'
@@ -1189,6 +1218,7 @@ export const ActivityItem = memo(
                     <CrossTeamTeamBadge teamName={crossTeamOrigin.teamName} onClick={onTeamClick} />
                   ) : null}
                   {senderBadge}
+                  <SessionSourceBadge message={message} />
                   {messageTypeBadge}
 
                   {statusBadge}
@@ -1267,6 +1297,7 @@ export const ActivityItem = memo(
                   <CrossTeamTeamBadge teamName={crossTeamOrigin.teamName} onClick={onTeamClick} />
                 ) : null}
                 {senderBadge}
+                <SessionSourceBadge message={message} />
                 {!compactHeader && formattedRole && !isSlashCommandResult ? (
                   <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                     {formattedRole}
@@ -1348,6 +1379,7 @@ export const ActivityItem = memo(
                 <CrossTeamTeamBadge teamName={crossTeamOrigin.teamName} onClick={onTeamClick} />
               ) : null}
               {senderBadge}
+              <SessionSourceBadge message={message} />
               {!compactHeader && formattedRole && !isSlashCommandResult ? (
                 <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                   {formattedRole}

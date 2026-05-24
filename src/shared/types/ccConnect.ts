@@ -228,6 +228,33 @@ export interface CcModelEntry {
 }
 
 // =============================================================================
+// Cron Jobs
+// =============================================================================
+
+export interface CcCronJob {
+  id: string;
+  project: string;
+  session_key: string;
+  cron_expr: string;
+  prompt: string;
+  description?: string;
+  enabled: boolean;
+  timeout_mins?: number;
+  created_at: string;
+  last_run?: string;
+}
+
+export interface CcCreateCronJobRequest {
+  project: string;
+  session_key: string;
+  cron_expr: string;
+  prompt: string;
+  description?: string;
+  enabled?: boolean;
+  timeout_mins?: number;
+}
+
+// =============================================================================
 // Bridge WebSocket Protocol
 // =============================================================================
 

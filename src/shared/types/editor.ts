@@ -217,6 +217,26 @@ export interface ProjectAPI {
 }
 
 // =============================================================================
+// Workspace (file system browsing)
+// =============================================================================
+
+export interface WorkspaceFileEntry {
+  name: string;
+  isDirectory: boolean;
+  size: number;
+  ext: string;
+}
+
+export interface WorkspaceListResponse {
+  path: string;
+  files: WorkspaceFileEntry[];
+  hasParent: boolean;
+  error?: string;
+}
+
+// =============================================================================
+
+// =============================================================================
 // Binary Preview
 // =============================================================================
 

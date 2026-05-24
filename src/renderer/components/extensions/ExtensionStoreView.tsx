@@ -43,7 +43,6 @@ import {
   AlertTriangle,
   BookOpen,
   Info,
-  Key,
   Loader2,
   Plus,
   Puzzle,
@@ -52,10 +51,8 @@ import {
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { ApiKeysPanel } from './apikeys/ApiKeysPanel';
 import { CustomMcpServerDialog } from './mcp/CustomMcpServerDialog';
 import { McpServersPanel } from './mcp/McpServersPanel';
-import { PluginsPanel } from './plugins/PluginsPanel';
 import { SkillsPanel } from './skills/SkillsPanel';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
@@ -115,18 +112,29 @@ function isCodexSnapshotPending(
   return provider.providerId === 'codex' && codexSnapshotPending;
 }
 
+const EXTENSION_SUB_TABS = [
+  {
+    value: 'mcp-servers' as const,
+    label: 'MCP 服务器',
+    icon: Server,
+    description: '连接外部工具和应用，让运行时可以读取数据或执行本应用之外的操作。',
+  },
+  {
+    value: 'skills' as const,
+    label: '技能',
+    icon: BookOpen,
+    description: '面向常见任务的可复用指令，帮助运行时更稳定地处理重复工作。',
+  },
+] as const;
+
 export const ExtensionStoreView = (): React.JSX.Element => {
   const tabId = useTabIdOptional();
   const {
-    fetchPluginCatalog,
     bootstrapCliStatus,
     fetchCliStatus,
-    fetchApiKeys,
     fetchSkillsCatalog,
     mcpBrowse,
     mcpFetchInstalled,
-    apiKeysLoading,
-    pluginCatalogLoading,
     mcpBrowseLoading,
     skillsLoading,
     cliStatus,
@@ -139,15 +147,11 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     repositoryGroups,
   } = useStore(
     useShallow((s) => ({
-      fetchPluginCatalog: s.fetchPluginCatalog,
       bootstrapCliStatus: s.bootstrapCliStatus,
       fetchCliStatus: s.fetchCliStatus,
-      fetchApiKeys: s.fetchApiKeys,
       fetchSkillsCatalog: s.fetchSkillsCatalog,
       mcpBrowse: s.mcpBrowse,
       mcpFetchInstalled: s.mcpFetchInstalled,
-      apiKeysLoading: s.apiKeysLoading,
-      pluginCatalogLoading: s.pluginCatalogLoading,
       mcpBrowseLoading: s.mcpBrowseLoading,
       skillsLoading: s.skillsLoading,
       cliStatus: s.cliStatus,
@@ -220,41 +224,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   );
   const projectPath = resolvedProject?.path ?? null;
   const projectLabel = resolvedProject?.name ?? null;
-  const subTabs = useMemo(
-    () => [
-      {
-        value: 'plugins' as const,
-        label: '插件',
-        icon: Puzzle,
-        description:
-          '运行时的小型扩展。多模型模式下，目前在支持时主要作用于 Anthropic 会话，更广泛的提供商支持正在开发中。',
-      },
-      {
-        value: 'mcp-servers' as const,
-        label: 'MCP 服务器',
-        icon: Server,
-        description: '连接外部工具和应用，让运行时可以读取数据或执行本应用之外的操作。',
-      },
-      {
-        value: 'skills' as const,
-        label: '技能',
-        icon: BookOpen,
-        description: '面向常见任务的可复用指令，帮助运行时更稳定地处理重复工作。',
-      },
-      {
-        value: 'api-keys' as const,
-        label: 'API 密钥',
-        icon: Key,
-        description: '在线服务的密钥。添加后，插件、服务器和集成即可连接并工作。',
-      },
-    ],
-    []
-  );
-
-  // Fetch plugin catalog on mount
-  useEffect(() => {
-    void fetchPluginCatalog(projectPath ?? undefined);
-  }, [fetchPluginCatalog, projectPath]);
+  const subTabs = EXTENSION_SUB_TABS;
 
   useEffect(() => {
     void refreshCliStatusForCurrentMode({
@@ -269,33 +239,24 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     void mcpFetchInstalled(projectPath ?? undefined);
   }, [mcpFetchInstalled, projectPath]);
 
-  // Fetch API keys on mount
-  useEffect(() => {
-    void fetchApiKeys();
-  }, [fetchApiKeys]);
-
   // Fetch Skills catalog on mount / project change
   useEffect(() => {
     void fetchSkillsCatalog(projectPath ?? undefined);
   }, [fetchSkillsCatalog, projectPath]);
 
-  // Refresh all data (plugins + MCP browse + installed + skills)
+  // Refresh all data (MCP + skills + runtime status)
   const handleRefresh = useCallback(() => {
     void refreshCliStatusForCurrentMode({
       multimodelEnabled,
       bootstrapCliStatus,
       fetchCliStatus,
     });
-    void fetchApiKeys();
-    void fetchPluginCatalog(projectPath ?? undefined, true);
     void mcpBrowse(); // re-fetch first page
     void mcpFetchInstalled(projectPath ?? undefined);
     void fetchSkillsCatalog(projectPath ?? undefined);
   }, [
     bootstrapCliStatus,
-    fetchApiKeys,
     fetchCliStatus,
-    fetchPluginCatalog,
     fetchSkillsCatalog,
     multimodelEnabled,
     mcpBrowse,
@@ -303,12 +264,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     projectPath,
   ]);
 
-  const isRefreshing =
-    effectiveCliStatusLoading ||
-    apiKeysLoading ||
-    pluginCatalogLoading ||
-    mcpBrowseLoading ||
-    skillsLoading;
+  const isRefreshing = effectiveCliStatusLoading || mcpBrowseLoading || skillsLoading;
   const mcpMutationDisableReason = useMemo(
     () =>
       getExtensionActionDisableReason({
@@ -336,7 +292,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
           <div>
             <p className="text-sm font-medium text-text">正在检查扩展运行时可用性</p>
             <p className="mt-0.5 text-xs text-text-muted">
-              扩展需要配置好的运行时来管理插件、MCP 服务器、技能和提供商连接。
+              扩展需要配置好的运行时来管理 MCP 服务器、技能和提供商连接。
             </p>
           </div>
         </div>
@@ -383,7 +339,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
               {effectiveCliStatus.installedVersion
                 ? ` (${effectiveCliStatus.installedVersion})`
                 : ''}
-              ，但登录前无法安装插件。请前往首页登录。
+              ，但登录前无法管理扩展。请前往首页登录。
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={openDashboard}>
@@ -401,7 +357,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-text">多模型运行时能力</p>
               <p className="mt-0.5 text-xs text-text-muted">
-                不同区域支持的提供商可能不同。只有运行时明确声明支持时，插件才会显示。
+                不同区域支持的提供商可能不同。只有运行时明确声明支持时，MCP 与技能能力才会显示。
               </p>
             </div>
           </div>
@@ -433,7 +389,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                     ? '需要设置'
                     : '不支持';
                 const extensionCapabilities = getCliProviderExtensionCapabilities(provider);
-                const pluginStatus = extensionCapabilities.plugins.status;
 
                 return (
                   <div
@@ -458,16 +413,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                       </Badge>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                      <Badge
-                        variant={pluginStatus === 'unsupported' ? 'outline' : 'secondary'}
-                        className={
-                          pluginStatus === 'unsupported'
-                            ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                            : undefined
-                        }
-                      >
-                        插件：{formatCliExtensionCapabilityStatus(pluginStatus)}
-                      </Badge>
                       <Badge variant="secondary">
                         MCP: {formatCliExtensionCapabilityStatus(extensionCapabilities.mcp.status)}
                       </Badge>
@@ -490,7 +435,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         <div>
           <p className="text-sm font-medium text-emerald-300">{runtimeDisplayName} 已就绪</p>
           <p className="mt-0.5 text-xs text-text-muted">
-            可以从此页面安装插件
+            可以从此页面管理 MCP 服务器与技能
             {effectiveCliStatus.installedVersion
               ? `，使用 ${runtimeDisplayName} ${effectiveCliStatus.installedVersion}`
               : ''}
@@ -559,9 +504,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             )}
             <Tabs
               value={tabState.activeSubTab}
-              onValueChange={(v) =>
-                tabState.setActiveSubTab(v as 'plugins' | 'mcp-servers' | 'skills' | 'api-keys')
-              }
+              onValueChange={(v) => tabState.setActiveSubTab(v as 'mcp-servers' | 'skills')}
             >
               <div className="-mx-6 flex items-end justify-between border-b border-border px-6">
                 <TabsList className="gap-1 rounded-b-none">
@@ -598,25 +541,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                 )}
               </div>
 
-              <TabsContent value="plugins" className="mt-0 pt-4">
-                <PluginsPanel
-                  projectPath={projectPath}
-                  pluginFilters={tabState.pluginFilters}
-                  pluginSort={tabState.pluginSort}
-                  selectedPluginId={tabState.selectedPluginId}
-                  updatePluginSearch={tabState.updatePluginSearch}
-                  toggleCategory={tabState.toggleCategory}
-                  toggleCapability={tabState.toggleCapability}
-                  toggleInstalledOnly={tabState.toggleInstalledOnly}
-                  setSelectedPluginId={tabState.setSelectedPluginId}
-                  clearFilters={tabState.clearFilters}
-                  hasActiveFilters={tabState.hasActiveFilters}
-                  setPluginSort={tabState.setPluginSort}
-                  cliStatus={effectiveCliStatus}
-                  cliStatusLoading={effectiveCliStatusLoading}
-                />
-              </TabsContent>
-
               <TabsContent value="mcp-servers" className="mt-0 pt-4">
                 <McpServersPanel
                   projectPath={projectPath}
@@ -630,10 +554,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   cliStatus={effectiveCliStatus}
                   cliStatusLoading={effectiveCliStatusLoading}
                 />
-              </TabsContent>
-
-              <TabsContent value="api-keys" className="mt-0 pt-4">
-                <ApiKeysPanel projectPath={projectPath} projectLabel={projectLabel} />
               </TabsContent>
 
               <TabsContent value="skills" className="mt-0 pt-4">

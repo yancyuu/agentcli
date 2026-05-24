@@ -9,38 +9,28 @@ import { useStore } from '@renderer/store';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { formatNextRun, getCronDescription } from '@renderer/utils/scheduleFormatters';
 import {
+  AlertCircle,
   Calendar,
   ChevronDown,
   ChevronRight,
   Filter,
+  Loader2,
   MoreHorizontal,
-  Pause,
   Pencil,
   Play,
   Plus,
   Search,
+  Square,
   Trash2,
-  Zap,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { LaunchTeamDialog } from '../team/dialogs/LaunchTeamDialog';
+import { CcCronScheduleDialog } from '../team/schedule/CcCronScheduleDialog';
 import { ScheduleRunLogDialog } from '../team/schedule/ScheduleRunLogDialog';
 import { ScheduleRunRow } from '../team/schedule/ScheduleRunRow';
 import { ScheduleStatusBadge } from '../team/schedule/ScheduleStatusBadge';
 
-import type { Schedule, ScheduleRun, ScheduleStatus } from '@shared/types';
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-const STATUS_OPTIONS: { value: ScheduleStatus | 'all'; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'active', label: '运行中' },
-  { value: 'paused', label: '已暂停' },
-  { value: 'disabled', label: '已禁用' },
-];
+import type { Schedule, ScheduleRun } from '@shared/types';
 
 // =============================================================================
 // ScheduleListItem
@@ -52,9 +42,10 @@ interface ScheduleListItemProps {
   onDelete: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
-  onTriggerNow: (id: string) => Promise<ScheduleRun>;
   onTeamClick: (teamName: string) => void;
   teamColor: string;
+  teamDisplayName: string;
+  deleting?: boolean;
 }
 
 const ScheduleListItem = ({
@@ -63,9 +54,10 @@ const ScheduleListItem = ({
   onDelete,
   onPause,
   onResume,
-  onTriggerNow,
   onTeamClick,
   teamColor,
+  teamDisplayName,
+  deleting = false,
 }: ScheduleListItemProps): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [selectedRun, setSelectedRun] = useState<ScheduleRun | null>(null);
@@ -80,15 +72,6 @@ const ScheduleListItem = ({
       void fetchRunHistory(schedule.id);
     }
   }, [expanded, runs.length, runsLoading, fetchRunHistory, schedule.id]);
-
-  const handleTriggerNow = useCallback(() => {
-    void (async () => {
-      const run = await onTriggerNow(schedule.id);
-      setExpanded(true);
-      setSelectedRun(run);
-      void fetchRunHistory(schedule.id);
-    })();
-  }, [fetchRunHistory, onTriggerNow, schedule.id]);
 
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] font-sans">
@@ -127,7 +110,7 @@ const ScheduleListItem = ({
           onClick={() => onTeamClick(schedule.teamName)}
         >
           <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: teamColor }} />
-          {schedule.teamName}
+          {teamDisplayName}
         </button>
 
         {/* Next run */}
@@ -156,14 +139,18 @@ const ScheduleListItem = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="size-7 p-0"
-                onClick={handleTriggerNow}
-                disabled={schedule.status !== 'active'}
+                className="size-7 p-0 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                onClick={() => onDelete(schedule.id)}
+                disabled={deleting}
               >
-                <Zap className="size-3.5" />
+                {deleting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3.5" />
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">立即运行</TooltipContent>
+            <TooltipContent side="top">删除</TooltipContent>
           </Tooltip>
 
           <Popover>
@@ -187,8 +174,8 @@ const ScheduleListItem = ({
                   className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-raised)]"
                   onClick={() => onPause(schedule.id)}
                 >
-                  <Pause className="mr-2 size-3.5" />
-                  暂停
+                  <Square className="mr-2 size-3.5" />
+                  停止
                 </button>
               ) : (
                 <button
@@ -197,17 +184,9 @@ const ScheduleListItem = ({
                   onClick={() => onResume(schedule.id)}
                 >
                   <Play className="mr-2 size-3.5" />
-                  恢复
+                  启用
                 </button>
               )}
-              <button
-                type="button"
-                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-red-400 hover:bg-[var(--color-surface-raised)]"
-                onClick={() => onDelete(schedule.id)}
-              >
-                <Trash2 className="mr-2 size-3.5" />
-                删除
-              </button>
             </PopoverContent>
           </Popover>
         </div>
@@ -257,7 +236,6 @@ export const SchedulesView = (): React.JSX.Element => {
     pauseSchedule,
     resumeSchedule,
     deleteSchedule,
-    triggerNow,
     openTeamTab,
     teamByName,
   } = useStore(
@@ -268,7 +246,6 @@ export const SchedulesView = (): React.JSX.Element => {
       pauseSchedule: s.pauseSchedule,
       resumeSchedule: s.resumeSchedule,
       deleteSchedule: s.deleteSchedule,
-      triggerNow: s.triggerNow,
       openTeamTab: s.openTeamTab,
       teamByName: s.teamByName,
     }))
@@ -284,11 +261,17 @@ export const SchedulesView = (): React.JSX.Element => {
     [teamByName]
   );
 
+  const getTeamDisplayName = useCallback(
+    (teamName: string): string => teamByName[teamName]?.displayName || teamName,
+    [teamByName]
+  );
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ScheduleStatus | 'all'>('all');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch schedules on mount
   useEffect(() => {
@@ -297,18 +280,16 @@ export const SchedulesView = (): React.JSX.Element => {
 
   // Derive unique team names
   const teamNames = useMemo(
-    () => [...new Set(schedules.map((s) => s.teamName))].sort(),
-    [schedules]
+    () =>
+      [...new Set(schedules.map((s) => s.teamName))].sort((a, b) =>
+        getTeamDisplayName(a).localeCompare(getTeamDisplayName(b))
+      ),
+    [getTeamDisplayName, schedules]
   );
 
   // Filter and sort schedules
   const filteredSchedules = useMemo(() => {
     let result = schedules;
-
-    // Filter by status
-    if (statusFilter !== 'all') {
-      result = result.filter((s) => s.status === statusFilter);
-    }
 
     // Filter by team
     if (teamFilter) {
@@ -318,13 +299,16 @@ export const SchedulesView = (): React.JSX.Element => {
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(
-        (s) =>
+      result = result.filter((s) => {
+        const teamDisplayName = getTeamDisplayName(s.teamName).toLowerCase();
+        return (
           (s.label ?? '').toLowerCase().includes(query) ||
+          teamDisplayName.includes(query) ||
           s.teamName.toLowerCase().includes(query) ||
           s.launchConfig.prompt.toLowerCase().includes(query) ||
           getCronDescription(s.cronExpression).toLowerCase().includes(query)
-      );
+        );
+      });
     }
 
     // Sort: active first, then by next run ascending
@@ -342,16 +326,7 @@ export const SchedulesView = (): React.JSX.Element => {
       if (b.nextRunAt) return 1;
       return 0;
     });
-  }, [schedules, statusFilter, teamFilter, searchQuery]);
-
-  // Counts per status
-  const statusCounts = useMemo(() => {
-    const counts = { all: schedules.length, active: 0, paused: 0, disabled: 0 };
-    for (const s of schedules) {
-      counts[s.status]++;
-    }
-    return counts;
-  }, [schedules]);
+  }, [getTeamDisplayName, schedules, teamFilter, searchQuery]);
 
   const handleEdit = useCallback((schedule: Schedule) => {
     setEditingSchedule(schedule);
@@ -370,21 +345,17 @@ export const SchedulesView = (): React.JSX.Element => {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      setDeletingScheduleId(id);
+      setDeleteError(null);
       try {
         await deleteSchedule(id);
       } catch (err) {
-        console.error('Failed to delete schedule:', err);
+        setDeleteError(err instanceof Error ? err.message : '删除计划失败');
+      } finally {
+        setDeletingScheduleId(null);
       }
     },
     [deleteSchedule]
-  );
-
-  const handleTriggerNow = useCallback(
-    async (id: string) => {
-      const run = await triggerNow(id);
-      return run;
-    },
-    [triggerNow]
   );
 
   const handleTeamClick = useCallback(
@@ -429,27 +400,6 @@ export const SchedulesView = (): React.JSX.Element => {
                 />
               </div>
 
-              {/* Status filter chips */}
-              <div className="flex items-center gap-1">
-                {STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                      statusFilter === opt.value
-                        ? 'bg-[var(--color-surface-raised)] font-medium text-[var(--color-text)]'
-                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                    }`}
-                    onClick={() => setStatusFilter(opt.value)}
-                  >
-                    {opt.label}
-                    {statusCounts[opt.value] > 0 && (
-                      <span className="ml-1 text-[10px] opacity-60">{statusCounts[opt.value]}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
               {/* Team filter */}
               {teamNames.length > 1 && (
                 <Popover>
@@ -462,7 +412,7 @@ export const SchedulesView = (): React.JSX.Element => {
                             className="size-2 shrink-0 rounded-full"
                             style={{ backgroundColor: getTeamColor(teamFilter) }}
                           />
-                          {teamFilter}
+                          {getTeamDisplayName(teamFilter)}
                         </>
                       ) : (
                         '全部团队'
@@ -496,7 +446,7 @@ export const SchedulesView = (): React.JSX.Element => {
                           className="size-2 shrink-0 rounded-full"
                           style={{ backgroundColor: getTeamColor(name) }}
                         />
-                        {name}
+                        {getTeamDisplayName(name)}
                       </button>
                     ))}
                   </PopoverContent>
@@ -505,6 +455,13 @@ export const SchedulesView = (): React.JSX.Element => {
             </div>
           )}
         </div>
+
+        {deleteError ? (
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertCircle className="size-3.5 shrink-0" />
+            {deleteError}
+          </div>
+        ) : null}
 
         {/* Content */}
         {schedulesLoading && schedules.length === 0 ? (
@@ -537,7 +494,6 @@ export const SchedulesView = (): React.JSX.Element => {
               className="text-xs text-[var(--color-text-secondary)] underline hover:text-[var(--color-text)]"
               onClick={() => {
                 setSearchQuery('');
-                setStatusFilter('all');
                 setTeamFilter(null);
               }}
             >
@@ -554,18 +510,17 @@ export const SchedulesView = (): React.JSX.Element => {
                 onDelete={(id) => void handleDelete(id)}
                 onPause={(id) => void pauseSchedule(id)}
                 onResume={(id) => void resumeSchedule(id)}
-                onTriggerNow={handleTriggerNow}
                 onTeamClick={handleTeamClick}
                 teamColor={getTeamColor(schedule.teamName)}
+                teamDisplayName={getTeamDisplayName(schedule.teamName)}
+                deleting={deletingScheduleId === schedule.id}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Create/Edit Dialog */}
-      <LaunchTeamDialog
-        mode="schedule"
+      <CcCronScheduleDialog
         open={dialogOpen}
         teamName={editingSchedule?.teamName}
         schedule={editingSchedule}

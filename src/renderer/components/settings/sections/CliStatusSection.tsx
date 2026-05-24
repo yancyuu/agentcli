@@ -7,30 +7,25 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-// Stubs for removed codex-account feature
-function useCodexAccountSnapshot(_opts: { enabled: boolean; includeRateLimits?: boolean }) {
-  return { snapshot: null, loading: false };
-}
-function mergeCodexProviderStatusWithSnapshot<T>(provider: T, _snapshot: unknown): T {
-  return provider;
-}
-
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import {
-  formatProviderStatusText,
-  getProviderConnectionModeSummary,
   getProviderConnectLabel,
-  getProviderCredentialSummary,
-  getProviderCurrentRuntimeSummary,
   getProviderDisconnectAction,
-  isConnectionManagedRuntimeProvider,
   shouldShowProviderConnectAction,
 } from '@renderer/components/runtime/providerConnectionUi';
-import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelBadges';
-import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
+import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
+import { Input } from '@renderer/components/ui/input';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
+import { providersApi } from '@renderer/api/providers';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { getMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
@@ -54,29 +49,14 @@ import {
 import { SettingsSectionHeader } from '../components';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
+import type { CcAgentType } from '@shared/types/ccConnect';
+import type { GlobalProvider } from '@shared/types/providers';
 
-const ProviderDetailSkeleton = (): React.JSX.Element => {
-  return (
-    <div className="mt-1 space-y-2">
-      <div
-        className="skeleton-shimmer h-3 rounded-sm"
-        style={{ width: '58%', backgroundColor: 'var(--skeleton-base)' }}
-      />
-      <div className="flex flex-wrap gap-1.5">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <div
-            key={index}
-            className="skeleton-shimmer h-6 rounded-md border"
-            style={{
-              width: index === 0 ? 56 : index === 1 ? 84 : index === 2 ? 72 : 96,
-              borderColor: 'var(--color-border-subtle)',
-              backgroundColor: 'var(--skeleton-base-dim)',
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
+const CLI_PROVIDER_BY_AGENT_TYPE: Partial<Record<CcAgentType, CliProviderId>> = {
+  claudecode: 'anthropic',
+  codex: 'codex',
+  gemini: 'gemini',
+  opencode: 'opencode',
 };
 
 const ProviderBetaBadge = (): React.JSX.Element => (
@@ -91,44 +71,6 @@ const ProviderBetaBadge = (): React.JSX.Element => (
     beta
   </span>
 );
-
-function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boolean): boolean {
-  return (
-    providerLoading ||
-    (!provider.authenticated &&
-      provider.statusMessage === 'Checking...' &&
-      provider.models.length === 0 &&
-      provider.backend == null)
-  );
-}
-
-function isCodexSnapshotPending(
-  provider: CliProviderStatus,
-  codexSnapshotPending: boolean
-): boolean {
-  return provider.providerId === 'codex' && codexSnapshotPending;
-}
-
-function shouldMaskCodexNegativeBootstrapState(
-  sourceProvider: CliProviderStatus | null,
-  mergedProvider: CliProviderStatus
-): boolean {
-  return (
-    sourceProvider?.providerId === 'codex' &&
-    sourceProvider.statusMessage === 'Checking...' &&
-    mergedProvider.providerId === 'codex' &&
-    mergedProvider.connection?.codex?.launchReadinessState === 'missing_auth' &&
-    mergedProvider.connection.codex.login.status === 'idle'
-  );
-}
-
-function getProviderStatusColor(statusText: string, authenticated: boolean): string {
-  if (statusText === 'Checking...') {
-    return 'var(--color-text-secondary)';
-  }
-
-  return authenticated ? '#4ade80' : 'var(--color-text-muted)';
-}
 
 function getProviderLabel(providerId: CliProviderId): string {
   switch (providerId) {
@@ -199,7 +141,13 @@ function getProviderTerminalLogoutCommand(provider: CliProviderStatus): {
   };
 }
 
-export const CliStatusSection = (): React.JSX.Element | null => {
+interface CliStatusSectionProps {
+  showSectionHeader?: boolean;
+}
+
+export const CliStatusSection = ({
+  showSectionHeader = true,
+}: CliStatusSectionProps): React.JSX.Element | null => {
   const appConfig = useStore((s) => s.appConfig);
   const selectedProjectId = useStore((s) => s.selectedProjectId);
   const projects = useStore((s) => s.projects);
@@ -229,6 +177,10 @@ export const CliStatusSection = (): React.JSX.Element | null => {
   } | null>(null);
   const [manageProviderId, setManageProviderId] = useState<CliProviderId>('gemini');
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
+  const [genericHarnessAgentType, setGenericHarnessAgentType] = useState<CcAgentType | null>(null);
+  const [globalProviders, setGlobalProviders] = useState<GlobalProvider[]>([]);
+  const [globalProvidersLoading, setGlobalProvidersLoading] = useState(false);
+  const [globalProvidersError, setGlobalProvidersError] = useState<string | null>(null);
   const multimodelEnabled = appConfig?.general?.multimodelEnabled ?? false;
   const selectedProjectPath = useMemo(
     () => resolveProjectPathById(selectedProjectId, projects, repositoryGroups)?.path ?? null,
@@ -238,38 +190,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     !cliStatus && cliStatusLoading && multimodelEnabled
       ? createLoadingMultimodelCliStatus()
       : cliStatus;
-  const codexAccount = useCodexAccountSnapshot({
-    enabled:
-      multimodelEnabled &&
-      loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
-      Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
-    includeRateLimits: true,
-  });
-  const codexSnapshotPending =
-    codexAccount.loading &&
-    Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')) &&
-    !codexAccount.snapshot;
-  const effectiveCliStatus = useMemo(
-    () =>
-      loadingCliStatus
-        ? {
-            ...loadingCliStatus,
-            providers: loadingCliStatus.providers.map((provider) =>
-              provider.providerId === 'codex'
-                ? mergeCodexProviderStatusWithSnapshot(provider, codexAccount.snapshot)
-                : provider
-            ),
-          }
-        : loadingCliStatus,
-    [codexAccount.snapshot, loadingCliStatus]
-  );
-  const loadingCliProviderMap = useMemo(
-    () =>
-      new Map(
-        (loadingCliStatus?.providers ?? []).map((provider) => [provider.providerId, provider])
-      ),
-    [loadingCliStatus?.providers]
-  );
+  const effectiveCliStatus = loadingCliStatus;
   const visibleProviders = useMemo(
     () => getMainScreenCliProviders(effectiveCliStatus),
     [effectiveCliStatus]
@@ -287,6 +208,24 @@ export const CliStatusSection = (): React.JSX.Element | null => {
       }
     }
   }, [bootstrapCliStatus, cliStatus, fetchCliStatus, multimodelEnabled]);
+
+  const refreshGlobalProviders = useCallback(async (): Promise<void> => {
+    setGlobalProvidersLoading(true);
+    setGlobalProvidersError(null);
+    try {
+      const result = await providersApi.list();
+      setGlobalProviders(result.providers ?? []);
+    } catch (error) {
+      setGlobalProvidersError(error instanceof Error ? error.message : '加载 Provider 失败');
+      setGlobalProviders([]);
+    } finally {
+      setGlobalProvidersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshGlobalProviders();
+  }, [refreshGlobalProviders]);
 
   const handleInstall = useCallback(() => {
     installCli();
@@ -334,6 +273,19 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     setManageDialogOpen(true);
   }, []);
 
+  const handleHarnessManage = useCallback(
+    (agentType: CcAgentType) => {
+      const providerId = CLI_PROVIDER_BY_AGENT_TYPE[agentType];
+      if (providerId && visibleProviders.some((provider) => provider.providerId === providerId)) {
+        setManageProviderId(providerId);
+        setManageDialogOpen(true);
+        return;
+      }
+      setGenericHarnessAgentType(agentType);
+    },
+    [visibleProviders]
+  );
+
   const recheckStatus = useCallback(() => {
     void (async () => {
       await invalidateCliStatus();
@@ -373,7 +325,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
   );
 
   const runtimeDisplayName = getRuntimeDisplayName(effectiveCliStatus, multimodelEnabled);
-  const runtimeLabel = 'Agent CLI';
+  const runtimeLabel = '运行时';
 
   const activeTerminalProvider = providerTerminal
     ? (effectiveCliStatus?.providers.find(
@@ -386,10 +338,37 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         ? getProviderTerminalCommand(activeTerminalProvider)
         : getProviderTerminalLogoutCommand(activeTerminalProvider)
       : null;
+  const cliProviderStatusByAgentType = useMemo(() => {
+    const map = new Map<CcAgentType, CliProviderStatus>();
+    for (const agentType of ALL_AGENT_TYPES) {
+      const providerId = CLI_PROVIDER_BY_AGENT_TYPE[agentType];
+      const provider = providerId
+        ? (visibleProviders.find((entry) => entry.providerId === providerId) ?? null)
+        : null;
+      if (provider) {
+        map.set(agentType, provider);
+      }
+    }
+    return map;
+  }, [visibleProviders]);
+  const globalProvidersByAgentType = useMemo(() => {
+    const map = new Map<CcAgentType, GlobalProvider[]>();
+    for (const agentType of ALL_AGENT_TYPES) {
+      map.set(
+        agentType,
+        globalProviders.filter((provider) =>
+          ((provider.agent_types ?? []) as readonly string[]).some(
+            (supportedType) => supportedType === agentType
+          )
+        )
+      );
+    }
+    return map;
+  }, [globalProviders]);
 
   return (
     <div className="mb-2">
-      <SettingsSectionHeader title="CLI 运行时" />
+      {showSectionHeader ? <SettingsSectionHeader title="Harness 配置" /> : null}
       <div className="space-y-3 py-2">
         {/* Loading status */}
         {!effectiveCliStatus && installerState === 'idle' && (
@@ -398,7 +377,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-muted)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            {multimodelEnabled ? '正在检查 Agent CLI 提供商...' : '正在检查 Agent CLI...'}
+            {multimodelEnabled ? '正在检查 Harness 提供商...' : '正在检查 Harness 运行时...'}
           </div>
         )}
 
@@ -415,14 +394,6 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                   {runtimeLabel && (
                     <span style={{ color: 'var(--color-text)' }}>{runtimeLabel}</span>
                   )}
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="text-xs font-medium"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      多模型
-                    </span>
-                  </div>
                   {/* Extensions button — right-aligned */}
                   {canOpenExtensions && (
                     <button
@@ -448,221 +419,116 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                     {effectiveCliStatus.binaryPath}
                   </p>
                 )}
-                {visibleProviders.length > 0 && (
-                  <div className="ml-6 mt-3 space-y-2">
-                    {visibleProviders.map((provider) => (
+                <div className="ml-6 mt-3 space-y-2">
+                  {ALL_AGENT_TYPES.map((agentType) => {
+                    const provider = cliProviderStatusByAgentType.get(agentType) ?? null;
+                    const harnessProviders = globalProvidersByAgentType.get(agentType) ?? [];
+                    if (!provider) {
+                      return (
+                        <div
+                          key={agentType}
+                          className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
+                          style={{
+                            borderColor: 'var(--color-border-subtle)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                          }}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-xs">
+                              <Terminal
+                                className="size-4 shrink-0"
+                                style={{ color: 'var(--color-text-muted)' }}
+                              />
+                              <span
+                                className="font-medium"
+                                style={{ color: 'var(--color-text-secondary)' }}
+                              >
+                                {AGENT_TYPE_LABELS[agentType]}
+                              </span>
+                              <span style={{ color: 'var(--color-text-muted)' }}>
+                                {harnessProviders.length > 0
+                                  ? `${harnessProviders.length} 个 Provider`
+                                  : '未配置 Provider'}
+                              </span>
+                            </div>
+                            <div
+                              className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
+                              style={{ color: 'var(--color-text-muted)' }}
+                            >
+                              <span>Agent 类型：{agentType}</span>
+                              <span>Provider：{harnessProviders.length}</span>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-start gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleHarnessManage(agentType)}
+                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5"
+                              style={{
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              <SlidersHorizontal className="size-3" />
+                              配置
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
                       <div
-                        key={provider.providerId}
+                        key={agentType}
                         className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
                         style={{
                           borderColor: 'var(--color-border-subtle)',
                           backgroundColor: 'rgba(255, 255, 255, 0.02)',
                         }}
                       >
-                        {(() => {
-                          const providerLoading =
-                            cliProviderStatusLoading[provider.providerId] === true;
-                          const showSkeleton =
-                            isProviderCardLoading(provider, providerLoading) ||
-                            isCodexSnapshotPending(provider, codexSnapshotPending);
-                          const runtimeSummary = isConnectionManagedRuntimeProvider(provider)
-                            ? getProviderCurrentRuntimeSummary(provider)
-                            : getProviderRuntimeBackendSummary(provider);
-                          const sourceProvider =
-                            loadingCliProviderMap.get(provider.providerId) ?? null;
-                          const maskNegativeBootstrapState = shouldMaskCodexNegativeBootstrapState(
-                            sourceProvider,
-                            provider
-                          );
-                          const effectiveShowSkeleton = showSkeleton || maskNegativeBootstrapState;
-                          const statusText = effectiveShowSkeleton
-                            ? 'Checking...'
-                            : formatProviderStatusText(provider);
-                          const connectionModeSummary = getProviderConnectionModeSummary(provider);
-                          const credentialSummary = getProviderCredentialSummary(provider);
-                          const disconnectAction = getProviderDisconnectAction(provider);
-                          const hasDetailContent = Boolean(
-                            (provider.backend?.label && !runtimeSummary) ||
-                            runtimeSummary ||
-                            connectionModeSummary ||
-                            credentialSummary ||
-                            provider.models.length === 0
-                          );
-
-                          return (
-                            <>
-                              <div className="col-span-2 flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 text-xs">
-                                    <span className="flex items-center gap-2">
-                                      <ProviderBrandLogo
-                                        providerId={provider.providerId}
-                                        className="size-4 shrink-0"
-                                      />
-                                      <span
-                                        className="font-medium"
-                                        style={{ color: 'var(--color-text-secondary)' }}
-                                      >
-                                        {provider.displayName}
-                                      </span>
-                                      {provider.providerId === 'codex' ? (
-                                        <ProviderBetaBadge />
-                                      ) : null}
-                                    </span>
-                                    <span
-                                      style={{
-                                        color: getProviderStatusColor(
-                                          statusText,
-                                          provider.authenticated
-                                        ),
-                                      }}
-                                    >
-                                      {statusText}
-                                    </span>
-                                  </div>
-                                  {effectiveShowSkeleton ? (
-                                    <ProviderDetailSkeleton />
-                                  ) : hasDetailContent ? (
-                                    <div
-                                      className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
-                                      style={{ color: 'var(--color-text-muted)' }}
-                                    >
-                                      {provider.backend?.label && !runtimeSummary && (
-                                        <span>后端：{provider.backend.label}</span>
-                                      )}
-                                      {runtimeSummary ? (
-                                        <span>
-                                          {isConnectionManagedRuntimeProvider(provider)
-                                            ? runtimeSummary
-                                            : `运行时：${runtimeSummary}`}
-                                        </span>
-                                      ) : null}
-                                      {connectionModeSummary ? (
-                                        <span>{connectionModeSummary}</span>
-                                      ) : null}
-                                      {credentialSummary ? <span>{credentialSummary}</span> : null}
-                                      {provider.models.length === 0 && (
-                                        <span>当前运行时构建无法使用模型列表</span>
-                                      )}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <div className="flex shrink-0 items-start gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => void fetchCliProviderStatus(provider.providerId)}
-                                    disabled={providerLoading}
-                                    className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                                    style={{
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-text-secondary)',
-                                    }}
-                                    title={`重新检查 ${provider.displayName}`}
-                                  >
-                                    <RefreshCw
-                                      className={providerLoading ? 'size-3 animate-spin' : 'size-3'}
-                                    />
-                                    检查更新
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleProviderManage(provider.providerId)}
-                                    disabled={!effectiveCliStatus.binaryPath}
-                                    className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                                    style={{
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-text-secondary)',
-                                    }}
-                                  >
-                                    <SlidersHorizontal className="size-3" />
-                                    管理
-                                  </button>
-                                  {disconnectAction ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleProviderLogout(provider.providerId)}
-                                      disabled={!effectiveCliStatus.binaryPath}
-                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                                      style={{
-                                        borderColor: 'var(--color-border)',
-                                        color: 'var(--color-text-secondary)',
-                                      }}
-                                    >
-                                      <LogOut className="size-3" />
-                                      {disconnectAction.label}
-                                    </button>
-                                  ) : !effectiveShowSkeleton &&
-                                    shouldShowProviderConnectAction(provider) ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setProviderTerminal({
-                                          providerId: provider.providerId,
-                                          action: 'login',
-                                        })
-                                      }
-                                      disabled={!effectiveCliStatus.binaryPath}
-                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                                      style={{
-                                        borderColor: 'var(--color-border)',
-                                        color: 'var(--color-text-secondary)',
-                                      }}
-                                    >
-                                      <LogIn className="size-3" />
-                                      {getProviderConnectLabel(provider)}
-                                    </button>
-                                  ) : null}
-                                  {provider.providerId === 'anthropic' &&
-                                  effectiveCliStatus.supportsSelfUpdate &&
-                                  effectiveCliStatus.updateAvailable ? (
-                                    <button
-                                      type="button"
-                                      onClick={handleInstall}
-                                      disabled={isBusy}
-                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                                      style={{
-                                        borderColor: 'rgba(59, 130, 246, 0.45)',
-                                        color: '#93c5fd',
-                                      }}
-                                      title={`更新 Claude Code 到 v${effectiveCliStatus.latestVersion ?? 'latest'}`}
-                                    >
-                                      <Download className="size-3" />
-                                      更新
-                                    </button>
-                                  ) : null}
-                                </div>
-                              </div>
-                              {!effectiveShowSkeleton && provider.models.length > 0 && (
-                                <div className="col-span-2">
-                                  <ProviderModelBadges
-                                    providerId={provider.providerId}
-                                    models={provider.models}
-                                    modelAvailability={provider.modelAvailability}
-                                    providerStatus={provider}
-                                  />
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
+                        <div className="col-span-2 flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="flex items-center gap-2">
+                                <ProviderBrandLogo
+                                  providerId={provider.providerId}
+                                  className="size-4 shrink-0"
+                                />
+                                <span
+                                  className="font-medium"
+                                  style={{ color: 'var(--color-text-secondary)' }}
+                                >
+                                  {provider.displayName}
+                                </span>
+                                {provider.providerId === 'codex' ? <ProviderBetaBadge /> : null}
+                              </span>
+                            </div>
+                            <div
+                              className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
+                              style={{ color: 'var(--color-text-muted)' }}
+                            >
+                              <span>Agent 类型：{agentType}</span>
+                              <span>Provider：{harnessProviders.length}</span>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-start gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleProviderManage(provider.providerId)}
+                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                              style={{
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              <SlidersHorizontal className="size-3" />
+                              配置
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-                <ProviderRuntimeSettingsDialog
-                  open={manageDialogOpen}
-                  onOpenChange={setManageDialogOpen}
-                  providers={visibleProviders}
-                  projectPath={selectedProjectPath}
-                  initialProviderId={manageProviderId}
-                  providerStatusLoading={cliProviderStatusLoading}
-                  disabled={!effectiveCliStatus.binaryPath || isBusy || cliStatusLoading}
-                  onSelectBackend={handleRuntimeBackendChange}
-                  onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
-                  onRequestLogin={(providerId) =>
-                    setProviderTerminal({ providerId, action: 'login' })
-                  }
-                />
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div className="space-y-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -800,6 +666,269 @@ export const CliStatusSection = (): React.JSX.Element | null => {
           </div>
         )}
       </div>
+      <ProviderRuntimeSettingsDialog
+        open={manageDialogOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setManageDialogOpen(false);
+        }}
+        providers={visibleProviders.filter((provider) => provider.providerId === manageProviderId)}
+        projectPath={selectedProjectPath}
+        initialProviderId={manageProviderId}
+        providerStatusLoading={cliProviderStatusLoading}
+        disabled={isBusy || cliStatusLoading}
+        onSelectBackend={handleRuntimeBackendChange}
+        onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
+        onRequestLogin={(providerId) => setProviderTerminal({ providerId, action: 'login' })}
+      />
+      <GenericHarnessProviderDialog
+        agentType={genericHarnessAgentType}
+        providers={
+          genericHarnessAgentType
+            ? (globalProvidersByAgentType.get(genericHarnessAgentType) ?? [])
+            : []
+        }
+        loading={globalProvidersLoading}
+        error={globalProvidersError}
+        onRefresh={() => void refreshGlobalProviders()}
+        onClose={() => setGenericHarnessAgentType(null)}
+      />
     </div>
+  );
+};
+
+interface GenericHarnessProviderDialogProps {
+  agentType: CcAgentType | null;
+  providers: GlobalProvider[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onClose: () => void;
+}
+
+const GenericHarnessProviderDialog = ({
+  agentType,
+  providers,
+  loading,
+  error,
+  onRefresh,
+  onClose,
+}: GenericHarnessProviderDialogProps): React.JSX.Element => {
+  const open = agentType !== null;
+  const title = agentType ? AGENT_TYPE_LABELS[agentType] : 'Harness';
+  const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderApiKey, setNewProviderApiKey] = useState('');
+  const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
+  const [newProviderModel, setNewProviderModel] = useState('');
+  const [addingProvider, setAddingProvider] = useState(false);
+  const [addProviderError, setAddProviderError] = useState<string | null>(null);
+
+  const handleAddProvider = async (): Promise<void> => {
+    if (!agentType || !newProviderName.trim()) {
+      setAddProviderError('请填写 Provider 名称');
+      return;
+    }
+    setAddingProvider(true);
+    setAddProviderError(null);
+    try {
+      await providersApi.add({
+        name: newProviderName.trim(),
+        api_key: newProviderApiKey.trim() || undefined,
+        base_url: newProviderBaseUrl.trim() || undefined,
+        model: newProviderModel.trim() || undefined,
+        agent_types: [agentType],
+      });
+      setNewProviderName('');
+      setNewProviderApiKey('');
+      setNewProviderBaseUrl('');
+      setNewProviderModel('');
+      onRefresh();
+    } catch (err) {
+      setAddProviderError(err instanceof Error ? err.message : '添加 Provider 失败');
+    } finally {
+      setAddingProvider(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent className="w-[min(92vw,760px)] max-w-[min(92vw,760px)]">
+        <DialogHeader>
+          <DialogTitle>{title} 配置</DialogTitle>
+          <DialogDescription>
+            当前 Harness 支持多个 Provider。这里展示已绑定到该 Agent 类型的模型、端点和凭据状态。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div
+            className="space-y-3 rounded-lg border p-3"
+            style={{ borderColor: 'var(--color-border-subtle)' }}
+          >
+            <div>
+              <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                新增 Provider
+              </div>
+              <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                保存后会自动绑定到 {title}。
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                value={newProviderName}
+                onChange={(event) => setNewProviderName(event.target.value)}
+                placeholder="Provider 名称，例如 deepseek"
+              />
+              <Input
+                value={newProviderModel}
+                onChange={(event) => setNewProviderModel(event.target.value)}
+                placeholder="默认模型（可选）"
+              />
+              <Input
+                value={newProviderBaseUrl}
+                onChange={(event) => setNewProviderBaseUrl(event.target.value)}
+                placeholder="Base URL（可选）"
+              />
+              <Input
+                type="password"
+                value={newProviderApiKey}
+                onChange={(event) => setNewProviderApiKey(event.target.value)}
+                placeholder="API Key（可选）"
+              />
+            </div>
+            {addProviderError ? (
+              <div className="text-xs text-red-400">{addProviderError}</div>
+            ) : null}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleAddProvider()}
+                disabled={addingProvider}
+                className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {addingProvider ? <Loader2 className="size-3 animate-spin" /> : null}
+                添加 Provider
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Agent 类型：{agentType ?? '-'}
+            </div>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              <RefreshCw className={loading ? 'size-3 animate-spin' : 'size-3'} />
+              刷新
+            </button>
+          </div>
+
+          {error ? (
+            <div
+              className="rounded-md border px-3 py-2 text-xs"
+              style={{
+                borderColor: 'rgba(248, 113, 113, 0.25)',
+                backgroundColor: 'rgba(248, 113, 113, 0.06)',
+                color: '#fca5a5',
+              }}
+            >
+              {error}
+            </div>
+          ) : null}
+
+          {loading && providers.length === 0 ? (
+            <div
+              className="flex items-center gap-2 rounded-md border px-3 py-3 text-xs"
+              style={{
+                borderColor: 'var(--color-border-subtle)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              <Loader2 className="size-3 animate-spin" />
+              正在加载 Provider...
+            </div>
+          ) : providers.length > 0 ? (
+            <div className="space-y-2">
+              {providers.map((provider) => {
+                const endpoint =
+                  (agentType
+                    ? (provider.endpoints as Record<string, string | undefined> | undefined)?.[
+                        agentType
+                      ]
+                    : undefined) ??
+                  provider.base_url ??
+                  '默认端点';
+                const model =
+                  (agentType
+                    ? (provider.agent_models as Record<string, string | undefined> | undefined)?.[
+                        agentType
+                      ]
+                    : undefined) ??
+                  provider.model ??
+                  provider.models?.[0]?.model ??
+                  '未指定模型';
+                return (
+                  <div
+                    key={provider.name}
+                    className="rounded-lg border px-3 py-2"
+                    style={{
+                      borderColor: 'var(--color-border-subtle)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                    }}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                        {provider.name}
+                      </div>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[11px]"
+                        style={{
+                          color: provider.api_key ? '#86efac' : '#fbbf24',
+                          backgroundColor: provider.api_key
+                            ? 'rgba(74, 222, 128, 0.14)'
+                            : 'rgba(245, 158, 11, 0.12)',
+                        }}
+                      >
+                        {provider.api_key ? 'API Key 已配置' : '未配置 Key'}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
+                      <span>端点：{endpoint}</span>
+                      <span>模型：{model}</span>
+                      {provider.thinking ? <span>Thinking：{provider.thinking}</span> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              className="rounded-md border px-3 py-3 text-xs"
+              style={{
+                borderColor: 'var(--color-border-subtle)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              当前还没有绑定到 {title} 的 Provider。请在 Hermit 配置中添加 `agent_types` 包含 `
+              {agentType ?? 'agent'}` 的 Provider。
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };

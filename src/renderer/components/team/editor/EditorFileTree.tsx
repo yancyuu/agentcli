@@ -856,15 +856,36 @@ const InlineRenameInput = ({
 // Helpers
 // =============================================================================
 
-/** Convert hierarchical FileTreeEntry[] into TreeNode[] using entry.type for classification */
-function convertEntriesToNodes(entries: FileTreeEntry[]): TreeNode<FileTreeEntry>[] {
-  return entries.map((entry) => ({
-    name: entry.name,
-    fullPath: entry.path, // absolute path — matches expandedDirs keys
-    isFile: entry.type === 'file',
-    data: entry,
-    children: entry.children ? convertEntriesToNodes(entry.children) : [],
-  }));
+/** Convert hierarchical FileTreeEntry[] into TreeNode[] using entry.type for classification. */
+function convertEntriesToNodes(entries: unknown): TreeNode<FileTreeEntry>[] {
+  if (!Array.isArray(entries)) return [];
+
+  return entries.flatMap((rawEntry) => {
+    if (!rawEntry || typeof rawEntry !== 'object') return [];
+    const entry = rawEntry as Partial<FileTreeEntry>;
+    if (
+      typeof entry.name !== 'string' ||
+      typeof entry.path !== 'string' ||
+      (entry.type !== 'file' && entry.type !== 'directory')
+    ) {
+      return [];
+    }
+
+    const normalizedEntry: FileTreeEntry = {
+      ...entry,
+      children: Array.isArray(entry.children) ? entry.children : undefined,
+    } as FileTreeEntry;
+
+    return [
+      {
+        name: normalizedEntry.name,
+        fullPath: normalizedEntry.path, // absolute path — matches expandedDirs keys
+        isFile: normalizedEntry.type === 'file',
+        data: normalizedEntry,
+        children: convertEntriesToNodes(normalizedEntry.children),
+      },
+    ];
+  });
 }
 
 /** Flatten tree into visible items list (DFS, respecting expanded state) */

@@ -45,7 +45,6 @@ import {
   Play,
   RotateCcw,
   Search,
-  Square,
   Trash2,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -257,6 +256,12 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
       );
   }
 };
+
+const PendingDeleteBadge = (): React.JSX.Element => (
+  <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+    待重启生效
+  </span>
+);
 
 export const TeamListView = (): React.JSX.Element => {
   const { isLight } = useTheme();
@@ -510,10 +515,12 @@ export const TeamListView = (): React.JSX.Element => {
     (teamName: string, isDraft: boolean, e: React.MouseEvent) => {
       e.stopPropagation();
       void (async () => {
+        const teamDisplayName =
+          teams.find((team) => team.teamName === teamName)?.displayName || teamName;
         if (isDraft) {
           const confirmed = await confirm({
             title: '删除草稿',
-            message: `确定删除草稿团队“${teamName}”吗？此操作无法撤销。`,
+            message: `确定删除草稿团队“${teamDisplayName}”吗？此操作无法撤销。`,
             confirmLabel: '删除',
             cancelLabel: '取消',
             variant: 'danger',
@@ -525,7 +532,7 @@ export const TeamListView = (): React.JSX.Element => {
         }
         const confirmed = await confirm({
           title: '移入回收站',
-          message: `确定将团队“${teamName}”移入回收站吗？之后可以恢复。`,
+          message: `确定将团队“${teamDisplayName}”移入回收站吗？之后可以恢复。`,
           confirmLabel: '移入回收站',
           cancelLabel: '取消',
           variant: 'danger',
@@ -539,7 +546,7 @@ export const TeamListView = (): React.JSX.Element => {
         }
       })();
     },
-    [deleteTeam]
+    [deleteTeam, teams]
   );
 
   const handleRestoreTeam = useCallback(
@@ -560,9 +567,11 @@ export const TeamListView = (): React.JSX.Element => {
     (teamName: string, e: React.MouseEvent) => {
       e.stopPropagation();
       void (async () => {
+        const teamDisplayName =
+          teams.find((team) => team.teamName === teamName)?.displayName || teamName;
         const confirmed = await confirm({
           title: '永久删除',
-          message: `确定永久删除团队“${teamName}”吗？所有数据都将丢失。`,
+          message: `确定永久删除团队“${teamDisplayName}”吗？所有数据都将丢失。`,
           confirmLabel: '永久删除',
           cancelLabel: '取消',
           variant: 'danger',
@@ -576,7 +585,7 @@ export const TeamListView = (): React.JSX.Element => {
         }
       })();
     },
-    [permanentlyDeleteTeam]
+    [permanentlyDeleteTeam, teams]
   );
 
   const handleCopyTeam = useCallback(
@@ -600,20 +609,6 @@ export const TeamListView = (): React.JSX.Element => {
     },
     [teams]
   );
-
-  const [stoppingTeamName, setStoppingTeamName] = useState<string | null>(null);
-  const handleStopTeam = useCallback(async (teamName: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setStoppingTeamName(teamName);
-    try {
-      await api.teams.stop(teamName);
-      setAliveTeams((prev) => prev.filter((n) => n !== teamName));
-    } catch (err) {
-      console.error('Failed to stop team:', err);
-    } finally {
-      setStoppingTeamName(null);
-    }
-  }, []);
 
   const [launchingTeamName, setLaunchingTeamName] = useState<string | null>(null);
   const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
@@ -651,6 +646,7 @@ export const TeamListView = (): React.JSX.Element => {
       setLaunchingTeamName(request.teamName);
       try {
         await launchTeam(request);
+        await Promise.all([fetchTeams(), fetchAllTasks()]);
       } catch (err) {
         console.error('Failed to launch team:', err);
         throw err;
@@ -658,7 +654,7 @@ export const TeamListView = (): React.JSX.Element => {
         setLaunchingTeamName(null);
       }
     },
-    [launchTeam]
+    [fetchAllTasks, fetchTeams, launchTeam]
   );
 
   useEffect(() => {
@@ -789,8 +785,13 @@ export const TeamListView = (): React.JSX.Element => {
   const handleCreateSubmit = useCallback(
     async (request: TeamCreateRequest) => {
       await createTeam(request);
+      await Promise.all([fetchTeams(), fetchAllTasks()]);
+      window.setTimeout(() => {
+        void fetchTeams();
+        void fetchAllTasks();
+      }, 1200);
     },
-    [createTeam]
+    [createTeam, fetchAllTasks, fetchTeams]
   );
 
   const createDialogElement = (
@@ -1044,7 +1045,11 @@ export const TeamListView = (): React.JSX.Element => {
 
     if (teamsWithProvisioning.length === 0) {
       return (
-        <TeamEmptyState canCreate={canCreate} onCreateTeam={() => setShowCreateDialog(true)} />
+        <TeamEmptyState
+          canCreate={canCreate}
+          onCreateTeam={() => setShowCreateDialog(true)}
+          onSelectHarness={() => setShowCreateDialog(true)}
+        />
       );
     }
 
@@ -1099,6 +1104,7 @@ export const TeamListView = (): React.JSX.Element => {
                         {team.displayName}
                       </h3>
                       <StatusBadge status={status} />
+                      {team.pendingDelete || team.restartRequired ? <PendingDeleteBadge /> : null}
                       {team.projectPath &&
                         (() => {
                           const branch = branchByPath[normalizePath(team.projectPath)];
@@ -1130,24 +1136,6 @@ export const TeamListView = (): React.JSX.Element => {
                           </TooltipTrigger>
                           <TooltipContent side="bottom">
                             {launchingTeamName === team.teamName ? '启动中…' : '启动团队'}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                      {(status === 'active' || status === 'idle') && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-amber-500/10 hover:text-amber-300 disabled:opacity-50 group-hover:opacity-100"
-                              onClick={(e) => handleStopTeam(team.teamName, e)}
-                              disabled={stoppingTeamName === team.teamName}
-                              aria-label="停止团队"
-                            >
-                              <Square size={14} fill="currentColor" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {stoppingTeamName === team.teamName ? '停止中…' : '停止团队'}
                           </TooltipContent>
                         </Tooltip>
                       )}

@@ -10,7 +10,7 @@
  * (TabBarRow tabs + PaneContainer split zones).
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
   DndContext,
@@ -42,8 +42,22 @@ export const TabbedLayout = (): React.JSX.Element => {
   useKeyboardShortcuts();
 
   // --- DnD state (lifted from PaneContainer) ---
-  const panes = useStore(useShallow((s) => s.paneLayout.panes));
+  const { panes, activeTabId } = useStore(
+    useShallow((s) => ({
+      panes: s.paneLayout.panes,
+      activeTabId: s.activeTabId,
+    }))
+  );
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
+  const activeTabType = useMemo(() => {
+    if (!activeTabId) return null;
+    for (const pane of panes) {
+      const tab = pane.tabs.find((item) => item.id === activeTabId);
+      if (tab) return tab.type;
+    }
+    return null;
+  }, [activeTabId, panes]);
+  const showSidebar = activeTabType === 'team';
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -156,8 +170,8 @@ export const TabbedLayout = (): React.JSX.Element => {
             <PaneContainer />
           </div>
 
-          {/* Sidebar - Task list / Sessions (right side) */}
-          <Sidebar />
+          {/* Sidebar - only for team detail tabs */}
+          {showSidebar ? <Sidebar /> : null}
         </div>
 
         {/* Drag overlay - semi-transparent ghost of the dragged tab */}

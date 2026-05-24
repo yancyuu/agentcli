@@ -17,13 +17,10 @@ import {
   ArrowLeftFromLine,
   ArrowRightFromLine,
   CheckCircle2,
-  Eye,
   FileCode,
-  FilePenLine,
   HelpCircle,
   Loader2,
   Play,
-  RotateCcw,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -228,10 +225,6 @@ export const KanbanTaskCard = memo(
     compact,
     taskMap,
     memberColorMap,
-    onRequestReview,
-    onApprove,
-    onRequestChanges,
-    onMoveBackToDone,
     onStartTask,
     onCompleteTask,
     onCancelTask,
@@ -254,8 +247,9 @@ export const KanbanTaskCard = memo(
       [taskChangeRequestOptions, onViewChanges]
     );
 
-    const effectiveReviewer = (kanbanTaskState?.reviewer ?? task.reviewer ?? '').trim();
-    const isReviewManual = columnId === 'review' && !hasReviewers && effectiveReviewer.length === 0;
+    void kanbanTaskState;
+    void hasReviewers;
+    const isScheduleTask = task.id.startsWith('schedule:');
     const metaActions = (
       <>
         {canDisplay && task.changePresence === 'has_changes' ? (
@@ -379,83 +373,50 @@ export const KanbanTaskCard = memo(
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 flex-nowrap gap-2">
             {columnId === 'todo' ? (
-              <>
-                <TaskActionIconButton
-                  label="开始"
-                  icon={<Play size={11} />}
-                  className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStartTask(task.id);
-                  }}
-                />
-                <TaskActionIconButton
-                  label="完成"
-                  icon={<CheckCircle2 size={11} />}
-                  className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCompleteTask(task.id);
-                  }}
-                />
-              </>
+              isScheduleTask ? null : (
+                <>
+                  <TaskActionIconButton
+                    label="开始"
+                    icon={<Play size={11} />}
+                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartTask(task.id);
+                    }}
+                  />
+                  <TaskActionIconButton
+                    label="完成"
+                    icon={<CheckCircle2 size={11} />}
+                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCompleteTask(task.id);
+                    }}
+                  />
+                </>
+              )
             ) : null}
 
             {columnId === 'in_progress' ? (
-              <>
-                <TaskActionIconButton
-                  label="完成"
-                  icon={<CheckCircle2 size={11} />}
-                  className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCompleteTask(task.id);
-                  }}
-                />
-                <CancelTaskButton taskId={task.id} onConfirm={onCancelTask} />
-              </>
-            ) : null}
-
-            {columnId === 'done' ? (
-              <>
-                <TaskActionIconButton
-                  label="通过"
-                  icon={<CheckCircle2 size={11} />}
-                  className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onApprove(task.id);
-                  }}
-                />
-                <TaskActionIconButton
-                  label="请求评审"
-                  icon={<Eye size={11} />}
-                  className="border-violet-500/40 text-violet-400 hover:bg-violet-500/10 hover:text-violet-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRequestReview(task.id);
-                  }}
-                />
-              </>
-            ) : null}
-
-            {columnId === 'review' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                <Loader2 size={11} className="animate-spin text-violet-400" />
-                <span className="whitespace-nowrap text-[11px] text-violet-400">Agent 审核中</span>
-              </div>
-            ) : null}
-
-            {columnId === 'approved' ? (
-              <TaskActionIconButton
-                label="撤销通过"
-                icon={<RotateCcw size={11} />}
-                className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMoveBackToDone(task.id);
-                }}
-              />
+              isScheduleTask ? (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <Loader2 size={11} className="animate-spin text-emerald-400" />
+                  <span className="whitespace-nowrap text-[11px] text-emerald-400">执行中</span>
+                </div>
+              ) : (
+                <>
+                  <TaskActionIconButton
+                    label="完成"
+                    icon={<CheckCircle2 size={11} />}
+                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCompleteTask(task.id);
+                    }}
+                  />
+                  <CancelTaskButton taskId={task.id} onConfirm={onCancelTask} />
+                </>
+              )
             ) : null}
           </div>
 
@@ -473,10 +434,6 @@ export const KanbanTaskCard = memo(
     prev.compact === next.compact &&
     prev.taskMap === next.taskMap &&
     prev.memberColorMap === next.memberColorMap &&
-    prev.onRequestReview === next.onRequestReview &&
-    prev.onApprove === next.onApprove &&
-    prev.onRequestChanges === next.onRequestChanges &&
-    prev.onMoveBackToDone === next.onMoveBackToDone &&
     prev.onStartTask === next.onStartTask &&
     prev.onCompleteTask === next.onCompleteTask &&
     prev.onCancelTask === next.onCancelTask &&

@@ -14,6 +14,7 @@ import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agent
 import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { Button } from '@renderer/components/ui/button';
 import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
 
 import type { SafeConfig } from '../hooks/useSettingsConfig';
@@ -27,6 +28,29 @@ const THEME_OPTIONS = [
   { value: 'light', label: '浅色' },
   { value: 'system', label: '跟随系统' },
 ] as const;
+
+const CC_LANGUAGE_OPTIONS = ['en', 'zh', 'zh-TW', 'ja', 'es'] as const;
+const CC_LOG_LEVEL_OPTIONS = ['debug', 'info', 'warn', 'error'] as const;
+const CC_ATTACHMENT_OPTIONS = [
+  { value: '', label: '默认' },
+  { value: 'on', label: '开启' },
+  { value: 'off', label: '关闭' },
+] as const;
+
+interface CcGlobalSettingsState {
+  language: string;
+  attachment_send: string;
+  log_level: string;
+  idle_timeout_mins: number;
+  thinking_messages: boolean;
+  thinking_max_len: number;
+  tool_messages: boolean;
+  tool_max_len: number;
+  stream_preview_enabled: boolean;
+  stream_preview_interval_ms: number;
+  rate_limit_max_messages: number;
+  rate_limit_window_secs: number;
+}
 
 interface GeneralSectionProps {
   readonly safeConfig: SafeConfig;
@@ -45,7 +69,7 @@ export const GeneralSection = ({
 }: GeneralSectionProps): React.JSX.Element => {
   const [serverStatus, setServerStatus] = useState<HttpServerStatus>({
     running: false,
-    port: 3456,
+    port: 5680,
   });
   const [serverLoading, setServerLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -66,6 +90,23 @@ export const GeneralSection = ({
   const [findingWslRoots, setFindingWslRoots] = useState(false);
   const [wslCandidates, setWslCandidates] = useState<WslClaudeRootCandidate[]>([]);
   const [showWslModal, setShowWslModal] = useState(false);
+  const [ccSettings, setCcSettings] = useState<CcGlobalSettingsState>({
+    language: 'zh',
+    attachment_send: '',
+    log_level: 'info',
+    idle_timeout_mins: 120,
+    thinking_messages: true,
+    thinking_max_len: 300,
+    tool_messages: true,
+    tool_max_len: 500,
+    stream_preview_enabled: true,
+    stream_preview_interval_ms: 1500,
+    rate_limit_max_messages: 20,
+    rate_limit_window_secs: 60,
+  });
+  const [ccSettingsLoading, setCcSettingsLoading] = useState(false);
+  const [ccSettingsSaving, setCcSettingsSaving] = useState(false);
+  const [ccSettingsMessage, setCcSettingsMessage] = useState<string | null>(null);
 
   // Fetch server status and Claude root info on mount
   useEffect(() => {
@@ -90,6 +131,40 @@ export const GeneralSection = ({
     void loadClaudeRootInfo();
   }, [loadClaudeRootInfo]);
 
+  const loadCcSettings = useCallback(async () => {
+    setCcSettingsLoading(true);
+    try {
+      const settings = await api.ccSettings.get();
+      setCcSettings((prev) => ({ ...prev, ...(settings as Partial<CcGlobalSettingsState>) }));
+    } catch (error) {
+      setCcSettingsMessage(error instanceof Error ? error.message : '加载运行设置失败');
+    } finally {
+      setCcSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCcSettings();
+  }, [loadCcSettings]);
+
+  const patchCcSettings = useCallback((patch: Partial<CcGlobalSettingsState>) => {
+    setCcSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const saveCcSettings = useCallback(async () => {
+    setCcSettingsSaving(true);
+    setCcSettingsMessage(null);
+    try {
+      await api.ccSettings.patch(ccSettings as unknown as Record<string, unknown>);
+      setCcSettingsMessage('已保存');
+      setTimeout(() => setCcSettingsMessage(null), 2500);
+    } catch (error) {
+      setCcSettingsMessage(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setCcSettingsSaving(false);
+    }
+  }, [ccSettings]);
+
   const handleServerToggle = useCallback(async (enabled: boolean) => {
     setServerLoading(true);
     setServerError(null);
@@ -103,7 +178,7 @@ export const GeneralSection = ({
     }
   }, []);
 
-  const serverUrl = `http://localhost:${serverStatus.port}`;
+  const serverUrl = `${window.location.protocol}//${window.location.hostname}:${serverStatus.port}`;
 
   const handleCopyUrl = useCallback(() => {
     void navigator.clipboard.writeText(serverUrl);
@@ -275,7 +350,7 @@ export const GeneralSection = ({
     () =>
       AGENT_LANGUAGE_OPTIONS.map((opt) => ({
         value: opt.value,
-        label: `${opt.flag}  ${opt.label}`,
+        label: `${opt.flag}  ${opt.value === 'system' ? '跟随系统' : opt.label}`,
         meta: { flag: opt.flag },
       })),
     []
@@ -347,9 +422,12 @@ export const GeneralSection = ({
         className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
         style={{ backgroundColor: 'var(--color-surface-raised)' }}
       >
-        <div className="size-2 shrink-0 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+        <div
+          className="size-2 shrink-0 rounded-full"
+          style={{ backgroundColor: serverStatus.running ? '#22c55e' : '#f59e0b' }}
+        />
         <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          运行地址
+          {serverStatus.running ? 'Web 服务运行中' : 'Web 服务状态未知'}
         </span>
         <code
           className="rounded px-1.5 py-0.5 font-mono text-xs"
@@ -359,14 +437,10 @@ export const GeneralSection = ({
             border: '1px solid var(--color-border)',
           }}
         >
-          {window.location.origin}
+          {serverLoading ? '检查中...' : serverUrl}
         </code>
         <button
-          onClick={() => {
-            void navigator.clipboard.writeText(window.location.origin);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          }}
+          onClick={handleCopyUrl}
           className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
           style={{
             borderColor: 'var(--color-border)',
@@ -377,9 +451,195 @@ export const GeneralSection = ({
           {copied ? '已复制' : '复制链接'}
         </button>
       </div>
+      {serverError && <p className="mb-2 text-xs text-red-400">服务状态获取失败：{serverError}</p>}
       <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        当前为独立运行模式。HTTP 服务始终开启。系统通知不可用，通知触发仅在应用内记录。
+        当前为 Web 控制台模式。服务由 Hermit 后端托管，不能在浏览器内启动或关闭。
       </p>
+
+      <SettingsSectionHeader title="运行设置" />
+      <div className="space-y-3 rounded-md border border-[var(--color-border)] p-3">
+        {ccSettingsLoading ? (
+          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            <Loader2 className="size-3.5 animate-spin" />
+            正在加载运行设置...
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  语言
+                </label>
+                <select
+                  value={ccSettings.language}
+                  onChange={(event) => patchCcSettings({ language: event.target.value })}
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                >
+                  {CC_LANGUAGE_OPTIONS.map((language) => (
+                    <option key={language} value={language}>
+                      {language}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  附件回传
+                </label>
+                <select
+                  value={ccSettings.attachment_send}
+                  onChange={(event) => patchCcSettings({ attachment_send: event.target.value })}
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                >
+                  {CC_ATTACHMENT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  空闲超时（分钟）
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={ccSettings.idle_timeout_mins}
+                  onChange={(event) =>
+                    patchCcSettings({ idle_timeout_mins: Number(event.target.value) || 0 })
+                  }
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  日志等级
+                </label>
+                <select
+                  value={ccSettings.log_level}
+                  onChange={(event) => patchCcSettings({ log_level: event.target.value })}
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                >
+                  {CC_LOG_LEVEL_OPTIONS.map((level) => (
+                    <option key={level} value={level}>
+                      {level}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              <SettingsToggle
+                enabled={ccSettings.thinking_messages}
+                onChange={(value) => patchCcSettings({ thinking_messages: value })}
+              />
+              <span className="text-xs text-[var(--color-text-secondary)]">显示 Thinking 消息</span>
+              <SettingsToggle
+                enabled={ccSettings.tool_messages}
+                onChange={(value) => patchCcSettings({ tool_messages: value })}
+              />
+              <span className="text-xs text-[var(--color-text-secondary)]">显示工具进度</span>
+              <SettingsToggle
+                enabled={ccSettings.stream_preview_enabled}
+                onChange={(value) => patchCcSettings({ stream_preview_enabled: value })}
+              />
+              <span className="text-xs text-[var(--color-text-secondary)]">启用流式预览</span>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  Thinking 最大长度
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={ccSettings.thinking_max_len}
+                  onChange={(event) =>
+                    patchCcSettings({ thinking_max_len: Number(event.target.value) || 0 })
+                  }
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  工具消息最大长度
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={ccSettings.tool_max_len}
+                  onChange={(event) =>
+                    patchCcSettings({ tool_max_len: Number(event.target.value) || 0 })
+                  }
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  预览间隔（毫秒）
+                </label>
+                <input
+                  type="number"
+                  min={100}
+                  value={ccSettings.stream_preview_interval_ms}
+                  onChange={(event) =>
+                    patchCcSettings({
+                      stream_preview_interval_ms: Number(event.target.value) || 100,
+                    })
+                  }
+                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+                  频率限制（条/窗口）
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={ccSettings.rate_limit_max_messages}
+                    onChange={(event) =>
+                      patchCcSettings({ rate_limit_max_messages: Number(event.target.value) || 0 })
+                    }
+                    className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                    placeholder="数量"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={ccSettings.rate_limit_window_secs}
+                    onChange={(event) =>
+                      patchCcSettings({ rate_limit_window_secs: Number(event.target.value) || 1 })
+                    }
+                    className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                    placeholder="秒"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button size="sm" onClick={() => void saveCcSettings()} disabled={ccSettingsSaving}>
+                {ccSettingsSaving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                保存运行设置
+              </Button>
+              {ccSettingsMessage ? (
+                <span
+                  className={`text-xs ${
+                    ccSettingsMessage === '已保存' ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {ccSettingsMessage}
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Privacy / Telemetry — only visible when Sentry DSN is baked into the build */}
       {import.meta.env.VITE_SENTRY_DSN && (

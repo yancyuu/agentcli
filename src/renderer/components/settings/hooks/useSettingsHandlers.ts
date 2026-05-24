@@ -104,6 +104,11 @@ export function useSettingsHandlers({
   const handleLanguageChange = useCallback(
     (value: string) => {
       fireAndForgetConfigUpdate('general', { agentLanguage: value });
+      // Sync to cc-connect: map 'system' → browser primary language code
+      const ccLang = value === 'system' ? (navigator.language.split('-')[0] ?? 'zh') : value;
+      api.ccSettings.patch({ language: ccLang }).catch(() => {
+        /* best-effort */
+      });
     },
     [fireAndForgetConfigUpdate]
   );

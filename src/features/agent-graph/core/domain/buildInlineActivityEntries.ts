@@ -72,7 +72,11 @@ export function buildInlineActivityEntries({
     entriesByOwnerNodeId.set(ownerNodeId, []);
   }
 
-  const orderedMessages = [...data.messages].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const orderedMessages = [...data.messages].sort((a, b) => {
+    const ta = String(a.timestamp ?? '');
+    const tb = String(b.timestamp ?? '');
+    return ta.localeCompare(tb);
+  });
   const messageSourceOrderByKey = new Map(
     data.messages.map((message, index) => [getActivityMessageKey(message), index] as const)
   );
@@ -129,9 +133,11 @@ export function buildInlineActivityEntries({
     });
   }
 
-  const orderedComments = [...collectTaskComments(data.tasks)].sort((a, b) =>
-    a.comment.createdAt.localeCompare(b.comment.createdAt)
-  );
+  const orderedComments = [...collectTaskComments(data.tasks)].sort((a, b) => {
+    const ta = String(a.comment.createdAt ?? '');
+    const tb = String(b.comment.createdAt ?? '');
+    return ta.localeCompare(tb);
+  });
   for (const item of orderedComments) {
     const ownerNodeId = resolveCommentOwnerNodeId({
       taskOwner: item.task.owner,
@@ -197,7 +203,9 @@ function compareInlineActivityEntries(
   left: InlineActivityEntry,
   right: InlineActivityEntry
 ): number {
-  const timestampDiff = right.graphItem.timestamp.localeCompare(left.graphItem.timestamp);
+  const tl = String(left.graphItem.timestamp ?? '');
+  const tr = String(right.graphItem.timestamp ?? '');
+  const timestampDiff = tr.localeCompare(tl);
   if (timestampDiff !== 0) {
     return timestampDiff;
   }

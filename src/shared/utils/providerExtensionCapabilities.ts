@@ -56,13 +56,24 @@ export function createLegacyRuntimeFallbackCliExtensionCapabilities(
 }
 
 export function getCliProviderExtensionCapabilities(
-  provider: Pick<CliProviderStatus, 'capabilities'>
+  provider: Pick<CliProviderStatus, 'capabilities'> | null | undefined
 ): CliExtensionCapabilities {
-  return provider.capabilities.extensions ?? createLegacyRuntimeFallbackCliExtensionCapabilities();
+  const fallback = createLegacyRuntimeFallbackCliExtensionCapabilities();
+  const extensions = provider?.capabilities?.extensions;
+  if (!extensions) {
+    return fallback;
+  }
+
+  return {
+    plugins: extensions.plugins ?? fallback.plugins,
+    mcp: extensions.mcp ?? fallback.mcp,
+    skills: extensions.skills ?? fallback.skills,
+    apiKeys: extensions.apiKeys ?? fallback.apiKeys,
+  };
 }
 
 export function getCliProviderExtensionCapability(
-  provider: Pick<CliProviderStatus, 'capabilities'>,
+  provider: Pick<CliProviderStatus, 'capabilities'> | null | undefined,
   section: keyof CliExtensionCapabilities
 ): CliExtensionCapability {
   return getCliProviderExtensionCapabilities(provider)[section];

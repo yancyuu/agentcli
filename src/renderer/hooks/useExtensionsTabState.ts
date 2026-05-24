@@ -33,7 +33,7 @@ const DEFAULT_FILTERS: PluginFilters = {
 
 export function useExtensionsTabState() {
   // ── Sub-tab navigation ──
-  const [activeSubTab, setActiveSubTab] = useState<ExtensionsSubTab>('plugins');
+  const [activeSubTab, setActiveSubTab] = useState<ExtensionsSubTab>('mcp-servers');
 
   // ── Plugin filters & sort ──
   const [pluginFilters, setPluginFilters] = useState<PluginFilters>(DEFAULT_FILTERS);

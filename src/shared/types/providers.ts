@@ -12,9 +12,13 @@ export type AgentType =
   | 'gemini'
   | 'opencode'
   | 'cursor'
+  | 'iflow'
   | 'kimi'
+  | 'devin'
   | 'qoder'
-  | 'acp';
+  | 'pi'
+  | 'acp'
+  | 'tmux';
 
 export const ALL_AGENT_TYPES: readonly AgentType[] = [
   'claudecode',
@@ -22,9 +26,13 @@ export const ALL_AGENT_TYPES: readonly AgentType[] = [
   'gemini',
   'opencode',
   'cursor',
+  'iflow',
   'kimi',
+  'devin',
   'qoder',
+  'pi',
   'acp',
+  'tmux',
 ] as const;
 
 export interface ProviderModelEntry {

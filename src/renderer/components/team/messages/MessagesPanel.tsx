@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Sheet, type SheetRef } from 'react-modal-sheet';
 
+import { api } from '@renderer/api';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -54,6 +55,8 @@ import type { MessagesFilterState } from './MessagesFilterPopover';
 import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
 import type {
   AgentActionMode,
+  CcSession,
+  CcSessionDetail,
   InboxMessage,
   ResolvedTeamMember,
   TaskRef,
@@ -69,6 +72,7 @@ const BOTTOM_SHEET_HEADER_HEIGHT = 40;
 const BOTTOM_SHEET_COLLAPSED_SNAP_INDEX = 1;
 const BOTTOM_SHEET_COMPOSER_SNAP_INDEX = 2;
 const BOTTOM_SHEET_FULL_SNAP_INDEX = 4;
+const AUTO_LOAD_OLDER_SCROLL_TOP_PX = 56;
 
 interface MessagesPanelProps {
   teamName: string;
@@ -238,6 +242,8 @@ export const MessagesPanel = memo(function MessagesPanel({
   const loadingOlderMessages = messagesState?.loadingOlder ?? false;
   const hasMore = messagesState?.hasMore ?? false;
   const effectiveMessages = messages;
+  const loadedMessageCount = effectiveMessages.length;
+  const autoLoadOlderLockRef = useRef(false);
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
@@ -260,6 +266,31 @@ export const MessagesPanel = memo(function MessagesPanel({
       : position === 'sidebar'
         ? sidebarScrollRef
         : bottomSheetScrollRef;
+
+  const maybeAutoLoadOlderMessages = useCallback(
+    (scrollTop: number) => {
+      if (
+        scrollTop > AUTO_LOAD_OLDER_SCROLL_TOP_PX ||
+        !hasMore ||
+        messagesState?.loadingHead ||
+        loadingOlderMessages
+      ) {
+        return;
+      }
+      if (autoLoadOlderLockRef.current) {
+        return;
+      }
+      autoLoadOlderLockRef.current = true;
+      void loadOlderMessages();
+    },
+    [hasMore, loadOlderMessages, loadingOlderMessages, messagesState?.loadingHead]
+  );
+
+  useEffect(() => {
+    if (!loadingOlderMessages) {
+      autoLoadOlderLockRef.current = false;
+    }
+  }, [loadingOlderMessages]);
 
   const activityTimelineViewport = useMemo<TimelineViewport | undefined>(() => {
     if (!activeScrollContainerRef) return undefined;
@@ -296,6 +327,10 @@ export const MessagesPanel = memo(function MessagesPanel({
   const [expandedItemKey, setExpandedItemKey] = useState<string | null>(
     initialSidebarStateRef.current.expandedItemKey
   );
+  const [teamSessions, setTeamSessions] = useState<CcSession[]>([]);
+  const [selectedSessionDetail, setSelectedSessionDetail] = useState<CcSessionDetail | null>(null);
+  const [selectedSessionDetailLoading, setSelectedSessionDetailLoading] = useState(false);
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
   const [messagesScrollTop, setMessagesScrollTop] = useState(
     initialSidebarStateRef.current.messagesScrollTop
   );
@@ -316,6 +351,65 @@ export const MessagesPanel = memo(function MessagesPanel({
     setMessagesScrollTop(initialSidebarStateRef.current.messagesScrollTop);
     setBottomSheetSnapIndex(initialSidebarStateRef.current.bottomSheetSnapIndex);
   }, [teamName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.teams
+      .getTeamSessions(teamName)
+      .then((sessions) => {
+        if (cancelled) return;
+        const sortedSessions = [...sessions].sort(
+          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        );
+        setTeamSessions(sortedSessions);
+        setSelectedSessionKey((current) => {
+          if (current && sortedSessions.some((session) => session.sessionKey === current))
+            return current;
+          return sortedSessions[0]?.sessionKey ?? null;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTeamSessions([]);
+          setSelectedSessionKey(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamName]);
+
+  const selectedSession = useMemo(
+    () => teamSessions.find((session) => session.sessionKey === selectedSessionKey) ?? null,
+    [selectedSessionKey, teamSessions]
+  );
+  const selectedIsHermitLocalSession =
+    selectedSession?.platform === 'hermit' ||
+    selectedSession?.sessionKey === `hermit:${teamName}:session`;
+
+  useEffect(() => {
+    if (!selectedSession || selectedIsHermitLocalSession) {
+      setSelectedSessionDetail(null);
+      setSelectedSessionDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSelectedSessionDetailLoading(true);
+    void api.teams
+      .getSessionDetail(teamName, selectedSession.id, 200)
+      .then((detail) => {
+        if (!cancelled) setSelectedSessionDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedSessionDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedSessionDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIsHermitLocalSession, selectedSession, teamName]);
 
   useEffect(() => {
     setTeamMessagesSidebarUiState(teamName, {
@@ -382,6 +476,27 @@ export const MessagesPanel = memo(function MessagesPanel({
     el.scrollTop = messagesScrollTop;
   }, [position, messagesScrollTop]);
 
+  useEffect(() => {
+    if (position === 'sidebar') {
+      return;
+    }
+    const scrollElement =
+      position === 'bottom-sheet'
+        ? bottomSheetScrollRef.current
+        : (inlineScrollContainerRef?.current ?? null);
+    if (!scrollElement) {
+      return;
+    }
+    const onScroll = () => {
+      maybeAutoLoadOlderMessages(scrollElement.scrollTop);
+    };
+    scrollElement.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => {
+      scrollElement.removeEventListener('scroll', onScroll);
+    };
+  }, [inlineScrollContainerRef, maybeAutoLoadOlderMessages, position]);
+
   useLayoutEffect(() => {
     if (position !== 'bottom-sheet' || typeof ResizeObserver === 'undefined') return;
 
@@ -416,22 +531,68 @@ export const MessagesPanel = memo(function MessagesPanel({
     };
   }, [position, mountPoint]);
 
+  const sessionScopedMessages = useMemo(() => {
+    const newestFirst = (items: InboxMessage[]) =>
+      [...items].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    if (!selectedSessionKey) return [];
+    if (selectedSession && !selectedIsHermitLocalSession) {
+      if (!selectedSessionDetail) {
+        return [];
+      }
+      return [...selectedSessionDetail.history].reverse().map(
+        (entry, index): InboxMessage => ({
+          messageId: `${selectedSessionDetail.id}:${index}:${entry.timestamp}`,
+          from: entry.role === 'user' ? 'user' : selectedSessionDetail.name || teamName,
+          to: entry.role === 'user' ? selectedSessionDetail.name || teamName : 'user',
+          text: entry.content,
+          timestamp: entry.timestamp,
+          read: true,
+          source: entry.role === 'user' ? 'user_sent' : 'inbox',
+          session: {
+            id: selectedSessionDetail.id,
+            key: selectedSessionDetail.sessionKey,
+            platform: selectedSessionDetail.platform,
+            title:
+              selectedSession.title ||
+              selectedSession.chatName ||
+              selectedSession.userName ||
+              selectedSession.sessionKey,
+            chatName: selectedSession.chatName,
+            userName: selectedSession.userName,
+          },
+        })
+      );
+    }
+    return newestFirst(
+      effectiveMessages.filter((message) => {
+        return message.session?.key === selectedSessionKey;
+      })
+    );
+  }, [
+    effectiveMessages,
+    selectedIsHermitLocalSession,
+    selectedSession,
+    selectedSessionDetail,
+    selectedSessionKey,
+    teamName,
+  ]);
+
   const filteredMessages = useMemo(() => {
-    return filterTeamMessages(effectiveMessages, {
+    return filterTeamMessages(sessionScopedMessages, {
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-  }, [effectiveMessages, messagesFilter, messagesSearchQuery, timeWindow]);
+  }, [messagesFilter, messagesSearchQuery, sessionScopedMessages, timeWindow]);
 
   const activityTimelineMessages = useMemo(() => {
-    return filterTeamMessages(effectiveMessages, {
+    return filterTeamMessages(sessionScopedMessages, {
       includePassiveIdlePeerSummariesWhenNoiseHidden: true,
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-  }, [effectiveMessages, messagesFilter, messagesSearchQuery, timeWindow]);
+  }, [messagesFilter, messagesSearchQuery, sessionScopedMessages, timeWindow]);
 
   const replyCandidateMessages = useMemo(
     () =>
@@ -527,6 +688,10 @@ export const MessagesPanel = memo(function MessagesPanel({
         attachments,
         actionMode,
         taskRefs,
+        sessionKey:
+          selectedSessionKey && selectedSessionKey !== '__unassigned__'
+            ? selectedSessionKey
+            : undefined,
       })
         .then((result) => {
           if (
@@ -550,7 +715,7 @@ export const MessagesPanel = memo(function MessagesPanel({
           });
         });
     },
-    [teamName, sendTeamMessage, onPendingReplyChange]
+    [teamName, sendTeamMessage, onPendingReplyChange, selectedSessionKey]
   );
 
   const handleCrossTeamSend = useCallback(
@@ -656,7 +821,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         teamName={teamName}
         members={members}
         filter={messagesFilter}
-        messages={effectiveMessages}
+        messages={sessionScopedMessages}
         open={messagesFilterOpen}
         onOpenChange={setMessagesFilterOpen}
         onApply={setMessagesFilter}
@@ -699,6 +864,9 @@ export const MessagesPanel = memo(function MessagesPanel({
         sendWarning={sendMessageWarning}
         sendDebugDetails={sendMessageDebugDetails}
         lastResult={lastSendMessageResult}
+        sessions={teamSessions}
+        selectedSessionKey={selectedSessionKey}
+        onSessionChange={setSelectedSessionKey}
         textareaRef={composerTextareaRef}
         onSend={handleSend}
         onCrossTeamSend={handleCrossTeamSend}
@@ -706,7 +874,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       <StatusBlock
         members={members}
         tasks={tasks}
-        messages={effectiveMessages}
+        messages={sessionScopedMessages}
         pendingRepliesByMember={pendingRepliesByMember}
         layout="flow"
         position="inline"
@@ -729,7 +897,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         teamColorByName={teamColorByName}
         onTeamClick={openTeamTab}
         onMemberClick={onMemberClick}
-        onCreateTaskFromMessage={onCreateTaskFromMessage}
+        onCreateTaskFromMessage={undefined}
         onReplyToMessage={onReplyToMessage}
         onMessageVisible={handleMessageVisible}
         onRestartTeam={onRestartTeam}
@@ -740,16 +908,21 @@ export const MessagesPanel = memo(function MessagesPanel({
       />
       {hasMore && (
         <div className="flex justify-center py-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-text-muted"
-            aria-busy={loadingOlderMessages}
-            disabled={loadingOlderMessages}
-            onClick={() => void loadOlderMessages()}
-          >
-            加载更早消息
-          </Button>
+          <div className="flex flex-col items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-text-muted"
+              aria-busy={loadingOlderMessages}
+              disabled={loadingOlderMessages}
+              onClick={() => void loadOlderMessages()}
+            >
+              加载更早消息
+            </Button>
+            <span className="text-[10px] text-[var(--color-text-muted)]">
+              已加载 {loadedMessageCount} 条
+            </span>
+          </div>
         </div>
       )}
       <MessageExpandDialog
@@ -758,7 +931,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         onOpenChange={handleExpandDialogChange}
         teamName={teamName}
         members={members}
-        onCreateTaskFromMessage={onCreateTaskFromMessage}
+        onCreateTaskFromMessage={undefined}
         onReplyToMessage={onReplyToMessage}
         onMemberClick={onMemberClick}
         onTaskIdClick={onTaskIdClick}
@@ -872,7 +1045,11 @@ export const MessagesPanel = memo(function MessagesPanel({
         <div
           ref={sidebarScrollRef}
           className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-14 pr-3 pt-2"
-          onScroll={(e) => setMessagesScrollTop(e.currentTarget.scrollTop)}
+          onScroll={(e) => {
+            const scrollTop = e.currentTarget.scrollTop;
+            setMessagesScrollTop(scrollTop);
+            maybeAutoLoadOlderMessages(scrollTop);
+          }}
         >
           <div className="pl-3">
             <MessageComposer
@@ -884,6 +1061,9 @@ export const MessagesPanel = memo(function MessagesPanel({
               sendWarning={sendMessageWarning}
               sendDebugDetails={sendMessageDebugDetails}
               lastResult={lastSendMessageResult}
+              sessions={teamSessions}
+              selectedSessionKey={selectedSessionKey}
+              onSessionChange={setSelectedSessionKey}
               textareaRef={composerTextareaRef}
               onSend={handleSend}
               onCrossTeamSend={handleCrossTeamSend}
@@ -891,7 +1071,7 @@ export const MessagesPanel = memo(function MessagesPanel({
             <StatusBlock
               members={members}
               tasks={tasks}
-              messages={effectiveMessages}
+              messages={sessionScopedMessages}
               pendingRepliesByMember={pendingRepliesByMember}
               layout="flow"
               position="sidebar"
@@ -915,7 +1095,7 @@ export const MessagesPanel = memo(function MessagesPanel({
             teamColorByName={teamColorByName}
             onTeamClick={openTeamTab}
             onMemberClick={onMemberClick}
-            onCreateTaskFromMessage={onCreateTaskFromMessage}
+            onCreateTaskFromMessage={undefined}
             onReplyToMessage={onReplyToMessage}
             onMessageVisible={handleMessageVisible}
             onRestartTeam={onRestartTeam}
@@ -926,16 +1106,21 @@ export const MessagesPanel = memo(function MessagesPanel({
           />
           {hasMore && (
             <div className="flex justify-center py-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-text-muted"
-                aria-busy={loadingOlderMessages}
-                disabled={loadingOlderMessages}
-                onClick={() => void loadOlderMessages()}
-              >
-                Load older messages
-              </Button>
+              <div className="flex flex-col items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-text-muted"
+                  aria-busy={loadingOlderMessages}
+                  disabled={loadingOlderMessages}
+                  onClick={() => void loadOlderMessages()}
+                >
+                  加载更早消息
+                </Button>
+                <span className="text-[10px] text-[var(--color-text-muted)]">
+                  已加载 {loadedMessageCount} 条
+                </span>
+              </div>
             </div>
           )}
           <MessageExpandDialog
@@ -944,7 +1129,7 @@ export const MessagesPanel = memo(function MessagesPanel({
             onOpenChange={handleExpandDialogChange}
             teamName={teamName}
             members={members}
-            onCreateTaskFromMessage={onCreateTaskFromMessage}
+            onCreateTaskFromMessage={undefined}
             onReplyToMessage={onReplyToMessage}
             onMemberClick={onMemberClick}
             onTaskIdClick={onTaskIdClick}
@@ -1164,6 +1349,9 @@ export const MessagesPanel = memo(function MessagesPanel({
                     sendWarning={sendMessageWarning}
                     sendDebugDetails={sendMessageDebugDetails}
                     lastResult={lastSendMessageResult}
+                    sessions={teamSessions}
+                    selectedSessionKey={selectedSessionKey}
+                    onSessionChange={setSelectedSessionKey}
                     textareaRef={composerTextareaRef}
                     onSend={handleSend}
                     onCrossTeamSend={handleCrossTeamSend}
@@ -1174,7 +1362,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                 <StatusBlock
                   members={members}
                   tasks={tasks}
-                  messages={effectiveMessages}
+                  messages={sessionScopedMessages}
                   pendingRepliesByMember={pendingRepliesByMember}
                   layout="flow"
                   position="inline"
@@ -1199,7 +1387,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                   teamColorByName={teamColorByName}
                   onTeamClick={openTeamTab}
                   onMemberClick={onMemberClick}
-                  onCreateTaskFromMessage={onCreateTaskFromMessage}
+                  onCreateTaskFromMessage={undefined}
                   onReplyToMessage={onReplyToMessage}
                   onMessageVisible={handleMessageVisible}
                   onRestartTeam={onRestartTeam}
@@ -1210,16 +1398,21 @@ export const MessagesPanel = memo(function MessagesPanel({
                 />
                 {hasMore && (
                   <div className="flex justify-center py-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs text-text-muted"
-                      aria-busy={loadingOlderMessages}
-                      disabled={loadingOlderMessages}
-                      onClick={() => void loadOlderMessages()}
-                    >
-                      加载更早消息
-                    </Button>
+                    <div className="flex flex-col items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-text-muted"
+                        aria-busy={loadingOlderMessages}
+                        disabled={loadingOlderMessages}
+                        onClick={() => void loadOlderMessages()}
+                      >
+                        加载更早消息
+                      </Button>
+                      <span className="text-[10px] text-[var(--color-text-muted)]">
+                        已加载 {loadedMessageCount} 条
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1229,7 +1422,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                 onOpenChange={handleExpandDialogChange}
                 teamName={teamName}
                 members={members}
-                onCreateTaskFromMessage={onCreateTaskFromMessage}
+                onCreateTaskFromMessage={undefined}
                 onReplyToMessage={onReplyToMessage}
                 onMemberClick={onMemberClick}
                 onTaskIdClick={onTaskIdClick}

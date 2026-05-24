@@ -13,6 +13,7 @@ import { SessionContextPanel } from './SessionContextPanel/index';
 
 /** Pixels from bottom considered "near bottom" for scroll-button visibility and auto-scroll. */
 const SCROLL_THRESHOLD = 300;
+const CHAT_ITEMS_PAGE_SIZE = 80;
 
 import { computeRemainingContext, sumContextInjectionTokens } from '@renderer/utils/contextMath';
 import { deriveContextMetrics } from '@shared/utils/contextMetrics';
@@ -233,6 +234,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
 
   // State for navigation highlight (blue, used for Turn navigation from CLAUDE.md panel)
   const [isNavigationHighlight, setIsNavigationHighlight] = useState(false);
+  const [pageFromLatest, setPageFromLatest] = useState(0);
   const navigationHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs map for AI groups, chat items, and individual tool items (for scrolling)
@@ -244,8 +246,49 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const isSearchActive = searchQuery.trim().length > 0;
-  const shouldVirtualize = (conversation?.items.length ?? 0) >= VIRTUALIZATION_THRESHOLD;
+  const fullConversationItems = conversation?.items ?? [];
+  const forceFullConversation =
+    isSearchActive || pendingNavigation != null || selectedContextPhase !== null;
+  const totalConversationPages = Math.max(
+    1,
+    Math.ceil(fullConversationItems.length / CHAT_ITEMS_PAGE_SIZE)
+  );
+  const normalizedPageFromLatest = Math.min(pageFromLatest, totalConversationPages - 1);
+  const displayedConversationItems = useMemo(() => {
+    if (forceFullConversation || fullConversationItems.length <= CHAT_ITEMS_PAGE_SIZE) {
+      return fullConversationItems;
+    }
+    const end = fullConversationItems.length - normalizedPageFromLatest * CHAT_ITEMS_PAGE_SIZE;
+    const start = Math.max(0, end - CHAT_ITEMS_PAGE_SIZE);
+    return fullConversationItems.slice(start, end);
+  }, [forceFullConversation, fullConversationItems, normalizedPageFromLatest]);
+  const shouldShowConversationPagination =
+    !forceFullConversation && fullConversationItems.length > CHAT_ITEMS_PAGE_SIZE;
+  const currentConversationPage = normalizedPageFromLatest + 1;
+  const shouldVirtualize = displayedConversationItems.length >= VIRTUALIZATION_THRESHOLD;
   const emptyRenderedSyncCountRef = useRef(0);
+
+  useEffect(() => {
+    setPageFromLatest(0);
+  }, [sessionDetail?.session?.id]);
+
+  useEffect(() => {
+    if (pageFromLatest > totalConversationPages - 1) {
+      setPageFromLatest(totalConversationPages - 1);
+    }
+  }, [pageFromLatest, totalConversationPages]);
+
+  const goToConversationPage = useCallback(
+    (nextPageFromLatest: number): void => {
+      setPageFromLatest(Math.max(0, Math.min(nextPageFromLatest, totalConversationPages - 1)));
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+        }
+      });
+    },
+    [totalConversationPages]
+  );
 
   const setSearchQueryForTab = useCallback(
     (query: string): void => {
@@ -256,14 +299,14 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
 
   const groupIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    if (!conversation?.items) {
+    if (!displayedConversationItems) {
       return map;
     }
-    conversation.items.forEach((item, index) => {
+    displayedConversationItems.forEach((item, index) => {
       map.set(item.group.id, index);
     });
     return map;
-  }, [conversation]);
+  }, [displayedConversationItems]);
 
   // --- New-item animation tracking ---
   const knownGroupIdsRef = useRef<Set<string>>(new Set());
@@ -280,7 +323,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   }
 
   const newGroupIds = useMemo(() => {
-    const items = conversation?.items;
+    const items = displayedConversationItems;
     if (!items || items.length === 0) {
       knownGroupIdsRef.current.clear();
       animatedGroupIdsRef.current.clear();
@@ -306,7 +349,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
       }
     }
     return newIds;
-  }, [conversation]);
+  }, [displayedConversationItems]);
 
   // Expire animation flags after the CSS animation completes (350ms + buffer).
   // This prevents replay when the virtualizer remounts off-screen elements.
@@ -321,7 +364,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   }, [newGroupIds]);
 
   const rowVirtualizer = useVirtualizer({
-    count: shouldVirtualize ? (conversation?.items.length ?? 0) : 0,
+    count: shouldVirtualize ? displayedConversationItems.length : 0,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => ESTIMATED_CHAT_ITEM_HEIGHT,
     overscan: 8,
@@ -492,7 +535,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   // Re-check button visibility whenever conversation updates
   useEffect(() => {
     checkScrollButton();
-  }, [conversation, checkScrollButton]);
+  }, [displayedConversationItems, checkScrollButton]);
 
   // Callback to register AI group refs (combines with visibility hook)
   const registerAIGroupRefCombined = useCallback(
@@ -949,6 +992,38 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
             style={{ marginTop: allContextInjections.length > 0 && !sessionTeam ? '-2rem' : 0 }}
           >
             <div className="space-y-8">
+              {shouldShowConversationPagination && (
+                <div className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--color-border)] px-2 py-1 transition-colors hover:bg-[var(--color-surface-raised)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={normalizedPageFromLatest >= totalConversationPages - 1}
+                    onClick={() => goToConversationPage(normalizedPageFromLatest + 1)}
+                  >
+                    更早一页
+                  </button>
+                  <span>
+                    第 {currentConversationPage} / {totalConversationPages} 页
+                    {currentConversationPage === 1 ? '（最新）' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--color-border)] px-2 py-1 transition-colors hover:bg-[var(--color-surface-raised)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={normalizedPageFromLatest <= 0}
+                    onClick={() => goToConversationPage(normalizedPageFromLatest - 1)}
+                  >
+                    更新一页
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--color-border)] px-2 py-1 transition-colors hover:bg-[var(--color-surface-raised)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={normalizedPageFromLatest <= 0}
+                    onClick={() => goToConversationPage(0)}
+                  >
+                    回到最新
+                  </button>
+                </div>
+              )}
               {shouldVirtualize ? (
                 <div
                   style={{
@@ -958,7 +1033,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                   }}
                 >
                   {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                    const item = conversation.items[virtualRow.index];
+                    const item = displayedConversationItems[virtualRow.index];
                     if (!item) return null;
                     return (
                       <div
@@ -994,7 +1069,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                   })}
                 </div>
               ) : (
-                conversation.items.map((item) => (
+                displayedConversationItems.map((item) => (
                   <ChatHistoryItem
                     key={item.group.id}
                     item={item}

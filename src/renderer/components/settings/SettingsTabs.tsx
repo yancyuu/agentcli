@@ -6,11 +6,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { Bell, Info, PlugZap, Settings, Wrench } from 'lucide-react';
+import { Bot, Info, PlugZap, Settings, Wrench } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
 
-export type SettingsSection = 'general' | 'channels' | 'notifications' | 'advanced';
+export type SettingsSection = 'general' | 'channels' | 'harness' | 'advanced';
 
 interface SettingsTabsProps {
   activeSection: SettingsSection;
@@ -22,7 +22,6 @@ interface TabConfig {
   label: string;
   icon: LucideIcon;
   description: string;
-  electronOnly?: boolean;
 }
 
 const tabs: TabConfig[] = [
@@ -37,13 +36,13 @@ const tabs: TabConfig[] = [
     label: '渠道',
     icon: PlugZap,
     description:
-      '管理团队可用的 AI 模型渠道（Claude / Codex / Gemini / OpenCode 等），支持预设市场和 cc-switch 导入。',
+      '管理飞书、微信、Telegram 等消息平台的接入配置。每个 cc-connect 项目可绑定一个或多个渠道。',
   },
   {
-    id: 'notifications',
-    label: '通知',
-    icon: Bell,
-    description: '控制何时以及如何接收智能体活动、任务完成和错误通知。',
+    id: 'harness',
+    label: 'Harness',
+    icon: Bot,
+    description: '管理 AI Agent 运行时（12 种）的 Provider 配置、API Key、端点和 CLI 安装状态。',
   },
   {
     id: 'advanced',
@@ -57,7 +56,7 @@ export const SettingsTabs = ({
   activeSection,
   onSectionChange,
 }: Readonly<SettingsTabsProps>): React.JSX.Element => {
-  const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.electronOnly), []);
+  const visibleTabs = useMemo(() => tabs, []);
 
   return (
     <TooltipProvider>

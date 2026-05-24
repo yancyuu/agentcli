@@ -795,6 +795,7 @@ export interface TeamMessagesCacheEntry {
   loadingHead: boolean;
   loadingOlder: boolean;
   headHydrated: boolean;
+  olderHydrated: boolean;
 }
 
 export interface RefreshTeamMessagesHeadResult {
@@ -813,6 +814,7 @@ const EMPTY_TEAM_MESSAGES_CACHE_ENTRY: TeamMessagesCacheEntry = {
   loadingHead: false,
   loadingOlder: false,
   headHydrated: false,
+  olderHydrated: false,
 };
 
 function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
@@ -826,6 +828,7 @@ function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
     loadingHead: false,
     loadingOlder: false,
     headHydrated: false,
+    olderHydrated: false,
   };
 }
 
@@ -3664,7 +3667,9 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             page.messages
           );
           const preserveLoadedOlderTail =
-            Array.isArray(retainedOlderTail) && retainedOlderTail.length > 0;
+            current.olderHydrated &&
+            Array.isArray(retainedOlderTail) &&
+            retainedOlderTail.length > 0;
           const nextCanonical = headChanged
             ? preserveLoadedOlderTail
               ? mergeTeamMessages(retainedOlderTail, page.messages)
@@ -3681,6 +3686,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             lastFetchedAt: Date.now(),
             loadingHead: false,
             headHydrated: true,
+            olderHydrated: preserveLoadedOlderTail ? current.olderHydrated : false,
           };
           return {
             teamMessagesByName: {
@@ -3823,6 +3829,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
                 hasMore: page.hasMore,
                 feedRevision: page.feedRevision,
                 loadingOlder: false,
+                olderHydrated: true,
               },
             },
           };
@@ -4284,28 +4291,6 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   deleteTeam: async (teamName: string) => {
     await unwrapIpc('team:deleteTeam', () => api.teams.deleteTeam(teamName));
-    invalidateTeamLocalStateEpoch(teamName);
-    clearPendingReplyRefreshTimer(teamName);
-    clearPendingReplyRefreshWaits(teamName);
-    clearTeamScopedTransientState(teamName);
-    set((state) => {
-      const clearedState = collectTeamScopedStateRemovals(state, teamName);
-      const tombstones = buildTeamScopedProgressTombstones(state, teamName, nowIso());
-      if (state.selectedTeamName === teamName) {
-        return {
-          selectedTeamName: null,
-          selectedTeamData: null,
-          selectedTeamLoading: false,
-          selectedTeamError: null,
-          ...clearedState,
-          ...tombstones,
-        };
-      }
-      return {
-        ...clearedState,
-        ...tombstones,
-      };
-    });
     await get().fetchTeams();
     await get().fetchAllTasks();
   },
@@ -4522,6 +4507,16 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       } catch {
         // ignore — polling below will retry
       }
+      void get().fetchTeams();
+      if (get().selectedTeamName === request.teamName) {
+        void get().selectTeam(request.teamName, { allowReloadWhileProvisioning: true });
+      }
+      window.setTimeout(() => {
+        void get().fetchTeams();
+        if (get().selectedTeamName === request.teamName) {
+          void get().selectTeam(request.teamName, { allowReloadWhileProvisioning: true });
+        }
+      }, 1200);
       void pollProvisioningStatus(get, response.runId);
       return response.runId;
     } catch (error) {

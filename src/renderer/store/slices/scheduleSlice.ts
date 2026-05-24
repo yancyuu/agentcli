@@ -82,13 +82,41 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
   },
 
   async deleteSchedule(id: string): Promise<void> {
-    await api.schedules.delete(id);
+    const previousSchedules = get().schedules;
+    const previousRuns = get().scheduleRuns;
     set((state) => ({
       schedules: state.schedules.filter((s) => s.id !== id),
       scheduleRuns: Object.fromEntries(
         Object.entries(state.scheduleRuns).filter(([key]) => key !== id)
       ),
+      schedulesError: null,
     }));
+    try {
+      await api.schedules.delete(id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除计划失败';
+      logger.error('deleteSchedule failed:', message);
+      set({
+        schedules: previousSchedules,
+        scheduleRuns: previousRuns,
+        schedulesError: message,
+        schedulesLoading: false,
+      });
+      await get().fetchSchedules();
+      throw err;
+    }
+    set((state) => ({
+      schedules: state.schedules.filter((s) => s.id !== id),
+      scheduleRuns: Object.fromEntries(
+        Object.entries(state.scheduleRuns).filter(([key]) => key !== id)
+      ),
+      schedulesError: null,
+    }));
+    set({ schedulesLoading: false });
+    await get().fetchSchedules();
+    window.setTimeout(() => {
+      void get().fetchSchedules();
+    }, 800);
   },
 
   async pauseSchedule(id: string): Promise<void> {
@@ -99,8 +127,8 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
         s.id === id ? { ...s, status: 'paused' as const, updatedAt: new Date().toISOString() } : s
       ),
     }));
-    // Refetch to get server-side state
-    void get().applyScheduleChange(id);
+    // Refetch from cc-connect so enabled/next_run mirrors /api/v1/cron exactly.
+    await get().fetchSchedules();
   },
 
   async resumeSchedule(id: string): Promise<void> {
@@ -111,16 +139,39 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
         s.id === id ? { ...s, status: 'active' as const, updatedAt: new Date().toISOString() } : s
       ),
     }));
-    // Refetch to get server-side state (includes nextRunAt recalculation)
-    void get().applyScheduleChange(id);
+    // Refetch from cc-connect so enabled/next_run mirrors /api/v1/cron exactly.
+    await get().fetchSchedules();
   },
 
   async triggerNow(id: string): Promise<ScheduleRun> {
+    const now = new Date().toISOString();
+    set((state) => ({
+      scheduleRuns: {
+        ...state.scheduleRuns,
+        [id]: [
+          {
+            id: `pending-${Date.now()}`,
+            scheduleId: id,
+            teamName: state.schedules.find((schedule) => schedule.id === id)?.teamName ?? '',
+            status: 'running',
+            scheduledFor: now,
+            startedAt: now,
+            executionStartedAt: now,
+            retryCount: 0,
+            summary: '正在触发 cc-connect runtime...',
+          },
+          ...(state.scheduleRuns[id] ?? []),
+        ],
+      },
+    }));
     const run = await api.schedules.triggerNow(id);
     set((state) => ({
       scheduleRuns: {
         ...state.scheduleRuns,
-        [id]: [run, ...(state.scheduleRuns[id] ?? [])],
+        [id]: [
+          run,
+          ...(state.scheduleRuns[id] ?? []).filter((entry) => !entry.id.startsWith('pending-')),
+        ],
       },
     }));
     return run;

@@ -40,6 +40,7 @@ import type { OpenCodeRuntimeDeliveryDebugDetails } from '@renderer/utils/openCo
 import type {
   AgentActionMode,
   AttachmentPayload,
+  CcSession,
   ResolvedTeamMember,
   SendMessageResult,
   TaskRef,
@@ -55,6 +56,9 @@ interface MessageComposerProps {
   sendWarning?: string | null;
   sendDebugDetails?: OpenCodeRuntimeDeliveryDebugDetails | null;
   lastResult?: SendMessageResult | null;
+  sessions?: CcSession[];
+  selectedSessionKey?: string | null;
+  onSessionChange?: (sessionKey: string | null) => void;
   /** Ref to the underlying textarea element for external focus management. */
   textareaRef?: React.Ref<HTMLTextAreaElement>;
   onSend: (
@@ -84,6 +88,9 @@ export const MessageComposer = ({
   sendWarning,
   sendDebugDetails,
   lastResult,
+  sessions = [],
+  selectedSessionKey = null,
+  onSessionChange,
   textareaRef: externalTextareaRef,
   onSend,
   onCrossTeamSend,
@@ -203,6 +210,16 @@ export const MessageComposer = ({
   });
   const isProvisioning = useStore((s) => isTeamProvisioningActive(s, teamName));
   const draft = useComposerDraft(teamName);
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.sessionKey === selectedSessionKey) ?? null,
+    [selectedSessionKey, sessions]
+  );
+  const selectedSessionLabel =
+    selectedSession?.title ||
+    selectedSession?.chatName ||
+    selectedSession?.userName ||
+    selectedSession?.sessionKey ||
+    '选择会话';
 
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
 
@@ -506,7 +523,7 @@ export const MessageComposer = ({
               className={cn(
                 'mr-[15px] inline-flex items-center border text-xs transition-colors',
                 shouldDockRecipientSelector
-                  ? 'relative z-10 -mb-px overflow-hidden rounded-b-none rounded-t-[1.35rem] border-b-0 bg-[var(--color-surface-raised)]'
+                  ? 'relative z-10 -mb-2 overflow-hidden rounded-b-none rounded-t-[1.35rem] border-b-0 bg-[var(--color-surface-raised)]'
                   : 'rounded-full',
                 isCrossTeam ? 'border-[var(--cross-team-border)]' : 'border-[var(--color-border)]'
               )}
@@ -552,7 +569,9 @@ export const MessageComposer = ({
                             style={{ backgroundColor: currentTeamColor }}
                           />
                         ) : null}
-                        <span className="text-[var(--color-text-secondary)]">当前团队</span>
+                        <span className="max-w-[120px] truncate text-[var(--color-text-secondary)]">
+                          {selectedSessionLabel}
+                        </span>
                       </>
                     )}
                     <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
@@ -560,32 +579,57 @@ export const MessageComposer = ({
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-56 p-1.5">
                   <div className="max-h-48 space-y-0.5 overflow-y-auto">
-                    {/* Current team option */}
-                    <button
-                      type="button"
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
-                        !isCrossTeam && 'bg-[var(--color-surface-raised)]'
-                      )}
-                      onClick={() => {
-                        setSelectedTeam(null);
-                        setTeamSelectorOpen(false);
-                      }}
-                    >
-                      {currentTeamColor ? (
-                        <span
-                          className="inline-block size-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: currentTeamColor }}
-                        />
-                      ) : null}
-                      <span className="truncate text-[var(--color-text)]">当前团队</span>
-                      <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                        当前
-                      </span>
-                      {!isCrossTeam ? (
-                        <Check size={12} className="ml-auto shrink-0 text-blue-400" />
-                      ) : null}
-                    </button>
+                    {/* Session options */}
+                    {sessions.length > 0 && (
+                      <>
+                        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                          会话
+                        </div>
+                        {sessions.map((session) => {
+                          const isSelected = selectedSessionKey === session.sessionKey;
+                          const label =
+                            session.title ||
+                            session.chatName ||
+                            session.userName ||
+                            session.sessionKey;
+                          return (
+                            <button
+                              key={session.sessionKey}
+                              type="button"
+                              className={cn(
+                                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
+                                isSelected && 'bg-[var(--color-surface-raised)]'
+                              )}
+                              onClick={() => {
+                                onSessionChange?.(session.sessionKey);
+                                setSelectedTeam(null);
+                                setTeamSelectorOpen(false);
+                              }}
+                            >
+                              <span
+                                className={cn(
+                                  'inline-block size-2 shrink-0 rounded-full',
+                                  session.live && 'animate-pulse'
+                                )}
+                                style={{
+                                  backgroundColor: session.live ? '#22c55e' : currentTeamColor,
+                                }}
+                              />
+                              <span className="min-w-0 flex-1 truncate text-[var(--color-text)]">
+                                {label}
+                              </span>
+                              <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
+                                {session.platform}
+                              </span>
+                              {isSelected ? (
+                                <Check size={12} className="ml-auto shrink-0 text-blue-400" />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                        <div className="my-1 h-px bg-[var(--color-border)]" />
+                      </>
+                    )}
 
                     {hasCrossTeamOptions ? (
                       <>
@@ -815,8 +859,15 @@ export const MessageComposer = ({
           onFileChipInsert={draft.addChip}
           onModEnter={handleSend}
           dismissMentionsRef={dismissMentionsRef}
-          extraTips={['Tips：你可以输入 "/" 来运行 Claude 命令。']}
-          surfaceClassName="message-composer-shell message-composer-orbit-surface border border-transparent bg-[var(--color-surface-raised)] shadow-[0_8px_24px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.03)]"
+          extraTips={useMemo(() => {
+            const commands = slashCommandSuggestions
+              .filter((s) => s.type === 'command')
+              .slice(0, 6)
+              .map((s) => s.command)
+              .join('、');
+            return [`Tips：你可以输入 "/" 来运行命令，如 ${commands} 等。`];
+          }, [slashCommandSuggestions])}
+          surfaceClassName="message-composer-shell message-composer-orbit-surface bg-[var(--color-surface-raised)]"
           surfaceDecoration="orbit-border"
           surfaceFadeColor="var(--color-surface-raised)"
           className="border-transparent shadow-none"

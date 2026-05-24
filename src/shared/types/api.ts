@@ -9,7 +9,7 @@
 
 import type { CliArgsValidationResult } from '../utils/cliArgsParser';
 import type { CliInstallerAPI } from './cliInstaller';
-import type { EditorAPI, EditorFileChangeEvent, ProjectAPI } from './editor';
+import type { EditorAPI, EditorFileChangeEvent, ProjectAPI, WorkspaceListResponse } from './editor';
 import type { ApiKeysAPI, McpCatalogAPI, PluginCatalogAPI, SkillsCatalogAPI } from './extensions';
 import type {
   AppConfig,
@@ -202,6 +202,10 @@ export interface ConfigAPI {
   testTrigger: (trigger: NotificationTrigger) => Promise<TriggerTestResult>;
   /** Opens native folder selection dialog and returns selected paths */
   selectFolders: () => Promise<string[]>;
+  /** Browse subdirectories at a given path (server-side, no native dialog) */
+  browseFolders: (
+    dirPath?: string
+  ) => Promise<{ path: string; dirs: string[]; hasParent: boolean }>;
   /** Open native dialog to select local Claude root folder */
   selectClaudeRootFolder: () => Promise<ClaudeRootFolderSelection | null>;
   /** Get resolved Claude root path info for local mode */
@@ -479,6 +483,44 @@ export interface HttpServerAPI {
 // Teams API
 // =============================================================================
 
+/** cc-connect session returned by /api/teams/:name/sessions */
+export interface CcSession {
+  id: string;
+  title: string;
+  projectId: string;
+  sessionKey: string;
+  platform: string;
+  userName: string;
+  chatName: string;
+  active: boolean;
+  live: boolean;
+  historyCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastMessage: { role: string; content: string; timestamp: string } | null;
+}
+
+export interface CcSessionMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface CcSessionDetail {
+  id: string;
+  name: string;
+  sessionKey: string;
+  agentSessionId?: string;
+  agentType: string;
+  active: boolean;
+  live: boolean;
+  historyCount: number;
+  createdAt: string;
+  updatedAt: string;
+  platform: string;
+  history: CcSessionMessage[];
+}
+
 export interface TeamsAPI {
   list: () => Promise<TeamSummary[]>;
   getData: (teamName: string) => Promise<TeamViewSnapshot>;
@@ -530,6 +572,7 @@ export interface TeamsAPI {
   startTask: (teamName: string, taskId: string) => Promise<{ notifiedOwner: boolean }>;
   startTaskByUser: (teamName: string, taskId: string) => Promise<{ notifiedOwner: boolean }>;
   processSend: (teamName: string, message: string) => Promise<void>;
+  setCollaboration: (teamName: string, collaboration: boolean) => Promise<void>;
   processAlive: (teamName: string) => Promise<boolean>;
   aliveList: () => Promise<string[]>;
   stop: (teamName: string) => Promise<void>;
@@ -651,6 +694,13 @@ export interface TeamsAPI {
   onToolApprovalEvent: (callback: (event: unknown, data: ToolApprovalEvent) => void) => () => void;
   updateToolApprovalSettings: (teamName: string, settings: ToolApprovalSettings) => Promise<void>;
   readFileForToolApproval: (filePath: string) => Promise<ToolApprovalFileContent>;
+  getTeamSessions: (teamName: string) => Promise<CcSession[]>;
+  getSessionDetail: (
+    teamName: string,
+    sessionId: string,
+    historyLimit?: number
+  ) => Promise<CcSessionDetail>;
+  cancelSession: (teamName: string, sessionId: string) => Promise<void>;
 }
 
 // =============================================================================
@@ -913,6 +963,101 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
   // Team management API
   teams: TeamsAPI;
 
+  // cc-connect connection config (baseUrl, token, bridgeUrl)
+  hermitConfig: {
+    get: () => Promise<{
+      ccBaseUrl: string;
+      ccBridgeUrl: string;
+      ccToken: string;
+      ccTokenSet: boolean;
+    }>;
+    update: (patch: {
+      ccBaseUrl?: string;
+      ccToken?: string;
+      ccBridgeUrl?: string;
+    }) => Promise<void>;
+    getRaw: () => Promise<{ path: string; content: string }>;
+    updateRaw: (content: string) => Promise<void>;
+  };
+
+  // cc-connect config.toml (兼容直接原文编辑)
+  ccConfig: {
+    get: () => Promise<Record<string, unknown>>;
+    update: (patch: Record<string, unknown>) => Promise<{ needsRestart: boolean }>;
+    getRaw: () => Promise<{ path: string; content: string }>;
+    updateRaw: (content: string) => Promise<void>;
+  };
+
+  // cc-connect global runtime settings (language, rate limits, etc.)
+  ccSettings: {
+    get: () => Promise<Record<string, unknown>>;
+    patch: (patch: Record<string, unknown>) => Promise<void>;
+    restart: () => Promise<void>;
+    reload: () => Promise<void>;
+  };
+
+  // cc-connect setup flows (QR code + manual platform binding)
+  ccSetup: {
+    feishuBegin: () => Promise<{
+      device_code: string;
+      qr_url: string;
+      base_url?: string;
+      interval: number;
+      expires_in: number;
+    }>;
+    feishuPoll: (
+      deviceCode: string,
+      baseUrl?: string
+    ) => Promise<{
+      status: string;
+      base_url?: string;
+      app_id?: string;
+      app_secret?: string;
+      platform?: string;
+      owner_open_id?: string;
+      slow_down?: boolean;
+      error?: string;
+    }>;
+    feishuSave: (params: {
+      project: string;
+      app_id: string;
+      app_secret: string;
+      platform_type?: string;
+      owner_open_id?: string;
+      work_dir?: string;
+      agent_type?: string;
+    }) => Promise<{ message: string; restart_required: boolean }>;
+    weixinBegin: (apiUrl?: string) => Promise<{ qr_key: string; qr_url: string }>;
+    weixinPoll: (
+      qrKey: string,
+      apiUrl?: string
+    ) => Promise<{
+      status: string;
+      bot_token?: string;
+      ilink_bot_id?: string;
+      base_url?: string;
+      ilink_user_id?: string;
+    }>;
+    weixinSave: (params: {
+      project: string;
+      token: string;
+      base_url?: string;
+      ilink_bot_id?: string;
+      ilink_user_id?: string;
+      work_dir?: string;
+      agent_type?: string;
+    }) => Promise<{ message: string; restart_required: boolean }>;
+    addPlatform: (
+      projectName: string,
+      body: {
+        type: string;
+        options?: Record<string, unknown>;
+        work_dir?: string;
+        agent_type?: string;
+      }
+    ) => Promise<{ message: string; restart_required: boolean }>;
+  };
+
   // Cross-Team Communication API
   crossTeam: CrossTeamAPI;
 
@@ -927,6 +1072,11 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // Project file operations (editor-independent)
   project: ProjectAPI;
+
+  // Workspace (file system browsing)
+  workspace: {
+    list: (dirPath: string) => Promise<WorkspaceListResponse>;
+  };
 
   // Project Editor API (file browser + CodeMirror)
   editor: EditorAPI;

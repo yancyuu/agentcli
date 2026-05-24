@@ -15,21 +15,14 @@ import {
   CheckCircle2,
   ClipboardList,
   Columns3,
-  Eye,
   LayoutGrid,
   PlayCircle,
   Plus,
-  ShieldCheck,
   Trash2,
 } from 'lucide-react';
 
 import { KanbanColumn } from './KanbanColumn';
 import { KanbanFilterPopover } from './KanbanFilterPopover';
-import {
-  KanbanGridLayout,
-  SKELETON_HIDE_DELAY_MS,
-  SKELETON_HIDE_DELAY_MS_ON_MODE_SWITCH,
-} from './KanbanGridLayout';
 import { KanbanSortPopover } from './KanbanSortPopover';
 import { KanbanTaskCard } from './KanbanTaskCard';
 
@@ -40,7 +33,7 @@ import type { Session } from '@renderer/types/data';
 import type { KanbanColumnId, KanbanState, ResolvedTeamMember, TeamTask } from '@shared/types';
 
 const COLUMN_ACCENTS: Record<
-  KanbanColumnId,
+  'todo' | 'in_progress' | 'done',
   { headerBg: string; bodyBg: string; icon: React.ReactNode }
 > = {
   todo: {
@@ -57,16 +50,6 @@ const COLUMN_ACCENTS: Record<
     headerBg: 'rgba(34, 197, 94, 0.22)',
     bodyBg: 'rgba(34, 197, 94, 0.05)',
     icon: <CheckCircle2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
-  },
-  review: {
-    headerBg: 'rgba(139, 92, 246, 0.22)',
-    bodyBg: 'rgba(139, 92, 246, 0.05)',
-    icon: <Eye size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
-  },
-  approved: {
-    headerBg: 'rgba(34, 197, 94, 0.34)',
-    bodyBg: 'rgba(34, 197, 94, 0.08)',
-    icon: <ShieldCheck size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
   },
 };
 
@@ -113,9 +96,7 @@ const SCROLLABLE_OVERFLOW_VALUES = new Set(['auto', 'scroll', 'overlay']);
 const COLUMNS: { id: KanbanColumnId; title: string }[] = [
   { id: 'todo', title: 'TODO' },
   { id: 'in_progress', title: 'IN PROGRESS' },
-  { id: 'review', title: 'REVIEW' },
   { id: 'done', title: 'DONE' },
-  { id: 'approved', title: 'APPROVED' },
 ];
 
 function getTaskColumn(task: TeamTask, kanbanState: KanbanState): KanbanColumnId | null {
@@ -124,7 +105,10 @@ function getTaskColumn(task: TeamTask, kanbanState: KanbanState): KanbanColumnId
   // fall back to task.reviewState, otherwise the task reappears in approved/review.
   const kanbanEntry = kanbanState.tasks[task.id];
   if (kanbanEntry?.column) {
-    return kanbanEntry.column;
+    // 看板流程已收敛为 TODO/IN PROGRESS/DONE：旧的 review/approved 统一归并到 DONE。
+    if (kanbanEntry.column === 'review' || kanbanEntry.column === 'approved') {
+      return 'done';
+    }
   }
 
   if (task.status === 'pending') {
@@ -137,36 +121,6 @@ function getTaskColumn(task: TeamTask, kanbanState: KanbanState): KanbanColumnId
     return 'done';
   }
   return null;
-}
-
-function columnSupportsAddButton(
-  columnId: KanbanColumnId,
-  onAddTask?: (startImmediately: boolean) => void
-): boolean {
-  return Boolean(onAddTask && (columnId === 'todo' || columnId === 'in_progress'));
-}
-
-function estimateGridSkeletonCardHeight(
-  task: TeamTask,
-  columnId: KanbanColumnId,
-  kanbanState: KanbanState,
-  hasReviewers: boolean
-): number {
-  let height = 122;
-
-  if (task.subject.length > 54) height += 10;
-  if (task.subject.length > 92) height += 8;
-  if (task.needsClarification) height += 16;
-  if (task.reviewState === 'needsFix') height += 14;
-  if ((task.blockedBy?.length ?? 0) > 0) height += 18;
-  if ((task.blocks?.length ?? 0) > 0) height += 18;
-
-  const effectiveReviewer = (kanbanState.tasks[task.id]?.reviewer ?? '').trim();
-  if (columnId === 'review' && !hasReviewers && effectiveReviewer.length === 0) {
-    height += 14;
-  }
-
-  return Math.min(Math.max(height, 116), 196);
 }
 
 /** Сортирует задачи колонки по сохранённому порядку; задачи без порядка — в конце. */
@@ -321,9 +275,6 @@ export const KanbanBoard = ({
   const boardRef = useRef<HTMLDivElement>(null);
   const scrollRestoreTimeoutsRef = useRef<number[]>([]);
   const [viewMode, setViewMode] = useState<KanbanViewMode>('grid');
-  const [gridPrimaryColumnWidth, setGridPrimaryColumnWidth] = useState<number | null>(null);
-  const [gridSkeletonDelayMs, setGridSkeletonDelayMs] = useState(SKELETON_HIDE_DELAY_MS);
-  const hasReviewers = kanbanState.reviewers.length > 0;
   const enableTaskSorting =
     viewMode === 'columns' && !!onColumnOrderChange && sort.field === 'manual';
 
@@ -460,7 +411,7 @@ export const KanbanBoard = ({
             teamName={teamName}
             columnId={columnId}
             kanbanTaskState={kanbanState.tasks[task.id]}
-            hasReviewers={hasReviewers}
+            hasReviewers={false}
             compact={compact}
             taskMap={taskMap}
             memberColorMap={memberColorMap}
@@ -482,10 +433,13 @@ export const KanbanBoard = ({
     );
   };
 
-  const visibleColumns = useMemo(
-    () => (filter.columns.size > 0 ? COLUMNS.filter((c) => filter.columns.has(c.id)) : COLUMNS),
-    [filter.columns]
-  );
+  const visibleColumns = useMemo(() => {
+    if (filter.columns.size === 0) {
+      return COLUMNS;
+    }
+    const narrowed = COLUMNS.filter((c) => filter.columns.has(c.id));
+    return narrowed.length > 0 ? narrowed : COLUMNS;
+  }, [filter.columns]);
   const primaryVisibleColumnId = visibleColumns[0]?.id ?? null;
 
   const resizableColumnIds = useMemo(() => visibleColumns.map((c) => c.id), [visibleColumns]);
@@ -495,8 +449,7 @@ export const KanbanBoard = ({
   });
   const columnModeSearchWidth =
     primaryVisibleColumnId != null ? (columnWidths.get(primaryVisibleColumnId) ?? 256) : 256;
-  const toolbarLeftWidth =
-    viewMode === 'grid' ? (gridPrimaryColumnWidth ?? columnModeSearchWidth) : columnModeSearchWidth;
+  const toolbarLeftWidth = columnModeSearchWidth;
 
   const clearScheduledScrollRestore = useCallback(() => {
     for (const timeoutId of scrollRestoreTimeoutsRef.current) {
@@ -520,7 +473,7 @@ export const KanbanBoard = ({
   }, []);
 
   const scheduleScrollRestore = useCallback(
-    (nextViewMode: KanbanViewMode, skeletonDelayMs: number) => {
+    (nextViewMode: KanbanViewMode) => {
       const container = findScrollContainer(boardRef.current);
       if (!container) {
         return;
@@ -533,8 +486,7 @@ export const KanbanBoard = ({
         container.scrollTop = savedScrollTop;
       };
 
-      const delays =
-        nextViewMode === 'grid' ? [skeletonDelayMs + 40, skeletonDelayMs + 220] : [120];
+      const delays = nextViewMode === 'grid' ? [120, 240] : [120];
 
       scrollRestoreTimeoutsRef.current = delays.map((delay) => window.setTimeout(restore, delay));
     },
@@ -543,13 +495,7 @@ export const KanbanBoard = ({
 
   const switchViewMode = useCallback(
     (nextViewMode: KanbanViewMode) => {
-      const nextSkeletonDelayMs =
-        nextViewMode === 'grid' && viewMode === 'columns'
-          ? SKELETON_HIDE_DELAY_MS_ON_MODE_SWITCH
-          : SKELETON_HIDE_DELAY_MS;
-
-      setGridSkeletonDelayMs(nextSkeletonDelayMs);
-      scheduleScrollRestore(nextViewMode, nextSkeletonDelayMs);
+      scheduleScrollRestore(nextViewMode);
       setViewMode(nextViewMode);
     },
     [scheduleScrollRestore, viewMode]
@@ -641,37 +587,33 @@ export const KanbanBoard = ({
       </div>
 
       {viewMode === 'grid' ? (
-        <KanbanGridLayout
-          allColumnIds={COLUMNS.map((column) => column.id)}
-          primaryColumnId={primaryVisibleColumnId}
-          onPrimaryColumnWidthChange={setGridPrimaryColumnWidth}
-          skeletonDelayMs={gridSkeletonDelayMs}
-          columns={visibleColumns.map((column) => {
-            const columnTasks = groupedOrdered.get(column.id) ?? [];
-            const accent = COLUMN_ACCENTS[column.id];
-
-            return {
-              id: column.id,
-              title: column.title,
-              count: columnTasks.length,
-              icon: accent.icon,
-              headerBg: accent.headerBg,
-              bodyBg: accent.bodyBg,
-              content: renderCards(column.id, columnTasks),
-              showAddButton: columnSupportsAddButton(column.id, onAddTask),
-              skeletonCards: columnTasks.map((task) => ({
-                key: task.id,
-                height: estimateGridSkeletonCardHeight(task, column.id, kanbanState, hasReviewers),
-              })),
-            };
-          })}
-        />
+        <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden px-1 pb-6 pr-4 pt-2">
+          <div className="grid min-w-[900px] grid-cols-3 items-start gap-3">
+            {visibleColumns.map((column) => {
+              const columnTasks = groupedOrdered.get(column.id) ?? [];
+              const accent = COLUMN_ACCENTS[column.id as 'todo' | 'in_progress' | 'done'];
+              return (
+                <KanbanColumn
+                  key={column.id}
+                  title={column.title}
+                  count={columnTasks.length}
+                  icon={accent.icon}
+                  headerBg={accent.headerBg}
+                  bodyBg={accent.bodyBg}
+                  bodyClassName="max-h-none overflow-visible"
+                >
+                  {renderCards(column.id, columnTasks)}
+                </KanbanColumn>
+              );
+            })}
+          </div>
+        </div>
       ) : (
         <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden px-1 pb-6 pr-4 pt-2">
           <div className="flex min-w-max items-start pr-1">
             {visibleColumns.map((column, index) => {
               const columnTasks = groupedOrdered.get(column.id) ?? [];
-              const accent = COLUMN_ACCENTS[column.id];
+              const accent = COLUMN_ACCENTS[column.id as 'todo' | 'in_progress' | 'done'];
               const width = columnWidths.get(column.id) ?? 256;
               const handleProps = getHandleProps(column.id);
               return (

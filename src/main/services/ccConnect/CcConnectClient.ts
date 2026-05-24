@@ -11,6 +11,8 @@ import type {
   CcAddPlatformRequest,
   CcApiResponse,
   CcConnectConfig,
+  CcCreateCronJobRequest,
+  CcCronJob,
   CcGlobalProvider,
   CcHeartbeatStatus,
   CcModelEntry,
@@ -74,6 +76,13 @@ export class CcConnectClient {
       });
 
       const text = await response.text();
+      if (!text.trim()) {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return undefined as T;
+      }
+
       let json: CcApiResponse<T>;
       try {
         json = JSON.parse(text) as CcApiResponse<T>;
@@ -130,6 +139,25 @@ export class CcConnectClient {
 
   async deleteProject(name: string): Promise<{ message: string; restart_required: boolean }> {
     return this.request('DELETE', `/api/v1/projects/${encodeURIComponent(name)}`);
+  }
+
+  /**
+   * Stop a project: delete it from cc-connect and restart to activate changes.
+   * This effectively stops all sessions and agents for the project.
+   */
+  async stopProject(name: string): Promise<void> {
+    try {
+      const result = await this.deleteProject(name);
+      if (result.restart_required) {
+        await this.restart();
+      }
+      logger.info(`cc-connect project "${name}" stopped`);
+    } catch (err) {
+      // Project might already not exist — log but don't throw
+      logger.warn(
+        `Failed to stop project "${name}": ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   /**
@@ -215,7 +243,7 @@ export class CcConnectClient {
   async getSession(
     projectName: string,
     sessionId: string,
-    historyLimit: number = 50
+    historyLimit: number = 500
   ): Promise<CcSessionDetail> {
     return this.request<CcSessionDetail>(
       'GET',
@@ -228,6 +256,13 @@ export class CcConnectClient {
       'POST',
       `/api/v1/projects/${encodeURIComponent(projectName)}/sessions`,
       name ? { name } : {}
+    );
+  }
+
+  async deleteSession(projectName: string, sessionId: string): Promise<void> {
+    await this.request(
+      'DELETE',
+      `/api/v1/projects/${encodeURIComponent(projectName)}/sessions/${encodeURIComponent(sessionId)}`
     );
   }
 
@@ -314,6 +349,42 @@ export class CcConnectClient {
     await this.request('PUT', `/api/v1/projects/${encodeURIComponent(projectName)}/provider-refs`, {
       provider_refs: providerRefs,
     });
+  }
+
+  // ===========================================================================
+  // Global settings
+  // ===========================================================================
+
+  async getGlobalSettings(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', '/api/v1/settings');
+  }
+
+  async patchGlobalSettings(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('PATCH', '/api/v1/settings', patch);
+  }
+
+  // ===========================================================================
+  // Cron jobs
+  // ===========================================================================
+
+  async listCronJobs(): Promise<CcCronJob[]> {
+    const data = await this.request<{ jobs: CcCronJob[] }>('GET', '/api/v1/cron');
+    return data.jobs ?? [];
+  }
+
+  async createCronJob(input: CcCreateCronJobRequest): Promise<CcCronJob> {
+    return this.request<CcCronJob>('POST', '/api/v1/cron', input);
+  }
+
+  async updateCronJob(
+    id: string,
+    patch: Partial<CcCreateCronJobRequest> & { enabled?: boolean }
+  ): Promise<CcCronJob> {
+    return this.request<CcCronJob>('PATCH', `/api/v1/cron/${encodeURIComponent(id)}`, patch);
+  }
+
+  async deleteCronJob(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/cron/${encodeURIComponent(id)}`);
   }
 
   // ===========================================================================

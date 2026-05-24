@@ -28,6 +28,14 @@ export interface TeamConfig {
   description?: string;
   color?: string;
   language?: string;
+  agentType?: string;
+  permissionMode?: string;
+  showContextIndicator?: boolean;
+  replyFooter?: boolean;
+  injectSender?: boolean;
+  managedSources?: string;
+  disabledCommands?: string[];
+  platformAllowFrom?: Record<string, string>;
   members?: TeamMember[];
   projectPath?: string;
   projectPathHistory?: string[];
@@ -44,6 +52,15 @@ export interface TeamUpdateConfigRequest {
   description?: string;
   color?: string;
   language?: string;
+  agentType?: string;
+  workDir?: string;
+  permissionMode?: string;
+  showContextIndicator?: boolean;
+  replyFooter?: boolean;
+  injectSender?: boolean;
+  managedSources?: string;
+  disabledCommands?: string[];
+  platformAllowFrom?: Record<string, string>;
   executionTarget?: ExecutionTarget;
   leadProviderId?: TeamProviderId;
   leadModel?: string;
@@ -68,6 +85,7 @@ export interface TeamSummary {
   taskCount: number;
   lastActivity: string | null;
   projectPath?: string;
+  workDir?: string;
   projectPathHistory?: string[];
   leadSessionId?: string;
   sessionHistory?: string[];
@@ -75,6 +93,9 @@ export interface TeamSummary {
   deletedAt?: string;
   /** True when team.meta.json exists but config.json doesn't — provisioning failed before TeamCreate. */
   pendingCreate?: boolean;
+  /** cc-connect config has removed the project, but service restart is still required. */
+  pendingDelete?: boolean;
+  restartRequired?: boolean;
   /** True when the last launch partially succeeded (e.g. lead started, but not all teammates joined). */
   partialLaunchFailure?: boolean;
   /** Planned teammate count for the last persisted partial launch marker. */
@@ -640,6 +661,15 @@ export interface InboxMessage {
   slashCommand?: SlashCommandMeta;
   /** Structured command-output metadata for session-derived result rows. */
   commandOutput?: CommandOutputMeta;
+  /** cc-connect session metadata used to distinguish multiple chats under one team. */
+  session?: {
+    id?: string;
+    key?: string;
+    platform?: string;
+    title?: string;
+    chatName?: string;
+    userName?: string;
+  };
 }
 
 /** Cursor-based paginated messages response. */
@@ -682,6 +712,8 @@ export interface SendMessageRequest {
   messageKind?: InboxMessageKind;
   slashCommand?: SlashCommandMeta;
   commandOutput?: CommandOutputMeta;
+  /** cc-connect session key for routing messages to a specific conversation. */
+  sessionKey?: string;
 }
 
 export interface SendMessageResult {
@@ -879,6 +911,14 @@ export interface TeamViewSnapshot {
   processes: TeamProcess[];
   warnings?: string[];
   isAlive?: boolean;
+  /** cc-connect project name this team is bound to */
+  bindProject?: string;
+  /** 团队协作开关：false = 独立作战，true = 可跨团队调度 */
+  collaboration?: boolean;
+  harness?: string;
+  workDir?: string;
+  permissionMode?: string;
+  settings?: Record<string, unknown>;
 }
 
 export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -1275,6 +1315,12 @@ export interface TeamCreateRequest {
   workflow?: string;
   /** Path to workflow file for the team lead (from template). */
   workflowFile?: string;
+  /** Harness/agent type (cc-connect agent_type). */
+  harness?: string;
+  /** Platform/channel type for cc-connect (default: bridge). */
+  platform?: string;
+  /** Platform-specific options (app_id, app_secret, allow_from, share_session, etc.) */
+  platformOptions?: Record<string, string | boolean>;
 }
 
 export interface TeamCreateConfigRequest {
