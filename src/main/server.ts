@@ -299,7 +299,10 @@ function resolveTeamFromSessionKey(sessionKey: string): string | null {
   return sessionKey;
 }
 
-const app = Fastify({ logger: { level: 'info' } });
+const app = Fastify({
+  logger: { level: process.env.HERMIT_LOG_LEVEL ?? 'warn' },
+  disableRequestLogging: true,
+});
 
 // ===========================================================================
 // Plugins
@@ -3839,13 +3842,16 @@ app.get('/api/events', (request, reply) => {
 
 const SSE_FALLBACK_RE = /^\/api\/(.*\/(events|stream|notifications\/stream))$/;
 
+app.get('/api/extensions/mcp/browse', async () => ({
+  servers: [],
+  items: [],
+}));
+
 app.setNotFoundHandler((request, reply) => {
   const u = request.url;
   if (!u.startsWith('/api/')) {
     return reply.code(404).type('text/plain').send('not found');
   }
-
-  request.log.info({ method: request.method, url: u }, '[stub]');
 
   if (request.method === 'GET' && SSE_FALLBACK_RE.test(u)) {
     reply.raw.writeHead(200, {

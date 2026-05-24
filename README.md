@@ -5,8 +5,8 @@
 <h1 align="center">openHermit</h1>
 
 <p align="center">
-  <strong>一人公司的 AI 团队指挥台</strong><br/>
-  你是老板，AI 是员工，openHermit 是你的 ERP。
+  <strong>本地 AI Agent 团队工作台</strong><br/>
+  面向一人公司和小团队，用一个 Web 控制台管理 Agent 团队、任务看板、消息和运行状态。
 </p>
 
 <p align="center">
@@ -16,109 +16,96 @@
 
 ---
 
-## 你是 OPC / TPC 吗？
-
-**OPC（One-Person Company）/ TPC（Two-Person Company）** — 一两个人做出过去需要整支团队才能完成的产品。
-
-这不是梦想，这正在发生。Claude Code、Codex、Gemini、Cursor、Qoder……这些 AI Coding Agent 已经可以独立完成需求分析、代码实现、测试、部署的完整链路。
-
-**但问题来了：你同时开着 10 个终端，不停地切换窗口、复制粘贴上下文、记住哪个 Agent 在做什么——这还是在"管人"。**
-
-openHermit 解决这个问题。
-
----
-
 ## openHermit 是什么
 
-openHermit 是一个 **AI 团队任务指挥台**，以 cc-connect 为引擎，让你像老板一样管理由 AI 组成的团队：
+openHermit 是一个本地运行的 AI Agent 工作台，适合一人公司、小团队和高频使用 AI Coding Agent 的个人开发者。它基于 cc-connect 启动和管理 Claude Code、Codex、Gemini、Qoder 等 Agent 运行时，并提供团队、任务、消息和看板 UI。
 
-- **你创建任务，AI 自动认领并执行**，结果写回看板
-- **不同 Agent 各司其职**，Claude Code 写代码、Gemini 做调研、Codex 跑测试
-- **跨团队协作自动路由**，任务分配给哪个团队，消息立刻推过去
-- **定时任务一键调度**，不用盯着
-- **飞书/微信/Telegram 渠道统一接入**，随时查看进展、发指令
+它主要解决这些问题：
 
-你做决策，AI 做执行。
-
----
-
-## 与竞品的核心差异
-
-| | openHermit | 普通 AI IDE 插件 | 自建脚本 |
-|---|---|---|---|
-| **理念** | AI 员工团队 | 辅助写代码 | 定制化自动化 |
-| **Harness 支持** | 几乎全覆盖（见下表） | 单一 | 手写对接 |
-| **渠道接入** | 飞书/微信/Telegram/Bridge | ❌ | 手写 |
-| **多团队协作** | 任务自动路由 + MCP | ❌ | 手写 |
-| **任务追踪** | 看板 + 状态机 | ❌ | ❌ |
-| **上手成本** | 创建团队即用 | 低 | 极高 |
-| **一人公司适配** | 专为此设计 | 不适合 | 勉强 |
+- 一个人同时调度多个 AI Agent 时，很难记住谁在做什么。
+- 多个 Agent 运行时分散在不同终端里，不方便跟踪。
+- 任务、消息和执行结果缺少统一记录。
+- Agent 改代码后需要有明确的审查入口。
+- 团队模板、Skills 和项目经验需要复用。
 
 ---
 
-## 支持市面上几乎所有 Harness
+## 能力概览
 
-cc-connect 管理 Agent 运行时，openHermit 通过它驱动以下全部 harness：
+- 为一个人或小团队创建多个 AI Agent 团队。
+- 创建团队并选择 Agent 运行时。
+- 用看板管理任务状态和结果。
+- 通过消息面板向团队或成员发送指令。
+- 查看运行日志和会话历史。
+- 对 Agent 产生的代码变更进行审查。
+- 通过 cc-connect 接入飞书、微信、Telegram 等渠道。
+- 使用 MCP 工具让 Agent 认领、更新和完成任务。
+
+---
+
+## 支持的 Agent 运行时
+
+openHermit 通过 cc-connect 管理 Agent 运行时。当前常用类型包括：
 
 | Harness | 标识 | MCP 自动注入 | 适合场景 |
 |---|---|---|---|
-| **Claude Code** | `claudecode` | ✅ 自动 | 全能型编码，最强上下文 |
-| **Qoder** | `qoder` | ✅ 自动 | Claude Code 的增强版 |
-| **Codex** | `codex` | 手动配置 | OpenAI 生态，o系列推理 |
-| **Gemini** | `gemini` | 手动配置 | Google 生态，长上下文分析 |
-| **OpenCode** | `opencode` | 手动配置 | 多 provider 开源方案 |
-| **Cursor** | `cursor` | 手动配置 | IDE 深度集成 |
-| **Kimi** | `kimi` | 手动配置 | 国产长文档处理 |
+| **Claude Code** | `claudecode` | ✅ 自动 | 默认推荐的编码运行时 |
+| **Qoder** | `qoder` | ✅ 自动 | Claude Code 兼容运行时 |
+| **Codex** | `codex` | 手动配置 | OpenAI/Codex 生态 |
+| **Gemini** | `gemini` | 手动配置 | Google/Gemini 生态 |
+| **OpenCode** | `opencode` | 手动配置 | 多 provider 开源运行时 |
+| **Cursor** | `cursor` | 手动配置 | Cursor 相关运行时 |
+| **Kimi** | `kimi` | 手动配置 | 长文本和文档任务 |
 
-**新 harness 不需要改 openHermit 代码** — cc-connect 对接，openHermit 自动列出。
+实际可用能力取决于本机安装的 CLI、账号状态和 cc-connect 的支持情况。
 
 ---
 
-## 支持几乎所有渠道
+## 支持的消息渠道
 
-同一个团队可以同时接入多个渠道，你从哪里发消息都能收到回复：
+openHermit 复用 cc-connect 的渠道能力。同一个 cc-connect project 可以绑定一个或多个渠道：
 
 | 渠道 | 场景 |
 |---|---|
 | **飞书** | 企业级，支持消息卡片 |
 | **微信** | 个人/小团队最顺手 |
 | **Telegram** | 海外 / 技术向首选 |
-| **Bridge** | 跨团队内部通信（openHermit 内置） |
+| **Bridge** | openHermit 内部和自定义集成 |
 
 ---
 
-## 它帮你做什么
+## 主要流程
 
-### 1. 任务看板 — 你的 AI 工单系统
+### 1. 任务看板
 
 ```
-你：在看板里创建一个任务 "重构支付模块"，assignee → backend-team
+用户：在看板里创建任务，例如 "重构支付模块"
     ↓
-openHermit：自动推消息给 backend-team 的 Agent
+openHermit：把任务写入团队看板，并通知对应 Agent
     ↓
 Agent：用 MCP 认领任务，开始执行
     ↓
-完成后：结果写回看板，状态变 done，你在看板里一眼看到
+完成后：结果写回看板，状态更新
 ```
 
-### 2. 多团队 — 分工协作，各尽其能
+### 2. 多团队
 
 ```
-前端团队 (Claude Code)  ——→  你的产品界面
+前端团队 (Claude Code)  ——→  UI 任务
 后端团队 (Codex)        ——→  API 和业务逻辑
-测试团队 (Gemini)       ——→  自动化测试和 QA
-调研团队 (Kimi)         ——→  竞品分析、文档整理
+测试团队 (Gemini)       ——→  测试和验证
+调研团队 (Kimi)         ——→  文档和资料整理
 ```
 
-每个团队独立运行，任务可以跨团队分配，互不干扰。
+每个团队有独立配置、任务和消息记录。任务可以分配给不同团队。
 
-### 3. 定时任务 — 你的 AI 会自己上班
+### 3. 定时任务
 
-在 openHermit 里配置定时计划，Agent 按时执行：早报、日报、代码健康检查、数据拉取……你睡觉，Agent 在跑。
+可以通过 cc-connect 配置定时任务，例如日报、代码健康检查、数据拉取等。
 
 ### 4. MCP 零配置接入
 
-Claude Code / Qoder 类 harness 创建团队时自动注入 MCP 配置，Agent 立刻拥有任务工具：
+Claude Code / Qoder 类运行时创建团队时会自动注入 MCP 配置，让 Agent 可以使用任务工具：
 
 ```
 list_tasks    — 看自己有哪些任务
@@ -145,30 +132,35 @@ create_task   — 创建新任务分配给其他团队
   Claude Code / Codex / Gemini / Qoder / ...
 ```
 
-openHermit 本身是 **纯本地、无 SaaS、无月费**。cc-connect 跑在你的机器上，数据不出门。
+openHermit 和 cc-connect 都运行在本机。项目代码、任务数据和配置默认存放在本地。
 
 ---
 
 ## 快速开始
 
-### 一键安装
+### npm 安装
 
-openHermit 的 npm 包会捆绑安装并自动启动 cc-connect：
+安装 CLI：
 
 ```bash
 npm install -g @yancyyu/openhermit
 openhermit
 ```
 
-启动后浏览器打开 `http://127.0.0.1:5680`。
+启动后打开：
 
-也可以使用这些命令：
+```text
+http://127.0.0.1:5680
+```
+
+常用命令：
 
 ```bash
-open-hermit              # 等同于 openhermit
-openhermit --port 8080   # 使用自定义端口
-openhermit --version     # 查看版本
-openhermit update        # 检查并更新
+open-hermit                # 等同于 openhermit
+openhermit --port 8080     # 指定 Web 控制台端口
+openhermit --no-cc-connect # 不自动启动 cc-connect
+openhermit --version       # 查看版本
+openhermit update          # 更新 openHermit
 ```
 
 首次启动会自动创建 `~/.hermit/cc-connect/config.toml`，启用 cc-connect Management API
