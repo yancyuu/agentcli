@@ -869,7 +869,6 @@ export const MessagesPanel = memo(function MessagesPanel({
         onSessionChange={setSelectedSessionKey}
         textareaRef={composerTextareaRef}
         onSend={handleSend}
-        onCrossTeamSend={handleCrossTeamSend}
       />
       <StatusBlock
         members={members}
@@ -1066,7 +1065,6 @@ export const MessagesPanel = memo(function MessagesPanel({
               onSessionChange={setSelectedSessionKey}
               textareaRef={composerTextareaRef}
               onSend={handleSend}
-              onCrossTeamSend={handleCrossTeamSend}
             />
             <StatusBlock
               members={members}
@@ -1354,7 +1352,6 @@ export const MessagesPanel = memo(function MessagesPanel({
                     onSessionChange={setSelectedSessionKey}
                     textareaRef={composerTextareaRef}
                     onSend={handleSend}
-                    onCrossTeamSend={handleCrossTeamSend}
                   />
                 </div>
               </div>
