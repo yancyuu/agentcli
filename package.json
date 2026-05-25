@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.5.9",
+  "version": "1.6.10",
   "description": "openHermit: team-oriented agent management workbench atop cc-connect.",
   "license": "AGPL-3.0",
   "author": {

@@ -91,58 +91,53 @@ const bootstrapProjectName = '__openhermit_bootstrap__';
 // ---------------------------------------------------------------------------
 
 async function runUpdate() {
-  console.log('[openHermit] Checking for updates...');
-
   const isGitRepo = existsSync(path.join(repoRoot, '.git'));
 
-  try {
-    // Check latest version from GitHub
-    const res = await fetch('https://api.github.com/repos/yancyuu/Hermit/releases/latest');
-    if (!res.ok) {
-      console.error('[openHermit] Failed to check for updates');
-      process.exit(1);
-    }
-
-    const data = await res.json();
-    const latestVersion = data.tag_name?.replace(/^v/, '');
-
-    if (!latestVersion) {
-      console.log('[openHermit] Already on latest version');
-      process.exit(0);
-    }
-
-    if (latestVersion === currentVersion) {
-      console.log(`[openHermit] Already on latest version (${currentVersion})`);
-      process.exit(0);
-    }
-
-    console.log(`[openHermit] Current version: ${currentVersion}`);
-    console.log(`[openHermit] Latest version: ${latestVersion}`);
-
-    if (isGitRepo) {
-      console.log('[openHermit] Updating from git repository...');
+  if (isGitRepo) {
+    // Git repo: check GitHub releases and checkout latest tag
+    console.log('[openHermit] Checking for updates...');
+    try {
+      const res = await fetch('https://api.github.com/repos/yancyuu/Hermit/releases/latest', {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) {
+        console.error(`[openHermit] Failed to check GitHub releases (HTTP ${res.status})`);
+        process.exit(1);
+      }
+      const data = await res.json();
+      const latestVersion = data.tag_name?.replace(/^v/, '');
+      if (!latestVersion) {
+        console.error('[openHermit] No release found on GitHub');
+        process.exit(1);
+      }
+      if (latestVersion === currentVersion) {
+        console.log(`[openHermit] Already on latest version (${currentVersion})`);
+        process.exit(0);
+      }
+      console.log(`[openHermit] Current: ${currentVersion} → Latest: ${latestVersion}`);
       console.log('[openHermit] Fetching latest changes...');
       execSync('git fetch --tags', { cwd: repoRoot, stdio: 'inherit' });
-
       console.log(`[openHermit] Checking out v${latestVersion}...`);
       execSync(`git checkout v${latestVersion}`, { cwd: repoRoot, stdio: 'inherit' });
-
       console.log('[openHermit] Installing dependencies...');
       execSync('npm install', { cwd: repoRoot, stdio: 'inherit' });
-
       console.log('[openHermit] Building frontend...');
       execSync('npm run build:web', { cwd: repoRoot, stdio: 'inherit' });
-
-      console.log(`\n[openHermit] Updated to openHermit ${latestVersion}`);
-      console.log('[openHermit] Please restart the server with: openhermit\n');
-    } else {
-      console.log('[openHermit] Updating via npm...');
-      execSync('npm update -g @yancyyu/openhermit', { stdio: 'inherit' });
-      console.log(`\n[openHermit] Updated to openHermit ${latestVersion}\n`);
+      console.log(`\n[openHermit] Updated to ${latestVersion}. Restart with: openhermit\n`);
+    } catch (err) {
+      console.error('[openHermit] Update failed:', err instanceof Error ? err.message : String(err));
+      process.exit(1);
     }
-  } catch (err) {
-    console.error('[openHermit] Update failed:', err instanceof Error ? err.message : String(err));
-    process.exit(1);
+  } else {
+    // npm install: directly update to latest
+    console.log('[openHermit] Updating via npm...');
+    try {
+      execSync('npm install -g @yancyyu/openhermit@latest', { stdio: 'inherit' });
+      console.log(`\n[openHermit] Updated successfully. Restart with: openhermit\n`);
+    } catch (err) {
+      console.error('[openHermit] npm update failed. Try: sudo npm install -g @yancyyu/openhermit@latest');
+      process.exit(1);
+    }
   }
 }
 
@@ -197,8 +192,8 @@ function hasProjectEntries(raw) {
 
 function buildBootstrapProjectToml() {
   return `
-# Bootstrap project — cc-connect requires at least one project to start.
-# This entry is automatically managed by openHermit and will be ignored at runtime.
+# Internal bootstrap project used only so cc-connect can start with an otherwise empty config.
+# It is safe to keep this project; users can replace or delete it after creating real teams.
 [[projects]]
 name = "${bootstrapProjectName}"
 disabled_commands = ["*"]
@@ -211,8 +206,31 @@ work_dir = "${escapeTomlPath(hermitHome)}"
 mode = "default"
 
 [[projects.platforms]]
-type = "bridge"
+type = "line"
+
+[projects.platforms.options]
+channel_secret = "openhermit-bootstrap"
+channel_token = "openhermit-bootstrap"
+port = "0"
+callback_path = "/openhermit-bootstrap"
 `;
+}
+
+function migrateManagedBootstrapProject(raw) {
+  const projectPattern = /(^|\n)(#.*\n)*\[\[projects\]\]\nname\s*=\s*"__openhermit_bootstrap__"[\s\S]*?(?=\n(#.*\n)*\[\[projects\]\]|\s*$)/m;
+  const match = raw.match(projectPattern);
+  if (!match) return raw;
+
+  const block = match[0];
+  const isLegacyManagedBootstrap =
+    block.includes('type = "feishu"') &&
+    block.includes('app_id = "placeholder"') &&
+    block.includes('app_secret = "placeholder"');
+
+  if (!isLegacyManagedBootstrap) return raw;
+
+  const prefix = match[1] === '\n' ? '\n' : '';
+  return raw.replace(projectPattern, `${prefix}${buildBootstrapProjectToml().trimStart()}`);
 }
 
 function ensureCcConnectConfig() {
@@ -246,6 +264,12 @@ ${buildBootstrapProjectToml()}`;
   if (!hasProjectEntries(raw)) {
     raw = `${raw.trimEnd()}\n${buildBootstrapProjectToml()}`;
     writeFileSync(ccConnectConfigPath, raw, 'utf-8');
+  } else {
+    const migrated = migrateManagedBootstrapProject(raw);
+    if (migrated !== raw) {
+      raw = migrated;
+      writeFileSync(ccConnectConfigPath, raw, 'utf-8');
+    }
   }
 
   return {
@@ -283,6 +307,15 @@ function resolveCcConnectRunner() {
 
 function resolveTsxCli() {
   return require.resolve('tsx/cli');
+}
+
+/**
+ * Build a NODE_OPTIONS string that registers tsx with tsconfig paths support.
+ * tsx in ESM mode needs explicit --import to handle TypeScript path aliases.
+ */
+function buildTsxNodeOptions(cwd) {
+  const tsxPath = require.resolve('tsx/esm');
+  return `--import=${tsxPath}`;
 }
 
 let ccConnectProcess = null;
@@ -354,7 +387,7 @@ if (!existsSync(distRenderererDir) || !existsSync(path.join(distRenderererDir, '
 // Start the server
 console.log('[openHermit] Launching server...\n');
 
-const serverProcess = spawn(process.execPath, [resolveTsxCli(), 'src/main/server.ts'], {
+const serverProcess = spawn(process.execPath, ['--import', require.resolve('tsx/esm'), 'src/main/server.ts'], {
   cwd: repoRoot,
   env: {
     ...process.env,
@@ -366,6 +399,7 @@ const serverProcess = spawn(process.execPath, [resolveTsxCli(), 'src/main/server
     CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
     CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
     CC_CONNECT_CONFIG: ccConnectConfigPath,
+    TSX_TSCONFIG_PATH: path.join(repoRoot, 'tsconfig.json'),
   },
   stdio: 'inherit',
 });
