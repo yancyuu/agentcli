@@ -36,6 +36,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import cors from '@fastify/cors';
@@ -45,6 +46,8 @@ import Fastify from 'fastify';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
+import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
+import type { TaskBusConfig } from '@shared/types/team';
 import { UpdateService } from './services/UpdateService';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -180,6 +183,7 @@ const bridge = new CcConnectBridge({
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
 const svc = new TeamProvisioningService(cc, bridge);
+const taskDispatch = new TaskDispatchService(svc['workspace']);
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -1618,17 +1622,26 @@ const MCP_TOOLS = [
     },
   },
   {
-    name: 'create_task',
-    description: '创建任务，可分配给其他团队',
+    name: 'list_teams',
+    description: '列出所有可用的团队（本地和远程）。用于发现可以派发任务的目标团队。',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'dispatch_task',
+    description: `将任务派发给另一个团队。当前团队通过 team_slug 参数指定。${taskDispatch.dispatchRulesText}`,
     inputSchema: {
       type: 'object',
       properties: {
-        team_slug: { type: 'string', description: '创建任务的团队 slug' },
-        title: { type: 'string', description: '任务标题' },
+        team_slug: { type: 'string', description: '当前团队 slug（即发出派发的团队）' },
+        target_team: { type: 'string', description: '目标团队 slug（可通过 list_teams 查询）' },
+        subject: { type: 'string', description: '任务标题' },
         description: { type: 'string', description: '任务描述（可选）' },
-        assignee: { type: 'string', description: '分配给哪个团队的 slug（可选）' },
+        prompt: { type: 'string', description: '给目标团队的执行指令（可选）' },
       },
-      required: ['team_slug', 'title'],
+      required: ['team_slug', 'target_team', 'subject'],
     },
   },
 ];
@@ -1654,21 +1667,27 @@ async function executeMcpTool(
     const patch: Record<string, unknown> = { status: 'done' };
     if (args.result) patch.result = args.result;
     const task = await svc.patchTask(args.team_slug, args.task_id, patch);
+    // Notify origin team if this was a dispatched task
+    await taskDispatch.onTaskCompleted(args.team_slug, args.task_id).catch(() => {});
     return text(task);
   }
 
-  if (toolName === 'create_task') {
-    const task = await svc.createTask(args.team_slug, {
-      title: args.title,
-      description: args.description,
-      assignee: args.assignee ?? null,
-    });
-    if (task.assignee) {
-      svc.dispatchTask(args.team_slug, task).catch(() => {
-        /* best-effort */
-      });
-    }
-    return text(task);
+  if (toolName === 'list_teams') {
+    const teams = await taskDispatch.listTeams();
+    return text(teams);
+  }
+
+  if (toolName === 'dispatch_task') {
+    const result = await taskDispatch.dispatchTask(
+      args.team_slug,
+      {
+        subject: args.subject,
+        description: args.description,
+        prompt: args.prompt,
+      },
+      args.target_team
+    );
+    return text(result);
   }
 
   throw new Error(`Unknown tool: ${toolName}`);
@@ -3813,12 +3832,78 @@ app.post('/api/teams/tool-approval/read-file', async () => ({ content: '' }));
 // validate-cli-args
 app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], errors: [] }));
 
-// cross-team stubs
-app.post('/api/cross-team/send', async () => ({ ok: true }));
-app.get('/api/cross-team/targets', async () => []);
-app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async () => []);
+// cross-team task dispatch endpoints
+app.post<{
+  Body: {
+    fromTeam: string;
+    toTeam: string;
+    subject: string;
+    description?: string;
+    prompt?: string;
+  };
+}>('/api/cross-team/send', async (request) => {
+  const { fromTeam, toTeam, subject, description, prompt } = request.body ?? {};
+  if (!toTeam || !subject) return { ok: false, error: 'toTeam and subject are required' };
+  const result = await taskDispatch.dispatchTask(
+    fromTeam ?? 'unknown',
+    { subject, description, prompt },
+    toTeam
+  );
+  return { ok: true, dispatchId: result.dispatchId, status: result.status };
+});
 
-// review stubs
+app.get('/api/cross-team/targets', async () => {
+  const teams = await taskDispatch.listTeams();
+  return { teams };
+});
+
+app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {
+  const teamSlug = request.params.name;
+  const tasks = await svc.readTasks(teamSlug);
+  const pending = tasks.filter(
+    (t: any) => t.dispatchMeta?.status === 'dispatched' && t.dispatchMeta?.originTeam === teamSlug
+  );
+  return { pending };
+});
+
+// Task bus settings
+app.get('/api/settings/task-bus', async () => {
+  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  try {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const settings = JSON.parse(raw);
+    return settings.taskBus ?? { enabled: false, redis: { host: '127.0.0.1', port: 6379 } };
+  } catch {
+    return { enabled: false, redis: { host: '127.0.0.1', port: 6379 } };
+  }
+});
+
+app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
+  const config = request.body;
+  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    settings = JSON.parse(raw);
+  } catch {
+    // File doesn't exist yet
+  }
+  settings.taskBus = config;
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify(settings, null, 2));
+
+  // Reconnect TaskDispatchService with new config
+  taskDispatch.dispose();
+  if (config?.enabled) {
+    await taskDispatch.start(config);
+    return {
+      ok: true,
+      connected: true,
+      message: `Connected to Redis at ${config.redis.host}:${config.redis.port}`,
+    };
+  }
+  return { ok: true, connected: false, message: 'Task bus disabled' };
+});
 app.get<{ Params: { name: string; memberName: string } }>(
   '/api/teams/:name/review/agent-changes/:memberName',
   async (request) => ({

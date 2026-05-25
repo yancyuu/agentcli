@@ -111,6 +111,8 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   order: number;
+  /** Cross-team dispatch metadata */
+  dispatchMeta?: import('@shared/types/team').DispatchMeta;
 }
 
 // ---------------------------------------------------------------------------
