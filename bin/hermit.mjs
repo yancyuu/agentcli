@@ -85,6 +85,7 @@ const ccConnectConfigPath =
   process.env.HERMIT_CC_CONNECT_CONFIG ||
   process.env.CC_CONNECT_CONFIG ||
   path.join(hermitHome, 'cc-connect', 'config.toml');
+const bootstrapProjectName = '__openhermit_bootstrap__';
 
 // ---------------------------------------------------------------------------
 // Update command
@@ -191,6 +192,36 @@ function parseTomlToken(raw, section) {
   return match?.[1] || '';
 }
 
+function hasProjectEntries(raw) {
+  return /^\s*\[\[projects\]\]/m.test(raw);
+}
+
+function buildBootstrapProjectToml() {
+  return `
+# Internal bootstrap project used only so cc-connect can start with an otherwise empty config.
+# It is safe to keep this project; users can replace or delete it after creating real teams.
+[[projects]]
+name = "${bootstrapProjectName}"
+disabled_commands = ["*"]
+
+[projects.agent]
+type = "claudecode"
+
+[projects.agent.options]
+work_dir = "${escapeTomlPath(hermitHome)}"
+mode = "default"
+
+[[projects.platforms]]
+type = "line"
+
+[projects.platforms.options]
+channel_secret = "openhermit-bootstrap"
+channel_token = "openhermit-bootstrap"
+port = "0"
+callback_path = "/openhermit-bootstrap"
+`;
+}
+
 function ensureCcConnectConfig() {
   mkdirSync(path.dirname(ccConnectConfigPath), { recursive: true });
   if (!existsSync(ccConnectConfigPath)) {
@@ -214,11 +245,16 @@ path = "/bridge/ws"
 
 [log]
 level = "info"
-`;
+${buildBootstrapProjectToml()}`;
     writeFileSync(ccConnectConfigPath, config, 'utf-8');
   }
 
-  const raw = readFileSync(ccConnectConfigPath, 'utf-8');
+  let raw = readFileSync(ccConnectConfigPath, 'utf-8');
+  if (!hasProjectEntries(raw)) {
+    raw = `${raw.trimEnd()}\n${buildBootstrapProjectToml()}`;
+    writeFileSync(ccConnectConfigPath, raw, 'utf-8');
+  }
+
   return {
     managementToken:
       process.env.CC_CONNECT_TOKEN ||
