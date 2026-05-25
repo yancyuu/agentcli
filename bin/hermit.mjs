@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -305,17 +305,13 @@ function resolveCcConnectRunner() {
   return path.join(path.dirname(pkgPath), 'run.js');
 }
 
-function resolveTsxCli() {
-  return require.resolve('tsx/cli');
+function resolveTsxLoader() {
+  return require.resolve('tsx');
 }
 
-/**
- * Build a NODE_OPTIONS string that registers tsx with tsconfig paths support.
- * tsx in ESM mode needs explicit --import to handle TypeScript path aliases.
- */
-function buildTsxNodeOptions(cwd) {
-  const tsxPath = require.resolve('tsx/esm');
-  return `--import=${tsxPath}`;
+function resolveAliasLoaderRegister() {
+  const aliasLoaderUrl = pathToFileURL(path.join(__dirname, 'alias-loader.mjs')).href;
+  return `data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register(${JSON.stringify(aliasLoaderUrl)}, pathToFileURL("./"));`;
 }
 
 let ccConnectProcess = null;
@@ -387,7 +383,7 @@ if (!existsSync(distRenderererDir) || !existsSync(path.join(distRenderererDir, '
 // Start the server
 console.log('[openHermit] Launching server...\n');
 
-const serverProcess = spawn(process.execPath, ['--import', require.resolve('tsx/esm'), 'src/main/server.ts'], {
+const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/server.ts'], {
   cwd: repoRoot,
   env: {
     ...process.env,
@@ -399,7 +395,6 @@ const serverProcess = spawn(process.execPath, ['--import', require.resolve('tsx/
     CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
     CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
     CC_CONNECT_CONFIG: ccConnectConfigPath,
-    TSX_TSCONFIG_PATH: path.join(repoRoot, 'tsconfig.json'),
   },
   stdio: 'inherit',
 });
