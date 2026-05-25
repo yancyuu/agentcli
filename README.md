@@ -82,19 +82,27 @@ openHermit 在同一处管理不同 Agent 运行时。Claude Code、Codex、Curs
 
 ## 支持的 Agent 运行时
 
-openHermit 支持多种 Agent 运行时。当前常用类型包括：
+openHermit 通过 cc-connect 接入不同 Agent CLI。团队创建时选择的是 `agent_type`；
+实际能否启动，取决于本机是否安装对应 CLI、是否完成账号登录，以及 Harness 配置里是否有可用的 Provider、模型、端点和密钥。
 
-| Harness | 标识 | MCP 自动注入 | 适合场景 |
-|---|---|---|---|
-| **Claude Code** | `claudecode` | ✅ 自动 | 默认推荐的编码运行时 |
-| **Qoder** | `qoder` | ✅ 自动 | Claude Code 兼容运行时 |
-| **Codex** | `codex` | 手动配置 | OpenAI/Codex 生态 |
-| **Gemini** | `gemini` | 手动配置 | Google/Gemini 生态 |
-| **OpenCode** | `opencode` | 手动配置 | 多 provider 开源运行时 |
-| **Cursor** | `cursor` | 手动配置 | Cursor 相关运行时 |
-| **Kimi** | `kimi` | 手动配置 | 长文本和文档任务 |
+当前内置 Agent 类型：
 
-实际可用能力取决于本机安装的 CLI、账号状态和对应运行时的支持情况。
+| Agent 类型 | 标识 | 说明 |
+|---|---|---|
+| **Claude Code** | `claudecode` | Anthropic 官方 Claude Code CLI |
+| **Codex** | `codex` | OpenAI Codex CLI |
+| **Cursor** | `cursor` | Cursor IDE Agent |
+| **Gemini** | `gemini` | Google Gemini CLI |
+| **iFlow** | `iflow` | iFlow CLI |
+| **Kimi** | `kimi` | Moonshot Kimi |
+| **Devin** | `devin` | Cognition Devin |
+| **OpenCode** | `opencode` | OpenCode CLI |
+| **Qoder** | `qoder` | Qoder CLI |
+| **Pi** | `pi` | Inflection Pi |
+| **ACP** | `acp` | Agent Communication Protocol |
+| **Tmux** | `tmux` | Tmux Session |
+
+MCP、Skills、模型和认证能力不是简单按表格固定开关，而是由具体运行时和 Provider 配置共同决定。
 
 ---
 
