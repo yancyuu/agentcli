@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
 import { AdvancedSection, GeneralSection, HarnessSection, PlatformsSection } from './sections';
+import { TaskBusSection } from './sections/TaskBusSection';
 import { type SettingsSection, SettingsTabs } from './SettingsTabs';
 
 export const SettingsView = (): React.JSX.Element | null => {
@@ -28,6 +29,7 @@ export const SettingsView = (): React.JSX.Element | null => {
       const nextSection: SettingsSection =
         pendingSettingsSection === 'channels' ||
         pendingSettingsSection === 'harness' ||
+        pendingSettingsSection === 'task-bus' ||
         pendingSettingsSection === 'advanced'
           ? pendingSettingsSection
           : 'general';
@@ -136,6 +138,8 @@ export const SettingsView = (): React.JSX.Element | null => {
           {activeSection === 'channels' && <PlatformsSection />}
 
           {activeSection === 'harness' && <HarnessSection />}
+
+          {activeSection === 'task-bus' && <TaskBusSection />}
 
           {activeSection === 'advanced' && (
             <AdvancedSection

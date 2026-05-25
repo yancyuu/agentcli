@@ -69,13 +69,6 @@ interface MessageComposerProps {
     actionMode?: AgentActionMode,
     taskRefs?: TaskRef[]
   ) => void;
-  onCrossTeamSend?: (
-    toTeam: string,
-    text: string,
-    summary?: string,
-    actionMode?: AgentActionMode,
-    taskRefs?: TaskRef[]
-  ) => void;
 }
 
 export const MessageComposer = ({
@@ -93,7 +86,6 @@ export const MessageComposer = ({
   onSessionChange,
   textareaRef: externalTextareaRef,
   onSend,
-  onCrossTeamSend,
 }: MessageComposerProps): React.JSX.Element => {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useMemo(() => {
@@ -120,69 +112,7 @@ export const MessageComposer = ({
   const [fileRestrictionError, setFileRestrictionError] = useState<string | null>(null);
   const fileRestrictionTimerRef = useRef(0);
   const dismissMentionsRef = useRef<(() => void) | null>(null);
-
-  // Cross-team state
-  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
   const [teamSelectorOpen, setTeamSelectorOpen] = useState(false);
-  const [aliveTeams, setAliveTeams] = useState<Set<string>>(new Set());
-  const allCrossTeamTargets = useStore(useShallow((s) => s.crossTeamTargets));
-  const fetchCrossTeamTargets = useStore((s) => s.fetchCrossTeamTargets);
-
-  useEffect(() => {
-    void fetchCrossTeamTargets();
-  }, [fetchCrossTeamTargets]);
-
-  const refreshAliveTeams = useCallback(async () => {
-    try {
-      const list = await api.teams.aliveList();
-      setAliveTeams(new Set(list));
-    } catch {
-      // best-effort
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshAliveTeams();
-  }, [refreshAliveTeams]);
-
-  useEffect(() => {
-    if (!teamSelectorOpen) return;
-    void refreshAliveTeams();
-  }, [teamSelectorOpen, refreshAliveTeams]);
-
-  // Always filter out current team on the UI side (store is global, shared across tabs)
-  const crossTeamTargets = useMemo(
-    () => allCrossTeamTargets.filter((t) => t.teamName !== teamName),
-    [allCrossTeamTargets, teamName]
-  );
-  const sortedCrossTeamTargets = useMemo(
-    () =>
-      crossTeamTargets
-        .map((target) => ({
-          ...target,
-          isOnline: aliveTeams.has(target.teamName),
-        }))
-        .sort((a, b) => {
-          if (a.isOnline && !b.isOnline) return -1;
-          if (!a.isOnline && b.isOnline) return 1;
-          return (a.displayName || a.teamName).localeCompare(
-            b.displayName || b.teamName,
-            undefined,
-            {
-              sensitivity: 'base',
-            }
-          );
-        }),
-    [aliveTeams, crossTeamTargets]
-  );
-  const hasCrossTeamOptions = sortedCrossTeamTargets.length > 0;
-
-  const isCrossTeam = selectedTeam !== null;
-  const selectedTarget = sortedCrossTeamTargets.find((t) => t.teamName === selectedTeam);
-  const targetDisplayName = selectedTarget?.displayName ?? selectedTeam;
-  const crossTeamHintText = isCrossTeam
-    ? 'Tips：跨团队消息会发送到目标团队负责人。如果你希望回复发回你当前团队负责人而不是你本人，请在消息中明确说明。'
-    : undefined;
 
   // Members load async with team data; keep recipient stable if valid, otherwise default to lead/first.
   useEffect(() => {
@@ -215,8 +145,8 @@ export const MessageComposer = ({
     [selectedSessionKey, sessions]
   );
   const selectedSessionLabel =
-    selectedSession?.title ||
     selectedSession?.chatName ||
+    selectedSession?.title ||
     selectedSession?.userName ||
     selectedSession?.sessionKey ||
     '选择会话';
@@ -276,26 +206,22 @@ export const MessageComposer = ({
   // const leadContext = useStore((s) =>
   //   isLeadAgentRecipient ? s.leadContextByTeam[teamName] : undefined
   // );
-  const supportsAttachments = isLeadRecipient && !isCrossTeam && !!isTeamAlive;
+  const supportsAttachments = isLeadRecipient && !!isTeamAlive;
   const canAttach = supportsAttachments && draft.canAddMore;
   const attachmentRestrictionReason = !supportsAttachments
-    ? isCrossTeam
-      ? '跨团队消息暂不支持文件附件'
-      : !isLeadRecipient
-        ? '文件只能发送给团队负责人'
-        : '团队在线时才能添加文件'
+    ? !isLeadRecipient
+      ? '文件只能发送给团队负责人'
+      : '团队在线时才能添加文件'
     : undefined;
   const attachmentsBlocked = draft.attachments.length > 0 && !supportsAttachments;
   const slashCommandRestrictionReason = standaloneSlashCommand
     ? draft.attachments.length > 0
       ? '斜杠命令需要团队负责人在线，且不能与附件同时发送'
-      : isCrossTeam
-        ? '斜杠命令只能在当前团队负责人上执行'
-        : !isLeadRecipient
-          ? '斜杠命令只能发送给团队负责人'
-          : !isTeamAlive
-            ? '斜杠命令需要团队负责人在线'
-            : null
+      : !isLeadRecipient
+        ? '斜杠命令只能发送给团队负责人'
+        : !isTeamAlive
+          ? '斜杠命令需要团队负责人在线'
+          : null
     : null;
   const canSend =
     recipient.length > 0 &&
@@ -304,8 +230,7 @@ export const MessageComposer = ({
     !sending &&
     !isProvisioning &&
     !attachmentsBlocked &&
-    !slashCommandRestrictionReason &&
-    (!isCrossTeam || onCrossTeamSend !== undefined);
+    !slashCommandRestrictionReason;
 
   // Track whether we initiated a send — clear draft only on confirmed success
   const pendingSendRef = useRef(false);
@@ -316,31 +241,15 @@ export const MessageComposer = ({
     pendingSendRef.current = true;
     const taskRefs = extractTaskRefsFromText(draft.text, taskSuggestions);
     const serialized = serializeChipsWithText(trimmed, draft.chips);
-    if (isCrossTeam && selectedTeam && onCrossTeamSend) {
-      onCrossTeamSend(selectedTeam, serialized, trimmed, undefined, taskRefs);
-    } else {
-      // Summary should stay compact (no expanded chip markdown)
-      onSend(
-        recipient,
-        serialized,
-        trimmed,
-        draft.attachments.length > 0 ? draft.attachments : undefined,
-        undefined,
-        taskRefs
-      );
-    }
-  }, [
-    canSend,
-    recipient,
-    trimmed,
-    onSend,
-    onCrossTeamSend,
-    isCrossTeam,
-    selectedTeam,
-    draft.attachments,
-    draft.chips,
-    taskSuggestions,
-  ]);
+    onSend(
+      recipient,
+      serialized,
+      trimmed,
+      draft.attachments.length > 0 ? draft.attachments : undefined,
+      undefined,
+      taskRefs
+    );
+  }, [canSend, recipient, trimmed, onSend, draft.attachments, draft.chips, taskSuggestions]);
 
   // Clear draft only after send completes successfully (sending: true → false, no error)
   useEffect(() => {
@@ -525,7 +434,7 @@ export const MessageComposer = ({
                 shouldDockRecipientSelector
                   ? 'relative z-10 -mb-2 overflow-hidden rounded-b-none rounded-t-[1.35rem] border-b-0 bg-[var(--color-surface-raised)]'
                   : 'rounded-full',
-                isCrossTeam ? 'border-[var(--cross-team-border)]' : 'border-[var(--color-border)]'
+                'border-[var(--color-border)]'
               )}
             >
               <Popover open={teamSelectorOpen} onOpenChange={setTeamSelectorOpen}>
@@ -537,49 +446,23 @@ export const MessageComposer = ({
                       shouldDockRecipientSelector
                         ? 'rounded-bl-none rounded-tl-[1.35rem]'
                         : 'rounded-l-full',
-                      isCrossTeam
-                        ? 'hover:bg-[var(--cross-team-bg)]/80 bg-[var(--cross-team-bg)] text-purple-400'
-                        : 'hover:bg-[var(--color-surface-raised)]'
+                      'hover:bg-[var(--color-surface-raised)]'
                     )}
                   >
-                    {isCrossTeam ? (
-                      <>
-                        <span
-                          className={cn(
-                            'inline-block size-2 shrink-0 rounded-full',
-                            selectedTarget?.isOnline && 'animate-pulse'
-                          )}
-                          style={{
-                            backgroundColor: selectedTarget?.isOnline
-                              ? '#22c55e'
-                              : selectedTarget
-                                ? selectedTarget.color
-                                  ? getTeamColorSet(selectedTarget.color).border
-                                  : nameColorSet(selectedTarget.displayName).border
-                                : undefined,
-                          }}
-                        />
-                        <span className="max-w-[100px] truncate">{targetDisplayName}</span>
-                      </>
-                    ) : (
-                      <>
-                        {currentTeamColor ? (
-                          <span
-                            className="inline-block size-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: currentTeamColor }}
-                          />
-                        ) : null}
-                        <span className="max-w-[120px] truncate text-[var(--color-text-secondary)]">
-                          {selectedSessionLabel}
-                        </span>
-                      </>
-                    )}
+                    {currentTeamColor ? (
+                      <span
+                        className="inline-block size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: currentTeamColor }}
+                      />
+                    ) : null}
+                    <span className="max-w-[120px] truncate text-[var(--color-text-secondary)]">
+                      {selectedSessionLabel}
+                    </span>
                     <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-56 p-1.5">
                   <div className="max-h-48 space-y-0.5 overflow-y-auto">
-                    {/* Session options */}
                     {sessions.length > 0 && (
                       <>
                         <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -588,8 +471,8 @@ export const MessageComposer = ({
                         {sessions.map((session) => {
                           const isSelected = selectedSessionKey === session.sessionKey;
                           const label =
-                            session.title ||
                             session.chatName ||
+                            session.title ||
                             session.userName ||
                             session.sessionKey;
                           return (
@@ -602,7 +485,6 @@ export const MessageComposer = ({
                               )}
                               onClick={() => {
                                 onSessionChange?.(session.sessionKey);
-                                setSelectedTeam(null);
                                 setTeamSelectorOpen(false);
                               }}
                             >
@@ -627,82 +509,13 @@ export const MessageComposer = ({
                             </button>
                           );
                         })}
-                        <div className="my-1 h-px bg-[var(--color-border)]" />
                       </>
                     )}
-
-                    {hasCrossTeamOptions ? (
-                      <>
-                        <div className="my-1 h-px bg-[var(--color-border)]" />
-
-                        {sortedCrossTeamTargets.map((target) => {
-                          const isSelected = selectedTeam === target.teamName;
-                          return (
-                            <button
-                              key={target.teamName}
-                              type="button"
-                              className={cn(
-                                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
-                                isSelected && 'bg-[var(--cross-team-bg)]'
-                              )}
-                              onClick={() => {
-                                setSelectedTeam(target.teamName);
-                                setRecipient(CANONICAL_LEAD_MEMBER_NAME);
-                                setTeamSelectorOpen(false);
-                              }}
-                            >
-                              <span
-                                className={cn(
-                                  'inline-block size-2 shrink-0 rounded-full',
-                                  target.isOnline && 'animate-pulse'
-                                )}
-                                style={{
-                                  backgroundColor: target.isOnline
-                                    ? '#22c55e'
-                                    : target.color
-                                      ? getTeamColorSet(target.color).border
-                                      : nameColorSet(target.displayName).border,
-                                }}
-                                title={target.isOnline ? '在线' : '离线'}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="truncate text-[var(--color-text)]">
-                                    {target.displayName}
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      'shrink-0 text-[10px]',
-                                      target.isOnline
-                                        ? 'text-green-400'
-                                        : 'text-[var(--color-text-muted)]'
-                                    )}
-                                  >
-                                    {target.isOnline ? '在线' : '离线'}
-                                  </span>
-                                </div>
-                                {target.description ? (
-                                  <div className="truncate text-[10px] text-[var(--color-text-muted)]">
-                                    {target.description}
-                                  </div>
-                                ) : null}
-                              </div>
-                              {isSelected ? (
-                                <Check size={12} className="ml-auto shrink-0 text-purple-400" />
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </>
-                    ) : null}
                   </div>
                 </PopoverContent>
               </Popover>
 
-              <Popover
-                open={isCrossTeam ? false : recipientOpen}
-                onOpenChange={isCrossTeam ? undefined : setRecipientOpen}
-              >
+              <Popover open={recipientOpen} onOpenChange={setRecipientOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
@@ -711,11 +524,8 @@ export const MessageComposer = ({
                       shouldDockRecipientSelector
                         ? 'rounded-br-none rounded-tr-[1.35rem]'
                         : 'rounded-r-full',
-                      isCrossTeam
-                        ? 'cursor-default bg-[var(--cross-team-bg)] opacity-60'
-                        : 'hover:bg-[var(--color-surface-raised)]'
+                      'hover:bg-[var(--color-surface-raised)]'
                     )}
-                    disabled={isCrossTeam}
                   >
                     {recipient ? (
                       <MemberBadge
@@ -843,9 +653,7 @@ export const MessageComposer = ({
           placeholder={
             isProvisioning
               ? '团队正在启动中... 消息将排队并在稍后投递到收件箱。'
-              : isCrossTeam
-                ? `发送跨团队消息到 ${targetDisplayName ?? '目标团队'}...`
-                : '输入消息...（回车发送，Shift+Enter 换行）'
+              : '输入消息...（回车发送，Shift+Enter 换行）'
           }
           value={draft.text}
           onValueChange={draft.setText}
@@ -875,7 +683,7 @@ export const MessageComposer = ({
           maxRows={6}
           maxLength={MAX_TEXT_LENGTH}
           disabled={sending}
-          hintText={crossTeamHintText}
+          hintText={undefined}
           showHint={!isCompactLayout}
           cornerActionInset="compact"
           cornerAction={

@@ -126,6 +126,77 @@ export interface TeamSummary {
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
 export type TeamReviewState = 'none' | 'review' | 'needsFix' | 'approved';
 
+// ---------------------------------------------------------------------------
+// Task Dispatch — cross-team task delivery
+// ---------------------------------------------------------------------------
+
+export type DispatchStatus =
+  | 'dispatched'
+  | 'received'
+  | 'in_progress'
+  | 'completed'
+  | 'synced_back'
+  | 'failed';
+
+export interface DispatchMeta {
+  dispatchId: string;
+  originTeam: string;
+  targetTeam: string;
+  status: DispatchStatus;
+  dispatchedAt: string;
+  receivedAt?: string;
+  completedAt?: string;
+  remoteTaskId?: string;
+}
+
+export interface DiscoverableTeam {
+  slug: string;
+  displayName: string;
+  location: 'local' | 'remote';
+  status: 'online' | 'offline';
+  collaboration: boolean;
+}
+
+export interface TaskBusConfig {
+  enabled: boolean;
+  redis: {
+    host: string;
+    port: number;
+    password?: string;
+    db?: number;
+  };
+}
+
+export interface TaskDispatchPayload {
+  dispatchId: string;
+  originTeam: string;
+  targetTeam: string;
+  task: {
+    subject: string;
+    description?: string;
+    prompt?: string;
+    descriptionTaskRefs?: string[];
+    promptTaskRefs?: string[];
+  };
+  dispatchedAt: string;
+}
+
+export interface TaskStatusUpdate {
+  dispatchId: string;
+  originTeam: string;
+  status: DispatchStatus;
+  remoteTaskId?: string;
+  timestamp: string;
+  result?: string;
+}
+
+export interface TaskAckPayload {
+  dispatchId: string;
+  status: 'received';
+  remoteTaskId: string;
+  timestamp: string;
+}
+
 export interface TaskWorkInterval {
   /** ISO timestamp when task entered in_progress */
   startedAt: string;
@@ -505,6 +576,8 @@ export interface TeamTask {
   sourceMessageId?: string;
   /** Snapshot of the source message at creation time (sanitized, no blobs). */
   sourceMessage?: SourceMessageSnapshot;
+  /** Cross-team dispatch metadata — set when task has been dispatched to or from another team. */
+  dispatchMeta?: DispatchMeta;
 }
 
 /** Task enriched for UI/DTO use (overlay from kanban-state.json). */

@@ -5,192 +5,84 @@
 <h1 align="center">openHermit</h1>
 
 <p align="center">
-  <strong>给一人公司和小团队用的本地 AI Agent 控制台</strong><br/>
-  把 Claude Code、Codex、Gemini、Qoder 等 Agent 放进同一个看板、消息和审查流程里。
+  <strong>超级个体的 AI 基础设施：用代码重构公司形态</strong><br/>
+  告别“玩具级”的提示词角色扮演。用状态机接管工作流，让一个人成为一支军队。
 </p>
 
 <p align="center">
-  <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=version&color=blue" alt="最新版本" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="许可证" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=version&color=black" alt="最新版本" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-black?style=flat-square" alt="许可证" /></a>
 </p>
 
 ---
 
-## openHermit 是什么
+## 💡 设计哲学：为什么我们需要 openHermit？
 
-openHermit 是一个本地运行的 AI Agent 工作台。它适合一人公司、小团队，以及每天同时使用多个 AI Coding Agent 的开发者。
+目前的 AI Agent 赛道充满了一个巨大的误区：**大家都在试图用人类的“HR 组织架构”来管理 AI。**
+让大模型扮演“资深前端”或“产品经理”，本质上是在模仿人类的**职责驱动**（因岗设人）。这注定会走向死锁——因为人类有精力上限和认知边界，才需要划分部门和扯皮；而 AI 没有。
 
-你可以把它理解成一个组织，不同的团队有不同的工作空间（文件即记忆），不同团队可以相互通信。
+**openHermit 是一场对传统协作模式的降维打击。** 它的核心哲学只有两条：
 
-它不提供模型，也不托管你的代码。openHermit 会在本机启动和管理 Claude Code、Codex、Gemini、Qoder 等运行时，项目代码、任务数据和配置默认都留在本机。
+### 1. 对创业者：组织形态的“资产化” (OPC 范式)
+**OPC（One Person Company）** 不再是一个浪漫的口号，而是最具杠杆率的商业形态。
+你不需要招聘、不需要对齐价值观、不需要处理情绪内耗。你是唯一的决策者，AI 是绝对服从的执行网格。openHermit 为你提供 **TPC（Team · Process · Channel）** 协作结构，将产品、开发、测试、运营转化为可并发现程。你的每一次业务跑通，都是在积累固化的“数字资产”，而不是随员工离职而流失的经验。
 
-## 为什么需要它
-
-AI Coding Agent 正在从“单次对话工具”变成“长期协作成员”。当你希望一个人同时管理产品、UI、后端、测试、运营等多个 AI 团队时，问题不再只是多开几个终端，而是缺少一套协作结构：
-
-- **团队需要边界**：不同团队应该有自己的工作空间、运行时、渠道和上下文，而不是全部混在一个聊天窗口里。
-- **任务需要流转**：产品需求要能拆成任务，派给 UI、后端、测试等团队，并在任务列表里留下状态和结果。
-- **消息需要归属**：来自飞书、微信、Telegram 或 Web 控制台的消息，需要进入正确团队，而不是散在不同入口。
-- **执行需要可追踪**：Agent 的会话、日志、错误和输出应该能回看，方便判断它到底做了什么。
-- **交付需要审查**：Agent 可以改代码，但代码变更仍然需要进入审查流程，避免直接混进项目。
-- **经验需要复用**：团队模板、Skills、运行时配置和项目约定应该能沉淀下来，下次创建团队时继续使用。
-
-openHermit 的目标是把这些东西放到一个本地控制台里：团队负责边界，任务负责流转，消息负责沟通，审查负责交付，日志负责复盘。
+### 2. 对开发者与工程师：去中心化的“状态机”驱动 (State-Driven DAG)
+**用管理机器的方式管理 Agent，而不是用管理人的方式。**
+Agent 的协作本质不该是“角色扮演”，而是**分布式状态机**。任务流是一张 DAG，每个节点代表一种确定的状态（Pending → Running → Review → Done）。
+* **拒绝死锁**：遇到网络波动或反爬环境，状态机自动 `Fail-Over` 切换运行时，流水线永远不会因为“超出角色职责”而卡死。
+* **Zero-Trust 与 Local-First**：真正的生产力工具不能是黑盒。openHermit 坚持本地优先的零信任架构。配置、项目代码、长短期记忆同步都在你的本地机器完成，彻底掌控数据主权。
+* **即用即走，上下文随状态流转**：Agent 不拥有固定岗位，只有当任务状态流转到 `Ready` 时，控制面才会将当前状态、上下文（Context）和能力（Skills）动态注入给对应的 Agent 运行时。
 
 ---
 
-## 界面预览
+## ⚙️ 核心架构：TPC 引擎
 
-### 团队工作台
+想要让 OPC 跑起来，你需要的不是一堆散落的终端窗口，而是 TPC 架构：
 
-团队详情页把成员、任务待开发、消息和会话放在同一个视图里。你可以直接给团队发送需求，也可以查看 Agent 的回复和运行会话。
-
-![团队工作台](docs/screenshots/openhermit/team-detail.png)
-
-### Harness 配置
-
-openHermit 在同一处管理不同 Agent 运行时。Claude Code、Codex、Cursor、Gemini、Qoder 等运行时可以统一查看和配置。
-
-![Harness 配置](docs/screenshots/openhermit/harness-settings.png)
-
-### 团队列表
-
-团队列表展示当前所有团队、绑定项目和运行状态，适合在多个项目或多个 Agent 团队之间切换。
-
-![团队列表](docs/screenshots/openhermit/team-list.png)
-
-### 渠道绑定
-
-绑定飞书、微信、Telegram、Discord、Slack、钉钉、企业微信、QQ、LINE 等渠道，让外部消息进入对应团队。
-
-![渠道绑定](docs/screenshots/openhermit/channel-binding.png)
+* **[ T ] Team（隔离与并发）**：给不同的工作建立独立团队。前端用 Claude Code 撸代码，后端用 Codex 构架，调研交由 Kimi。每个团队有独立的隔离运行时环境，但在全局协作看板上，任务可以跨团队无缝调度。
+* **[ P ] Process（状态流转）**：彻底放弃“岗位 KPI”。一切以任务的原子化状态为核心，MCP Server 动态向 Agent 注入当前所需工具。
+* **[ C ] Channel（全渠道触达）**：支持飞书、微信、Telegram、Discord、Slack 等 10+ 渠道接入。消息即指令，外部输入自动路由至对应 Agent 团队，支持独立上下文串或共享群会话，将你的 IM 变成公司级控制台。
 
 ---
 
-## 你可以用它做什么
+## 🛠️ 支持的 Agent 运行时与渠道
 
-- **创建 AI 团队**：为前端、后端、测试、调研等工作创建不同团队或角色。
-- **用看板管任务**：任务有状态、负责人、执行记录和结果，不再散在聊天里。
-- **给 Agent 发消息**：向负责人或具体成员补充指令，保留上下文。
-- **团队派单（规划中）**：产品团队可以把任务派给 UI、后端、测试等团队，任务进入对方任务列表并由对应渠道执行。
-- **审查代码改动**：Agent 产生的变更进入审查流程，而不是直接混进代码库。
-- **查看运行状态**：会话、日志、错误和启动状态集中展示，便于排障。
-- **接入外部渠道**：接入飞书、微信、Telegram 等消息来源。
-- **复用团队配置**：把团队模板、Skills 和工作方式沉淀下来，下次直接复用。
+openHermit 不提供闭源模型，也不劫持你的代码。它是一个高度可扩展的本地环境壳层。
 
----
+### 极客级的多端运行时支持
+创建团队时，底层 MCP Server 会自动完成零配置注入。能否启动，取决于你的算力边界。
 
-## 支持的 Agent 运行时
+| 标识 | 运行时说明 | 标识 | 运行时说明 |
+|:---|:---|:---|:---|
+| `claudecode` | Anthropic 官方 CLI | `devin` | Cognition Devin |
+| `codex` | OpenAI Codex CLI | `opencode` | OpenCode CLI |
+| `cursor` | Cursor IDE Agent | `qoder` | Qoder CLI |
+| `gemini` | Google Gemini CLI | `pi` | Inflection Pi |
+| `iflow` | iFlow CLI | `acp` | Agent Communication Protocol |
+| `kimi` | Moonshot Kimi | `tmux` | 经典 Tmux Session 桥接 |
 
-openHermit 通过 cc-connect 接入不同 Agent CLI。团队创建时选择的是 `agent_type`；
-实际能否启动，取决于本机是否安装对应 CLI、是否完成账号登录，以及 Harness 配置里是否有可用的 Provider、模型、端点和密钥。
-
-当前内置 Agent 类型：
-
-| Agent 类型 | 标识 | 说明 |
-|---|---|---|
-| **Claude Code** | `claudecode` | Anthropic 官方 Claude Code CLI |
-| **Codex** | `codex` | OpenAI Codex CLI |
-| **Cursor** | `cursor` | Cursor IDE Agent |
-| **Gemini** | `gemini` | Google Gemini CLI |
-| **iFlow** | `iflow` | iFlow CLI |
-| **Kimi** | `kimi` | Moonshot Kimi |
-| **Devin** | `devin` | Cognition Devin |
-| **OpenCode** | `opencode` | OpenCode CLI |
-| **Qoder** | `qoder` | Qoder CLI |
-| **Pi** | `pi` | Inflection Pi |
-| **ACP** | `acp` | Agent Communication Protocol |
-| **Tmux** | `tmux` | Tmux Session |
-
-MCP、Skills、模型和认证能力不是简单按表格固定开关，而是由具体运行时和 Provider 配置共同决定。
+### 模块化的信使网络 (Channels)
+让外部世界无缝接入你的自动化流水线：
+* **研发协同**：飞书（支持高级消息卡片）、钉钉、企业微信、Slack
+* **极客与海外**：Telegram、Discord、LINE
+* **私域与社群**：微信、QQ
+* **自定义集成**：原生支持 openHermit 内部 Bridge 协议
 
 ---
 
-## 支持的消息渠道
+## 🚀 极速部署
 
-同一个团队可以绑定一个或多个消息渠道：
+### 1. 安装启动
 
-| 渠道 | 场景 |
-|---|---|
-| **飞书** | 企业级，支持消息卡片 |
-| **微信** | 个人/小团队最顺手 |
-| **Telegram** | 海外 / 技术向首选 |
-| **内部 Bridge** | openHermit 内部和自定义集成 |
-
----
-
-## 主要流程
-
-### 1. 任务看板
-
-```
-用户：在看板里创建任务，例如 "重构支付模块"
-    ↓
-openHermit：把任务写入团队看板，并通知对应 Agent
-    ↓
-Agent：用 MCP 认领任务，开始执行
-    ↓
-完成后：结果写回看板，状态更新
-```
-
-### 2. 多团队
-
-```
-前端团队 (Claude Code)  ——→  UI 任务
-后端团队 (Codex)        ——→  API 和业务逻辑
-测试团队 (Gemini)       ——→  测试和验证
-调研团队 (Kimi)         ——→  文档和资料整理
-```
-
-每个团队有独立配置、任务和消息记录。任务可以分配给不同团队。
-
-后续的团队派单会把这种协作做成更明确的产品流程：例如产品团队把需求派给 UI 团队，选择目标渠道后，任务会进入 UI 团队的任务列表，由该团队的 Agent 接收并执行。
-
-### 3. 定时任务
-
-可以配置定时任务，例如日报、代码健康检查、数据拉取等。
-
-### 4. MCP 零配置接入
-
-Claude Code / Qoder 类运行时创建团队时会自动注入 MCP 配置，让 Agent 可以使用任务工具：
-
-```
-list_tasks    — 看自己有哪些任务
-claim_task    — 认领任务，开始干活
-complete_task — 完成任务，写入结果
-create_task   — 创建新任务分配给其他团队
-```
-
----
-
-## 架构
-
-```
-你的指令 / 飞书消息 / 微信消息 / Telegram
-              ↓
-       本地运行时服务
-    （渠道接入 + Agent 进程管理）
-              ↓
-           openHermit
-    （团队管理 + 任务路由 + 看板 UI）
-              ↓
-      MCP Server（hermit-tasks）
-              ↓
-  Claude Code / Codex / Gemini / Qoder / ...
-```
-
-openHermit 及其本地运行时服务都运行在本机。项目代码、任务数据和配置默认存放在本地。
-
----
-
-## 快速开始
-
-### npm 安装
-
-安装 CLI：
-
+方式一：npx（免安装直接运行）
 ```bash
-npm install -g @yancyyu/openhermit
+npx @yancyyu/openhermit@latest
+```
+
+方式二：全局安装
+```bash
+npm install -g @yancyyu/openhermit@latest --prefer-online
 openhermit
 ```
 
@@ -233,23 +125,6 @@ pnpm dev
 2. 填写团队名、选 harness（如 `claudecode`）
 3. 选择对应的本地项目和运行时
 4. 保存 → 看板就绪，任务等你分配
-
----
-
-## 文件结构
-
-```
-~/.hermit/
-  └── teams/
-        ├── frontend/
-        │     ├── team.json        # 团队配置（harness、bindProject、color）
-        │     └── tasks/board.json # 任务看板
-        └── backend/
-              ├── team.json
-              └── tasks/board.json
-```
-
-所有数据存本地，可以用 Git 备份。
 
 ---
 

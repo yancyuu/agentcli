@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.5.9",
+  "version": "1.6.12",
   "description": "openHermit: team-oriented agent management workbench atop cc-connect.",
   "license": "AGPL-3.0",
   "author": {
@@ -142,6 +142,9 @@
     "yaml": "^2.8.2",
     "yet-another-react-lightbox": "^3.29.1",
     "zustand": "^4.5.0"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.6.1"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.6.0",

@@ -3,7 +3,7 @@
  *
  * 设计（v2）:
  *   - 一个 Team = 一个 cc-connect project
- *   - createTeam(): 本地建目录 + cc-connect 创建 project + 注入 MCP 配置
+ *   - createTeam(): 本地建目录 + cc-connect 创建 project + 注入 CLAUDE.md 指令
  *   - dispatchTask(): assignee 变化时通过 Bridge 推消息给目标团队的 agent
  */
 
@@ -25,12 +25,6 @@ import {
 
 const logger = createLogger('TeamProvisioningService');
 
-/** MCP server 地址，注入到 claudecode/qoder 配置 */
-const MCP_SERVER_URL = process.env.HERMIT_MCP_URL ?? 'http://127.0.0.1:5680/mcp';
-
-/** 支持自动注入 MCP 配置的 harness 类型 */
-const MCP_AUTO_INJECT_HARNESS = new Set(['claudecode', 'qoder']);
-
 export class TeamProvisioningService {
   private readonly workspace: TeamWorkspaceService;
 
@@ -50,7 +44,7 @@ export class TeamProvisioningService {
    * 创建团队：
    * 1. 本地建目录 + team.json
    * 2. 在 cc-connect 创建 project（bridge platform）
-   * 3. 如果 harness 支持，注入 MCP 配置到 workDir
+   * 3. 注入 CLAUDE.md 跨团队派发指令
    * 4. 触发 cc-connect restart 激活 project
    */
   async createTeam(
@@ -83,9 +77,7 @@ export class TeamProvisioningService {
       }
     }
 
-    if (MCP_AUTO_INJECT_HARNESS.has(manifest.harness)) {
-      await this.injectMcpConfig(manifest.workDir, slug);
-    }
+    await this.injectTeamInstructions(manifest.workDir, slug);
 
     return { slug, manifest };
   }
@@ -247,38 +239,49 @@ export class TeamProvisioningService {
   }
 
   // ===========================================================================
-  // MCP config injection
+  // CLAUDE.md instruction injection
   // ===========================================================================
 
-  /**
-   * 向 workDir 注入 MCP 配置，让 claude code / qoder 自动发现 hermit-tasks 工具。
-   * 写入 workDir/.claude/settings.json（claudecode）。
-   */
-  private async injectMcpConfig(workDir: string, teamSlug: string): Promise<void> {
-    const settingsPath = path.join(workDir, '.claude', 'settings.json');
-    try {
-      await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
+  async injectTeamInstructions(workDir: string, teamSlug: string): Promise<void> {
+    const mdPath = path.join(workDir, 'CLAUDE.md');
+    const section = `
 
-      let existing: Record<string, unknown> = {};
+## Cross-Team Task Dispatch (Hermit)
+
+You can dispatch tasks to other teams via the Hermit local API:
+
+- **List available teams**: \`curl -s http://127.0.0.1:5680/api/cross-team/targets\`
+- **Dispatch a task**: \`curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'\`
+
+Current team slug: \`${teamSlug}\`
+
+When to dispatch:
+- Task requires access to a different codebase/project
+- Task explicitly mentions another team's domain
+- Task is blocked by work owned by another team
+
+Do NOT dispatch:
+- Task is within current team's project scope
+- Task can be completed with available tools
+`;
+
+    try {
+      let existing = '';
       try {
-        const raw = await fs.promises.readFile(settingsPath, 'utf8');
-        existing = JSON.parse(raw) as Record<string, unknown>;
+        existing = await fs.promises.readFile(mdPath, 'utf8');
       } catch {
-        // file doesn't exist yet, start fresh
+        // File doesn't exist yet
       }
 
-      const mcpServers = (existing.mcpServers as Record<string, unknown>) ?? {};
-      mcpServers['hermit-tasks'] = {
-        url: MCP_SERVER_URL,
-        env: { HERMIT_TEAM_SLUG: teamSlug },
-      };
+      if (existing.includes('Cross-Team Task Dispatch (Hermit)')) {
+        return;
+      }
 
-      const updated = { ...existing, mcpServers };
-      await fs.promises.writeFile(settingsPath, JSON.stringify(updated, null, 2), 'utf8');
-      logger.info(`injected MCP config → ${settingsPath}`);
+      await fs.promises.writeFile(mdPath, existing + section, 'utf8');
+      logger.info(`injected team instructions → ${mdPath}`);
     } catch (err) {
       logger.warn(
-        `MCP config injection failed (workDir=${workDir}): ${err instanceof Error ? err.message : String(err)}`
+        `Team instructions injection failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

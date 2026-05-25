@@ -6,11 +6,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { Bot, Info, PlugZap, Settings, Wrench } from 'lucide-react';
+import { Bot, Info, PlugZap, Settings, Share2, Wrench } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
 
-export type SettingsSection = 'general' | 'channels' | 'harness' | 'advanced';
+export type SettingsSection = 'general' | 'channels' | 'harness' | 'task-bus' | 'advanced';
 
 interface SettingsTabsProps {
   activeSection: SettingsSection;
@@ -43,6 +43,12 @@ const tabs: TabConfig[] = [
     label: 'Harness',
     icon: Bot,
     description: '管理 AI Agent 运行时（12 种）的 Provider 配置、API Key、端点和 CLI 安装状态。',
+  },
+  {
+    id: 'task-bus',
+    label: '任务总线',
+    icon: Share2,
+    description: '配置 Redis 消息总线，实现跨主机的团队任务派发和状态同步。',
   },
   {
     id: 'advanced',
