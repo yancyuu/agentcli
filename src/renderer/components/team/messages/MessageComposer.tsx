@@ -145,8 +145,8 @@ export const MessageComposer = ({
     [selectedSessionKey, sessions]
   );
   const selectedSessionLabel =
-    selectedSession?.title ||
     selectedSession?.chatName ||
+    selectedSession?.title ||
     selectedSession?.userName ||
     selectedSession?.sessionKey ||
     '选择会话';
@@ -471,8 +471,8 @@ export const MessageComposer = ({
                         {sessions.map((session) => {
                           const isSelected = selectedSessionKey === session.sessionKey;
                           const label =
-                            session.title ||
                             session.chatName ||
+                            session.title ||
                             session.userName ||
                             session.sessionKey;
                           return (
