@@ -531,28 +531,15 @@ export const TeamListView = (): React.JSX.Element => {
           return;
         }
         const confirmed = await confirm({
-          title: '移入回收站',
-          message: `确定将团队“${teamDisplayName}”移入回收站吗？之后可以恢复。`,
-          confirmLabel: '移入回收站',
+          title: '删除团队',
+          message: `确定删除团队“${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地团队数据。`,
+          confirmLabel: '删除',
           cancelLabel: '取消',
           variant: 'danger',
         });
         if (confirmed) {
           try {
-            const result = await deleteTeam(teamName);
-            if (result.restartRequired) {
-              const shouldRestart = await confirm({
-                title: '需要重启 cc-connect',
-                message:
-                  '已调用 cc-connect 删除团队配置。cc-connect 需要重启后才会真正移除该团队并停止相关运行时。',
-                confirmLabel: '立即重启',
-                cancelLabel: '稍后重启',
-                variant: 'danger',
-              });
-              if (shouldRestart) {
-                await api.ccSettings.restart();
-              }
-            }
+            await deleteTeam(teamName);
           } catch {
             // error via store
           }

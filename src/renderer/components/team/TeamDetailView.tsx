@@ -1830,20 +1830,7 @@ export const TeamDetailView = ({
     setDeleteConfirmOpen(false);
     void (async () => {
       try {
-        const result = await deleteTeam(teamName);
-        if (result.restartRequired) {
-          const shouldRestart = await confirm({
-            title: '需要重启 cc-connect',
-            message:
-              '已调用 cc-connect 删除团队配置。cc-connect 需要重启后才会真正移除该团队并停止相关运行时。',
-            confirmLabel: '立即重启',
-            cancelLabel: '稍后重启',
-            variant: 'danger',
-          });
-          if (shouldRestart) {
-            await api.ccSettings.restart();
-          }
-        }
+        await deleteTeam(teamName);
         if (tabId) closeTab(tabId);
         openTeamsTab();
       } catch {

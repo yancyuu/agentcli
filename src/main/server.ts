@@ -1033,30 +1033,22 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   async (request, reply) => {
     const teamName = request.params.name;
     try {
-      let restartRequired = false;
       try {
         const result = await cc.deleteProject(teamName);
-        restartRequired = result.restart_required === true;
-        await svc.updateTeam(teamName, {
-          pendingDelete: true,
-          restartRequired,
-        });
+        if (result.restart_required) {
+          await cc.restart();
+        }
       } catch (err) {
         request.log.warn({ err, teamName }, 'delete cc-connect project failed or project missing');
-        try {
-          await svc.updateTeam(teamName, {
-            pendingDelete: true,
-            restartRequired: true,
-          });
-          restartRequired = true;
-        } catch {
-          // Local metadata may already be gone; keep deletion best-effort.
-        }
       }
-      if (request.query.deleteFiles === 'true') {
-        await svc.deleteTeam(teamName, { deleteFiles: true });
+
+      try {
+        await svc.deleteTeam(teamName, { deleteFiles: request.query.deleteFiles === 'true' });
+      } catch (err) {
+        request.log.warn({ err, teamName }, 'delete local team metadata failed or already missing');
       }
-      return { ok: true, restartRequired };
+
+      return { ok: true, restartRequired: false };
     } catch (err) {
       return reply.code(500).send(reply500(err));
     }
