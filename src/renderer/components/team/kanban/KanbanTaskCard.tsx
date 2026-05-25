@@ -21,10 +21,12 @@ import {
   HelpCircle,
   Loader2,
   Play,
+  Send,
   Trash2,
   XCircle,
 } from 'lucide-react';
 
+import type { DispatchMeta } from '@shared/types/team';
 import type { KanbanColumnId, KanbanTaskState, TeamTask, TeamTaskWithKanban } from '@shared/types';
 
 interface KanbanTaskCardProps {
@@ -54,6 +56,40 @@ interface DependencyBadgeProps {
   taskMap: Map<string, TeamTask>;
   onScrollToTask?: (taskId: string) => void;
 }
+
+const DISPATCH_STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
+  dispatched: {
+    bg: 'bg-yellow-500/15',
+    text: 'text-yellow-600 dark:text-yellow-400',
+    label: '已派发',
+  },
+  received: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', label: '已接收' },
+  in_progress: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', label: '执行中' },
+  completed: {
+    bg: 'bg-emerald-500/15',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    label: '已完成',
+  },
+  synced_back: {
+    bg: 'bg-emerald-500/15',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    label: '已同步',
+  },
+  failed: { bg: 'bg-red-500/15', text: 'text-red-600 dark:text-red-400', label: '失败' },
+};
+
+const DispatchBadge = ({ meta }: { meta: DispatchMeta }): React.JSX.Element => {
+  const style = DISPATCH_STATUS_STYLE[meta.status] ?? DISPATCH_STATUS_STYLE.dispatched;
+  const target = meta.targetTeam;
+  return (
+    <span
+      className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}
+    >
+      <Send size={10} />
+      {style.label} → {target}
+    </span>
+  );
+};
 
 const DependencyBadge = ({
   taskId,
@@ -333,6 +369,7 @@ export const KanbanTaskCard = memo(
               {REVIEW_STATE_DISPLAY.needsFix.label}
             </span>
           ) : null}
+          {task.dispatchMeta ? <DispatchBadge meta={task.dispatchMeta} /> : null}
           {compact && <TruncatedTitle text={task.subject} className="mt-1" />}
         </div>
 
