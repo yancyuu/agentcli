@@ -47,7 +47,6 @@ import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner, normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
-import { getCronDescription } from '@renderer/utils/scheduleFormatters';
 import {
   buildTaskChangeRequestOptions,
   type TaskChangeRequestOptions,
@@ -124,8 +123,6 @@ import type {
   TeamFastMode,
   TeamLaunchRequest,
   TeamProviderId,
-  Schedule,
-  ScheduleRunStatus,
   TeamTaskWithKanban,
   TeamViewSnapshot,
 } from '@shared/types';
@@ -147,21 +144,6 @@ interface CreateTaskDialogState {
 }
 
 const TEAM_PENDING_REPLY_REFRESH_DELAY_MS = 10_000;
-const SCHEDULE_TASK_ID_PREFIX = 'schedule:';
-const SCHEDULE_IN_PROGRESS_STATUSES = new Set<ScheduleRunStatus>([
-  'pending',
-  'warming_up',
-  'warm',
-  'running',
-]);
-
-function isScheduleBoardTaskId(taskId: string): boolean {
-  return taskId.startsWith(SCHEDULE_TASK_ID_PREFIX);
-}
-
-function getScheduleIdFromBoardTaskId(taskId: string): string | null {
-  return isScheduleBoardTaskId(taskId) ? taskId.slice(SCHEDULE_TASK_ID_PREFIX.length) : null;
-}
 
 function areResolvedMembersEqual(
   prev: readonly ResolvedTeamMember[],
@@ -1167,13 +1149,6 @@ export const TeamDetailView = ({
     pendingReviewRequest,
     setPendingReviewRequest,
     teams,
-    schedules,
-    scheduleRuns,
-    scheduleRunsLoading,
-    fetchSchedules,
-    fetchRunHistory,
-    triggerScheduleNow,
-    removeSchedule,
     fetchTeams,
   } = useStore(
     useShallow((s) => ({
@@ -1225,13 +1200,6 @@ export const TeamDetailView = ({
       pendingReviewRequest: s.pendingReviewRequest,
       setPendingReviewRequest: s.setPendingReviewRequest,
       teams: s.teams,
-      schedules: s.schedules,
-      scheduleRuns: s.scheduleRuns,
-      scheduleRunsLoading: s.scheduleRunsLoading,
-      fetchSchedules: s.fetchSchedules,
-      fetchRunHistory: s.fetchRunHistory,
-      triggerScheduleNow: s.triggerNow,
-      removeSchedule: s.deleteSchedule,
       fetchTeams: s.fetchTeams,
     }))
   );
@@ -1282,56 +1250,6 @@ export const TeamDetailView = ({
     void selectTeam(teamName);
     void fetchDeletedTasks(teamName);
   }, [teamName, selectTeam, fetchDeletedTasks]);
-
-  useEffect(() => {
-    void fetchSchedules();
-  }, [fetchSchedules]);
-
-  const teamSchedules = useMemo(
-    () => schedules.filter((schedule) => schedule.teamName === teamName),
-    [schedules, teamName]
-  );
-
-  useEffect(() => {
-    for (const schedule of teamSchedules) {
-      if (scheduleRuns[schedule.id] || scheduleRunsLoading[schedule.id]) {
-        continue;
-      }
-      void fetchRunHistory(schedule.id);
-    }
-  }, [fetchRunHistory, scheduleRuns, scheduleRunsLoading, teamSchedules]);
-
-  const scheduleKanbanTasks = useMemo<TeamTaskWithKanban[]>(() => {
-    return teamSchedules.map((schedule: Schedule) => {
-      const latestRun = (scheduleRuns[schedule.id] ?? [])[0];
-      const isInProgress = latestRun ? SCHEDULE_IN_PROGRESS_STATUSES.has(latestRun.status) : false;
-      const status: TeamTaskWithKanban['status'] = isInProgress ? 'in_progress' : 'pending';
-      const title = schedule.label?.trim() || getCronDescription(schedule.cronExpression);
-      const latestRunText = latestRun
-        ? `最近运行：${latestRun.status}${latestRun.startedAt ? ` (${new Date(latestRun.startedAt).toLocaleString('zh-CN')})` : ''}`
-        : null;
-      const nextRunText = schedule.nextRunAt
-        ? `下次执行：${new Date(schedule.nextRunAt).toLocaleString('zh-CN')}`
-        : null;
-
-      return {
-        id: `${SCHEDULE_TASK_ID_PREFIX}${schedule.id}`,
-        displayId: `SCH-${schedule.id.slice(0, 6)}`,
-        subject: `[定时] ${title}`,
-        description: [
-          `Cron: ${schedule.cronExpression}`,
-          `时区: ${schedule.timezone}`,
-          nextRunText,
-          latestRunText,
-        ]
-          .filter((item): item is string => Boolean(item))
-          .join('\n'),
-        status,
-        createdAt: schedule.createdAt,
-        updatedAt: latestRun?.startedAt ?? schedule.updatedAt,
-      };
-    });
-  }, [scheduleRuns, teamSchedules]);
 
   // Recovery: after HMR, all mounted TeamDetailView effects re-run simultaneously.
   // With CSS display-toggle (all tabs stay mounted), the last selectTeam() call wins
@@ -1607,16 +1525,11 @@ export const TeamDetailView = ({
 
   const activeMembers = useStableActiveMembers(membersWithLiveBranches);
 
-  const mergedKanbanTasks = useMemo(
-    () => [...filteredTasks, ...scheduleKanbanTasks],
-    [filteredTasks, scheduleKanbanTasks]
-  );
-
   const kanbanDisplayTasks = useMemo(() => {
     const query = kanbanSearch.trim();
-    if (!query) return mergedKanbanTasks;
-    return filterKanbanTasks(mergedKanbanTasks, query);
-  }, [mergedKanbanTasks, kanbanSearch]);
+    if (!query) return filteredTasks;
+    return filterKanbanTasks(filteredTasks, query);
+  }, [filteredTasks, kanbanSearch]);
 
   const activeTeammateCount = useMemo(
     () => activeMembers.filter((m) => !isLeadMember(m)).length,
@@ -1860,33 +1773,23 @@ export const TeamDetailView = ({
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       void (async () => {
-        const scheduleId = getScheduleIdFromBoardTaskId(taskId);
-        const isScheduleTask = scheduleId !== null;
-        const title = isScheduleTask ? '删除定时任务' : '删除任务';
-        const message = isScheduleTask
-          ? '将该定时任务从看板中删除（会同时删除计划）？'
-          : `将任务 #${deriveTaskDisplayId(taskId)} 移入废纸篓？`;
         const confirmed = await confirm({
-          title,
-          message,
+          title: '删除任务',
+          message: `将任务 #${deriveTaskDisplayId(taskId)} 移入废纸篓？`,
           confirmLabel: '删除',
           cancelLabel: '取消',
           variant: 'danger',
         });
         if (confirmed) {
           try {
-            if (scheduleId) {
-              await removeSchedule(scheduleId);
-            } else {
-              await softDeleteTask(teamName, taskId);
-            }
+            await softDeleteTask(teamName, taskId);
           } catch {
             // error via store
           }
         }
       })();
     },
-    [teamName, softDeleteTask, removeSchedule]
+    [teamName, softDeleteTask]
   );
 
   const handleViewChanges = useCallback(
@@ -2394,7 +2297,7 @@ export const TeamDetailView = ({
 
               <CollapsibleTeamSection
                 sectionId="kanban"
-                title="任务"
+                title="外部派单"
                 icon={<Columns3 size={14} />}
                 badge={filteredTasks.length}
                 defaultOpen
@@ -2410,7 +2313,7 @@ export const TeamDetailView = ({
                     }}
                   >
                     <Plus size={12} />
-                    任务
+                    新建
                   </Button>
                 }
               >
@@ -2470,16 +2373,6 @@ export const TeamDetailView = ({
                     }}
                     onStartTask={(taskId) => {
                       void (async () => {
-                        const scheduleId = getScheduleIdFromBoardTaskId(taskId);
-                        if (scheduleId) {
-                          try {
-                            await triggerScheduleNow(scheduleId);
-                            await fetchRunHistory(scheduleId);
-                          } catch {
-                            // error via store
-                          }
-                          return;
-                        }
                         try {
                           const result = await startTaskByUser(teamName, taskId);
                           if (data?.isAlive) {
@@ -2510,9 +2403,6 @@ export const TeamDetailView = ({
                     }}
                     onCompleteTask={(taskId) => {
                       void (async () => {
-                        if (isScheduleBoardTaskId(taskId)) {
-                          return;
-                        }
                         try {
                           await updateTaskStatus(teamName, taskId, 'completed');
                         } catch {
@@ -2522,9 +2412,6 @@ export const TeamDetailView = ({
                     }}
                     onCancelTask={(taskId) => {
                       void (async () => {
-                        if (isScheduleBoardTaskId(taskId)) {
-                          return;
-                        }
                         try {
                           const task = data?.tasks.find((t) => t.id === taskId);
                           await updateTaskStatus(teamName, taskId, 'pending');
@@ -2585,9 +2472,6 @@ export const TeamDetailView = ({
                       }
                     }}
                     onTaskClick={(task) => {
-                      if (isScheduleBoardTaskId(task.id)) {
-                        return;
-                      }
                       setSelectedTask(task);
                     }}
                     onViewChanges={handleViewChanges}

@@ -3085,12 +3085,18 @@ app.get<{ Params: { name: string; sessionId: string }; Querystring: { history_li
   }
 );
 
-// DELETE session — 通过 cc-connect API 删除指定 session
+// DELETE session — 关闭 cc-connect live session，使其从运行中转为历史会话。
 app.delete<{ Params: { name: string; sessionId: string } }>(
   '/api/teams/:name/sessions/:sessionId',
   async (request, reply) => {
     try {
-      await cc.deleteSession(request.params.name, request.params.sessionId);
+      const detail = await cc.getSession(request.params.name, request.params.sessionId, 1);
+      await sendHarnessMessageViaBridge({
+        teamName: request.params.name,
+        sessionKey: detail.session_key,
+        text: '/stop',
+        msgId: `hermit-stop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      });
       return { ok: true };
     } catch (err) {
       return reply

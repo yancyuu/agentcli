@@ -4,7 +4,7 @@
  * - 默认按当前选中团队隔离展示（无选中团队时展示全部）
  * - 分组：live 在上，inactive 在下
  * - 分页：默认 8 条，"加载更多"
- * - 取消：live 会话 hover 显示红色 X
+ * - 关闭：live 会话 hover 显示红色 X，关闭后进入历史会话
  * - 搜索：按会话标题、团队名、最后消息过滤
  */
 
@@ -156,7 +156,7 @@ export const SidebarSessions = (): React.JSX.Element => {
           setExpandedId(null);
         }
       } catch (err) {
-        console.error('Failed to cancel session:', err);
+        console.error('Failed to close session:', err);
       } finally {
         setCancellingId(null);
       }
@@ -451,7 +451,7 @@ const SessionRow = ({
               onCancel(session.teamName, session.id);
             }}
             disabled={cancelling}
-            title="终止会话"
+            title="关闭会话并归档"
           >
             {cancelling ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
           </button>
