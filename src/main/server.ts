@@ -3923,18 +3923,58 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify(settings, null, 2));
 
-  // Reconnect TaskDispatchService with new config
-  taskDispatch.dispose();
+  // Auto-inject CLAUDE.md instructions when enabling
   if (config?.enabled) {
-    await taskDispatch.start(config);
-    return {
-      ok: true,
-      connected: true,
-      message: `Connected to Redis at ${config.redis.host}:${config.redis.port}`,
-    };
+    try {
+      const projects = await cc.listProjects();
+      for (const p of projects) {
+        let workDir = '';
+        let slug = p.name;
+        try {
+          const meta = await svc.readTeamManifest(p.name);
+          if (typeof meta.workDir === 'string') workDir = meta.workDir.trim();
+          if (meta.slug) slug = meta.slug;
+        } catch {
+          /* no local manifest */
+        }
+        if (!workDir) {
+          try {
+            const detail = await cc.getProject(p.name);
+            if (typeof detail.work_dir === 'string') workDir = detail.work_dir.trim();
+          } catch {
+            // ignore
+          }
+        }
+        if (workDir) {
+          await svc.injectTeamInstructions(workDir, slug);
+        }
+      }
+    } catch (err) {
+      request.log.warn({ err }, 'CLAUDE.md injection failed');
+    }
+
+    // Reconnect TaskDispatchService with Redis (optional)
+    taskDispatch.dispose();
+    try {
+      await taskDispatch.start(config);
+      return {
+        ok: true,
+        connected: true,
+        message: `Redis 连接成功，分布式派发已启用`,
+      };
+    } catch {
+      return {
+        ok: true,
+        connected: false,
+        message: `Redis 连接失败，仅本地派发`,
+      };
+    }
   }
+
+  taskDispatch.dispose();
   return { ok: true, connected: false, message: 'Task bus disabled' };
 });
+
 app.get<{ Params: { name: string; memberName: string } }>(
   '/api/teams/:name/review/agent-changes/:memberName',
   async (request) => ({

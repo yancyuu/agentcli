@@ -73,9 +73,16 @@ openHermit 不提供闭源模型，也不劫持你的代码。它是一个高度
 
 ## 🚀 极速部署
 
-### 1. 全局安装
+### 1. 安装启动
+
+方式一：npx（免安装直接运行）
 ```bash
-npm install -g @yancyyu/openhermit
+npx @yancyyu/openhermit@latest
+```
+
+方式二：全局安装
+```bash
+npm install -g @yancyyu/openhermit@latest --prefer-online
 openhermit
 ```
 

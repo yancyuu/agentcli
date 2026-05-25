@@ -1,33 +1,42 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
+import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
 import type { TaskBusConfig } from '@shared/types/team';
-
-const defaultConfig: TaskBusConfig = {
-  enabled: false,
-  redis: { host: '127.0.0.1', port: 6379 },
-};
+import { Loader2, Radio, Wifi, WifiOff } from 'lucide-react';
 
 export function TaskBusSection(): React.JSX.Element {
-  const [config, setConfig] = useState<TaskBusConfig>(defaultConfig);
+  const [enabled, setEnabled] = useState(false);
+  const [host, setHost] = useState('127.0.0.1');
+  const [port, setPort] = useState(6379);
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings/task-bus')
       .then((r) => r.json())
-      .then((data) => {
-        setConfig(data ?? defaultConfig);
-        setLoading(false);
+      .then((data: TaskBusConfig) => {
+        setEnabled(data.enabled);
+        if (data.redis) {
+          setHost(data.redis.host ?? '127.0.0.1');
+          setPort(data.redis.port ?? 6379);
+          setPassword(data.redis.password ?? '');
+        }
       })
-      .catch(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
-  const save = useCallback(async () => {
-    setSaving(true);
-    setTestResult(null);
+  const save = async (connectRedis = false) => {
+    setMessage(null);
+    if (connectRedis) setConnecting(true);
+    const config: TaskBusConfig = {
+      enabled,
+      redis: { host, port, password: password || undefined },
+    };
     try {
       const res = await fetch('/api/settings/task-bus', {
         method: 'PUT',
@@ -35,140 +44,133 @@ export function TaskBusSection(): React.JSX.Element {
         body: JSON.stringify(config),
       });
       const data = await res.json();
-      if (data.ok) {
-        setTestResult('已保存');
+      if (connectRedis) {
+        setConnected(!!data.connected);
+        setMessage(
+          data.connected ? 'Redis 连接成功，分布式派发已启用' : 'Redis 连接失败，仅本地派发'
+        );
       } else {
-        setTestResult(`保存失败: ${data.error ?? 'unknown'}`);
+        setConnected(false);
+        setMessage(enabled ? '已开启，指令已注入到团队工作目录' : '已关闭');
       }
     } catch (err) {
-      setTestResult(`保存失败: ${err}`);
+      setMessage(`操作失败: ${err}`);
     } finally {
-      setSaving(false);
+      setConnecting(false);
     }
-  }, [config]);
+  };
 
-  const testConnection = useCallback(async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, enabled: true }),
-      });
-      const data = await res.json();
-      setTestResult(data.connected ? `连接成功: ${data.message}` : `连接失败: ${data.message}`);
-    } catch (err) {
-      setTestResult(`连接失败: ${err}`);
-    } finally {
-      setTesting(false);
-    }
-  }, [config]);
+  const toggle = (value: boolean) => {
+    setEnabled(value);
+    const config: TaskBusConfig = {
+      enabled: value,
+      redis: { host, port, password: password || undefined },
+    };
+    fetch('/api/settings/task-bus', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+      .then((r) => r.json())
+      .then(() => setMessage(value ? '已开启，指令已注入到团队工作目录' : '已关闭'))
+      .catch(() => setMessage('操作失败'));
+  };
 
   if (loading) {
-    return <div className="px-4 py-8 text-center text-[var(--color-text-muted)]">加载中...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={16} className="animate-spin text-[var(--color-text-muted)]" />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6 px-2">
-      {/* Enable toggle */}
-      <label className="flex items-center gap-3">
-        <input
-          type="checkbox"
-          checked={config.enabled}
-          onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
-          className="h-4 w-4 rounded border-[var(--color-border)]"
-        />
-        <div>
-          <div className="text-sm font-medium">启用任务总线</div>
-          <div className="text-xs text-[var(--color-text-muted)]">
-            开启后可通过 Redis 与其他 Hermit 实例共享团队任务
-          </div>
-        </div>
-      </label>
+    <div>
+      <SettingsSectionHeader title="任务总线" icon={<Radio size={12} />} />
 
-      {/* Redis config */}
-      <fieldset
-        className={`space-y-4 rounded-lg border border-[var(--color-border)] p-4 ${
-          !config.enabled ? 'opacity-50' : ''
-        }`}
-        disabled={!config.enabled}
+      <SettingRow
+        label="启用任务总线"
+        description="开启后自动为所有团队注入跨团队任务派发指令到 CLAUDE.md"
       >
-        <legend className="px-2 text-sm font-medium">Redis 配置</legend>
+        <SettingsToggle enabled={enabled} onChange={toggle} />
+      </SettingRow>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="mb-1 block text-xs text-[var(--color-text-muted)]">主机</label>
-            <input
-              type="text"
-              value={config.redis.host}
-              onChange={(e) =>
-                setConfig({ ...config, redis: { ...config.redis, host: e.target.value } })
-              }
-              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-              placeholder="127.0.0.1"
-            />
+      {/* Redis */}
+      <SettingRow label="Redis" description="可选，配置后启用跨主机分布式派发">
+        <div className="flex items-center gap-2">
+          {connected ? (
+            <span className="flex items-center gap-1 text-xs text-emerald-500">
+              <Wifi size={12} />
+              已连接
+            </span>
+          ) : enabled ? (
+            <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+              <WifiOff size={12} />
+              本地模式
+            </span>
+          ) : null}
+        </div>
+      </SettingRow>
+
+      {enabled && (
+        <div className="border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          <div className="space-y-3 px-1 pt-2">
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="mb-1 block text-xs text-[var(--color-text-muted)]">主机</label>
+                <input
+                  type="text"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                  placeholder="127.0.0.1"
+                />
+              </div>
+              <div className="w-24">
+                <label className="mb-1 block text-xs text-[var(--color-text-muted)]">端口</label>
+                <input
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value))}
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                  placeholder="6379"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">密码</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                placeholder="可选"
+              />
+            </div>
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                size="sm"
+                onClick={() => save(true)}
+                disabled={connecting}
+                className="gap-1.5"
+              >
+                {connecting && <Loader2 size={12} className="animate-spin" />}
+                {connecting ? '连接中...' : '测试连接'}
+              </Button>
+              {message && <span className="text-xs text-[var(--color-text-muted)]">{message}</span>}
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-[var(--color-text-muted)]">端口</label>
-            <input
-              type="number"
-              value={config.redis.port}
-              onChange={(e) =>
-                setConfig({ ...config, redis: { ...config.redis, port: Number(e.target.value) } })
-              }
-              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-              placeholder="6379"
-            />
-          </div>
         </div>
+      )}
 
-        <div>
-          <label className="mb-1 block text-xs text-[var(--color-text-muted)]">密码（可选）</label>
-          <input
-            type="password"
-            value={config.redis.password ?? ''}
-            onChange={(e) =>
-              setConfig({
-                ...config,
-                redis: { ...config.redis, password: e.target.value || undefined },
-              })
-            }
-            className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-            placeholder="留空则无密码"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs text-[var(--color-text-muted)]">数据库编号</label>
-          <input
-            type="number"
-            min={0}
-            max={15}
-            value={config.redis.db ?? 0}
-            onChange={(e) =>
-              setConfig({ ...config, redis: { ...config.redis, db: Number(e.target.value) } })
-            }
-            className="w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-          />
-        </div>
-      </fieldset>
-
-      {/* Actions */}
-      <div className="flex items-center gap-3">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={testConnection}
-          disabled={!config.enabled || testing}
+      {!enabled && message && (
+        <div
+          className="border-b py-2 text-xs text-[var(--color-text-muted)]"
+          style={{ borderColor: 'var(--color-border-subtle)' }}
         >
-          {testing ? '测试中...' : '测试连接'}
-        </Button>
-        <Button size="sm" onClick={save} disabled={saving}>
-          {saving ? '保存中...' : '保存'}
-        </Button>
-        {testResult && <span className="text-xs text-[var(--color-text-muted)]">{testResult}</span>}
-      </div>
+          {message}
+        </div>
+      )}
     </div>
   );
 }

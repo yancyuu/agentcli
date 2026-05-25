@@ -3,7 +3,7 @@
  *
  * 设计（v2）:
  *   - 一个 Team = 一个 cc-connect project
- *   - createTeam(): 本地建目录 + cc-connect 创建 project + 注入 MCP 配置
+ *   - createTeam(): 本地建目录 + cc-connect 创建 project + 注入 CLAUDE.md 指令
  *   - dispatchTask(): assignee 变化时通过 Bridge 推消息给目标团队的 agent
  */
 
@@ -25,12 +25,6 @@ import {
 
 const logger = createLogger('TeamProvisioningService');
 
-/** MCP server 地址，注入到 claudecode/qoder 配置 */
-const MCP_SERVER_URL = process.env.HERMIT_MCP_URL ?? 'http://127.0.0.1:5680/mcp';
-
-/** 支持自动注入 MCP 配置的 harness 类型 */
-const MCP_AUTO_INJECT_HARNESS = new Set(['claudecode', 'qoder']);
-
 export class TeamProvisioningService {
   private readonly workspace: TeamWorkspaceService;
 
@@ -50,7 +44,7 @@ export class TeamProvisioningService {
    * 创建团队：
    * 1. 本地建目录 + team.json
    * 2. 在 cc-connect 创建 project（bridge platform）
-   * 3. 如果 harness 支持，注入 MCP 配置到 workDir
+   * 3. 注入 CLAUDE.md 跨团队派发指令
    * 4. 触发 cc-connect restart 激活 project
    */
   async createTeam(
@@ -81,10 +75,6 @@ export class TeamProvisioningService {
         );
         // 不中断流程 — project 可能已存在
       }
-    }
-
-    if (MCP_AUTO_INJECT_HARNESS.has(manifest.harness)) {
-      await this.injectMcpConfig(manifest.workDir, slug, manifest.harness);
     }
 
     await this.injectTeamInstructions(manifest.workDir, slug);
@@ -249,55 +239,10 @@ export class TeamProvisioningService {
   }
 
   // ===========================================================================
-  // MCP config injection
+  // CLAUDE.md instruction injection
   // ===========================================================================
 
-  /**
-   * 根据 harness 类型将 hermit-tasks MCP 配置注入到对应目录。
-   */
-  private async injectMcpConfig(
-    workDir: string,
-    teamSlug: string,
-    harness?: string
-  ): Promise<void> {
-    const configPaths = this.getMcpConfigPaths(workDir, harness);
-    for (const settingsPath of configPaths) {
-      try {
-        await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-        let existing: Record<string, unknown> = {};
-        try {
-          const raw = await fs.promises.readFile(settingsPath, 'utf8');
-          existing = JSON.parse(raw) as Record<string, unknown>;
-        } catch {
-          // file doesn't exist yet
-        }
-        const mcpServers = (existing.mcpServers as Record<string, unknown>) ?? {};
-        mcpServers['hermit-tasks'] = {
-          url: MCP_SERVER_URL,
-          env: { HERMIT_TEAM_SLUG: teamSlug },
-        };
-        const updated = { ...existing, mcpServers };
-        await fs.promises.writeFile(settingsPath, JSON.stringify(updated, null, 2), 'utf8');
-        logger.info(`injected MCP config → ${settingsPath}`);
-      } catch (err) {
-        logger.warn(
-          `MCP config injection failed (${settingsPath}): ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }
-  }
-
-  private getMcpConfigPaths(workDir: string, harness?: string): string[] {
-    const h = (harness ?? '').toLowerCase();
-    if (h === 'cursor') return [path.join(workDir, '.cursor', 'mcp.json')];
-    if (h === 'codex' || h === 'openai-codex')
-      return [path.join(workDir, '.codex', 'settings.json')];
-    if (h === 'gemini' || h === 'gemini-cli')
-      return [path.join(workDir, '.gemini', 'settings.json')];
-    return [path.join(workDir, '.claude', 'settings.json')];
-  }
-
-  private async injectTeamInstructions(workDir: string, teamSlug: string): Promise<void> {
+  async injectTeamInstructions(workDir: string, teamSlug: string): Promise<void> {
     const mdPath = path.join(workDir, 'CLAUDE.md');
     const section = `
 

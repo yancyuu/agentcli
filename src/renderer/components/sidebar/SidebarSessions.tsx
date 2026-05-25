@@ -28,7 +28,7 @@ import {
 import type { CcSession, CcSessionDetail, TeamSummary } from '@shared/types';
 
 const PAGE_SIZE = 8;
-const REFRESH_INTERVAL_MS = 5000;
+const REFRESH_INTERVAL_MS = 2000;
 const SESSION_DETAIL_PAGE_SIZE = 50;
 
 interface TaggedSession extends CcSession {
@@ -50,6 +50,7 @@ export const SidebarSessions = (): React.JSX.Element => {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
+  const needsRefreshRef = useRef(false);
 
   const activeTeamTabName = useMemo(() => {
     if (!activeTabId) return null;
@@ -67,7 +68,10 @@ export const SidebarSessions = (): React.JSX.Element => {
 
   const fetchAll = useCallback(
     async (opts: { silent?: boolean } = {}) => {
-      if (refreshInFlightRef.current) return;
+      if (refreshInFlightRef.current) {
+        needsRefreshRef.current = true;
+        return;
+      }
       const { silent = false } = opts;
       refreshInFlightRef.current = true;
       if (!silent) {
@@ -108,10 +112,32 @@ export const SidebarSessions = (): React.JSX.Element => {
         if (!silent) {
           setLoading(false);
         }
+        if (needsRefreshRef.current) {
+          needsRefreshRef.current = false;
+          void fetchAll({ silent: true });
+        }
       }
     },
     [scopedTeamName]
   );
+
+  /** Incremental refresh: only re-fetch sessions for one team */
+  const refreshTeam = useCallback(async (teamName: string) => {
+    try {
+      const sessions = await api.teams.getTeamSessions(teamName);
+      const tagged = sessions.map((s) => ({
+        ...s,
+        teamName,
+        teamDisplayName: teamName,
+      }));
+      setAllSessions((prev) => {
+        const others = prev.filter((s) => s.teamName !== teamName);
+        return [...others, ...tagged];
+      });
+    } catch {
+      // silent
+    }
+  }, []);
 
   useEffect(() => {
     void fetchAll();
@@ -135,7 +161,8 @@ export const SidebarSessions = (): React.JSX.Element => {
       if (scopedTeamName && change.teamName !== scopedTeamName) {
         return;
       }
-      void fetchAll({ silent: true });
+      // Incremental refresh for the changed team — lightweight, no blocking
+      void refreshTeam(change.teamName);
     });
     return () => {
       if (typeof unsubscribe === 'function') {
@@ -333,7 +360,7 @@ const SessionRow = ({
   cancelling,
 }: Readonly<SessionRowProps>): React.JSX.Element => {
   const timeAgo = formatShortTime(new Date(session.updatedAt));
-  const label = session.title || session.chatName || session.userName || session.sessionKey;
+  const label = session.chatName || session.title || session.userName || session.sessionKey;
   const platformLabel = session.platform === 'bridge' ? 'Bridge' : session.platform;
   const [detail, setDetail] = useState<CcSessionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);

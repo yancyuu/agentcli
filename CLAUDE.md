@@ -244,3 +244,22 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 - Keep persistence concerns split by responsibility: schema/normalization, repository interface, concrete storage implementation, and UI adapter logic should live in separate modules.
 - Prefer designs where the high-level feature code can swap local browser/Electron storage for a server-backed implementation without rewriting the rendering layer.
 - Reuse generic persistence/layout infrastructure when adding new draggable/resizable surfaces instead of copying feature-specific storage code.
+
+
+## Cross-Team Task Dispatch (Hermit)
+
+You can dispatch tasks to other teams via the Hermit local API:
+
+- **List available teams**: `curl -s http://127.0.0.1:5680/api/cross-team/targets`
+- **Dispatch a task**: `curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"openHermit","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'`
+
+Current team slug: `openHermit`
+
+When to dispatch:
+- Task requires access to a different codebase/project
+- Task explicitly mentions another team's domain
+- Task is blocked by work owned by another team
+
+Do NOT dispatch:
+- Task is within current team's project scope
+- Task can be completed with available tools

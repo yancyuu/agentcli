@@ -61,12 +61,11 @@ Options:
   update             Check and install updates
 
 Examples:
-  openhermit                      # Start on port 5680
-  openhermit --port 8080          # Start on port 8080
-  openhermit --no-cc-connect      # Start only openHermit
-  openhermit --version            # Show version
-  openhermit update               # Check for updates
-  npx @yancyyu/openhermit         # Run without installing
+  npx @yancyyu/openhermit             # Run without installing
+  npx @yancyyu/openhermit --port 8080
+  openhermit                          # After global install
+  openhermit --version
+  openhermit update
 `);
   process.exit(0);
 }
@@ -198,8 +197,8 @@ function hasProjectEntries(raw) {
 
 function buildBootstrapProjectToml() {
   return `
-# Internal bootstrap project used only so cc-connect can start with an otherwise empty config.
-# It is safe to keep this project; users can replace or delete it after creating real teams.
+# Bootstrap project — cc-connect requires at least one project to start.
+# This entry is automatically managed by openHermit and will be ignored at runtime.
 [[projects]]
 name = "${bootstrapProjectName}"
 disabled_commands = ["*"]
@@ -212,13 +211,7 @@ work_dir = "${escapeTomlPath(hermitHome)}"
 mode = "default"
 
 [[projects.platforms]]
-type = "line"
-
-[projects.platforms.options]
-channel_secret = "openhermit-bootstrap"
-channel_token = "openhermit-bootstrap"
-port = "0"
-callback_path = "/openhermit-bootstrap"
+type = "bridge"
 `;
 }
 
@@ -317,9 +310,9 @@ if (!skipCcConnect) {
       },
       stdio: 'inherit',
     });
-    const ready = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 15_000);
+    const ready = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 30_000);
     if (!ready) {
-      console.warn('[openHermit] cc-connect did not become ready within 15s; openHermit will keep trying via API.');
+      console.warn('[openHermit] cc-connect did not become ready within 30s; openHermit will keep trying via API.');
     }
   }
 }

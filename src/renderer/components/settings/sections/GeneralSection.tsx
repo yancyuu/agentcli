@@ -15,27 +15,31 @@ import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-reac
 import { useShallow } from 'zustand/react/shallow';
 
 import { Button } from '@renderer/components/ui/button';
-import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
+import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
 
 import type { SafeConfig } from '../hooks/useSettingsConfig';
 import type { ClaudeRootInfo, WslClaudeRootCandidate } from '@shared/types';
 import type { HttpServerStatus } from '@shared/types/api';
 import type { AppConfig } from '@shared/types/notifications';
 
-// Theme options
 const THEME_OPTIONS = [
   { value: 'dark', label: '深色' },
   { value: 'light', label: '浅色' },
   { value: 'system', label: '跟随系统' },
 ] as const;
 
-const CC_LANGUAGE_OPTIONS = ['en', 'zh', 'zh-TW', 'ja', 'es'] as const;
-const CC_LOG_LEVEL_OPTIONS = ['debug', 'info', 'warn', 'error'] as const;
+const CC_LOG_LEVEL_OPTIONS = [
+  { value: 'debug', label: 'Debug' },
+  { value: 'info', label: 'Info' },
+  { value: 'warn', label: 'Warn' },
+  { value: 'error', label: 'Error' },
+];
+
 const CC_ATTACHMENT_OPTIONS = [
   { value: '', label: '默认' },
   { value: 'on', label: '开启' },
   { value: 'off', label: '关闭' },
-] as const;
+];
 
 interface CcGlobalSettingsState {
   language: string;
@@ -51,6 +55,38 @@ interface CcGlobalSettingsState {
   rate_limit_max_messages: number;
   rate_limit_window_secs: number;
 }
+
+/** Compact number input for SettingRow right side */
+const CompactNum = ({
+  value,
+  onChange,
+  onSave,
+  min,
+  className,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  onSave: () => void;
+  min?: number;
+  className?: string;
+}): React.JSX.Element => (
+  <input
+    type="number"
+    min={min}
+    value={value}
+    onChange={(e) => onChange(Number(e.target.value) || 0)}
+    onBlur={onSave}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter') onSave();
+    }}
+    className={cn(
+      'h-8 w-24 rounded-md border bg-transparent px-2 text-right text-xs tabular-nums',
+      'focus:outline-none focus:ring-1 focus:ring-zinc-700',
+      className
+    )}
+    style={{ borderColor: 'var(--color-border-subtle)', color: 'var(--color-text)' }}
+  />
+);
 
 interface GeneralSectionProps {
   readonly safeConfig: SafeConfig;
@@ -75,7 +111,6 @@ export const GeneralSection = ({
   const [serverError, setServerError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Claude Root state
   const { connectionMode, fetchProjects, fetchRepositoryGroups } = useStore(
     useShallow((s) => ({
       connectionMode: s.connectionMode,
@@ -105,10 +140,7 @@ export const GeneralSection = ({
     rate_limit_window_secs: 60,
   });
   const [ccSettingsLoading, setCcSettingsLoading] = useState(false);
-  const [ccSettingsSaving, setCcSettingsSaving] = useState(false);
-  const [ccSettingsMessage, setCcSettingsMessage] = useState<string | null>(null);
 
-  // Fetch server status and Claude root info on mount
   useEffect(() => {
     void api.httpServer
       .getStatus()
@@ -136,8 +168,8 @@ export const GeneralSection = ({
     try {
       const settings = await api.ccSettings.get();
       setCcSettings((prev) => ({ ...prev, ...(settings as Partial<CcGlobalSettingsState>) }));
-    } catch (error) {
-      setCcSettingsMessage(error instanceof Error ? error.message : '加载运行设置失败');
+    } catch {
+      // best-effort
     } finally {
       setCcSettingsLoading(false);
     }
@@ -151,19 +183,17 @@ export const GeneralSection = ({
     setCcSettings((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const saveCcSettings = useCallback(async () => {
-    setCcSettingsSaving(true);
-    setCcSettingsMessage(null);
-    try {
-      await api.ccSettings.patch(ccSettings as unknown as Record<string, unknown>);
-      setCcSettingsMessage('已保存');
-      setTimeout(() => setCcSettingsMessage(null), 2500);
-    } catch (error) {
-      setCcSettingsMessage(error instanceof Error ? error.message : '保存失败');
-    } finally {
-      setCcSettingsSaving(false);
-    }
-  }, [ccSettings]);
+  const autoSaveCcSetting = useCallback(
+    async <K extends keyof CcGlobalSettingsState>(key: K, value: CcGlobalSettingsState[K]) => {
+      patchCcSettings({ [key]: value });
+      try {
+        await api.ccSettings.patch({ [key]: value } as unknown as Record<string, unknown>);
+      } catch {
+        // silent
+      }
+    },
+    [patchCcSettings]
+  );
 
   const handleServerToggle = useCallback(async (enabled: boolean) => {
     setServerLoading(true);
@@ -186,7 +216,6 @@ export const GeneralSection = ({
     setTimeout(() => setCopied(false), 2000);
   }, [serverUrl]);
 
-  // Claude Root handlers
   const resetWorkspaceForRootChange = useCallback((): void => {
     useStore.setState({
       projects: [],
@@ -369,8 +398,20 @@ export const GeneralSection = ({
     []
   );
 
+  const saveRateLimit = useCallback(async () => {
+    try {
+      await api.ccSettings.patch({
+        rate_limit_max_messages: ccSettings.rate_limit_max_messages,
+        rate_limit_window_secs: ccSettings.rate_limit_window_secs,
+      } as Record<string, unknown>);
+    } catch {
+      // silent
+    }
+  }, [ccSettings.rate_limit_max_messages, ccSettings.rate_limit_window_secs]);
+
   return (
     <div>
+      {/* Language */}
       <SettingsSectionHeader title="Agent 语言" />
       <SettingRow label="语言" description={agentLanguageDescription}>
         <Combobox
@@ -386,6 +427,7 @@ export const GeneralSection = ({
         />
       </SettingRow>
 
+      {/* Appearance */}
       <SettingsSectionHeader title="外观" />
       <SettingRow label="主题" description="选择你偏好的界面主题">
         <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
@@ -417,6 +459,8 @@ export const GeneralSection = ({
           disabled={saving}
         />
       </SettingRow>
+
+      {/* Server Status */}
       <SettingsSectionHeader title="服务状态" />
       <div
         className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
@@ -456,192 +500,110 @@ export const GeneralSection = ({
         当前为 Web 控制台模式。服务由 Hermit 后端托管，不能在浏览器内启动或关闭。
       </p>
 
+      {/* Runtime Settings */}
       <SettingsSectionHeader title="运行设置" />
-      <div className="space-y-3 rounded-md border border-[var(--color-border)] p-3">
-        {ccSettingsLoading ? (
-          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="size-3.5 animate-spin" />
-            正在加载运行设置...
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  语言
-                </label>
-                <select
-                  value={ccSettings.language}
-                  onChange={(event) => patchCcSettings({ language: event.target.value })}
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                >
-                  {CC_LANGUAGE_OPTIONS.map((language) => (
-                    <option key={language} value={language}>
-                      {language}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  附件回传
-                </label>
-                <select
-                  value={ccSettings.attachment_send}
-                  onChange={(event) => patchCcSettings({ attachment_send: event.target.value })}
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                >
-                  {CC_ATTACHMENT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  空闲超时（分钟）
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={ccSettings.idle_timeout_mins}
-                  onChange={(event) =>
-                    patchCcSettings({ idle_timeout_mins: Number(event.target.value) || 0 })
-                  }
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  日志等级
-                </label>
-                <select
-                  value={ccSettings.log_level}
-                  onChange={(event) => patchCcSettings({ log_level: event.target.value })}
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                >
-                  {CC_LOG_LEVEL_OPTIONS.map((level) => (
-                    <option key={level} value={level}>
-                      {level}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid gap-2 md:grid-cols-2">
-              <SettingsToggle
-                enabled={ccSettings.thinking_messages}
-                onChange={(value) => patchCcSettings({ thinking_messages: value })}
+      {ccSettingsLoading ? (
+        <div className="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
+          <Loader2 className="size-3.5 animate-spin" />
+          正在加载...
+        </div>
+      ) : (
+        <>
+          <SettingRow label="附件回传" description="控制是否将对话中的附件文件回传给 Agent">
+            <SettingsSelect
+              value={ccSettings.attachment_send}
+              options={CC_ATTACHMENT_OPTIONS}
+              onChange={(v) => void autoSaveCcSetting('attachment_send', v)}
+            />
+          </SettingRow>
+          <SettingRow label="空闲超时" description="Agent 空闲多久后自动断开（分钟）">
+            <CompactNum
+              value={ccSettings.idle_timeout_mins}
+              onChange={(v) => patchCcSettings({ idle_timeout_mins: v })}
+              onSave={() =>
+                void autoSaveCcSetting('idle_timeout_mins', ccSettings.idle_timeout_mins)
+              }
+              min={0}
+            />
+          </SettingRow>
+          <SettingRow label="日志等级" description="cc-connect 日志输出级别">
+            <SettingsSelect
+              value={ccSettings.log_level}
+              options={CC_LOG_LEVEL_OPTIONS}
+              onChange={(v) => void autoSaveCcSetting('log_level', v)}
+            />
+          </SettingRow>
+          <SettingRow label="显示 Thinking 消息" description="在对话中展示 Agent 的思考过程">
+            <SettingsToggle
+              enabled={ccSettings.thinking_messages}
+              onChange={(v) => void autoSaveCcSetting('thinking_messages', v)}
+            />
+          </SettingRow>
+          <SettingRow label="显示工具进度" description="在对话中展示 Agent 调用工具的详细信息">
+            <SettingsToggle
+              enabled={ccSettings.tool_messages}
+              onChange={(v) => void autoSaveCcSetting('tool_messages', v)}
+            />
+          </SettingRow>
+          <SettingRow label="启用流式预览" description="实时预览 Agent 的流式输出内容">
+            <SettingsToggle
+              enabled={ccSettings.stream_preview_enabled}
+              onChange={(v) => void autoSaveCcSetting('stream_preview_enabled', v)}
+            />
+          </SettingRow>
+          <SettingRow label="Thinking 最大长度" description="截断展示的 Thinking 消息最大字符数">
+            <CompactNum
+              value={ccSettings.thinking_max_len}
+              onChange={(v) => patchCcSettings({ thinking_max_len: v })}
+              onSave={() => void autoSaveCcSetting('thinking_max_len', ccSettings.thinking_max_len)}
+              min={0}
+            />
+          </SettingRow>
+          <SettingRow label="工具消息最大长度" description="截断展示的工具消息最大字符数">
+            <CompactNum
+              value={ccSettings.tool_max_len}
+              onChange={(v) => patchCcSettings({ tool_max_len: v })}
+              onSave={() => void autoSaveCcSetting('tool_max_len', ccSettings.tool_max_len)}
+              min={0}
+            />
+          </SettingRow>
+          <SettingRow label="预览间隔" description="流式预览刷新间隔（毫秒）">
+            <CompactNum
+              value={ccSettings.stream_preview_interval_ms}
+              onChange={(v) => patchCcSettings({ stream_preview_interval_ms: v })}
+              onSave={() =>
+                void autoSaveCcSetting(
+                  'stream_preview_interval_ms',
+                  ccSettings.stream_preview_interval_ms
+                )
+              }
+              min={100}
+            />
+          </SettingRow>
+          <SettingRow label="频率限制" description="限制时间窗口内发送的最大消息数">
+            <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+              <CompactNum
+                value={ccSettings.rate_limit_max_messages}
+                onChange={(v) => patchCcSettings({ rate_limit_max_messages: v })}
+                onSave={() => void saveRateLimit()}
+                min={0}
+                className="w-20"
               />
-              <span className="text-xs text-[var(--color-text-secondary)]">显示 Thinking 消息</span>
-              <SettingsToggle
-                enabled={ccSettings.tool_messages}
-                onChange={(value) => patchCcSettings({ tool_messages: value })}
+              <span>条 /</span>
+              <CompactNum
+                value={ccSettings.rate_limit_window_secs}
+                onChange={(v) => patchCcSettings({ rate_limit_window_secs: v })}
+                onSave={() => void saveRateLimit()}
+                min={1}
+                className="w-20"
               />
-              <span className="text-xs text-[var(--color-text-secondary)]">显示工具进度</span>
-              <SettingsToggle
-                enabled={ccSettings.stream_preview_enabled}
-                onChange={(value) => patchCcSettings({ stream_preview_enabled: value })}
-              />
-              <span className="text-xs text-[var(--color-text-secondary)]">启用流式预览</span>
+              <span>秒</span>
             </div>
+          </SettingRow>
+        </>
+      )}
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  Thinking 最大长度
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={ccSettings.thinking_max_len}
-                  onChange={(event) =>
-                    patchCcSettings({ thinking_max_len: Number(event.target.value) || 0 })
-                  }
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  工具消息最大长度
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={ccSettings.tool_max_len}
-                  onChange={(event) =>
-                    patchCcSettings({ tool_max_len: Number(event.target.value) || 0 })
-                  }
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  预览间隔（毫秒）
-                </label>
-                <input
-                  type="number"
-                  min={100}
-                  value={ccSettings.stream_preview_interval_ms}
-                  onChange={(event) =>
-                    patchCcSettings({
-                      stream_preview_interval_ms: Number(event.target.value) || 100,
-                    })
-                  }
-                  className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  频率限制（条/窗口）
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    value={ccSettings.rate_limit_max_messages}
-                    onChange={(event) =>
-                      patchCcSettings({ rate_limit_max_messages: Number(event.target.value) || 0 })
-                    }
-                    className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                    placeholder="数量"
-                  />
-                  <input
-                    type="number"
-                    min={1}
-                    value={ccSettings.rate_limit_window_secs}
-                    onChange={(event) =>
-                      patchCcSettings({ rate_limit_window_secs: Number(event.target.value) || 1 })
-                    }
-                    className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-                    placeholder="秒"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button size="sm" onClick={() => void saveCcSettings()} disabled={ccSettingsSaving}>
-                {ccSettingsSaving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                保存运行设置
-              </Button>
-              {ccSettingsMessage ? (
-                <span
-                  className={`text-xs ${
-                    ccSettingsMessage === '已保存' ? 'text-emerald-400' : 'text-red-400'
-                  }`}
-                >
-                  {ccSettingsMessage}
-                </span>
-              ) : null}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Privacy / Telemetry — only visible when Sentry DSN is baked into the build */}
+      {/* Privacy */}
       {import.meta.env.VITE_SENTRY_DSN && (
         <>
           <SettingsSectionHeader title="隐私" />
