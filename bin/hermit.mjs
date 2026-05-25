@@ -84,7 +84,8 @@ const ccConnectConfigPath =
   process.env.HERMIT_CC_CONNECT_CONFIG ||
   process.env.CC_CONNECT_CONFIG ||
   path.join(hermitHome, 'cc-connect', 'config.toml');
-const bootstrapProjectName = '__openhermit_bootstrap__';
+const bootstrapProjectName = 'default';
+const legacyBootstrapProjectName = '__openhermit_bootstrap__';
 
 // ---------------------------------------------------------------------------
 // Update command
@@ -216,21 +217,39 @@ callback_path = "/openhermit-bootstrap"
 `;
 }
 
-function migrateManagedBootstrapProject(raw) {
-  const projectPattern = /(^|\n)(#.*\n)*\[\[projects\]\]\nname\s*=\s*"__openhermit_bootstrap__"[\s\S]*?(?=\n(#.*\n)*\[\[projects\]\]|\s*$)/m;
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findProjectBlock(raw, name) {
+  const projectPattern = new RegExp(
+    `(^|\\n)(#.*\\n)*\\[\\[projects\\]\\]\\nname\\s*=\\s*"${escapeRegExp(name)}"[\\s\\S]*?(?=\\n(#.*\\n)*\\[\\[projects\\]\\]|\\s*$)`,
+    'm'
+  );
   const match = raw.match(projectPattern);
-  if (!match) return raw;
+  return match ? { pattern: projectPattern, match } : null;
+}
 
-  const block = match[0];
-  const isLegacyManagedBootstrap =
-    block.includes('type = "feishu"') &&
-    block.includes('app_id = "placeholder"') &&
-    block.includes('app_secret = "placeholder"');
+function isManagedBootstrapBlock(block) {
+  return (
+    block.includes('disabled_commands = ["*"]') &&
+    (block.includes('app_id = "placeholder"') ||
+      block.includes('channel_token = "openhermit-bootstrap"') ||
+      block.includes('callback_path = "/openhermit-bootstrap"'))
+  );
+}
 
-  if (!isLegacyManagedBootstrap) return raw;
+function migrateManagedBootstrapProject(raw) {
+  const legacyBlock = findProjectBlock(raw, legacyBootstrapProjectName);
+  if (!legacyBlock || !isManagedBootstrapBlock(legacyBlock.match[0])) return raw;
 
-  const prefix = match[1] === '\n' ? '\n' : '';
-  return raw.replace(projectPattern, `${prefix}${buildBootstrapProjectToml().trimStart()}`);
+  const prefix = legacyBlock.match[1] === '\n' ? '\n' : '';
+  const defaultBlock = findProjectBlock(raw, bootstrapProjectName);
+  if (defaultBlock) {
+    return raw.replace(legacyBlock.pattern, prefix);
+  }
+
+  return raw.replace(legacyBlock.pattern, `${prefix}${buildBootstrapProjectToml().trimStart()}`);
 }
 
 function ensureCcConnectConfig() {
