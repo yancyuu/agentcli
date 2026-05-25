@@ -3852,9 +3852,40 @@ app.post<{
   return { ok: true, dispatchId: result.dispatchId, status: result.status };
 });
 
-app.get('/api/cross-team/targets', async () => {
-  const teams = await taskDispatch.listTeams();
-  return teams;
+app.get<{ Querystring: { excludeTeam?: string } }>('/api/cross-team/targets', async (request) => {
+  const excludeTeam = request.query.excludeTeam;
+  // Fetch teams from workspace + alive status from cc-connect
+  const allTeams = await svc.listTeams();
+  let aliveSet = new Set<string>();
+  try {
+    const projects = await cc.listProjects();
+    const states = await Promise.all(
+      projects.map(async (p) => {
+        let isAlive = false;
+        try {
+          const detail = await cc.getProject(p.name);
+          isAlive =
+            Array.isArray(detail.platforms) && detail.platforms.some((pl: any) => pl.connected);
+        } catch {
+          /* degraded */
+        }
+        return { name: p.name, isAlive };
+      })
+    );
+    aliveSet = new Set(states.filter((s) => s.isAlive).map((s) => s.name));
+  } catch {
+    /* cc-connect unavailable */
+  }
+
+  return allTeams
+    .filter((t) => t.slug !== excludeTeam && !t.pendingDelete)
+    .map((t) => ({
+      teamName: t.slug,
+      displayName: t.displayName || t.slug,
+      description: t.description,
+      color: t.color,
+      isOnline: aliveSet.has(t.bindProject),
+    }));
 });
 
 app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {
