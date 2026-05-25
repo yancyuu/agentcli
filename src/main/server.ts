@@ -701,7 +701,7 @@ app.post('/api/cc-reload', async () => {
 app.get('/api/teams', async () => {
   try {
     const projects = await cc.listProjects();
-    return await Promise.all(
+    const summaries = await Promise.all(
       projects.map(async (p) => {
         // platforms 从 listProjects 返回的是 string[]，有 platform 即认为在线
         const isOnline = Array.isArray(p.platforms) && p.platforms.length > 0;
@@ -760,6 +760,7 @@ app.get('/api/teams', async () => {
         };
       })
     );
+    return summaries.filter((team) => team.pendingDelete !== true);
   } catch {
     return [];
   }
@@ -1028,19 +1029,30 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   async (request, reply) => {
     const teamName = request.params.name;
     try {
+      let restartRequired = false;
       try {
         const result = await cc.deleteProject(teamName);
+        restartRequired = result.restart_required === true;
         await svc.updateTeam(teamName, {
           pendingDelete: true,
-          restartRequired: result.restart_required === true,
+          restartRequired,
         });
       } catch (err) {
         request.log.warn({ err, teamName }, 'delete cc-connect project failed or project missing');
+        try {
+          await svc.updateTeam(teamName, {
+            pendingDelete: true,
+            restartRequired: true,
+          });
+          restartRequired = true;
+        } catch {
+          // Local metadata may already be gone; keep deletion best-effort.
+        }
       }
       if (request.query.deleteFiles === 'true') {
         await svc.deleteTeam(teamName, { deleteFiles: true });
       }
-      return { ok: true, restartRequired: true };
+      return { ok: true, restartRequired };
     } catch (err) {
       return reply.code(500).send(reply500(err));
     }
@@ -2146,6 +2158,11 @@ function clearScheduleRuntimeState(scheduleId: string): void {
   }
 }
 
+function isCronNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(\b404\b|not found|no matching|does not exist|不存在)/i.test(message);
+}
+
 app.get('/api/schedules', async () => {
   try {
     const jobs = await cc.listCronJobs();
@@ -2322,6 +2339,17 @@ app.delete<{ Params: { id: string } }>('/api/schedules/:id', async (request, rep
     });
     return {};
   } catch (err) {
+    if (isCronNotFoundError(err)) {
+      clearScheduleRuntimeState(resolvedId);
+      clearScheduleRuntimeState(normalizedId);
+      broadcastSse('schedule:change', {
+        type: 'schedule-updated',
+        scheduleId: resolvedId,
+        teamName: resolvedTeamName,
+        detail: 'deleted',
+      });
+      return {};
+    }
     try {
       const jobs = await cc.listCronJobs();
       const stillExists = Boolean(findCronJobByRouteId(jobs, requestedId));
@@ -3001,7 +3029,25 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/lead-context', async () 
 app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (request) => {
   try {
     const sessions = await cc.listSessions(request.params.name);
-    return sessions.map((s) => ({
+    const sessionsByKey = new Map<string, (typeof sessions)[number]>();
+    const sessionScore = (session: (typeof sessions)[number]): number => {
+      const updatedAt = Date.parse(session.updated_at);
+      return (
+        (session.live ? 1_000_000_000_000_000 : 0) +
+        (session.active ? 1_000_000_000_000 : 0) +
+        (session.history_count ?? 0) * 1_000_000 +
+        (session.agent_type ? 10_000 : 0) +
+        (Number.isFinite(updatedAt) ? updatedAt / 1_000_000 : 0)
+      );
+    };
+    for (const session of sessions) {
+      const existing = sessionsByKey.get(session.session_key);
+      if (!existing || sessionScore(session) > sessionScore(existing)) {
+        sessionsByKey.set(session.session_key, session);
+      }
+    }
+
+    return [...sessionsByKey.values()].map((s) => ({
       id: s.id,
       title: s.user_name || s.chat_name || s.name || s.session_key,
       projectId: request.params.name,
@@ -3850,6 +3896,16 @@ app.get('/api/extensions/mcp/browse', async () => ({
 app.setNotFoundHandler((request, reply) => {
   const u = request.url;
   if (!u.startsWith('/api/')) {
+    const pathname = u.split('?')[0] ?? '/';
+    const hasFileExtension = /\.[^/]+$/.test(pathname);
+    const indexPath = path.join(STATIC_DIR, 'index.html');
+    if (
+      (request.method === 'GET' || request.method === 'HEAD') &&
+      !hasFileExtension &&
+      _existsSync2(indexPath)
+    ) {
+      return reply.type('text/html; charset=utf-8').send(readFileSync(indexPath, 'utf-8'));
+    }
     return reply.code(404).type('text/plain').send('not found');
   }
 

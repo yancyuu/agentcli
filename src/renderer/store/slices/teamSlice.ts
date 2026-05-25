@@ -2151,7 +2151,7 @@ export interface TeamSlice {
   softDeleteTask: (teamName: string, taskId: string) => Promise<void>;
   restoreTask: (teamName: string, taskId: string) => Promise<void>;
   fetchDeletedTasks: (teamName: string) => Promise<void>;
-  deleteTeam: (teamName: string) => Promise<void>;
+  deleteTeam: (teamName: string) => Promise<{ restartRequired?: boolean }>;
   restoreTeam: (teamName: string) => Promise<void>;
   permanentlyDeleteTeam: (teamName: string) => Promise<void>;
   createTeam: (request: TeamCreateRequest) => Promise<string>;
@@ -4266,6 +4266,35 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   softDeleteTask: async (teamName: string, taskId: string) => {
     await unwrapIpc('team:softDeleteTask', () => api.teams.softDeleteTask(teamName, taskId));
+    set((state) => {
+      const removeTaskFromSnapshot = (snapshot: TeamViewSnapshot): TeamViewSnapshot => ({
+        ...snapshot,
+        tasks: snapshot.tasks.filter((task) => task.id !== taskId),
+        kanbanState: {
+          ...snapshot.kanbanState,
+          tasks: Object.fromEntries(
+            Object.entries(snapshot.kanbanState.tasks).filter(([id]) => id !== taskId)
+          ),
+        },
+      });
+      const cached = state.teamDataCacheByName[teamName];
+      return {
+        ...(cached
+          ? {
+              teamDataCacheByName: {
+                ...state.teamDataCacheByName,
+                [teamName]: removeTaskFromSnapshot(cached),
+              },
+            }
+          : {}),
+        ...(state.selectedTeamName === teamName && state.selectedTeamData
+          ? { selectedTeamData: removeTaskFromSnapshot(state.selectedTeamData) }
+          : {}),
+        globalTasks: state.globalTasks.filter(
+          (task) => !(task.teamName === teamName && task.id === taskId)
+        ),
+      };
+    });
     await get().refreshTeamData(teamName);
     await get().fetchDeletedTasks(teamName);
   },
@@ -4290,9 +4319,22 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   },
 
   deleteTeam: async (teamName: string) => {
-    await unwrapIpc('team:deleteTeam', () => api.teams.deleteTeam(teamName));
+    const result = await unwrapIpc('team:deleteTeam', () => api.teams.deleteTeam(teamName));
+    invalidateTeamLocalStateEpoch(teamName);
+    clearPendingReplyRefreshTimer(teamName);
+    clearPendingReplyRefreshWaits(teamName);
+    clearTeamScopedTransientState(teamName);
+    set((state) => ({
+      ...collectTeamScopedStateRemovals(state, teamName),
+      teams: state.teams.filter((team) => team.teamName !== teamName),
+      selectedTeamName: state.selectedTeamName === teamName ? null : state.selectedTeamName,
+      selectedTeamData: state.selectedTeamName === teamName ? null : state.selectedTeamData,
+      selectedTeamError: state.selectedTeamName === teamName ? null : state.selectedTeamError,
+      selectedTeamLoading: state.selectedTeamName === teamName ? false : state.selectedTeamLoading,
+    }));
     await get().fetchTeams();
     await get().fetchAllTasks();
+    return result;
   },
 
   restoreTeam: async (teamName: string) => {

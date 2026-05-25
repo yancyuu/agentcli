@@ -59,7 +59,6 @@ export const ProviderRuntimeSettingsDialog = ({
   open,
   onOpenChange,
   initialProviderId,
-  onRefreshProvider,
 }: Props): React.JSX.Element => {
   const agentType = AGENT_TYPE_BY_CLI_PROVIDER[initialProviderId];
   const harnessLabel = CLI_PROVIDER_LABELS[initialProviderId] ?? initialProviderId;
@@ -84,14 +83,13 @@ export const ProviderRuntimeSettingsDialog = ({
     try {
       const result = await providersApi.list();
       setProviders(result.providers ?? []);
-      await onRefreshProvider?.(initialProviderId);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载 Provider 失败');
       setProviders([]);
     } finally {
       setLoading(false);
     }
-  }, [initialProviderId, onRefreshProvider]);
+  }, []);
 
   useEffect(() => {
     if (open) {

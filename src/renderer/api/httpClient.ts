@@ -1114,8 +1114,8 @@ export class HttpAPIClient implements ElectronAPI {
       const path = `/api/teams/${encodeURIComponent(teamName)}/claude-logs`;
       return this.get<TeamClaudeLogsResponse>(qs ? `${path}?${qs}` : path);
     },
-    deleteTeam: async (teamName: string): Promise<void> => {
-      await this.del(`/api/teams/${encodeURIComponent(teamName)}`);
+    deleteTeam: async (teamName: string): Promise<{ restartRequired?: boolean }> => {
+      return this.del<{ restartRequired?: boolean }>(`/api/teams/${encodeURIComponent(teamName)}`);
     },
     restoreTeam: async (teamName: string): Promise<void> => {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/restore`);

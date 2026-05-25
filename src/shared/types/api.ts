@@ -529,7 +529,7 @@ export interface TeamsAPI {
   setToolActivityTracking: (teamName: string, enabled: boolean) => Promise<void>;
   setTaskLogStreamTracking: (teamName: string, enabled: boolean) => Promise<void>;
   getClaudeLogs: (teamName: string, query?: TeamClaudeLogsQuery) => Promise<TeamClaudeLogsResponse>;
-  deleteTeam: (teamName: string) => Promise<void>;
+  deleteTeam: (teamName: string) => Promise<{ restartRequired?: boolean }>;
   restoreTeam: (teamName: string) => Promise<void>;
   permanentlyDeleteTeam: (teamName: string) => Promise<void>;
   getSavedRequest: (teamName: string) => Promise<TeamCreateRequest | null>;

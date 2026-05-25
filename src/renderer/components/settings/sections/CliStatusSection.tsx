@@ -273,6 +273,11 @@ export const CliStatusSection = ({
     setManageDialogOpen(true);
   }, []);
 
+  const handleProviderRefresh = useCallback(
+    (providerId: CliProviderId) => fetchCliProviderStatus(providerId),
+    [fetchCliProviderStatus]
+  );
+
   const handleHarnessManage = useCallback(
     (agentType: CcAgentType) => {
       const providerId = CLI_PROVIDER_BY_AGENT_TYPE[agentType];
@@ -677,7 +682,7 @@ export const CliStatusSection = ({
         providerStatusLoading={cliProviderStatusLoading}
         disabled={isBusy || cliStatusLoading}
         onSelectBackend={handleRuntimeBackendChange}
-        onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
+        onRefreshProvider={handleProviderRefresh}
         onRequestLogin={(providerId) => setProviderTerminal({ providerId, action: 'login' })}
       />
       <GenericHarnessProviderDialog

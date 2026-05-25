@@ -5,8 +5,8 @@
 <h1 align="center">openHermit</h1>
 
 <p align="center">
-  <strong>本地 AI Agent 团队工作台</strong><br/>
-  面向一人公司和小团队，用一个 Web 控制台管理 Agent 团队、任务看板、消息和运行状态。
+  <strong>给一人公司和小团队用的本地 AI Agent 控制台</strong><br/>
+  把 Claude Code、Codex、Gemini、Qoder 等 Agent 放进同一个看板、消息和审查流程里。
 </p>
 
 <p align="center">
@@ -18,28 +18,35 @@
 
 ## openHermit 是什么
 
-openHermit 是一个本地运行的 AI Agent 工作台，适合一人公司、小团队和高频使用 AI Coding Agent 的个人开发者。它基于 cc-connect 启动和管理 Claude Code、Codex、Gemini、Qoder 等 Agent 运行时，并提供团队、任务、消息和看板 UI。
+openHermit 是一个本地运行的 AI Agent 工作台。它适合一人公司、小团队，以及每天同时使用多个 AI Coding Agent 的开发者。
 
-它主要解决这些问题：
+你可以把它理解成一个轻量的本地“调度台”：需求进入看板，任务分配给不同 Agent，过程通过消息和日志保留下来，代码改动再进入审查。
 
-- 一个人同时调度多个 AI Agent 时，很难记住谁在做什么。
-- 多个 Agent 运行时分散在不同终端里，不方便跟踪。
-- 任务、消息和执行结果缺少统一记录。
-- Agent 改代码后需要有明确的审查入口。
-- 团队模板、Skills 和项目经验需要复用。
+它不提供模型，也不托管你的代码。openHermit 基于 cc-connect 启动和管理 Claude Code、Codex、Gemini、Qoder 等运行时，项目代码、任务数据和配置默认都留在本机。
+
+## 为什么需要它
+
+AI Coding Agent 已经能完成越来越多实际开发工作，但当你同时开多个终端、多个项目、多个 Agent 时，问题很快会出现：
+
+- 哪个 Agent 正在做什么，靠脑子记不住。
+- 同一个需求被拆成多个子任务后，缺少统一看板。
+- Agent 的执行过程散在终端日志里，不方便复盘。
+- 代码改动可以生成，但缺少明确的审查入口。
+- 团队模板、Skills 和项目经验沉淀不下来。
+
+openHermit 做的事很简单：把多个 Agent 的工作过程放进一个本地控制台里，让一个人也能按“团队”的方式分配任务、查看进度、接收结果和审查改动。
 
 ---
 
-## 能力概览
+## 你可以用它做什么
 
-- 为一个人或小团队创建多个 AI Agent 团队。
-- 创建团队并选择 Agent 运行时。
-- 用看板管理任务状态和结果。
-- 通过消息面板向团队或成员发送指令。
-- 查看运行日志和会话历史。
-- 对 Agent 产生的代码变更进行审查。
-- 通过 cc-connect 接入飞书、微信、Telegram 等渠道。
-- 使用 MCP 工具让 Agent 认领、更新和完成任务。
+- **创建 AI 团队**：为前端、后端、测试、调研等工作创建不同团队或角色。
+- **用看板管任务**：任务有状态、负责人、执行记录和结果，不再散在聊天里。
+- **给 Agent 发消息**：向负责人或具体成员补充指令，保留上下文。
+- **审查代码改动**：Agent 产生的变更进入审查流程，而不是直接混进代码库。
+- **查看运行状态**：会话、日志、错误和启动状态集中展示，便于排障。
+- **接入外部渠道**：通过 cc-connect 接入飞书、微信、Telegram 等消息来源。
+- **复用团队配置**：把团队模板、Skills 和工作方式沉淀下来，下次直接复用。
 
 ---
 
@@ -157,6 +164,9 @@ http://127.0.0.1:5680
 
 ```bash
 open-hermit                # 等同于 openhermit
+openhermit --daemon        # 后台运行
+openhermit status          # 查看后台运行状态
+openhermit stop            # 停止后台服务
 openhermit --port 8080     # 指定 Web 控制台端口
 openhermit --no-cc-connect # 不自动启动 cc-connect
 openhermit --version       # 查看版本

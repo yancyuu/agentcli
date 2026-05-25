@@ -1301,7 +1301,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           providerStatusLoading={cliProviderStatusLoading}
           disabled={isBusy || cliStatusLoading || !renderCliStatus.binaryPath}
           onSelectBackend={handleProviderBackendChange}
-          onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
+          onRefreshProvider={handleProviderRefresh}
           onRequestLogin={(providerId) => setProviderTerminal({ providerId, action: 'login' })}
         />
       </>
