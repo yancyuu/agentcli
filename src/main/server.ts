@@ -3854,7 +3854,7 @@ app.post<{
 
 app.get('/api/cross-team/targets', async () => {
   const teams = await taskDispatch.listTeams();
-  return { teams };
+  return teams;
 });
 
 app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {

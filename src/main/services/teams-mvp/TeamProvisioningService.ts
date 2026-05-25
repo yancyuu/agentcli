@@ -84,8 +84,10 @@ export class TeamProvisioningService {
     }
 
     if (MCP_AUTO_INJECT_HARNESS.has(manifest.harness)) {
-      await this.injectMcpConfig(manifest.workDir, slug);
+      await this.injectMcpConfig(manifest.workDir, slug, manifest.harness);
     }
+
+    await this.injectTeamInstructions(manifest.workDir, slug);
 
     return { slug, manifest };
   }
@@ -251,34 +253,90 @@ export class TeamProvisioningService {
   // ===========================================================================
 
   /**
-   * 向 workDir 注入 MCP 配置，让 claude code / qoder 自动发现 hermit-tasks 工具。
-   * 写入 workDir/.claude/settings.json（claudecode）。
+   * 根据 harness 类型将 hermit-tasks MCP 配置注入到对应目录。
    */
-  private async injectMcpConfig(workDir: string, teamSlug: string): Promise<void> {
-    const settingsPath = path.join(workDir, '.claude', 'settings.json');
-    try {
-      await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-
-      let existing: Record<string, unknown> = {};
+  private async injectMcpConfig(
+    workDir: string,
+    teamSlug: string,
+    harness?: string
+  ): Promise<void> {
+    const configPaths = this.getMcpConfigPaths(workDir, harness);
+    for (const settingsPath of configPaths) {
       try {
-        const raw = await fs.promises.readFile(settingsPath, 'utf8');
-        existing = JSON.parse(raw) as Record<string, unknown>;
+        await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
+        let existing: Record<string, unknown> = {};
+        try {
+          const raw = await fs.promises.readFile(settingsPath, 'utf8');
+          existing = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          // file doesn't exist yet
+        }
+        const mcpServers = (existing.mcpServers as Record<string, unknown>) ?? {};
+        mcpServers['hermit-tasks'] = {
+          url: MCP_SERVER_URL,
+          env: { HERMIT_TEAM_SLUG: teamSlug },
+        };
+        const updated = { ...existing, mcpServers };
+        await fs.promises.writeFile(settingsPath, JSON.stringify(updated, null, 2), 'utf8');
+        logger.info(`injected MCP config → ${settingsPath}`);
+      } catch (err) {
+        logger.warn(
+          `MCP config injection failed (${settingsPath}): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  private getMcpConfigPaths(workDir: string, harness?: string): string[] {
+    const h = (harness ?? '').toLowerCase();
+    if (h === 'cursor') return [path.join(workDir, '.cursor', 'mcp.json')];
+    if (h === 'codex' || h === 'openai-codex')
+      return [path.join(workDir, '.codex', 'settings.json')];
+    if (h === 'gemini' || h === 'gemini-cli')
+      return [path.join(workDir, '.gemini', 'settings.json')];
+    return [path.join(workDir, '.claude', 'settings.json')];
+  }
+
+  private async injectTeamInstructions(workDir: string, teamSlug: string): Promise<void> {
+    const mdPath = path.join(workDir, 'CLAUDE.md');
+    const section = `
+
+## Cross-Team Task Dispatch (Hermit)
+
+You can dispatch tasks to other teams via the Hermit local API:
+
+- **List available teams**: \`curl -s http://127.0.0.1:5680/api/cross-team/targets\`
+- **Dispatch a task**: \`curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'\`
+
+Current team slug: \`${teamSlug}\`
+
+When to dispatch:
+- Task requires access to a different codebase/project
+- Task explicitly mentions another team's domain
+- Task is blocked by work owned by another team
+
+Do NOT dispatch:
+- Task is within current team's project scope
+- Task can be completed with available tools
+`;
+
+    try {
+      let existing = '';
+      try {
+        existing = await fs.promises.readFile(mdPath, 'utf8');
       } catch {
-        // file doesn't exist yet, start fresh
+        // File doesn't exist yet
       }
 
-      const mcpServers = (existing.mcpServers as Record<string, unknown>) ?? {};
-      mcpServers['hermit-tasks'] = {
-        url: MCP_SERVER_URL,
-        env: { HERMIT_TEAM_SLUG: teamSlug },
-      };
+      if (existing.includes('Cross-Team Task Dispatch (Hermit)')) {
+        return;
+      }
 
-      const updated = { ...existing, mcpServers };
-      await fs.promises.writeFile(settingsPath, JSON.stringify(updated, null, 2), 'utf8');
-      logger.info(`injected MCP config → ${settingsPath}`);
+      await fs.promises.writeFile(mdPath, existing + section, 'utf8');
+      logger.info(`injected team instructions → ${mdPath}`);
     } catch (err) {
       logger.warn(
-        `MCP config injection failed (workDir=${workDir}): ${err instanceof Error ? err.message : String(err)}`
+        `Team instructions injection failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
