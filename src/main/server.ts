@@ -682,7 +682,17 @@ app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request)
 app.post('/api/cc-restart', async () => {
   try {
     await cc.restart();
-    return { ok: true };
+    // Wait for cc-connect to come back (restart only signals, process respawns async)
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        await cc.listProjects();
+        return { ok: true };
+      } catch {
+        /* not back yet */
+      }
+    }
+    return reply500(new Error('cc-connect did not come back within 30s'));
   } catch (err) {
     return reply500(err);
   }
@@ -764,7 +774,9 @@ app.get('/api/teams', async () => {
         };
       })
     );
-    return summaries.filter((team) => team.pendingDelete !== true);
+    return summaries.filter(
+      (team) => team.pendingDelete !== true && team.teamName !== 'my-project'
+    );
   } catch {
     return [];
   }
@@ -804,6 +816,16 @@ app.post('/api/teams/create', async (request, reply) => {
       });
     } catch (err) {
       request.log.warn({ err, teamName: name }, 'failed to persist local team metadata');
+    }
+
+    // Bind provider refs if specified
+    const providerRefs = Array.isArray(body.providerRefs) ? (body.providerRefs as string[]) : [];
+    if (providerRefs.length > 0) {
+      try {
+        await cc.setProviderRefs(name, providerRefs);
+      } catch (err) {
+        request.log.warn({ err, teamName: name, providerRefs }, 'failed to set provider refs');
+      }
     }
 
     return { ok: true, teamName: name, runId: null };
@@ -905,6 +927,10 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
         : permissionMode;
+    const [providerRefs, globalProviders] = await Promise.all([
+      cc.getProviderRefs(name).catch(() => []),
+      cc.listProviders().catch(() => []),
+    ]);
 
     return {
       teamName: name,
@@ -945,6 +971,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       description,
       workDir: p.work_dir ?? workDir,
       permissionMode: resolvedPermissionMode,
+      providerRefs,
+      globalProviders,
       settings: {
         ...projectSettings,
         language: resolvedLanguage,
@@ -999,6 +1027,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       description,
       workDir,
       permissionMode,
+      providerRefs: [],
+      globalProviders: [],
       heartbeat: null,
       settings: {
         language,
@@ -1032,30 +1062,24 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   '/api/teams/:name',
   async (request, reply) => {
     const teamName = request.params.name;
+    if (teamName === 'default' || teamName === 'my-project') {
+      return reply.code(403).send({ error: '该团队不可删除' });
+    }
     try {
       let restartRequired = false;
       try {
         const result = await cc.deleteProject(teamName);
         restartRequired = result.restart_required === true;
-        await svc.updateTeam(teamName, {
-          pendingDelete: true,
-          restartRequired,
-        });
       } catch (err) {
         request.log.warn({ err, teamName }, 'delete cc-connect project failed or project missing');
-        try {
-          await svc.updateTeam(teamName, {
-            pendingDelete: true,
-            restartRequired: true,
-          });
-          restartRequired = true;
-        } catch {
-          // Local metadata may already be gone; keep deletion best-effort.
-        }
       }
-      if (request.query.deleteFiles === 'true') {
-        await svc.deleteTeam(teamName, { deleteFiles: true });
+
+      try {
+        await svc.deleteTeam(teamName, { deleteFiles: request.query.deleteFiles === 'true' });
+      } catch (err) {
+        request.log.warn({ err, teamName }, 'delete local team metadata failed or already missing');
       }
+
       return { ok: true, restartRequired };
     } catch (err) {
       return reply.code(500).send(reply500(err));
@@ -3405,6 +3429,9 @@ async function applyTeamConfigUpdate(
   const disabledCommands = Array.isArray(body.disabledCommands)
     ? normalizeStringArray(body.disabledCommands)
     : undefined;
+  const providerRefs = Array.isArray(body.providerRefs)
+    ? normalizeStringArray(body.providerRefs)
+    : undefined;
   const platformAllowFrom = body.platformAllowFrom
     ? normalizePlatformAllowFrom(body.platformAllowFrom)
     : undefined;
@@ -3469,6 +3496,13 @@ async function applyTeamConfigUpdate(
       ccSyncError = err instanceof Error ? err.message : String(err);
     }
   }
+  if (providerRefs !== undefined) {
+    try {
+      await cc.setProviderRefs(teamName, providerRefs);
+    } catch (err) {
+      ccSyncError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   return {
     name: name || teamName,
@@ -3485,6 +3519,7 @@ async function applyTeamConfigUpdate(
     replyFooter: replyFooter ?? false,
     injectSender: injectSender ?? false,
     platformAllowFrom: platformAllowFrom ?? {},
+    providerRefs: providerRefs ?? [],
     ccSyncError,
   };
 }
@@ -3556,6 +3591,10 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
         : permissionMode;
+    const [providerRefs, globalProviders] = await Promise.all([
+      cc.getProviderRefs(name).catch(() => []),
+      cc.listProviders().catch(() => []),
+    ]);
     return {
       name,
       color,
@@ -3571,6 +3610,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       injectSender: resolvedInjectSender,
       permissionMode: resolvedPermissionMode,
       platformAllowFrom: resolvedPlatformAllowFrom,
+      providerRefs,
+      globalProviders,
       settings: {
         ...projectSettings,
         language: resolvedLanguage,

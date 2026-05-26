@@ -30,6 +30,7 @@ import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { getMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
 import { formatBytes } from '@renderer/utils/formatters';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
@@ -747,6 +748,7 @@ const GenericHarnessProviderDialog = ({
       setNewProviderBaseUrl('');
       setNewProviderModel('');
       onRefresh();
+      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.providersChanged);
     } catch (err) {
       setAddProviderError(err instanceof Error ? err.message : '添加 Provider 失败');
     } finally {

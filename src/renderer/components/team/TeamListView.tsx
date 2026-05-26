@@ -33,6 +33,7 @@ import {
 } from '@renderer/store/utils/stateResetHelpers';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
@@ -42,6 +43,7 @@ import {
   Download,
   FolderOpen,
   GitBranch,
+  Loader2,
   Play,
   RotateCcw,
   Search,
@@ -275,6 +277,7 @@ export const TeamListView = (): React.JSX.Element => {
   const [copyData, setCopyData] = useState<TeamCopyData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<TeamListFilterState>(EMPTY_TEAM_FILTER);
+  const [deletingTeamName, setDeletingTeamName] = useState<string | null>(null);
   const [aliveTeams, setAliveTeams] = useState<string[]>([]);
   const {
     teams,
@@ -531,35 +534,29 @@ export const TeamListView = (): React.JSX.Element => {
           return;
         }
         const confirmed = await confirm({
-          title: '移入回收站',
-          message: `确定将团队“${teamDisplayName}”移入回收站吗？之后可以恢复。`,
-          confirmLabel: '移入回收站',
+          title: '删除团队',
+          message: `确定删除团队”${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地团队数据。`,
+          confirmLabel: '删除并重启',
           cancelLabel: '取消',
           variant: 'danger',
         });
         if (confirmed) {
+          setDeletingTeamName(teamName);
           try {
             const result = await deleteTeam(teamName);
             if (result.restartRequired) {
-              const shouldRestart = await confirm({
-                title: '需要重启 cc-connect',
-                message:
-                  '已调用 cc-connect 删除团队配置。cc-connect 需要重启后才会真正移除该团队并停止相关运行时。',
-                confirmLabel: '立即重启',
-                cancelLabel: '稍后重启',
-                variant: 'danger',
-              });
-              if (shouldRestart) {
-                await api.ccSettings.restart();
-              }
+              await api.ccSettings.restart();
             }
-          } catch {
-            // error via store
+            await fetchTeams();
+          } catch (err) {
+            console.error('Failed to delete team:', err);
+          } finally {
+            setDeletingTeamName(null);
           }
         }
       })();
     },
-    [deleteTeam, teams]
+    [deleteTeam, teams, fetchTeams]
   );
 
   const handleRestoreTeam = useCallback(
@@ -673,6 +670,19 @@ export const TeamListView = (): React.JSX.Element => {
   useEffect(() => {
     void fetchTeams();
     void fetchAllTasks();
+  }, [fetchTeams, fetchAllTasks]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void fetchTeams();
+      void fetchAllTasks();
+    };
+    window.addEventListener(OPEN_HERMIT_EVENTS.runtimeRestarted, refresh);
+    window.addEventListener(OPEN_HERMIT_EVENTS.teamsChanged, refresh);
+    return () => {
+      window.removeEventListener(OPEN_HERMIT_EVENTS.runtimeRestarted, refresh);
+      window.removeEventListener(OPEN_HERMIT_EVENTS.teamsChanged, refresh);
+    };
   }, [fetchTeams, fetchAllTasks]);
 
   const taskCountsByTeam = useMemo(() => buildTaskCountsByTeam(globalTasks), [globalTasks]);
@@ -799,6 +809,7 @@ export const TeamListView = (): React.JSX.Element => {
     async (request: TeamCreateRequest) => {
       await createTeam(request);
       await Promise.all([fetchTeams(), fetchAllTasks()]);
+      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.teamsChanged);
       window.setTimeout(() => {
         void fetchTeams();
         void fetchAllTasks();
@@ -1095,6 +1106,7 @@ export const TeamListView = (): React.JSX.Element => {
             const matchesCurrentProject = currentProjectPath
               ? teamMatchesProjectSelection(team, currentProjectPath)
               : false;
+            const isDeleting = deletingTeamName === team.teamName;
             return (
               <div
                 key={team.teamName}
@@ -1102,14 +1114,22 @@ export const TeamListView = (): React.JSX.Element => {
                 tabIndex={0}
                 className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-l-[3px] border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
                 style={teamColorSet ? { borderLeftColor: teamColorSet.border } : undefined}
-                onClick={() => openTeamTab(team.teamName, team.projectPath)}
+                onClick={
+                  isDeleting ? undefined : () => openTeamTab(team.teamName, team.projectPath)
+                }
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    openTeamTab(team.teamName, team.projectPath);
+                    if (!isDeleting) openTeamTab(team.teamName, team.projectPath);
                   }
                 }}
               >
+                {isDeleting && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/60 text-sm text-white">
+                    <Loader2 size={16} className="animate-spin" />
+                    删除并重启中…
+                  </div>
+                )}
                 <div className="flex flex-1 flex-col">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1166,20 +1186,22 @@ export const TeamListView = (): React.JSX.Element => {
                           <TooltipContent side="bottom">复制团队</TooltipContent>
                         </Tooltip>
                       )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                            onClick={(e) =>
-                              handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
-                            }
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">删除团队</TooltipContent>
-                      </Tooltip>
+                      {team.teamName !== 'default' && team.teamName !== 'my-project' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                              onClick={(e) =>
+                                handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
+                              }
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">删除团队</TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                   <div className="mt-2 flex min-h-10 items-start gap-2">

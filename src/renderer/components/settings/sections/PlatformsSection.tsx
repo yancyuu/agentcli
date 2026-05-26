@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { api } from '@renderer/api';
+import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -17,6 +19,7 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import {
   Select,
   SelectContent,
@@ -198,14 +201,22 @@ async function addPlatform(
   projectName: string,
   type: string,
   options: Record<string, string>
-): Promise<void> {
+): Promise<{ restartRequired: boolean }> {
   const res = await fetch(`/api/v1/projects/${encodeURIComponent(projectName)}/add-platform`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, options }),
   });
-  const json = (await res.json()) as { ok: boolean; error?: string };
+  const json = (await res.json()) as {
+    ok: boolean;
+    error?: string;
+    data?: { restart_required?: boolean };
+    restart_required?: boolean;
+  };
   if (!json.ok) throw new Error(json.error ?? '添加失败');
+  return {
+    restartRequired: json.data?.restart_required === true || json.restart_required === true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -482,8 +493,24 @@ function AddPlatformDialog({
         else if (v === 'false') ccOptions[k] = false;
         else ccOptions[k] = v;
       }
-      await addPlatform(projectName, platformType, ccOptions as Record<string, string>);
+      const result = await addPlatform(
+        projectName,
+        platformType,
+        ccOptions as Record<string, string>
+      );
       onAdded(projectName);
+      if (result.restartRequired) {
+        const shouldRestart = await confirm({
+          title: '重启 cc-connect',
+          message: '渠道已添加。需要重启 cc-connect 才会生效。',
+          confirmLabel: '立即重启',
+          cancelLabel: '稍后重启',
+        });
+        if (shouldRestart) {
+          await api.ccSettings.restart();
+          emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '添加失败');
     } finally {

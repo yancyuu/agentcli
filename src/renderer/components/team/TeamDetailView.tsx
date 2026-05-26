@@ -67,6 +67,7 @@ import {
   Plus,
   Terminal,
   Trash2,
+  Loader2,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -1065,6 +1066,7 @@ export const TeamDetailView = ({
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [sendDialogDefaultText, setSendDialogDefaultText] = useState<string | undefined>(undefined);
@@ -1618,16 +1620,13 @@ export const TeamDetailView = ({
   );
 
   const handleRestartTeamFromEdit = useCallback(async (): Promise<void> => {
-    if (!data?.config.projectPath) {
-      throw new Error('团队缺少项目路径，无法自动重启。');
-    }
-    await api.teams.stop(teamName);
-    await launchTeam({
-      teamName,
-      cwd: data.config.projectPath,
-    });
-    await Promise.all([fetchTeams(), selectTeam(teamName)]);
-  }, [data?.config.projectPath, fetchTeams, launchTeam, selectTeam, teamName]);
+    await api.ccSettings.restart();
+    // Wait for cc-connect to come back, then refresh
+    setTimeout(() => {
+      void fetchTeams();
+      void selectTeam(teamName);
+    }, 3000);
+  }, [fetchTeams, selectTeam, teamName]);
 
   const handleSaveAndRestartFromEdit = useCallback(
     async (runtimeConfig: {
@@ -1827,30 +1826,25 @@ export const TeamDetailView = ({
   }, []);
 
   const confirmDeleteTeam = useCallback((): void => {
-    setDeleteConfirmOpen(false);
+    setDeleting(true);
     void (async () => {
       try {
         const result = await deleteTeam(teamName);
         if (result.restartRequired) {
-          const shouldRestart = await confirm({
-            title: '需要重启 cc-connect',
-            message:
-              '已调用 cc-connect 删除团队配置。cc-connect 需要重启后才会真正移除该团队并停止相关运行时。',
-            confirmLabel: '立即重启',
-            cancelLabel: '稍后重启',
-            variant: 'danger',
-          });
-          if (shouldRestart) {
-            await api.ccSettings.restart();
-          }
+          await api.ccSettings.restart();
         }
+        await fetchTeams();
+        setDeleteConfirmOpen(false);
         if (tabId) closeTab(tabId);
         openTeamsTab();
-      } catch {
-        // error is shown via store
+      } catch (err) {
+        console.error('Failed to delete team:', err);
+        setDeleteConfirmOpen(false);
+      } finally {
+        setDeleting(false);
       }
     })();
-  }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId]);
+  }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId, fetchTeams]);
 
   const handleCreateTask = (
     subject: string,
@@ -2164,19 +2158,21 @@ export const TeamDetailView = ({
                         {isTeamProvisioning ? '团队仍在编排中，暂时无法编辑' : '编辑团队'}
                       </TooltipContent>
                     </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                          onClick={handleDeleteTeam}
-                        >
-                          <Trash2 size={12} />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">删除团队</TooltipContent>
-                    </Tooltip>
+                    {teamName !== 'default' && teamName !== 'my-project' && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            onClick={handleDeleteTeam}
+                          >
+                            <Trash2 size={12} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">删除团队</TooltipContent>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
                 {data.config.description && (
@@ -2654,6 +2650,8 @@ export const TeamDetailView = ({
                 currentManagedSources={currentManagedSources}
                 currentDisabledCommands={currentDisabledCommands}
                 currentPlatformAllowFrom={currentPlatformAllowFrom}
+                currentProviderRefs={data.providerRefs ?? []}
+                globalProviders={data.globalProviders ?? []}
                 currentMembers={membersWithLiveBranches.filter((m) => !isLeadMember(m))}
                 leadMember={membersWithLiveBranches.find((m) => isLeadMember(m)) ?? null}
                 resolvedMemberColorMap={resolvedMemberColorMap}
@@ -2666,9 +2664,10 @@ export const TeamDetailView = ({
                   void fetchTeams();
                   void selectTeam(teamName);
                 }}
-                onDeleteTeam={handleDeleteTeam}
+                onDeleteTeam={
+                  teamName !== 'default' && teamName !== 'my-project' ? handleDeleteTeam : undefined
+                }
                 onRestartTeam={handleRestartTeamFromEdit}
-                onSaveAndRestart={handleSaveAndRestartFromEdit}
               />
 
               <Dialog
@@ -2705,7 +2704,12 @@ export const TeamDetailView = ({
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+              <Dialog
+                open={deleteConfirmOpen}
+                onOpenChange={(v) => {
+                  if (!deleting) setDeleteConfirmOpen(v);
+                }}
+              >
                 <DialogContent className="max-w-sm">
                   <DialogHeader>
                     <DialogTitle>删除团队</DialogTitle>
@@ -2718,8 +2722,14 @@ export const TeamDetailView = ({
                     <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmOpen(false)}>
                       取消
                     </Button>
-                    <Button variant="destructive" size="sm" onClick={confirmDeleteTeam}>
-                      删除
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={confirmDeleteTeam}
+                      disabled={deleting}
+                    >
+                      {deleting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+                      删除并重启
                     </Button>
                   </DialogFooter>
                 </DialogContent>
