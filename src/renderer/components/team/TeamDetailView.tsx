@@ -61,7 +61,6 @@ import {
   Columns3,
   FolderOpen,
   GitBranch,
-  Globe,
   History,
   Pencil,
   Play,
@@ -81,7 +80,6 @@ import { SendMessageDialog } from './dialogs/SendMessageDialog';
 import { TaskDetailDialog } from './dialogs/TaskDetailDialog';
 import { executeTeamRelaunch } from './dialogs/teamRelaunchFlow';
 import { KanbanBoard } from './kanban/KanbanBoard';
-import { CollabBoardPanel } from './kanban/CollabBoardPanel';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { KanbanSearchInput } from './kanban/KanbanSearchInput';
 import { TrashDialog } from './kanban/TrashDialog';
@@ -2481,15 +2479,6 @@ export const TeamDetailView = ({
                     onOpenTrash={() => setTrashOpen(true)}
                   />
                 </div>
-              </CollapsibleTeamSection>
-
-              <CollapsibleTeamSection
-                sectionId="collab"
-                title="协作看板"
-                icon={<Globe size={14} />}
-                defaultOpen={false}
-              >
-                <CollabBoardPanel teamName={teamName} />
               </CollapsibleTeamSection>
 
               <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />

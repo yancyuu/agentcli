@@ -59,6 +59,7 @@ const TAB_ICONS = {
   report: Activity,
   extensions: Puzzle,
   schedules: Calendar,
+  tasks: Calendar,
   graph: Network,
 } as const;
 

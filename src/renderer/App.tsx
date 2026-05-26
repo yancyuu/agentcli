@@ -52,6 +52,8 @@ function buildPathForTab(activeTab: Tab | null): string {
       return '/extensions';
     case 'schedules':
       return '/schedules';
+    case 'tasks':
+      return '/tasks';
     case 'dashboard':
       return '/dashboard';
     case 'session': {
@@ -148,6 +150,9 @@ function useTabPathPersistence() {
         break;
       case 'schedules':
         state.openSchedulesTab();
+        break;
+      case 'tasks':
+        state.openTasksTab();
         break;
       case 'dashboard':
         state.openDashboard();

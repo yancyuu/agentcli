@@ -39,6 +39,9 @@ export interface ScheduleSlice {
 
   /** Open a standalone Schedules tab (or focus existing) */
   openSchedulesTab(): void;
+
+  /** Open a unified Tasks tab (collab board + schedules) */
+  openTasksTab(): void;
 }
 
 // =============================================================================
@@ -244,6 +247,23 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
     });
 
     // Ensure schedules are fresh when opening
+    void get().fetchSchedules();
+  },
+
+  openTasksTab: () => {
+    const state = get();
+    const focusedPane = state.paneLayout.panes.find((p) => p.id === state.paneLayout.focusedPaneId);
+    const existingTab = focusedPane?.tabs.find((tab) => tab.type === 'tasks');
+    if (existingTab) {
+      state.setActiveTab(existingTab.id);
+      return;
+    }
+
+    state.openTab({
+      type: 'tasks',
+      label: '任务',
+    });
+
     void get().fetchSchedules();
   },
 });

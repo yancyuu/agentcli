@@ -14,6 +14,7 @@ import { SchedulesView } from '../schedules/SchedulesView';
 import { SettingsView } from '../settings/SettingsView';
 import { TeamDetailView } from '../team/TeamDetailView';
 import { TeamListView } from '../team/TeamListView';
+import { TasksView } from '../tasks/TasksView';
 
 import { SessionTabContent } from './SessionTabContent';
 
@@ -67,6 +68,7 @@ export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JS
               </TabUIProvider>
             )}
             {tab.type === 'schedules' && <SchedulesView />}
+            {tab.type === 'tasks' && <TasksView />}
             {tab.type === 'graph' && (
               <TabUIProvider tabId={tab.id}>
                 <TeamGraphTab
