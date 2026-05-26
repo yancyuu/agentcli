@@ -133,6 +133,9 @@ export type TeamReviewState = 'none' | 'review' | 'needsFix' | 'approved';
 
 export type DispatchStatus =
   | 'dispatched'
+  | 'pending_accept'
+  | 'accepted'
+  | 'rejected'
   | 'received'
   | 'in_progress'
   | 'completed'
@@ -148,6 +151,15 @@ export interface DispatchMeta {
   receivedAt?: string;
   completedAt?: string;
   remoteTaskId?: string;
+  deadline?: string;
+  acceptedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface AgentCapability {
+  skill: string;
+  description: string;
 }
 
 export interface DiscoverableTeam {
@@ -156,6 +168,9 @@ export interface DiscoverableTeam {
   location: 'local' | 'remote';
   status: 'online' | 'offline';
   collaboration: boolean;
+  capabilities?: AgentCapability[];
+  description?: string;
+  harness?: string;
 }
 
 export interface TaskBusConfig {
@@ -185,6 +200,7 @@ export interface TaskDispatchPayload {
     promptTaskRefs?: string[];
   };
   dispatchedAt: string;
+  deadline?: string;
 }
 
 export interface TaskStatusUpdate {
@@ -201,6 +217,17 @@ export interface TaskAckPayload {
   status: 'received';
   remoteTaskId: string;
   timestamp: string;
+}
+
+export interface TaskHandshakeResponse {
+  dispatchId: string;
+  type: 'task_accept' | 'task_reject';
+  fromTeam: string;
+  toTeam: string;
+  remoteTaskId?: string;
+  reason?: string;
+  acceptedAt?: string;
+  rejectedAt?: string;
 }
 
 export interface TaskWorkInterval {

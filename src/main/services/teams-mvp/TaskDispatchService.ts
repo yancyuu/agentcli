@@ -1,8 +1,10 @@
 import type {
+  AgentCapability,
   DiscoverableTeam,
   DispatchMeta,
   TaskBusConfig,
   TaskDispatchPayload,
+  TaskHandshakeResponse,
   TaskStatusUpdate,
 } from '@shared/types/team';
 import type { TeamWorkspaceService, TeamManifest } from './TeamWorkspaceService';
@@ -19,6 +21,13 @@ Do NOT dispatch:
 - Task can be completed with available tools
 - Task is a small change (< estimated 5 min)`;
 
+interface PendingRequest {
+  payload: TaskDispatchPayload;
+  msgId: string;
+  groupName: string;
+  teamSlug: string;
+}
+
 export interface DispatchResult {
   dispatchId: string;
   status: DispatchMeta['status'];
@@ -33,7 +42,9 @@ export class TaskDispatchService {
   private redisSub: Redis | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private consumerTimers: ReturnType<typeof setInterval>[] = [];
+  private responseConsumerTimers: ReturnType<typeof setInterval>[] = [];
   private disposed = false;
+  private pendingRequests: Map<string, PendingRequest> = new Map();
 
   constructor(workspace: TeamWorkspaceService) {
     this.workspace = workspace;
@@ -54,6 +65,7 @@ export class TaskDispatchService {
     this.disposed = true;
     this.stopHeartbeat();
     this.stopConsumers();
+    this.stopResponseConsumers();
     this.redis?.disconnect();
     this.redisSub?.disconnect();
     this.redis = null;
@@ -63,9 +75,12 @@ export class TaskDispatchService {
   // ── Agent-facing ──────────────────────────────────────────────
 
   async listTeams(): Promise<DiscoverableTeam[]> {
+    return this.discoverTeams();
+  }
+
+  async discoverTeams(): Promise<DiscoverableTeam[]> {
     const teams: DiscoverableTeam[] = [];
 
-    // Local teams
     const localTeams = await this.workspace.listTeams();
     for (const team of localTeams) {
       teams.push({
@@ -74,26 +89,44 @@ export class TaskDispatchService {
         location: 'local',
         status: 'online',
         collaboration: team.collaboration !== false,
+        description: team.description,
+        harness: team.harness,
+        capabilities: this.inferCapabilities(team),
       });
     }
 
-    // Remote teams (via Redis)
     if (this.redis) {
       try {
         const now = Date.now();
-        const staleThreshold = 90_000; // 90s
+        const staleThreshold = 90_000;
         const entries = await this.redis.zrange('task:teams', 0, -1, 'WITHSCORES');
         const localSlugs = new Set(teams.map((t) => t.slug));
         for (let i = 0; i < entries.length; i += 2) {
           const slug = entries[i] as string;
           const ts = Number(entries[i + 1]);
           if (localSlugs.has(slug)) continue;
+          const isOnline = now - ts < staleThreshold;
+
+          let info: Record<string, string> | null = null;
+          try {
+            info = (await this.redis!.hgetall(`task:team:info:${slug}`)) as Record<string, string>;
+          } catch {
+            /* degraded */
+          }
+
+          const capabilities = info?.capabilities
+            ? (JSON.parse(info.capabilities) as AgentCapability[])
+            : undefined;
+
           teams.push({
             slug,
-            displayName: slug,
+            displayName: info?.displayName ?? slug,
             location: 'remote',
-            status: now - ts < staleThreshold ? 'online' : 'offline',
-            collaboration: true,
+            status: isOnline ? 'online' : 'offline',
+            collaboration: info?.collaboration !== 'false',
+            description: info?.description || undefined,
+            harness: info?.harness || undefined,
+            capabilities,
           });
         }
       } catch {
@@ -107,7 +140,8 @@ export class TaskDispatchService {
   async dispatchTask(
     fromTeam: string,
     task: { subject: string; description?: string; prompt?: string },
-    targetTeam: string
+    targetTeam: string,
+    opts?: { deadlineMinutes?: number }
   ): Promise<DispatchResult> {
     if (fromTeam === targetTeam) {
       return {
@@ -119,20 +153,35 @@ export class TaskDispatchService {
     }
 
     const dispatchId = crypto.randomUUID();
+    const now = new Date();
+    const deadline = opts?.deadlineMinutes
+      ? new Date(now.getTime() + opts.deadlineMinutes * 60_000).toISOString()
+      : undefined;
+
     const dispatchMeta: DispatchMeta = {
       dispatchId,
       originTeam: fromTeam,
       targetTeam,
-      status: 'dispatched',
-      dispatchedAt: new Date().toISOString(),
+      status: 'pending_accept',
+      dispatchedAt: now.toISOString(),
+      deadline,
     };
+
+    // Write shadow task in origin team's board
+    const shadow = await this.workspace.createTask(fromTeam, {
+      title: `[→${targetTeam}] ${task.subject}`,
+      description: task.description,
+    });
+    await this.workspace.patchTask(fromTeam, shadow.id, {
+      dispatchMeta,
+    } as any);
 
     // Route: local or remote
     const isLocal = await this.isLocalTeam(targetTeam);
     if (isLocal) {
-      await this.handleLocalDispatch(dispatchMeta, task);
+      await this.handleLocalHandshakeDispatch(dispatchMeta, task);
     } else if (this.redis) {
-      await this.handleRemoteDispatch(dispatchMeta, task);
+      await this.handleRemoteHandshakeDispatch(dispatchMeta, task);
     } else {
       return {
         dispatchId,
@@ -144,10 +193,115 @@ export class TaskDispatchService {
 
     return {
       dispatchId,
-      status: 'dispatched',
+      status: 'pending_accept',
       targetTeam,
-      message: `Task dispatched to ${targetTeam}`,
+      message: `Task dispatched to ${targetTeam}, awaiting acceptance.`,
     };
+  }
+
+  async acceptTask(teamSlug: string, dispatchId: string): Promise<{ taskId: string }> {
+    const pending = this.pendingRequests.get(dispatchId);
+    if (!pending) {
+      throw new Error(`No pending request found for dispatchId: ${dispatchId}`);
+    }
+
+    const { payload, msgId, groupName } = pending;
+
+    // Create task in local board
+    const created = await this.workspace.createTask(teamSlug, {
+      title: payload.task.subject,
+      description: payload.task.description,
+    });
+
+    const dispatchMeta: DispatchMeta = {
+      dispatchId: payload.dispatchId,
+      originTeam: payload.originTeam,
+      targetTeam: payload.targetTeam,
+      status: 'received',
+      dispatchedAt: payload.dispatchedAt,
+      deadline: payload.deadline,
+      receivedAt: new Date().toISOString(),
+      remoteTaskId: created.id,
+    };
+
+    await this.workspace.patchTask(teamSlug, created.id, {
+      dispatchMeta,
+    } as any);
+
+    // Send accept response
+    const response: TaskHandshakeResponse = {
+      dispatchId: payload.dispatchId,
+      type: 'task_accept',
+      fromTeam: teamSlug,
+      toTeam: payload.originTeam,
+      remoteTaskId: created.id,
+      acceptedAt: new Date().toISOString(),
+    };
+
+    if (this.redis) {
+      const isLocal = await this.isLocalTeam(payload.originTeam);
+      if (isLocal) {
+        await this.handleLocalResponse(response);
+      } else {
+        await this.redis
+          .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
+          .catch((err: Error) => {
+            console.error('[TaskDispatchService] accept xadd failed:', err.message);
+          });
+      }
+
+      // ACK the original dispatch message
+      await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId).catch(() => {});
+    }
+
+    this.pendingRequests.delete(dispatchId);
+    return { taskId: created.id };
+  }
+
+  async rejectTask(teamSlug: string, dispatchId: string, reason?: string): Promise<void> {
+    const pending = this.pendingRequests.get(dispatchId);
+    if (!pending) {
+      throw new Error(`No pending request found for dispatchId: ${dispatchId}`);
+    }
+
+    const { payload, msgId, groupName } = pending;
+
+    const response: TaskHandshakeResponse = {
+      dispatchId: payload.dispatchId,
+      type: 'task_reject',
+      fromTeam: teamSlug,
+      toTeam: payload.originTeam,
+      reason,
+      rejectedAt: new Date().toISOString(),
+    };
+
+    if (this.redis) {
+      const isLocal = await this.isLocalTeam(payload.originTeam);
+      if (isLocal) {
+        await this.handleLocalResponse(response);
+      } else {
+        await this.redis
+          .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
+          .catch((err: Error) => {
+            console.error('[TaskDispatchService] reject xadd failed:', err.message);
+          });
+      }
+
+      await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId).catch(() => {});
+    }
+
+    this.pendingRequests.delete(dispatchId);
+  }
+
+  /** List pending requests for a team (for MCP/UI). */
+  listPendingRequests(teamSlug: string): TaskDispatchPayload[] {
+    const results: TaskDispatchPayload[] = [];
+    for (const [, req] of this.pendingRequests) {
+      if (req.teamSlug === teamSlug) {
+        results.push(req.payload);
+      }
+    }
+    return results;
   }
 
   async onTaskCompleted(teamSlug: string, taskId: string): Promise<void> {
@@ -165,12 +319,10 @@ export class TaskDispatchService {
       result: task.result ?? undefined,
     };
 
-    // Update local dispatchMeta
     await this.workspace.patchTask(teamSlug, taskId, {
       dispatchMeta: { ...meta, status: 'completed', completedAt: update.timestamp },
     } as any);
 
-    // Notify origin team
     if (this.redis) {
       const channel = `task:status:${meta.originTeam}`;
       await this.redis.publish(channel, JSON.stringify(update)).catch((err: Error) => {
@@ -179,7 +331,7 @@ export class TaskDispatchService {
     }
   }
 
-  // ── Local dispatch ────────────────────────────────────────────
+  // ── Local team check ─────────────────────────────────────────
 
   private async isLocalTeam(teamSlug: string): Promise<boolean> {
     try {
@@ -190,21 +342,56 @@ export class TaskDispatchService {
     }
   }
 
-  private async handleLocalDispatch(
+  // ── Local handshake dispatch (same machine) ───────────────────
+
+  private async handleLocalHandshakeDispatch(
     dispatchMeta: DispatchMeta,
     task: { subject: string; description?: string; prompt?: string }
   ): Promise<void> {
-    const created = await this.workspace.createTask(dispatchMeta.targetTeam, {
-      title: task.subject,
-      description: task.description,
+    // For local dispatch, store directly in pendingRequests
+    const payload: TaskDispatchPayload = {
+      dispatchId: dispatchMeta.dispatchId,
+      originTeam: dispatchMeta.originTeam,
+      targetTeam: dispatchMeta.targetTeam,
+      task: { subject: task.subject, description: task.description, prompt: task.prompt },
+      dispatchedAt: dispatchMeta.dispatchedAt,
+      deadline: dispatchMeta.deadline,
+    };
+
+    this.pendingRequests.set(dispatchMeta.dispatchId, {
+      payload,
+      msgId: `local-${Date.now()}`,
+      groupName: 'local',
+      teamSlug: dispatchMeta.targetTeam,
     });
-    // Attach dispatchMeta after creation
-    await this.workspace.patchTask(dispatchMeta.targetTeam, created.id, {
-      dispatchMeta,
-    } as any);
   }
 
-  // ── Remote dispatch (Redis) ───────────────────────────────────
+  // ── Remote dispatch (Redis Streams) ───────────────────────────
+
+  private async handleRemoteHandshakeDispatch(
+    dispatchMeta: DispatchMeta,
+    task: { subject: string; description?: string; prompt?: string }
+  ): Promise<void> {
+    const payload: TaskDispatchPayload = {
+      dispatchId: dispatchMeta.dispatchId,
+      originTeam: dispatchMeta.originTeam,
+      targetTeam: dispatchMeta.targetTeam,
+      task: { subject: task.subject, description: task.description, prompt: task.prompt },
+      dispatchedAt: dispatchMeta.dispatchedAt,
+      deadline: dispatchMeta.deadline,
+    };
+
+    const streamKey = `task:dispatch:${dispatchMeta.targetTeam}`;
+    await this.redis!.xadd(streamKey, '*', 'payload', JSON.stringify(payload));
+  }
+
+  // ── Local response (same machine) ─────────────────────────────
+
+  private async handleLocalResponse(response: TaskHandshakeResponse): Promise<void> {
+    await this.applyResponse(response);
+  }
+
+  // ── Redis connection ──────────────────────────────────────────
 
   private async connectRedis(): Promise<void> {
     if (!this.config?.redis) return;
@@ -224,6 +411,7 @@ export class TaskDispatchService {
 
       this.startHeartbeat();
       this.startConsumers();
+      this.startResponseConsumers();
       this.subscribeStatus();
     } catch (err) {
       console.error('[TaskDispatchService] Redis connect failed:', err);
@@ -232,27 +420,7 @@ export class TaskDispatchService {
     }
   }
 
-  private async handleRemoteDispatch(
-    dispatchMeta: DispatchMeta,
-    task: { subject: string; description?: string; prompt?: string }
-  ): Promise<void> {
-    const payload: TaskDispatchPayload = {
-      dispatchId: dispatchMeta.dispatchId,
-      originTeam: dispatchMeta.originTeam,
-      targetTeam: dispatchMeta.targetTeam,
-      task: {
-        subject: task.subject,
-        description: task.description,
-        prompt: task.prompt,
-      },
-      dispatchedAt: dispatchMeta.dispatchedAt,
-    };
-
-    const streamKey = `task:dispatch:${dispatchMeta.targetTeam}`;
-    await this.redis!.xadd(streamKey, '*', 'payload', JSON.stringify(payload));
-  }
-
-  // ── Heartbeat ─────────────────────────────────────────────────
+  // ── Heartbeat + agent info ────────────────────────────────────
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
@@ -262,7 +430,21 @@ export class TaskDispatchService {
       const localTeams = await this.workspace.listTeams();
       for (const team of localTeams) {
         await this.redis.zadd('task:teams', now, team.slug).catch(() => {});
+        await this.redis
+          .hset(`task:team:info:${team.slug}`, {
+            slug: team.slug,
+            displayName: team.displayName ?? team.slug,
+            harness: team.harness,
+            description: team.description ?? '',
+            capabilities: JSON.stringify(this.inferCapabilities(team)),
+            collaboration: String(team.collaboration !== false),
+            updatedAt: new Date().toISOString(),
+          })
+          .catch(() => {});
       }
+
+      // Check deadline timeouts
+      await this.checkDeadlines(localTeams);
     };
     beat();
     this.heartbeatTimer = setInterval(beat, 30_000);
@@ -275,7 +457,32 @@ export class TaskDispatchService {
     }
   }
 
-  // ── Consumers (XREADGROUP) ────────────────────────────────────
+  private async checkDeadlines(localTeams: TeamManifest[]): Promise<void> {
+    for (const team of localTeams) {
+      try {
+        const tasks = await this.workspace.readTasks(team.slug);
+        for (const task of tasks) {
+          if (
+            task.dispatchMeta?.status === 'pending_accept' &&
+            task.dispatchMeta.deadline &&
+            new Date(task.dispatchMeta.deadline).getTime() < Date.now()
+          ) {
+            await this.workspace.patchTask(team.slug, task.id, {
+              dispatchMeta: {
+                ...task.dispatchMeta,
+                status: 'failed',
+                rejectionReason: 'handshake timeout',
+              },
+            } as any);
+          }
+        }
+      } catch {
+        /* skip broken teams */
+      }
+    }
+  }
+
+  // ── Dispatch consumers (XREADGROUP) ───────────────────────────
 
   private startConsumers(): void {
     if (!this.redis || !this.redisSub) return;
@@ -285,11 +492,10 @@ export class TaskDispatchService {
       const groupName = `hermit-${teamSlug}`;
       const consumerId = `consumer-${process.pid}`;
 
-      // Create consumer group (MKSTREAM creates stream if missing)
       try {
         await this.redis!.xgroup('CREATE', streamKey, groupName, '0', 'MKSTREAM');
       } catch {
-        // Group already exists — ignore
+        // Group already exists
       }
 
       const poll = async () => {
@@ -322,13 +528,11 @@ export class TaskDispatchService {
         }
       };
 
-      // Initial poll, then interval
       poll();
       const timer = setInterval(poll, 5000);
       this.consumerTimers.push(timer);
     };
 
-    // Start consumer for each local team
     this.workspace.listTeams().then((teams) => {
       for (const team of teams) {
         startForTeam(team.slug);
@@ -343,44 +547,22 @@ export class TaskDispatchService {
     groupName: string
   ): Promise<void> {
     try {
-      // fields is [key, value, key, value, ...]
       const payloadStr = fields[1]?.toString();
       if (!payloadStr) return;
 
       const payload: TaskDispatchPayload = JSON.parse(payloadStr);
 
-      // Write task to board.json
-      const created = await this.workspace.createTask(teamSlug, {
-        title: payload.task.subject,
-        description: payload.task.description,
+      // Store in pending requests — wait for agent to accept/reject
+      this.pendingRequests.set(payload.dispatchId, {
+        payload,
+        msgId,
+        groupName,
+        teamSlug,
       });
 
-      const dispatchMeta: DispatchMeta = {
-        dispatchId: payload.dispatchId,
-        originTeam: payload.originTeam,
-        targetTeam: payload.targetTeam,
-        status: 'received',
-        dispatchedAt: payload.dispatchedAt,
-        receivedAt: new Date().toISOString(),
-        remoteTaskId: created.id,
-      };
-
-      await this.workspace.patchTask(teamSlug, created.id, {
-        dispatchMeta,
-      } as any);
-
-      // Send ack
-      if (this.redis) {
-        const ackKey = `task:ack:${payload.dispatchId}`;
-        const ackPayload = JSON.stringify({
-          dispatchId: payload.dispatchId,
-          status: 'received',
-          remoteTaskId: created.id,
-          timestamp: new Date().toISOString(),
-        });
-        await this.redis.xadd(ackKey, '*', 'ack', ackPayload);
-        await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId);
-      }
+      console.log(
+        `[TaskDispatchService] received dispatch request: ${payload.dispatchId} from ${payload.originTeam} → ${teamSlug}`
+      );
     } catch (err) {
       console.error('[TaskDispatchService] handleIncomingDispatch error:', err);
     }
@@ -391,7 +573,116 @@ export class TaskDispatchService {
     this.consumerTimers = [];
   }
 
-  // ── Status subscribe ──────────────────────────────────────────
+  // ── Response consumers (XREADGROUP) ───────────────────────────
+
+  private startResponseConsumers(): void {
+    if (!this.redis || !this.redisSub) return;
+
+    const startForTeam = async (teamSlug: string) => {
+      const streamKey = `task:response:${teamSlug}`;
+      const groupName = `hermit-response-${teamSlug}`;
+      const consumerId = `response-consumer-${process.pid}`;
+
+      try {
+        await this.redis!.xgroup('CREATE', streamKey, groupName, '0', 'MKSTREAM');
+      } catch {
+        // Group already exists
+      }
+
+      const poll = async () => {
+        if (this.disposed || !this.redisSub) return;
+        try {
+          const raw: unknown = await (this.redisSub as any).xreadgroup(
+            'GROUP',
+            groupName,
+            consumerId,
+            'BLOCK',
+            5000,
+            'COUNT',
+            1,
+            'STREAMS',
+            streamKey,
+            '>'
+          );
+          const results = raw as [string, [string, (string | Buffer)[]][]][] | null;
+
+          if (!results || results.length === 0) return;
+
+          for (const [, messages] of results) {
+            if (!Array.isArray(messages)) continue;
+            for (const [msgId, fields] of messages) {
+              await this.handleIncomingResponse(teamSlug, msgId, fields, groupName);
+            }
+          }
+        } catch {
+          // Read error — will retry next poll
+        }
+      };
+
+      poll();
+      const timer = setInterval(poll, 5000);
+      this.responseConsumerTimers.push(timer);
+    };
+
+    this.workspace.listTeams().then((teams) => {
+      for (const team of teams) {
+        startForTeam(team.slug);
+      }
+    });
+  }
+
+  private async handleIncomingResponse(
+    _teamSlug: string,
+    msgId: string,
+    fields: (string | Buffer)[],
+    groupName: string
+  ): Promise<void> {
+    try {
+      const payloadStr = fields[1]?.toString();
+      if (!payloadStr) return;
+
+      const response: TaskHandshakeResponse = JSON.parse(payloadStr);
+      await this.applyResponse(response);
+
+      // ACK
+      if (this.redis) {
+        await this.redis.xack(`task:response:${_teamSlug}`, groupName, msgId).catch(() => {});
+      }
+    } catch (err) {
+      console.error('[TaskDispatchService] handleIncomingResponse error:', err);
+    }
+  }
+
+  private async applyResponse(response: TaskHandshakeResponse): Promise<void> {
+    // Find shadow task in origin team and update dispatch meta
+    const originTeam = response.toTeam;
+    const tasks = await this.workspace.readTasks(originTeam);
+    const shadowTask = tasks.find((t) => t.dispatchMeta?.dispatchId === response.dispatchId);
+    if (!shadowTask) return;
+
+    const meta = { ...shadowTask.dispatchMeta! };
+
+    if (response.type === 'task_accept') {
+      meta.status = 'accepted';
+      meta.acceptedAt = response.acceptedAt;
+      meta.remoteTaskId = response.remoteTaskId;
+    } else {
+      meta.status = 'rejected';
+      meta.rejectedAt = response.rejectedAt;
+      meta.rejectionReason = response.reason;
+    }
+
+    await this.workspace.patchTask(originTeam, shadowTask.id, {
+      dispatchMeta: meta,
+    } as any);
+  }
+
+  private stopResponseConsumers(): void {
+    for (const t of this.responseConsumerTimers) clearInterval(t);
+    this.responseConsumerTimers = [];
+  }
+
+  // ── Status subscribe (completion notifications) ──────────────
 
   private subscribeStatus(): void {
     if (!this.redisSub) return;
@@ -407,14 +698,11 @@ export class TaskDispatchService {
     });
 
     this.redisSub.on('message', (channel: string, message: string) => {
-      // channel format: task:status:{teamSlug}
       if (!channel.startsWith('task:status:')) return;
 
       try {
         const update: TaskStatusUpdate = JSON.parse(message);
         const teamSlug = channel.replace('task:status:', '');
-
-        // Find shadow task (dispatched from this team) and update status
         this.handleStatusSync(teamSlug, update);
       } catch {
         // Ignore malformed messages
@@ -436,5 +724,18 @@ export class TaskDispatchService {
         remoteTaskId: update.remoteTaskId ?? shadowTask.dispatchMeta!.remoteTaskId,
       },
     } as any);
+  }
+
+  // ── Capability inference ──────────────────────────────────────
+
+  private inferCapabilities(team: TeamManifest): AgentCapability[] {
+    const caps: AgentCapability[] = [];
+    if (team.harness) {
+      caps.push({ skill: team.harness, description: `${team.harness} agent` });
+    }
+    if (team.description) {
+      caps.push({ skill: 'general', description: team.description });
+    }
+    return caps;
   }
 }

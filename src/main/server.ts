@@ -1653,7 +1653,7 @@ const MCP_TOOLS = [
   },
   {
     name: 'list_teams',
-    description: '列出所有可用的团队（本地和远程）。用于发现可以派发任务的目标团队。',
+    description: '列出所有可用的团队（本地和远程），包含能力信息。用于发现可以派发任务的目标团队。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1661,7 +1661,7 @@ const MCP_TOOLS = [
   },
   {
     name: 'dispatch_task',
-    description: `将任务派发给另一个团队。当前团队通过 team_slug 参数指定。${taskDispatch.dispatchRulesText}`,
+    description: `将任务派发给另一个团队，等待对方接受。当前团队通过 team_slug 参数指定。${taskDispatch.dispatchRulesText}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1670,8 +1670,48 @@ const MCP_TOOLS = [
         subject: { type: 'string', description: '任务标题' },
         description: { type: 'string', description: '任务描述（可选）' },
         prompt: { type: 'string', description: '给目标团队的执行指令（可选）' },
+        deadline_minutes: {
+          type: 'number',
+          description: '握手超时时间（分钟），默认 5 分钟。超时后任务标记为 failed。',
+        },
       },
       required: ['team_slug', 'target_team', 'subject'],
+    },
+  },
+  {
+    name: 'accept_task',
+    description: '接受来自另一个团队的任务请求。在本地创建任务并通知发起方。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '你的团队 slug（接收方）' },
+        dispatch_id: { type: 'string', description: '任务派发 ID' },
+      },
+      required: ['team_slug', 'dispatch_id'],
+    },
+  },
+  {
+    name: 'reject_task',
+    description: '拒绝来自另一个团队的任务请求。通知发起方并附原因。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '你的团队 slug（接收方）' },
+        dispatch_id: { type: 'string', description: '任务派发 ID' },
+        reason: { type: 'string', description: '拒绝原因（可选）' },
+      },
+      required: ['team_slug', 'dispatch_id'],
+    },
+  },
+  {
+    name: 'list_pending_requests',
+    description: '列出当前团队待处理的任务请求（尚未接受或拒绝的）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '团队 slug' },
+      },
+      required: ['team_slug'],
     },
   },
 ];
@@ -1703,11 +1743,12 @@ async function executeMcpTool(
   }
 
   if (toolName === 'list_teams') {
-    const teams = await taskDispatch.listTeams();
+    const teams = await taskDispatch.discoverTeams();
     return text(teams);
   }
 
   if (toolName === 'dispatch_task') {
+    const deadlineMinutes = args.deadline_minutes ? Number(args.deadline_minutes) : undefined;
     const result = await taskDispatch.dispatchTask(
       args.team_slug,
       {
@@ -1715,9 +1756,25 @@ async function executeMcpTool(
         description: args.description,
         prompt: args.prompt,
       },
-      args.target_team
+      args.target_team,
+      { deadlineMinutes }
     );
     return text(result);
+  }
+
+  if (toolName === 'accept_task') {
+    const result = await taskDispatch.acceptTask(args.team_slug, args.dispatch_id);
+    return text(result);
+  }
+
+  if (toolName === 'reject_task') {
+    await taskDispatch.rejectTask(args.team_slug, args.dispatch_id, args.reason);
+    return text({ ok: true, message: 'Task rejected' });
+  }
+
+  if (toolName === 'list_pending_requests') {
+    const requests = taskDispatch.listPendingRequests(args.team_slug);
+    return text(requests);
   }
 
   throw new Error(`Unknown tool: ${toolName}`);
@@ -3942,6 +3999,19 @@ app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (req
     (t: any) => t.dispatchMeta?.status === 'dispatched' && t.dispatchMeta?.originTeam === teamSlug
   );
   return { pending };
+});
+
+// Agent collaboration: discover teams with capabilities
+app.get('/api/cross-team/discover', async () => {
+  const teams = await taskDispatch.discoverTeams();
+  return { teams };
+});
+
+// Agent collaboration: pending handshake requests for a team
+app.get<{ Params: { name: string } }>('/api/cross-team/pending-requests/:name', async (request) => {
+  const teamSlug = request.params.name;
+  const requests = taskDispatch.listPendingRequests(teamSlug);
+  return { requests };
 });
 
 // GET /api/settings/task-bus → full config including telemetry
