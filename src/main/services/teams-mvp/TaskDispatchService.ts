@@ -238,19 +238,18 @@ export class TaskDispatchService {
       acceptedAt: new Date().toISOString(),
     };
 
-    if (this.redis) {
-      const isLocal = await this.isLocalTeam(payload.originTeam);
-      if (isLocal) {
-        await this.handleLocalResponse(response);
-      } else {
-        await this.redis
-          .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
-          .catch((err: Error) => {
-            console.error('[TaskDispatchService] accept xadd failed:', err.message);
-          });
-      }
+    const isLocalOrigin = await this.isLocalTeam(payload.originTeam);
+    if (isLocalOrigin) {
+      await this.handleLocalResponse(response);
+    } else if (this.redis) {
+      await this.redis
+        .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
+        .catch((err: Error) => {
+          console.error('[TaskDispatchService] accept xadd failed:', err.message);
+        });
+    }
 
-      // ACK the original dispatch message
+    if (this.redis) {
       await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId).catch(() => {});
     }
 
@@ -275,18 +274,18 @@ export class TaskDispatchService {
       rejectedAt: new Date().toISOString(),
     };
 
-    if (this.redis) {
-      const isLocal = await this.isLocalTeam(payload.originTeam);
-      if (isLocal) {
-        await this.handleLocalResponse(response);
-      } else {
-        await this.redis
-          .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
-          .catch((err: Error) => {
-            console.error('[TaskDispatchService] reject xadd failed:', err.message);
-          });
-      }
+    const isLocalOrigin = await this.isLocalTeam(payload.originTeam);
+    if (isLocalOrigin) {
+      await this.handleLocalResponse(response);
+    } else if (this.redis) {
+      await this.redis
+        .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
+        .catch((err: Error) => {
+          console.error('[TaskDispatchService] reject xadd failed:', err.message);
+        });
+    }
 
+    if (this.redis) {
       await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId).catch(() => {});
     }
 
