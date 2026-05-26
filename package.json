@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.6.12",
+  "version": "1.6.17",
   "description": "openHermit: team-oriented agent management workbench atop cc-connect.",
   "license": "AGPL-3.0",
   "author": {
@@ -34,6 +34,7 @@
     "dev:server": "tsx watch src/main/server.ts",
     "dev:web": "vite --config vite.web.config.ts",
     "build:web": "vite build --config vite.web.config.ts --outDir ../../dist-renderer --emptyOutDir",
+    "postinstall": "node ./bin/postinstall.mjs",
     "prepack": "pnpm build:web",
     "start": "node bin/hermit.mjs",
     "typecheck": "tsc --noEmit",

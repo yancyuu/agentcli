@@ -1033,11 +1033,10 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   async (request, reply) => {
     const teamName = request.params.name;
     try {
+      let restartRequired = false;
       try {
         const result = await cc.deleteProject(teamName);
-        if (result.restart_required) {
-          await cc.restart();
-        }
+        restartRequired = result.restart_required === true;
       } catch (err) {
         request.log.warn({ err, teamName }, 'delete cc-connect project failed or project missing');
       }
@@ -1048,7 +1047,7 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
         request.log.warn({ err, teamName }, 'delete local team metadata failed or already missing');
       }
 
-      return { ok: true, restartRequired: false };
+      return { ok: true, restartRequired };
     } catch (err) {
       return reply.code(500).send(reply500(err));
     }

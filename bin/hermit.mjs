@@ -16,7 +16,7 @@
 
 import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,15 +55,21 @@ Usage:
 
 Options:
   --port <number>    HTTP server port (default: 5680)
-  --no-cc-connect    Do not auto-start bundled cc-connect
+  --no-cc-connect    Do not auto-start bundled runtime service
+  --daemon           Run openHermit in the background
   --version          Show current version
   --help             Show this help message
+  status             Show background service status
+  stop               Stop background service
   update             Check and install updates
 
 Examples:
   npx @yancyyu/openhermit             # Run without installing
   npx @yancyyu/openhermit --port 8080
   openhermit                          # After global install
+  openhermit --daemon
+  openhermit status
+  openhermit stop
   openhermit --version
   openhermit update
 `);
@@ -80,6 +86,12 @@ const portIndex = args.indexOf('--port');
 const port = portIndex !== -1 && args[portIndex + 1] ? args[portIndex + 1] : '5680';
 const skipCcConnect = args.includes('--no-cc-connect') || process.env.HERMIT_NO_CC_CONNECT === '1';
 const hermitHome = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
+const daemonRequested = args.includes('--daemon');
+const daemonChild = process.env.HERMIT_DAEMON_CHILD === '1';
+const daemonPidPath = path.join(hermitHome, 'openhermit.pid');
+const daemonLogPath = path.join(hermitHome, 'logs', 'openhermit.log');
+const runtimeLogPath = path.join(hermitHome, 'logs', 'openhermit-runtime.log');
+const serverLogPath = path.join(hermitHome, 'logs', 'openhermit-server.log');
 const ccConnectConfigPath =
   process.env.HERMIT_CC_CONNECT_CONFIG ||
   process.env.CC_CONNECT_CONFIG ||
@@ -140,6 +152,171 @@ async function runUpdate() {
       process.exit(1);
     }
   }
+}
+
+function readDaemonPid() {
+  try {
+    const raw = readFileSync(daemonPidPath, 'utf-8').trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPidRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeDaemonPidFile() {
+  try {
+    unlinkSync(daemonPidPath);
+  } catch {
+    // Already gone.
+  }
+}
+
+function signalDaemon(pid, signal) {
+  if (!pid) return false;
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    // Fall back to direct process signal.
+  }
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function collectFallbackPids() {
+  const pids = new Set();
+  const commands = [
+    `lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true`,
+    'lsof -tiTCP:9810 -sTCP:LISTEN 2>/dev/null || true',
+    'lsof -tiTCP:9820 -sTCP:LISTEN 2>/dev/null || true',
+    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|cc-connect' 2>/dev/null || true",
+  ];
+
+  for (const command of commands) {
+    try {
+      const out = execSync(command, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of out.split(/\s+/)) {
+        const pid = Number.parseInt(line, 10);
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+          pids.add(pid);
+        }
+      }
+    } catch {
+      // Ignore missing lsof/pgrep or races with exiting processes.
+    }
+  }
+
+  return [...pids];
+}
+
+async function stopFallbackProcesses() {
+  const pids = collectFallbackPids();
+  if (pids.length === 0) return false;
+
+  for (const pid of pids) {
+    signalDaemon(pid, 'SIGTERM');
+  }
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  for (const pid of pids) {
+    if (isPidRunning(pid)) {
+      signalDaemon(pid, 'SIGKILL');
+    }
+  }
+  return true;
+}
+
+function printDaemonStatus() {
+  const pid = readDaemonPid();
+  if (pid && isPidRunning(pid)) {
+    console.log(`[openHermit] Running in background (pid ${pid})`);
+    console.log(`[openHermit] Log: ${daemonLogPath}`);
+    process.exit(0);
+  }
+  if (pid) removeDaemonPidFile();
+  const fallbackPids = collectFallbackPids();
+  if (fallbackPids.length > 0) {
+    console.log(`[openHermit] Running without daemon pidfile (pids ${fallbackPids.join(', ')})`);
+    process.exit(0);
+  }
+  console.log('[openHermit] Not running');
+  process.exit(1);
+}
+
+async function stopDaemon() {
+  const pid = readDaemonPid();
+  if (!pid || !isPidRunning(pid)) {
+    if (pid) removeDaemonPidFile();
+    const stoppedFallback = await stopFallbackProcesses();
+    console.log(stoppedFallback ? '[openHermit] Stopped orphaned service processes' : '[openHermit] Not running');
+    process.exit(0);
+  }
+  console.log(`[openHermit] Stopping background service (pid ${pid})...`);
+  signalDaemon(pid, 'SIGTERM');
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  if (isPidRunning(pid)) {
+    signalDaemon(pid, 'SIGKILL');
+  }
+  removeDaemonPidFile();
+  console.log('[openHermit] Stopped');
+  process.exit(0);
+}
+
+function startDaemon() {
+  const existingPid = readDaemonPid();
+  if (existingPid && isPidRunning(existingPid)) {
+    console.log(`[openHermit] Already running in background (pid ${existingPid})`);
+    console.log(`[openHermit] Log: ${daemonLogPath}`);
+    process.exit(0);
+  }
+
+  mkdirSync(path.dirname(daemonPidPath), { recursive: true });
+  mkdirSync(path.dirname(daemonLogPath), { recursive: true });
+  const out = openSync(daemonLogPath, 'a');
+  const err = openSync(daemonLogPath, 'a');
+  const childArgs = process.argv.slice(2).filter((arg) => arg !== '--daemon');
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...childArgs], {
+    cwd: repoRoot,
+    detached: true,
+    env: {
+      ...process.env,
+      HERMIT_DAEMON_CHILD: '1',
+    },
+    stdio: ['ignore', out, err],
+  });
+  child.unref();
+  closeSync(out);
+  closeSync(err);
+  writeFileSync(daemonPidPath, String(child.pid), 'utf-8');
+  console.log(`[openHermit] Started in background (pid ${child.pid})`);
+  console.log(`[openHermit] URL: http://127.0.0.1:${port}`);
+  console.log(`[openHermit] Log: ${daemonLogPath}`);
+  process.exit(0);
+}
+
+if (args.includes('status')) {
+  printDaemonStatus();
+}
+
+if (args.includes('stop')) {
+  await stopDaemon();
+}
+
+if (daemonRequested && !daemonChild) {
+  startDaemon();
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +400,7 @@ function escapeRegExp(value) {
 
 function findProjectBlock(raw, name) {
   const projectPattern = new RegExp(
-    `(^|\\n)(#.*\\n)*\\[\\[projects\\]\\]\\nname\\s*=\\s*"${escapeRegExp(name)}"[\\s\\S]*?(?=\\n(#.*\\n)*\\[\\[projects\\]\\]|\\s*$)`,
-    'm'
+    `\\[\\[projects\\]\\]\\nname\\s*=\\s*"${escapeRegExp(name)}"[\\s\\S]*?(?=\\n\\[\\[projects\\]\\]|\\s*$)`
   );
   const match = raw.match(projectPattern);
   return match ? { pattern: projectPattern, match } : null;
@@ -243,13 +419,12 @@ function migrateManagedBootstrapProject(raw) {
   const legacyBlock = findProjectBlock(raw, legacyBootstrapProjectName);
   if (!legacyBlock || !isManagedBootstrapBlock(legacyBlock.match[0])) return raw;
 
-  const prefix = legacyBlock.match[1] === '\n' ? '\n' : '';
-  const defaultBlock = findProjectBlock(raw, bootstrapProjectName);
-  if (defaultBlock) {
-    return raw.replace(legacyBlock.pattern, prefix);
+  const withoutLegacy = raw.replace(legacyBlock.pattern, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+  if (findProjectBlock(withoutLegacy, bootstrapProjectName)) {
+    return `${withoutLegacy}\n`;
   }
 
-  return raw.replace(legacyBlock.pattern, `${prefix}${buildBootstrapProjectToml().trimStart()}`);
+  return `${withoutLegacy}\n${buildBootstrapProjectToml()}`;
 }
 
 function ensureCcConnectConfig() {
@@ -319,13 +494,61 @@ async function waitForCcConnect(baseUrl, token, timeoutMs = 15_000) {
   return false;
 }
 
+function appendLog(filePath, chunk) {
+  try {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    appendFileSync(filePath, chunk);
+  } catch {
+    // Logging must never block startup.
+  }
+}
+
+function printLogTail(label, filePath) {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const lines = content.trimEnd().split(/\r?\n/).slice(-80);
+    console.error(`[openHermit] ${label} log: ${filePath}`);
+    if (lines.length > 0) {
+      console.error(`[openHermit] Last ${label} log lines:`);
+      console.error(lines.join('\n'));
+    }
+  } catch {
+    console.error(`[openHermit] ${label} log: ${filePath}`);
+  }
+}
+
+async function waitForRuntimeReady(baseUrl, token, child, timeoutMs = 30_000) {
+  let exitCode = null;
+  child.once('exit', (code) => {
+    exitCode = code ?? 1;
+  });
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (exitCode !== null) {
+      throw new Error(`Runtime service exited before becoming ready (code ${exitCode})`);
+    }
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/status`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (res.ok) return;
+    } catch {
+      // keep polling
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Runtime service did not become ready within ${Math.round(timeoutMs / 1000)}s`);
+}
+
 function resolveCcConnectRunner() {
   const pkgPath = require.resolve('cc-connect/package.json');
   return path.join(path.dirname(pkgPath), 'run.js');
 }
 
 function resolveTsxLoader() {
-  return require.resolve('tsx');
+  return pathToFileURL(require.resolve('tsx')).href;
 }
 
 function resolveAliasLoaderRegister() {
@@ -344,23 +567,41 @@ if (!skipCcConnect) {
   const ccBaseUrl = process.env.CC_CONNECT_BASE_URL || 'http://127.0.0.1:9820';
   const alreadyRunning = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 1_000);
   if (alreadyRunning) {
-    console.log(`[openHermit] cc-connect already running: ${ccBaseUrl}`);
+    console.log(`[openHermit] Runtime service already running: ${ccBaseUrl}`);
   } else {
-    console.log('[openHermit] Starting bundled cc-connect...');
-    console.log(`[openHermit] cc-connect config: ${ccConnectConfigPath}`);
+    console.log('[openHermit] Starting bundled runtime service...');
+    console.log(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
     ccConnectProcess = spawn(process.execPath, [resolveCcConnectRunner(), '-config', ccConnectConfigPath], {
       cwd: repoRoot,
+      detached: true,
       env: {
         ...process.env,
         CC_CONNECT_TOKEN: ccTokens.managementToken,
         CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
         CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
       },
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const ready = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 30_000);
-    if (!ready) {
-      console.warn('[openHermit] cc-connect did not become ready within 30s; openHermit will keep trying via API.');
+
+    ccConnectProcess.stdout?.on('data', (chunk) => {
+      process.stdout.write(chunk);
+      appendLog(runtimeLogPath, chunk);
+    });
+    ccConnectProcess.stderr?.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      appendLog(runtimeLogPath, chunk);
+    });
+
+    try {
+      await waitForRuntimeReady(ccBaseUrl, ccTokens.managementToken, ccConnectProcess, 30_000);
+    } catch (err) {
+      console.error(
+        `[openHermit] Runtime service failed to start: ${err instanceof Error ? err.message : String(err)}`
+      );
+      printLogTail('Runtime', runtimeLogPath);
+      signalDaemon(ccConnectProcess.pid, 'SIGTERM');
+      setTimeout(() => signalDaemon(ccConnectProcess?.pid, 'SIGKILL'), 2_000).unref();
+      process.exit(1);
     }
   }
 }
@@ -402,8 +643,13 @@ if (!existsSync(distRenderererDir) || !existsSync(path.join(distRenderererDir, '
 // Start the server
 console.log('[openHermit] Launching server...\n');
 
+function printServerLogTail() {
+  printLogTail('Server', serverLogPath);
+}
+
 const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/server.ts'], {
   cwd: repoRoot,
+  detached: true,
   env: {
     ...process.env,
     PORT: port,
@@ -415,26 +661,49 @@ const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderReg
     CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
     CC_CONNECT_CONFIG: ccConnectConfigPath,
   },
-  stdio: 'inherit',
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+
+serverProcess.stdout?.on('data', (chunk) => {
+  process.stdout.write(chunk);
+  appendLog(serverLogPath, chunk);
+});
+
+serverProcess.stderr?.on('data', (chunk) => {
+  process.stderr.write(chunk);
+  appendLog(serverLogPath, chunk);
 });
 
 serverProcess.on('exit', (code) => {
+  if (shuttingDown) return;
+  signalDaemon(ccConnectProcess?.pid, 'SIGTERM');
   if (code !== 0) {
     console.error(`[openHermit] Server exited with code ${code}`);
+    printServerLogTail();
     process.exit(code ?? 1);
   }
 });
 
-process.on('SIGINT', () => {
+let shuttingDown = false;
+function shutdown(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('\n[openHermit] Shutting down...');
-  serverProcess.kill('SIGINT');
-  ccConnectProcess?.kill('SIGINT');
+  signalDaemon(serverProcess?.pid, 'SIGTERM');
+  signalDaemon(ccConnectProcess?.pid, 'SIGTERM');
+  setTimeout(() => {
+    signalDaemon(serverProcess?.pid, 'SIGKILL');
+    signalDaemon(ccConnectProcess?.pid, 'SIGKILL');
+    process.exit(exitCode);
+  }, 2_000).unref();
+}
+
+process.on('SIGINT', () => {
+  shutdown(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n[openHermit] Shutting down...');
-  serverProcess.kill('SIGTERM');
-  ccConnectProcess?.kill('SIGTERM');
+  shutdown(0);
 });
 
 console.log(`[openHermit] Server starting on http://127.0.0.1:${port}`);

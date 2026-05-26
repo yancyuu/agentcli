@@ -539,7 +539,19 @@ export const TeamListView = (): React.JSX.Element => {
         });
         if (confirmed) {
           try {
-            await deleteTeam(teamName);
+            const result = await deleteTeam(teamName);
+            if (result.restartRequired) {
+              const shouldRestart = await confirm({
+                title: '重启 cc-connect',
+                message: '团队已从配置中删除。需要重启 cc-connect 才会停止对应运行时。',
+                confirmLabel: '立即重启',
+                cancelLabel: '稍后重启',
+                variant: 'danger',
+              });
+              if (shouldRestart) {
+                await api.ccSettings.restart();
+              }
+            }
           } catch {
             // error via store
           }
