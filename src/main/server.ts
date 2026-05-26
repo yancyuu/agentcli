@@ -806,6 +806,16 @@ app.post('/api/teams/create', async (request, reply) => {
       request.log.warn({ err, teamName: name }, 'failed to persist local team metadata');
     }
 
+    // Bind provider refs if specified
+    const providerRefs = Array.isArray(body.providerRefs) ? (body.providerRefs as string[]) : [];
+    if (providerRefs.length > 0) {
+      try {
+        await cc.setProviderRefs(name, providerRefs);
+      } catch (err) {
+        request.log.warn({ err, teamName: name, providerRefs }, 'failed to set provider refs');
+      }
+    }
+
     return { ok: true, teamName: name, runId: null };
   } catch (err) {
     return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
@@ -905,6 +915,10 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
         : permissionMode;
+    const [providerRefs, globalProviders] = await Promise.all([
+      cc.getProviderRefs(name).catch(() => []),
+      cc.listProviders().catch(() => []),
+    ]);
 
     return {
       teamName: name,
@@ -945,6 +959,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       description,
       workDir: p.work_dir ?? workDir,
       permissionMode: resolvedPermissionMode,
+      providerRefs,
+      globalProviders,
       settings: {
         ...projectSettings,
         language: resolvedLanguage,
@@ -999,6 +1015,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       description,
       workDir,
       permissionMode,
+      providerRefs: [],
+      globalProviders: [],
       heartbeat: null,
       settings: {
         language,
@@ -1032,6 +1050,9 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   '/api/teams/:name',
   async (request, reply) => {
     const teamName = request.params.name;
+    if (teamName === 'default') {
+      return reply.code(403).send({ error: 'default 团队不可删除' });
+    }
     try {
       let restartRequired = false;
       try {
@@ -3396,6 +3417,9 @@ async function applyTeamConfigUpdate(
   const disabledCommands = Array.isArray(body.disabledCommands)
     ? normalizeStringArray(body.disabledCommands)
     : undefined;
+  const providerRefs = Array.isArray(body.providerRefs)
+    ? normalizeStringArray(body.providerRefs)
+    : undefined;
   const platformAllowFrom = body.platformAllowFrom
     ? normalizePlatformAllowFrom(body.platformAllowFrom)
     : undefined;
@@ -3460,6 +3484,13 @@ async function applyTeamConfigUpdate(
       ccSyncError = err instanceof Error ? err.message : String(err);
     }
   }
+  if (providerRefs !== undefined) {
+    try {
+      await cc.setProviderRefs(teamName, providerRefs);
+    } catch (err) {
+      ccSyncError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   return {
     name: name || teamName,
@@ -3476,6 +3507,7 @@ async function applyTeamConfigUpdate(
     replyFooter: replyFooter ?? false,
     injectSender: injectSender ?? false,
     platformAllowFrom: platformAllowFrom ?? {},
+    providerRefs: providerRefs ?? [],
     ccSyncError,
   };
 }
@@ -3547,6 +3579,10 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
         : permissionMode;
+    const [providerRefs, globalProviders] = await Promise.all([
+      cc.getProviderRefs(name).catch(() => []),
+      cc.listProviders().catch(() => []),
+    ]);
     return {
       name,
       color,
@@ -3562,6 +3598,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       injectSender: resolvedInjectSender,
       permissionMode: resolvedPermissionMode,
       platformAllowFrom: resolvedPlatformAllowFrom,
+      providerRefs,
+      globalProviders,
       settings: {
         ...projectSettings,
         language: resolvedLanguage,

@@ -66,6 +66,7 @@ export interface TeamUpdateConfigRequest {
   leadModel?: string;
   leadEffort?: EffortLevel;
   leadWorkflow?: string;
+  providerRefs?: string[];
 }
 
 export interface TeamSummaryMember {
@@ -992,6 +993,8 @@ export interface TeamViewSnapshot {
   workDir?: string;
   permissionMode?: string;
   settings?: Record<string, unknown>;
+  providerRefs?: string[];
+  globalProviders?: import('./providers').GlobalProvider[];
 }
 
 export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -1394,6 +1397,8 @@ export interface TeamCreateRequest {
   platform?: string;
   /** Platform-specific options (app_id, app_secret, allow_from, share_session, etc.) */
   platformOptions?: Record<string, string | boolean>;
+  /** Provider names to bind to the team project in cc-connect. */
+  providerRefs?: string[];
 }
 
 export interface TeamCreateConfigRequest {

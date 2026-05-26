@@ -542,20 +542,11 @@ export const TeamListView = (): React.JSX.Element => {
           try {
             const result = await deleteTeam(teamName);
             if (result.restartRequired) {
-              const shouldRestart = await confirm({
-                title: '重启 cc-connect',
-                message: '团队已从配置中删除。需要重启 cc-connect 才会停止对应运行时。',
-                confirmLabel: '立即重启',
-                cancelLabel: '稍后重启',
-                variant: 'danger',
-              });
-              if (shouldRestart) {
-                await api.ccSettings.restart();
-                emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
-              }
+              await api.ccSettings.restart();
+              emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
             }
-          } catch {
-            // error via store
+          } catch (err) {
+            console.error('Failed to delete team:', err);
           }
         }
       })();
@@ -1181,20 +1172,22 @@ export const TeamListView = (): React.JSX.Element => {
                           <TooltipContent side="bottom">复制团队</TooltipContent>
                         </Tooltip>
                       )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                            onClick={(e) =>
-                              handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
-                            }
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">删除团队</TooltipContent>
-                      </Tooltip>
+                      {team.teamName !== 'default' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                              onClick={(e) =>
+                                handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
+                              }
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">删除团队</TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                   <div className="mt-2 flex min-h-10 items-start gap-2">

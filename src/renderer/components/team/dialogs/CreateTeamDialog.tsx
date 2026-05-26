@@ -54,6 +54,9 @@ import PlatformManualForm from './PlatformManualForm';
 
 import type { Project, TeamCreateRequest } from '@shared/types';
 import type { CcAgentType } from '@shared/types/ccConnect';
+import type { GlobalProvider } from '@shared/types/providers';
+
+import { providersApi } from '@renderer/api/providers';
 
 export interface ActiveTeamRef {
   teamName: string;
@@ -252,6 +255,10 @@ export const CreateTeamDialog = ({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
 
+  // ── Global providers ─────────────────────────────────────────────────
+  const [globalProviders, setGlobalProviders] = useState<GlobalProvider[]>([]);
+  const [selectedProviderRef, setSelectedProviderRef] = useState<string | null>(null);
+
   // ── Errors / submission ──────────────────────────────────────────────
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -272,6 +279,28 @@ export const CreateTeamDialog = ({
         ? ''
         : selectedProjectPath.trim()
       : customCwd.trim();
+
+  const compatibleProviders = useMemo(
+    () =>
+      globalProviders.filter(
+        (p) =>
+          !p.agent_types || p.agent_types.length === 0 || p.agent_types.includes(selectedHarness)
+      ),
+    [globalProviders, selectedHarness]
+  );
+
+  const selectProviderRef = (providerName: string) => {
+    setSelectedProviderRef((prev) => (prev === providerName ? null : providerName));
+  };
+
+  // Clear selected provider when harness changes and it's no longer compatible
+  useEffect(() => {
+    setSelectedProviderRef((prev) => {
+      if (!prev) return prev;
+      const compatible = new Set(compatibleProviders.map((p) => p.name));
+      return compatible.has(prev) ? prev : null;
+    });
+  }, [compatibleProviders]);
 
   const conflictingTeam = useMemo(() => {
     if (!activeTeams?.length || !effectiveCwd) return null;
@@ -309,6 +338,23 @@ export const CreateTeamDialog = ({
     };
   }, [open]);
 
+  // ── Load global providers on open ────────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await providersApi.list();
+        if (!cancelled) setGlobalProviders(result.providers ?? []);
+      } catch {
+        if (!cancelled) setGlobalProviders([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   // ── Auto-select default project path ─────────────────────────────────
   useEffect(() => {
     if (!open || cwdMode !== 'project' || selectedProjectPath) return;
@@ -337,6 +383,7 @@ export const CreateTeamDialog = ({
     setFieldErrors({});
     setIsSubmitting(false);
     setConflictDismissed(false);
+    setSelectedProviderRef(null);
   };
 
   // ── Platform selection ───────────────────────────────────────────────
@@ -402,6 +449,7 @@ export const CreateTeamDialog = ({
         harness: selectedHarness,
         platform: selectedPlatform || 'bridge',
         platformOptions: {},
+        providerRefs: selectedProviderRef ? [selectedProviderRef] : undefined,
       };
       await onCreate(request);
       onOpenTeam(request.teamName, effectiveCwd || undefined);
@@ -527,6 +575,81 @@ export const CreateTeamDialog = ({
               projectsError={projectsError}
               fieldError={fieldErrors.cwd}
             />
+
+            {/* Provider selection */}
+            <div className="rounded-lg border border-[var(--color-border-subtle)] bg-white/[0.02] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--color-text)]">Provider（可选）</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    留空时使用本机 {AGENT_TYPE_LABELS[selectedHarness] ?? selectedHarness}{' '}
+                    默认配置和登录状态。 只有需要给该团队指定模型供应商时，才绑定下面的全局
+                    Provider。
+                  </p>
+                </div>
+                {selectedProviderRef ? (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-[var(--color-border)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-white/5"
+                    onClick={() => setSelectedProviderRef(null)}
+                  >
+                    使用本机默认
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {compatibleProviders.length > 0 ? (
+                  compatibleProviders.map((provider) => {
+                    const checked = selectedProviderRef === provider.name;
+                    const endpoint =
+                      provider.endpoints?.[selectedHarness] ?? provider.base_url ?? '默认端点';
+                    const model =
+                      provider.agent_models?.[selectedHarness] ??
+                      provider.model ??
+                      provider.models?.[0]?.model ??
+                      '未指定模型';
+                    return (
+                      <button
+                        key={provider.name}
+                        type="button"
+                        onClick={() => selectProviderRef(provider.name)}
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          checked
+                            ? 'border-indigo-400/60 bg-indigo-500/10'
+                            : 'border-[var(--color-border-subtle)] bg-black/10 hover:border-[var(--color-border)] hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium text-[var(--color-text)]">
+                              {provider.name}
+                            </p>
+                            <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                              {model} · {endpoint}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                              checked
+                                ? 'bg-indigo-400/20 text-indigo-200'
+                                : 'bg-white/5 text-[var(--color-text-muted)]'
+                            }`}
+                          >
+                            {checked ? '已绑定' : '可绑定'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                    暂无适用于 {AGENT_TYPE_LABELS[selectedHarness] ?? selectedHarness} 的全局
+                    Provider。 可先在「设置 → Harness 配置」中添加；不添加也会使用本机默认登录态。
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

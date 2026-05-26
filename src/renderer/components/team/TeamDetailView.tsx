@@ -1618,16 +1618,13 @@ export const TeamDetailView = ({
   );
 
   const handleRestartTeamFromEdit = useCallback(async (): Promise<void> => {
-    if (!data?.config.projectPath) {
-      throw new Error('团队缺少项目路径，无法自动重启。');
-    }
-    await api.teams.stop(teamName);
-    await launchTeam({
-      teamName,
-      cwd: data.config.projectPath,
-    });
-    await Promise.all([fetchTeams(), selectTeam(teamName)]);
-  }, [data?.config.projectPath, fetchTeams, launchTeam, selectTeam, teamName]);
+    await api.ccSettings.restart();
+    // Wait for cc-connect to come back, then refresh
+    setTimeout(() => {
+      void fetchTeams();
+      void selectTeam(teamName);
+    }, 3000);
+  }, [fetchTeams, selectTeam, teamName]);
 
   const handleSaveAndRestartFromEdit = useCallback(
     async (runtimeConfig: {
@@ -1832,21 +1829,12 @@ export const TeamDetailView = ({
       try {
         const result = await deleteTeam(teamName);
         if (result.restartRequired) {
-          const shouldRestart = await confirm({
-            title: '重启 cc-connect',
-            message: '团队已从配置中删除。需要重启 cc-connect 才会停止对应运行时。',
-            confirmLabel: '立即重启',
-            cancelLabel: '稍后重启',
-            variant: 'danger',
-          });
-          if (shouldRestart) {
-            await api.ccSettings.restart();
-          }
+          await api.ccSettings.restart();
         }
         if (tabId) closeTab(tabId);
         openTeamsTab();
-      } catch {
-        // error is shown via store
+      } catch (err) {
+        console.error('Failed to delete team:', err);
       }
     })();
   }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId]);
@@ -2163,19 +2151,21 @@ export const TeamDetailView = ({
                         {isTeamProvisioning ? '团队仍在编排中，暂时无法编辑' : '编辑团队'}
                       </TooltipContent>
                     </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                          onClick={handleDeleteTeam}
-                        >
-                          <Trash2 size={12} />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">删除团队</TooltipContent>
-                    </Tooltip>
+                    {teamName !== 'default' && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            onClick={handleDeleteTeam}
+                          >
+                            <Trash2 size={12} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">删除团队</TooltipContent>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
                 {data.config.description && (
@@ -2653,6 +2643,8 @@ export const TeamDetailView = ({
                 currentManagedSources={currentManagedSources}
                 currentDisabledCommands={currentDisabledCommands}
                 currentPlatformAllowFrom={currentPlatformAllowFrom}
+                currentProviderRefs={data.providerRefs ?? []}
+                globalProviders={data.globalProviders ?? []}
                 currentMembers={membersWithLiveBranches.filter((m) => !isLeadMember(m))}
                 leadMember={membersWithLiveBranches.find((m) => isLeadMember(m)) ?? null}
                 resolvedMemberColorMap={resolvedMemberColorMap}
@@ -2665,9 +2657,8 @@ export const TeamDetailView = ({
                   void fetchTeams();
                   void selectTeam(teamName);
                 }}
-                onDeleteTeam={handleDeleteTeam}
+                onDeleteTeam={teamName !== 'default' ? handleDeleteTeam : undefined}
                 onRestartTeam={handleRestartTeamFromEdit}
-                onSaveAndRestart={handleSaveAndRestartFromEdit}
               />
 
               <Dialog
