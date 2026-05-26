@@ -15,9 +15,9 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -96,8 +96,7 @@ const ccConnectConfigPath =
   process.env.HERMIT_CC_CONNECT_CONFIG ||
   process.env.CC_CONNECT_CONFIG ||
   path.join(hermitHome, 'cc-connect', 'config.toml');
-const bootstrapProjectName = 'default';
-const legacyBootstrapProjectName = '__openhermit_bootstrap__';
+const starterProjectName = 'my-project';
 
 // ---------------------------------------------------------------------------
 // Update command
@@ -351,10 +350,6 @@ Please install dependencies first:
 // cc-connect sidecar
 // ---------------------------------------------------------------------------
 
-function randomToken() {
-  return crypto.randomBytes(16).toString('hex');
-}
-
 function escapeTomlPath(value) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -362,36 +357,6 @@ function escapeTomlPath(value) {
 function parseTomlToken(raw, section) {
   const match = raw.match(new RegExp(`\\[${section}\\][^\\[]*token\\s*=\\s*"([^"]+)"`, 's'));
   return match?.[1] || '';
-}
-
-function hasProjectEntries(raw) {
-  return /^\s*\[\[projects\]\]/m.test(raw);
-}
-
-function buildBootstrapProjectToml() {
-  return `
-# Internal bootstrap project used only so cc-connect can start with an otherwise empty config.
-# It is safe to keep this project; users can replace or delete it after creating real teams.
-[[projects]]
-name = "${bootstrapProjectName}"
-disabled_commands = ["*"]
-
-[projects.agent]
-type = "claudecode"
-
-[projects.agent.options]
-work_dir = "${escapeTomlPath(hermitHome)}"
-mode = "default"
-
-[[projects.platforms]]
-type = "line"
-
-[projects.platforms.options]
-channel_secret = "openhermit-bootstrap"
-channel_token = "openhermit-bootstrap"
-port = "0"
-callback_path = "/openhermit-bootstrap"
-`;
 }
 
 function escapeRegExp(value) {
@@ -415,58 +380,77 @@ function isManagedBootstrapBlock(block) {
   );
 }
 
-function migrateManagedBootstrapProject(raw) {
-  const legacyBlock = findProjectBlock(raw, legacyBootstrapProjectName);
-  if (!legacyBlock || !isManagedBootstrapBlock(legacyBlock.match[0])) return raw;
-
-  const withoutLegacy = raw.replace(legacyBlock.pattern, '').replace(/\n{3,}/g, '\n\n').trimEnd();
-  if (findProjectBlock(withoutLegacy, bootstrapProjectName)) {
-    return `${withoutLegacy}\n`;
-  }
-
-  return `${withoutLegacy}\n${buildBootstrapProjectToml()}`;
+function isStarterProjectConfig(raw) {
+  const block = findProjectBlock(raw, starterProjectName);
+  if (!block) return false;
+  const text = block.match[0];
+  return (
+    text.includes('name = "my-project"') &&
+    text.includes('type = "claudecode"') &&
+    text.includes('work_dir = "/path/to/your/project"') &&
+    text.includes('app_id = "your-feishu-app-id"') &&
+    text.includes('app_secret = "your-feishu-app-secret"')
+  );
 }
 
-function ensureCcConnectConfig() {
+function configRequiresClaudeCode(raw) {
+  return /type\s*=\s*"claudecode"/.test(raw);
+}
+
+function hasProjectEntries(raw) {
+  const projectPattern = /\[\[projects\]\]\nname\s*=\s*"([^"]+)"[\s\S]*?(?=\n\[\[projects\]\]|\s*$)/g;
+  return [...raw.matchAll(projectPattern)].some((match) => !isManagedBootstrapBlock(match[0]));
+}
+
+function commandExists(command) {
+  try {
+    execSync(`${command} --version`, { stdio: 'ignore', shell: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureClaudeCodeCliIfNeeded(raw) {
+  if (!configRequiresClaudeCode(raw) || commandExists('claude')) return;
+
+  console.log('[openHermit] Claude Code CLI not found.');
+  console.log('[openHermit] Installing @anthropic-ai/claude-code globally. This may take a few minutes...');
+  console.log('[openHermit] Running: npm install -g @anthropic-ai/claude-code@latest --prefer-online');
+  try {
+    execSync('npm install -g @anthropic-ai/claude-code@latest --prefer-online', {
+      stdio: 'inherit',
+      shell: true,
+    });
+  } catch (err) {
+    console.error('[openHermit] Claude Code CLI install command failed.');
+    console.error('[openHermit] Failed to install Claude Code CLI automatically.');
+    console.error('[openHermit] Please install it manually: npm install -g @anthropic-ai/claude-code@latest');
+    throw err;
+  }
+
+  if (!commandExists('claude')) {
+    throw new Error('Claude Code CLI was installed but `claude` is still not available in PATH');
+  }
+  console.log('[openHermit] Claude Code CLI installed and available in PATH.');
+}
+
+function readCcConnectConfigState() {
   mkdirSync(path.dirname(ccConnectConfigPath), { recursive: true });
   if (!existsSync(ccConnectConfigPath)) {
-    const managementToken = randomToken();
-    const bridgeToken = randomToken();
-    const config = `data_dir = "${escapeTomlPath(path.join(hermitHome, 'cc-connect', 'data'))}"
-language = "zh"
-
-[management]
-enabled = true
-host = "127.0.0.1"
-port = 9820
-token = "${managementToken}"
-
-[bridge]
-enabled = true
-host = "127.0.0.1"
-port = 9810
-token = "${bridgeToken}"
-path = "/bridge/ws"
-
-[log]
-level = "info"
-${buildBootstrapProjectToml()}`;
-    writeFileSync(ccConnectConfigPath, config, 'utf-8');
+    return {
+      configExists: false,
+      managementToken: process.env.CC_CONNECT_TOKEN || process.env.CC_CONNECT_MANAGEMENT_TOKEN || '',
+      bridgeToken: process.env.CC_CONNECT_BRIDGE_TOKEN || process.env.CC_CONNECT_TOKEN || '',
+      hasRunnableProjects: false,
+      isStarterConfig: false,
+    };
   }
 
-  let raw = readFileSync(ccConnectConfigPath, 'utf-8');
-  if (!hasProjectEntries(raw)) {
-    raw = `${raw.trimEnd()}\n${buildBootstrapProjectToml()}`;
-    writeFileSync(ccConnectConfigPath, raw, 'utf-8');
-  } else {
-    const migrated = migrateManagedBootstrapProject(raw);
-    if (migrated !== raw) {
-      raw = migrated;
-      writeFileSync(ccConnectConfigPath, raw, 'utf-8');
-    }
-  }
+  const raw = readFileSync(ccConnectConfigPath, 'utf-8');
 
   return {
+    configExists: true,
     managementToken:
       process.env.CC_CONNECT_TOKEN ||
       process.env.CC_CONNECT_MANAGEMENT_TOKEN ||
@@ -475,6 +459,9 @@ ${buildBootstrapProjectToml()}`;
       process.env.CC_CONNECT_BRIDGE_TOKEN ||
       process.env.CC_CONNECT_TOKEN ||
       parseTomlToken(raw, 'bridge'),
+    hasProjects: hasProjectEntries(raw),
+    isStarterConfig: isStarterProjectConfig(raw),
+    raw,
   };
 }
 
@@ -556,19 +543,124 @@ function resolveAliasLoaderRegister() {
   return `data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register(${JSON.stringify(aliasLoaderUrl)}, pathToFileURL("./"));`;
 }
 
+async function checkExistingOpenHermitServer() {
+  const url = `http://127.0.0.1:${port}`;
+  try {
+    const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(1000) });
+    if (res.ok) {
+      const version = (await res.text()).trim() || 'unknown';
+      return { running: true, version, url };
+    }
+  } catch {
+    // Port may be unused or owned by another process.
+  }
+  return { running: false, version: '', url };
+}
+
+async function isTcpPortAvailable(portNumber) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(portNumber, '127.0.0.1');
+  });
+}
+
+async function assertWebPortAvailable() {
+  const existingServer = await checkExistingOpenHermitServer();
+  if (existingServer.running) {
+    console.log(`[openHermit] Already running: ${existingServer.url}`);
+    console.log(`[openHermit] Version: ${existingServer.version}`);
+    console.log('[openHermit] Run `openhermit stop` first, or use `openhermit --port <port>` for another instance.');
+    process.exit(0);
+  }
+
+  const available = await isTcpPortAvailable(Number.parseInt(port, 10));
+  if (!available) {
+    console.error(`[openHermit] Port ${port} is already in use.`);
+    console.error('[openHermit] Stop the existing process first, or start with another port:');
+    console.error(`  openhermit --port ${Number.parseInt(port, 10) + 1}`);
+    console.error('[openHermit] macOS/Linux: lsof -nP -iTCP:' + port + ' -sTCP:LISTEN');
+    console.error('[openHermit] Windows: netstat -ano | findstr :' + port);
+    process.exit(1);
+  }
+}
+
 let ccConnectProcess = null;
 let ccTokens = {
   managementToken: process.env.CC_CONNECT_TOKEN || process.env.CC_CONNECT_MANAGEMENT_TOKEN || '',
   bridgeToken: process.env.CC_CONNECT_BRIDGE_TOKEN || process.env.CC_CONNECT_TOKEN || '',
 };
+let runtimeSetupMode = false;
+
+await assertWebPortAvailable();
 
 if (!skipCcConnect) {
-  ccTokens = ensureCcConnectConfig();
+  let shouldStartRuntime = false;
+  ccTokens = readCcConnectConfigState();
   const ccBaseUrl = process.env.CC_CONNECT_BASE_URL || 'http://127.0.0.1:9820';
   const alreadyRunning = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 1_000);
   if (alreadyRunning) {
     console.log(`[openHermit] Runtime service already running: ${ccBaseUrl}`);
+  } else if (!ccTokens.configExists) {
+    console.log('[openHermit] Initializing runtime config with bundled runtime service...');
+    console.log(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
+    const initProcess = spawn(process.execPath, [resolveCcConnectRunner(), '-config', ccConnectConfigPath], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        CC_CONNECT_TOKEN: ccTokens.managementToken,
+        CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
+        CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    initProcess.stdout?.on('data', (chunk) => {
+      process.stdout.write(chunk);
+      appendLog(runtimeLogPath, chunk);
+    });
+    initProcess.stderr?.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      appendLog(runtimeLogPath, chunk);
+    });
+
+    const initCode = await new Promise((resolve) => {
+      initProcess.on('exit', (code) => resolve(code ?? 1));
+      initProcess.on('error', () => resolve(1));
+    });
+
+    ccTokens = readCcConnectConfigState();
+    if (initCode === 0 && ccTokens.configExists) {
+      console.log('[openHermit] Runtime starter config created.');
+      try {
+        ensureClaudeCodeCliIfNeeded(ccTokens.raw);
+      } catch {
+        printLogTail('Runtime', runtimeLogPath);
+        process.exit(1);
+      }
+      shouldStartRuntime = true;
+    } else {
+      console.error(`[openHermit] Runtime config initialization failed (code ${initCode}).`);
+      printLogTail('Runtime', runtimeLogPath);
+      process.exit(1);
+    }
+  } else if (ccTokens.hasProjects) {
+    try {
+      ensureClaudeCodeCliIfNeeded(ccTokens.raw);
+    } catch {
+      printLogTail('Runtime', runtimeLogPath);
+      process.exit(1);
+    }
+    shouldStartRuntime = true;
   } else {
+    console.error('[openHermit] Runtime config has no projects. Please edit the config and try again.');
+    console.error(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
+    process.exit(1);
+  }
+
+  if (shouldStartRuntime) {
     console.log('[openHermit] Starting bundled runtime service...');
     console.log(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
     ccConnectProcess = spawn(process.execPath, [resolveCcConnectRunner(), '-config', ccConnectConfigPath], {
@@ -656,6 +748,7 @@ const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderReg
     HOST: process.env.HOST || '127.0.0.1',
     NODE_ENV: 'production',
     HERMIT_HOME: hermitHome,
+    HERMIT_RUNTIME_SETUP_MODE: runtimeSetupMode ? '1' : '0',
     CC_CONNECT_TOKEN: ccTokens.managementToken,
     CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
     CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
