@@ -3944,16 +3944,61 @@ app.post<{
     subject: string;
     description?: string;
     prompt?: string;
+    deadlineMinutes?: number;
   };
 }>('/api/cross-team/send', async (request) => {
-  const { fromTeam, toTeam, subject, description, prompt } = request.body ?? {};
+  const { fromTeam, toTeam, subject, description, prompt, deadlineMinutes } = request.body ?? {};
   if (!toTeam || !subject) return { ok: false, error: 'toTeam and subject are required' };
   const result = await taskDispatch.dispatchTask(
     fromTeam ?? 'unknown',
     { subject, description, prompt },
-    toTeam
+    toTeam,
+    { deadlineMinutes: deadlineMinutes ? Number(deadlineMinutes) : undefined }
   );
-  return { ok: true, dispatchId: result.dispatchId, status: result.status };
+  return {
+    ok: true,
+    dispatchId: result.dispatchId,
+    status: result.status,
+    message: result.message,
+  };
+});
+
+// Agent collaboration: accept a task request
+app.post<{
+  Body: { team_slug: string; dispatch_id: string };
+}>('/api/cross-team/accept', async (request) => {
+  const { team_slug, dispatch_id } = request.body ?? {};
+  if (!team_slug || !dispatch_id) {
+    return { ok: false, error: 'team_slug and dispatch_id are required' };
+  }
+  try {
+    const result = await taskDispatch.acceptTask(team_slug, dispatch_id);
+    return { ok: true, taskId: result.taskId };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+// Agent collaboration: reject a task request
+app.post<{
+  Body: { team_slug: string; dispatch_id: string; reason?: string };
+}>('/api/cross-team/reject', async (request) => {
+  const { team_slug, dispatch_id, reason } = request.body ?? {};
+  if (!team_slug || !dispatch_id) {
+    return { ok: false, error: 'team_slug and dispatch_id are required' };
+  }
+  try {
+    await taskDispatch.rejectTask(team_slug, dispatch_id, reason);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 });
 
 app.get<{ Querystring: { excludeTeam?: string } }>('/api/cross-team/targets', async (request) => {

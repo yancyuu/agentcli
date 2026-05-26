@@ -246,14 +246,54 @@ export class TeamProvisioningService {
     const mdPath = path.join(workDir, 'CLAUDE.md');
     const section = `
 
-## Cross-Team Task Dispatch (Hermit)
+## Agent Collaboration (Hermit)
 
-You can dispatch tasks to other teams via the Hermit local API:
-
-- **List available teams**: \`curl -s http://127.0.0.1:5680/api/cross-team/targets\`
-- **Dispatch a task**: \`curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'\`
-
+You can collaborate with other teams (local or remote) via the Hermit local API.
 Current team slug: \`${teamSlug}\`
+
+### Discovery
+
+- **List available teams**: \`curl -s http://127.0.0.1:5680/api/cross-team/discover | jq '.teams[]'\`
+
+### Send a task to another team
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/send \\
+  -H 'Content-Type: application/json' \\
+  -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description","deadlineMinutes":5}'
+\`\`\`
+
+Returns \`{"ok":true,"dispatchId":"...","status":"pending_accept"}\`
+
+### Check pending requests (tasks others sent to you)
+
+\`\`\`bash
+curl -s http://127.0.0.1:5680/api/cross-team/pending-requests/${teamSlug}
+\`\`\`
+
+### Accept a task request
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/accept \\
+  -H 'Content-Type: application/json' \\
+  -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID"}'
+\`\`\`
+
+### Reject a task request
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/reject \\
+  -H 'Content-Type: application/json' \\
+  -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID","reason":"Optional reason"}'
+\`\`\`
+
+### Workflow
+
+1. Call \`/api/cross-team/discover\` to find available teams
+2. Call \`/api/cross-team/send\` to dispatch a task (waits for acceptance)
+3. The target team calls \`/api/cross-team/pending-requests/:name\` to see requests
+4. The target team calls \`/api/cross-team/accept\` or \`/api/cross-team/reject\`
+5. If deadline passes without acceptance, the task is marked as failed
 
 When to dispatch:
 - Task requires access to a different codebase/project
@@ -273,7 +313,7 @@ Do NOT dispatch:
         // File doesn't exist yet
       }
 
-      if (existing.includes('Cross-Team Task Dispatch (Hermit)')) {
+      if (existing.includes('Agent Collaboration (Hermit)')) {
         return;
       }
 
