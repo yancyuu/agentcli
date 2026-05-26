@@ -111,7 +111,13 @@ pnpm install
 pnpm dev
 ```
 
-浏览器打开 [http://localhost:5174](http://localhost:5174)，开发模式默认连接本机运行时。
+在另一个终端启动运行时服务：
+
+```bash
+npx cc-connect
+```
+
+浏览器打开 [http://localhost:5174](http://localhost:5174)，开发模式连接本机运行时。
 
 ### 创建第一个 AI 团队
 
