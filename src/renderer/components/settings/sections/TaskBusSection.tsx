@@ -37,7 +37,8 @@ interface TelemetryStatus {
   workSecondsByDay: Record<string, number>;
 }
 
-function formatNum(n: number): string {
+function formatNum(n: number | undefined): string {
+  if (n == null) return '采集中...';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return String(n);
@@ -464,42 +465,37 @@ export function TaskBusSection(): React.JSX.Element {
             </div>
           </div>
 
-          {/* Telemetry - aligned SettingRows */}
-          <div className="mt-4 border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          {/* 数据采集 - 不依赖 Redis */}
+          <div style={{ borderColor: 'var(--color-border-subtle)' }}>
             <SettingRow
-              label="数据上报"
-              description="采集 Claude Code 使用指标（会话、消息、Token、工作时长）并上报到 Redis，供团队看板使用"
+              label="数据采集"
+              description="扫描本地 ~/.claude/projects 会话文件，采集使用指标（会话、消息、Token、工作时长）"
             >
-              <SettingsToggle
-                enabled={telemetryEnabled}
-                onChange={(value) => void toggleTelemetry(value)}
-              />
+              <div className="flex items-center gap-2">
+                <select
+                  value={telemetryPlatform}
+                  onChange={(e) => {
+                    const nextPlatform = e.target.value;
+                    setTelemetryPlatform(nextPlatform);
+                    saveTelemetryPlatform(nextPlatform);
+                  }}
+                  className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
+                >
+                  <option value="claudecode">Claude Code</option>
+                </select>
+                <SettingsToggle
+                  enabled={telemetryEnabled}
+                  onChange={(value) => void toggleTelemetry(value)}
+                />
+              </div>
             </SettingRow>
 
-            {!connected && (
-              <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
-                <AlertCircle size={12} />
-                <span>数据上报需要 Redis；点击开关会自动测试当前连接。</span>
-              </div>
-            )}
-
-            {telemetryEnabled && connected && (
-              <div className="space-y-3 px-1 pt-2">
-                <SettingRow label="数据来源" description="选择要采集的 Agent 平台">
-                  <select
-                    value={telemetryPlatform}
-                    onChange={(e) => {
-                      const nextPlatform = e.target.value;
-                      setTelemetryPlatform(nextPlatform);
-                      saveTelemetryPlatform(nextPlatform);
-                    }}
-                    className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
-                  >
-                    <option value="claudecode">Claude Code</option>
-                  </select>
-                </SettingRow>
-
-                <div className="flex items-center gap-3">
+            {telemetryEnabled && (
+              <>
+                <div
+                  className="flex items-center gap-3 border-b py-3"
+                  style={{ borderColor: 'var(--color-border-subtle)' }}
+                >
                   <Button
                     size="sm"
                     variant="outline"
@@ -515,11 +511,32 @@ export function TaskBusSection(): React.JSX.Element {
                     {scanning ? '采集中...' : '立即采集'}
                   </Button>
                   <span className="text-[10px] text-[var(--color-text-muted)]">
-                    扫描本地 ~/.claude/projects 下的会话文件并汇总上报
+                    扫描本地 ~/.claude/projects 下的会话文件
                   </span>
                 </div>
 
-                {telemetryStatus && <UsageDashboard status={telemetryStatus} />}
+                {telemetryStatus && (
+                  <div className="py-3">
+                    <UsageDashboard status={telemetryStatus} />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* 数据上报 - 依赖 Redis，最下面 */}
+          <div>
+            <SettingRow label="数据上报" description="将采集数据上报到 Redis，供团队看板使用">
+              <SettingsToggle
+                enabled={telemetryEnabled && connected}
+                onChange={(value) => void toggleTelemetry(value)}
+              />
+            </SettingRow>
+
+            {!connected && (
+              <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
+                <AlertCircle size={12} />
+                <span>数据上报需要 Redis；请先配置并测试 Redis 连接。</span>
               </div>
             )}
           </div>
