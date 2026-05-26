@@ -51,11 +51,15 @@ function formatDuration(secs: number): string {
 
 function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Element {
   const maxHourly = Math.max(...status.hourly, 1);
-  const recentDays = Object.keys(status.workSecondsByDay).sort().slice(-7).reverse();
+  const recentDays = Object.keys(status.workSecondsByDay).sort().slice(-7);
   const maxWorkSecs = Math.max(...Object.values(status.workSecondsByDay), 1);
 
   return (
     <div className="space-y-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-[var(--color-text-muted)]">使用指标概览</span>
+        <span className="text-[10px] text-[var(--color-text-muted)]">累计数据（全部历史）</span>
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           icon={<MessageSquare size={14} />}
@@ -109,7 +113,9 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
 
       {recentDays.length > 0 && (
         <div>
-          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">日工作时长</div>
+          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
+            日工作时长（近 {recentDays.length} 天）
+          </div>
           <div className="flex h-16 items-end gap-1">
             {recentDays.map((day) => {
               const secs = status.workSecondsByDay[day] ?? 0;
@@ -135,20 +141,27 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
 
       {status.projects.length > 0 && (
         <div>
-          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">项目排行</div>
+          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
+            项目排行（累计）
+          </div>
+          {/* Header row */}
+          <div className="grid grid-cols-[1fr_64px_64px] items-center gap-2 pb-1 text-[10px] text-[var(--color-text-muted)]">
+            <span>项目</span>
+            <span className="text-right">消息</span>
+            <span className="text-right">Token</span>
+          </div>
           <div className="max-h-40 space-y-1 overflow-y-auto">
             {status.projects.slice(0, 10).map((proj, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <span
-                  className="max-w-[200px] truncate text-[var(--color-text-secondary)]"
-                  title={proj.cwd}
-                >
+              <div key={i} className="grid grid-cols-[1fr_64px_64px] items-center gap-2 text-xs">
+                <span className="truncate text-[var(--color-text-secondary)]" title={proj.cwd}>
                   {proj.cwd.split('/').pop() || proj.cwd}
                 </span>
-                <div className="flex gap-3 text-[var(--color-text-muted)]">
-                  <span>{proj.messages} msg</span>
-                  <span>{formatNum(proj.tokensIn + proj.tokensOut)} tok</span>
-                </div>
+                <span className="text-right text-[var(--color-text-muted)]">
+                  {formatNum(proj.messages)}
+                </span>
+                <span className="text-right text-[var(--color-text-muted)]">
+                  {formatNum(proj.tokensIn + proj.tokensOut)}
+                </span>
               </div>
             ))}
           </div>
@@ -210,6 +223,15 @@ export function TaskBusSection(): React.JSX.Element {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    // Restore telemetry status + Redis connection state on mount
+    fetch('/api/telemetry/status')
+      .then((r) => r.json())
+      .then((s: TelemetryStatus) => {
+        if (s.connected) setConnected(true);
+        if ('sessions' in s && s.sessions > 0) setTelemetryStatus(s);
+      })
+      .catch(() => {});
 
     const poll = setInterval(() => {
       if (telemetryEnabled) {
@@ -274,8 +296,24 @@ export function TaskBusSection(): React.JSX.Element {
   };
 
   const toggleTelemetry = async (value: boolean) => {
+    if (!value) {
+      setTelemetryEnabled(false);
+      const config = buildConfig({ telemetryEnabled: false });
+      fetch('/api/settings/task-bus', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      }).catch(() => setMessage('操作失败'));
+      setTelemetryStatus(null);
+      return;
+    }
+
+    // Optimistic update: toggle on immediately
+    setTelemetryEnabled(true);
+
+    // Test Redis if not already connected
     let redisReady = connected;
-    if (value && !redisReady) {
+    if (!redisReady) {
       setMessage('正在测试 Redis 连接...');
       redisReady = await testRedisConnection();
       if (!redisReady) {
@@ -284,20 +322,18 @@ export function TaskBusSection(): React.JSX.Element {
         return;
       }
     }
-    setTelemetryEnabled(value);
-    const config = buildConfig({ telemetryEnabled: value });
+
+    setMessage(null);
+    const config = buildConfig({ telemetryEnabled: true });
     try {
       await fetch('/api/settings/task-bus', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
-      if (value) {
-        triggerScan();
-      } else {
-        setTelemetryStatus(null);
-      }
+      triggerScan();
     } catch {
+      setTelemetryEnabled(false);
       setMessage('操作失败');
     }
   };
@@ -428,20 +464,11 @@ export function TaskBusSection(): React.JSX.Element {
             </div>
           </div>
 
-          {/* Telemetry */}
+          {/* Telemetry - aligned SettingRows */}
           <div className="mt-4 border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
-            <div className="flex items-center gap-2 px-1 pb-2">
-              <BarChart3 size={14} className="text-[var(--color-text-muted)]" />
-              <span className="text-sm font-medium">团队数据上报</span>
-            </div>
-
             <SettingRow
-              label="启用数据上报"
-              description={
-                connected
-                  ? '开启后自动采集 Claude Code 使用指标并上报到 Redis'
-                  : '开启时会先测试 Redis 连接，连接成功后才会启用'
-              }
+              label="数据上报"
+              description="采集 Claude Code 使用指标（会话、消息、Token、工作时长）并上报到 Redis，供团队看板使用"
             >
               <SettingsToggle
                 enabled={telemetryEnabled}
@@ -487,6 +514,9 @@ export function TaskBusSection(): React.JSX.Element {
                     )}
                     {scanning ? '采集中...' : '立即采集'}
                   </Button>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">
+                    扫描本地 ~/.claude/projects 下的会话文件并汇总上报
+                  </span>
                 </div>
 
                 {telemetryStatus && <UsageDashboard status={telemetryStatus} />}

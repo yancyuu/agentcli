@@ -114,7 +114,7 @@ pnpm dev
 在另一个终端启动运行时服务：
 
 ```bash
-npx cc-connect
+npx cc-connect -config ~/.hermit/cc-connect/config.toml
 ```
 
 浏览器打开 [http://localhost:5174](http://localhost:5174)，开发模式连接本机运行时。
