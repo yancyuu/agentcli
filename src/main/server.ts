@@ -47,6 +47,7 @@ import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
 import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
+import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
 import type { TaskBusConfig } from '@shared/types/team';
 import { UpdateService } from './services/UpdateService';
 import {
@@ -189,7 +190,13 @@ const bridge = new CcConnectBridge({
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
 const svc = new TeamProvisioningService(cc, bridge);
-const taskDispatch = new TaskDispatchService(svc['workspace']);
+const collabBoard = new CollaborationBoardService();
+const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
+
+// Broadcast collab board changes via SSE
+taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
+  broadcastSse('collab-change', { dispatchId, status, fromTeam, toTeam });
+};
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -1674,6 +1681,11 @@ const MCP_TOOLS = [
           type: 'number',
           description: '握手超时时间（分钟），默认 5 分钟。超时后任务标记为 failed。',
         },
+        needs_human_review: {
+          type: 'boolean',
+          description:
+            '交付结果是否需要人工审核。默认 false（自动通过）。设为 true 时，交付后需要人在看板上审核。',
+        },
       },
       required: ['team_slug', 'target_team', 'subject'],
     },
@@ -1714,6 +1726,44 @@ const MCP_TOOLS = [
       required: ['team_slug'],
     },
   },
+  {
+    name: 'deliver_task',
+    description: '交付任务结果。完成任务后调用此工具，将结果发送给发起方审核。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '你的团队 slug（接收方/执行方）' },
+        dispatch_id: { type: 'string', description: '任务派发 ID' },
+        result: { type: 'string', description: '交付结果描述' },
+      },
+      required: ['team_slug', 'dispatch_id', 'result'],
+    },
+  },
+  {
+    name: 'approve_task',
+    description: '审核通过任务交付。发起方对交付结果满意时调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '你的团队 slug（发起方/审核方）' },
+        dispatch_id: { type: 'string', description: '任务派发 ID' },
+      },
+      required: ['team_slug', 'dispatch_id'],
+    },
+  },
+  {
+    name: 'reject_result',
+    description: '退回任务交付结果，要求修改。附上反馈意见。超过 3 次退回需要人工介入。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team_slug: { type: 'string', description: '你的团队 slug（发起方/审核方）' },
+        dispatch_id: { type: 'string', description: '任务派发 ID' },
+        feedback: { type: 'string', description: '退回反馈（需要修改的内容）' },
+      },
+      required: ['team_slug', 'dispatch_id', 'feedback'],
+    },
+  },
 ];
 
 /** 执行 MCP tool，返回 content array */
@@ -1749,6 +1799,7 @@ async function executeMcpTool(
 
   if (toolName === 'dispatch_task') {
     const deadlineMinutes = args.deadline_minutes ? Number(args.deadline_minutes) : undefined;
+    const needsHumanReview = args.needs_human_review === 'true';
     const result = await taskDispatch.dispatchTask(
       args.team_slug,
       {
@@ -1757,7 +1808,7 @@ async function executeMcpTool(
         prompt: args.prompt,
       },
       args.target_team,
-      { deadlineMinutes }
+      { deadlineMinutes, needsHumanReview }
     );
     return text(result);
   }
@@ -1775,6 +1826,21 @@ async function executeMcpTool(
   if (toolName === 'list_pending_requests') {
     const requests = taskDispatch.listPendingRequests(args.team_slug);
     return text(requests);
+  }
+
+  if (toolName === 'deliver_task') {
+    const result = await taskDispatch.deliverTask(args.team_slug, args.dispatch_id, args.result);
+    return text(result);
+  }
+
+  if (toolName === 'approve_task') {
+    const result = await taskDispatch.approveTask(args.team_slug, args.dispatch_id);
+    return text(result);
+  }
+
+  if (toolName === 'reject_result') {
+    const result = await taskDispatch.rejectResult(args.team_slug, args.dispatch_id, args.feedback);
+    return text(result);
   }
 
   throw new Error(`Unknown tool: ${toolName}`);
@@ -3937,32 +4003,6 @@ app.post('/api/teams/tool-approval/read-file', async () => ({ content: '' }));
 app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], errors: [] }));
 
 // cross-team task dispatch endpoints
-app.post<{
-  Body: {
-    fromTeam: string;
-    toTeam: string;
-    subject: string;
-    description?: string;
-    prompt?: string;
-    deadlineMinutes?: number;
-  };
-}>('/api/cross-team/send', async (request) => {
-  const { fromTeam, toTeam, subject, description, prompt, deadlineMinutes } = request.body ?? {};
-  if (!toTeam || !subject) return { ok: false, error: 'toTeam and subject are required' };
-  const result = await taskDispatch.dispatchTask(
-    fromTeam ?? 'unknown',
-    { subject, description, prompt },
-    toTeam,
-    { deadlineMinutes: deadlineMinutes ? Number(deadlineMinutes) : undefined }
-  );
-  return {
-    ok: true,
-    dispatchId: result.dispatchId,
-    status: result.status,
-    message: result.message,
-  };
-});
-
 // Agent collaboration: accept a task request
 app.post<{
   Body: { team_slug: string; dispatch_id: string };
@@ -4057,6 +4097,107 @@ app.get<{ Params: { name: string } }>('/api/cross-team/pending-requests/:name', 
   const teamSlug = request.params.name;
   const requests = taskDispatch.listPendingRequests(teamSlug);
   return { requests };
+});
+
+// Agent collaboration: deliver task result
+app.post<{
+  Body: { team_slug: string; dispatch_id: string; result: string };
+}>('/api/cross-team/deliver', async (request) => {
+  const { team_slug, dispatch_id, result } = request.body ?? {};
+  if (!team_slug || !dispatch_id || !result) {
+    return { ok: false, error: 'team_slug, dispatch_id, and result are required' };
+  }
+  try {
+    const res = await taskDispatch.deliverTask(team_slug, dispatch_id, result);
+    return res;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+// Agent collaboration: approve task result
+app.post<{
+  Body: { team_slug: string; dispatch_id: string };
+}>('/api/cross-team/approve', async (request) => {
+  const { team_slug, dispatch_id } = request.body ?? {};
+  if (!team_slug || !dispatch_id) {
+    return { ok: false, error: 'team_slug and dispatch_id are required' };
+  }
+  try {
+    const res = await taskDispatch.approveTask(team_slug, dispatch_id);
+    return res;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+// Agent collaboration: reject (request revision) task result
+app.post<{
+  Body: { team_slug: string; dispatch_id: string; feedback: string };
+}>('/api/cross-team/revision', async (request) => {
+  const { team_slug, dispatch_id, feedback } = request.body ?? {};
+  if (!team_slug || !dispatch_id || !feedback) {
+    return { ok: false, error: 'team_slug, dispatch_id, and feedback are required' };
+  }
+  try {
+    const res = await taskDispatch.rejectResult(team_slug, dispatch_id, feedback);
+    return res;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+// Collaboration board: list all collab tasks
+app.get('/api/collab/board', async () => {
+  return { tasks: taskDispatch.getCollabBoard() };
+});
+
+// Collaboration board: get single collab task
+app.get<{ Params: { dispatchId: string } }>('/api/collab/board/:dispatchId', async (request) => {
+  const task = taskDispatch.getCollabTask(request.params.dispatchId);
+  if (!task) return { ok: false, error: 'Not found' };
+  return { task };
+});
+
+// Update /api/cross-team/send to support needsHumanReview
+app.post<{
+  Body: {
+    fromTeam: string;
+    toTeam: string;
+    subject: string;
+    description?: string;
+    prompt?: string;
+    deadlineMinutes?: number;
+    needsHumanReview?: boolean;
+  };
+}>('/api/cross-team/send', async (request) => {
+  const { fromTeam, toTeam, subject, description, prompt, deadlineMinutes, needsHumanReview } =
+    request.body ?? {};
+  if (!toTeam || !subject) return { ok: false, error: 'toTeam and subject are required' };
+  const result = await taskDispatch.dispatchTask(
+    fromTeam ?? 'unknown',
+    { subject, description, prompt },
+    toTeam,
+    {
+      deadlineMinutes: deadlineMinutes ? Number(deadlineMinutes) : undefined,
+      needsHumanReview,
+    }
+  );
+  return {
+    ok: true,
+    dispatchId: result.dispatchId,
+    status: result.status,
+    message: result.message,
+  };
 });
 
 // GET /api/settings/task-bus → full config including telemetry

@@ -260,10 +260,12 @@ Current team slug: \`${teamSlug}\`
 \`\`\`bash
 curl -s -X POST http://127.0.0.1:5680/api/cross-team/send \\
   -H 'Content-Type: application/json' \\
-  -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description","deadlineMinutes":5}'
+  -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description","deadlineMinutes":5,"needsHumanReview":false}'
 \`\`\`
 
 Returns \`{"ok":true,"dispatchId":"...","status":"pending_accept"}\`
+
+Set \`needsHumanReview: true\` if the deliverable requires human approval before completion.
 
 ### Check pending requests (tasks others sent to you)
 
@@ -287,13 +289,52 @@ curl -s -X POST http://127.0.0.1:5680/api/cross-team/reject \\
   -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID","reason":"Optional reason"}'
 \`\`\`
 
-### Workflow
+### Deliver task result (target team)
 
-1. Call \`/api/cross-team/discover\` to find available teams
-2. Call \`/api/cross-team/send\` to dispatch a task (waits for acceptance)
-3. The target team calls \`/api/cross-team/pending-requests/:name\` to see requests
-4. The target team calls \`/api/cross-team/accept\` or \`/api/cross-team/reject\`
-5. If deadline passes without acceptance, the task is marked as failed
+After completing the task, deliver the result:
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/deliver \\
+  -H 'Content-Type: application/json' \\
+  -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID","result":"Result description"}'
+\`\`\`
+
+If \`needsHumanReview\` was false, the task is auto-approved after delivery.
+If \`needsHumanReview\` was true, the origin team must approve or request revision.
+
+### Approve a delivered task (origin team)
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/approve \\
+  -H 'Content-Type: application/json' \\
+  -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID"}'
+\`\`\`
+
+### Request revision (origin team)
+
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/revision \\
+  -H 'Content-Type: application/json' \\
+  -d '{"team_slug":"${teamSlug}","dispatch_id":"DISPATCH_ID","feedback":"What needs to change"}'
+\`\`\`
+
+After revision, the target team should re-deliver with \`/api/cross-team/deliver\`.
+Max 3 revision rounds before requiring human intervention.
+
+### View collaboration board
+
+\`\`\`bash
+curl -s http://127.0.0.1:5680/api/collab/board | jq '.tasks[]'
+\`\`\`
+
+### Full Workflow
+
+1. **Discover**: \`/api/cross-team/discover\` — find available teams
+2. **Dispatch**: \`/api/cross-team/send\` — send task (waits for acceptance)
+3. **Accept/Reject**: Target team checks \`/api/cross-team/pending-requests/:name\` then accepts or rejects
+4. **Deliver**: Target team completes work and calls \`/api/cross-team/deliver\`
+5. **Review**: If \`needsHumanReview\`, origin team calls \`/api/cross-team/approve\` or \`/api/cross-team/revision\`
+6. If deadline passes without acceptance, task is marked as failed
 
 When to dispatch:
 - Task requires access to a different codebase/project

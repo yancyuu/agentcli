@@ -99,6 +99,7 @@ import type {
   TeamAgentRuntimeSnapshot,
   CcSession,
   CcSessionDetail,
+  CollabTask,
 } from '@shared/types';
 
 import type {
@@ -1630,6 +1631,49 @@ export class HttpAPIClient implements ElectronAPI {
     },
     getOutbox: (teamName: string) =>
       this.get<CrossTeamMessage[]>(`/api/cross-team/outbox/${encodeURIComponent(teamName)}`),
+  };
+
+  // Collaboration board API
+  collab = {
+    getBoard: () => this.get<{ tasks: CollabTask[] }>('/api/collab/board'),
+    getTask: (dispatchId: string) =>
+      this.get<{ task: CollabTask }>(`/api/collab/board/${encodeURIComponent(dispatchId)}`),
+    deliver: (teamSlug: string, dispatchId: string, result: string) =>
+      this.post<{ ok: boolean }>('/api/cross-team/deliver', {
+        team_slug: teamSlug,
+        dispatch_id: dispatchId,
+        result,
+      }),
+    approve: (teamSlug: string, dispatchId: string) =>
+      this.post<{ ok: boolean }>('/api/cross-team/approve', {
+        team_slug: teamSlug,
+        dispatch_id: dispatchId,
+      }),
+    revision: (teamSlug: string, dispatchId: string, feedback: string) =>
+      this.post<{ ok: boolean }>('/api/cross-team/revision', {
+        team_slug: teamSlug,
+        dispatch_id: dispatchId,
+        feedback,
+      }),
+    dispatch: (
+      fromTeam: string,
+      toTeam: string,
+      subject: string,
+      opts?: { description?: string; deadlineMinutes?: number; needsHumanReview?: boolean }
+    ) =>
+      this.post<{
+        ok: boolean;
+        dispatchId: string;
+        status: string;
+        message: string;
+      }>('/api/cross-team/send', {
+        fromTeam,
+        toTeam,
+        subject,
+        description: opts?.description,
+        deadlineMinutes: opts?.deadlineMinutes,
+        needsHumanReview: opts?.needsHumanReview,
+      }),
   };
 
   // Review API

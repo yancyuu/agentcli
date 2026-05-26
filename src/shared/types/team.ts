@@ -201,6 +201,7 @@ export interface TaskDispatchPayload {
   };
   dispatchedAt: string;
   deadline?: string;
+  needsHumanReview?: boolean;
 }
 
 export interface TaskStatusUpdate {
@@ -221,13 +222,52 @@ export interface TaskAckPayload {
 
 export interface TaskHandshakeResponse {
   dispatchId: string;
-  type: 'task_accept' | 'task_reject';
+  type: 'task_accept' | 'task_reject' | 'task_deliver' | 'task_approve' | 'task_revision';
   fromTeam: string;
   toTeam: string;
   remoteTaskId?: string;
   reason?: string;
+  result?: string;
+  feedback?: string;
   acceptedAt?: string;
   rejectedAt?: string;
+  deliveredAt?: string;
+  approvedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration Board — global cross-team task view
+// ---------------------------------------------------------------------------
+
+export type CollabTaskStatus =
+  | 'pending_accept'
+  | 'accepted'
+  | 'delivered'
+  | 'approved'
+  | 'revision'
+  | 'rejected'
+  | 'failed';
+
+export interface CollabTask {
+  id: string;
+  dispatchId: string;
+  subject: string;
+  description?: string;
+  fromTeam: string;
+  fromTeamDisplay: string;
+  toTeam: string;
+  toTeamDisplay: string;
+  status: CollabTaskStatus;
+  result?: string;
+  feedback?: string;
+  deadline?: string;
+  needsHumanReview: boolean;
+  revisionCount: number;
+  createdAt: string;
+  updatedAt: string;
+  acceptedAt?: string;
+  deliveredAt?: string;
+  approvedAt?: string;
 }
 
 export interface TaskWorkInterval {
@@ -890,7 +930,15 @@ export type TeamLaunchAggregateState =
   | 'partial_skipped';
 export type PersistedTeamLaunchPhase = 'active' | 'finished' | 'reconciled';
 
-export type KanbanColumnId = 'todo' | 'in_progress' | 'done' | 'review' | 'approved';
+export type KanbanColumnId =
+  | 'todo'
+  | 'in_progress'
+  | 'done'
+  | 'review'
+  | 'approved'
+  | 'pending_accept'
+  | 'delivered'
+  | 'revision';
 
 export interface KanbanTaskState {
   column: Extract<KanbanColumnId, 'review' | 'approved'>;

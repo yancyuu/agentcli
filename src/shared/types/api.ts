@@ -46,6 +46,7 @@ import type {
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
   BoardTaskLogStreamSummary,
+  CollabTask,
   CreateTaskRequest,
   CrossTeamMessage,
   CrossTeamSendRequest,
@@ -724,6 +725,24 @@ export interface CrossTeamAPI {
 }
 
 // =============================================================================
+// Collaboration Board API
+// =============================================================================
+
+export interface CollabBoardAPI {
+  getBoard: () => Promise<{ tasks: CollabTask[] }>;
+  getTask: (dispatchId: string) => Promise<{ task: CollabTask }>;
+  deliver: (teamSlug: string, dispatchId: string, result: string) => Promise<{ ok: boolean }>;
+  approve: (teamSlug: string, dispatchId: string) => Promise<{ ok: boolean }>;
+  revision: (teamSlug: string, dispatchId: string, feedback: string) => Promise<{ ok: boolean }>;
+  dispatch: (
+    fromTeam: string,
+    toTeam: string,
+    subject: string,
+    opts?: { description?: string; deadlineMinutes?: number; needsHumanReview?: boolean }
+  ) => Promise<{ ok: boolean; dispatchId: string; status: string; message: string }>;
+}
+
+// =============================================================================
 // Schedule API
 // =============================================================================
 
@@ -1060,6 +1079,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // Cross-Team Communication API
   crossTeam: CrossTeamAPI;
+  collab: CollabBoardAPI;
 
   // Review API
   review: ReviewAPI;

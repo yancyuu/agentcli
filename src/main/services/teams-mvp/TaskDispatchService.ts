@@ -1,5 +1,6 @@
 import type {
   AgentCapability,
+  CollabTask,
   DiscoverableTeam,
   DispatchMeta,
   TaskBusConfig,
@@ -8,6 +9,7 @@ import type {
   TaskStatusUpdate,
 } from '@shared/types/team';
 import type { TeamWorkspaceService, TeamManifest } from './TeamWorkspaceService';
+import type { CollaborationBoardService } from './CollaborationBoardService';
 import type Redis from 'ioredis';
 
 const DISPATCH_RULES_DEFAULT = `When to dispatch a task to another team:
@@ -37,6 +39,7 @@ export interface DispatchResult {
 
 export class TaskDispatchService {
   private workspace: TeamWorkspaceService;
+  private collabBoard: CollaborationBoardService;
   private config: TaskBusConfig | null = null;
   private redis: Redis | null = null;
   private redisSub: Redis | null = null;
@@ -45,9 +48,12 @@ export class TaskDispatchService {
   private responseConsumerTimers: ReturnType<typeof setInterval>[] = [];
   private disposed = false;
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  /** Callback fired when collab task state changes (for SSE broadcast). */
+  onCollabChange?: (dispatchId: string, status: string, fromTeam: string, toTeam: string) => void;
 
-  constructor(workspace: TeamWorkspaceService) {
+  constructor(workspace: TeamWorkspaceService, collabBoard: CollaborationBoardService) {
     this.workspace = workspace;
+    this.collabBoard = collabBoard;
   }
 
   get dispatchRulesText(): string {
@@ -141,7 +147,7 @@ export class TaskDispatchService {
     fromTeam: string,
     task: { subject: string; description?: string; prompt?: string },
     targetTeam: string,
-    opts?: { deadlineMinutes?: number }
+    opts?: { deadlineMinutes?: number; needsHumanReview?: boolean }
   ): Promise<DispatchResult> {
     if (fromTeam === targetTeam) {
       return {
@@ -179,9 +185,9 @@ export class TaskDispatchService {
     // Route: local or remote
     const isLocal = await this.isLocalTeam(targetTeam);
     if (isLocal) {
-      await this.handleLocalHandshakeDispatch(dispatchMeta, task);
+      await this.handleLocalHandshakeDispatch(dispatchMeta, task, opts?.needsHumanReview);
     } else if (this.redis) {
-      await this.handleRemoteHandshakeDispatch(dispatchMeta, task);
+      await this.handleRemoteHandshakeDispatch(dispatchMeta, task, opts?.needsHumanReview);
     } else {
       return {
         dispatchId,
@@ -190,6 +196,28 @@ export class TaskDispatchService {
         message: 'Redis not configured — remote dispatch unavailable.',
       };
     }
+
+    // Add to collaboration board
+    const fromTeamManifest = await this.safeReadManifest(fromTeam);
+    const toTeamManifest = await this.safeReadManifest(targetTeam);
+    const collabTask: CollabTask = {
+      id: dispatchId,
+      dispatchId,
+      subject: task.subject,
+      description: task.description,
+      fromTeam,
+      fromTeamDisplay: fromTeamManifest?.displayName ?? fromTeam,
+      toTeam: targetTeam,
+      toTeamDisplay: toTeamManifest?.displayName ?? targetTeam,
+      status: 'pending_accept',
+      deadline,
+      needsHumanReview: opts?.needsHumanReview ?? false,
+      revisionCount: 0,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    this.collabBoard.addTask(collabTask);
+    this.emitCollabChange(dispatchId, 'pending_accept', fromTeam, targetTeam);
 
     return {
       dispatchId,
@@ -254,6 +282,12 @@ export class TaskDispatchService {
     }
 
     this.pendingRequests.delete(dispatchId);
+
+    // Update collab board
+    const acceptedAt = new Date().toISOString();
+    this.collabBoard.updateStatus(payload.dispatchId, 'accepted', { acceptedAt });
+    this.emitCollabChange(payload.dispatchId, 'accepted', payload.originTeam, payload.targetTeam);
+
     return { taskId: created.id };
   }
 
@@ -290,9 +324,140 @@ export class TaskDispatchService {
     }
 
     this.pendingRequests.delete(dispatchId);
+
+    // Update collab board
+    this.collabBoard.updateStatus(payload.dispatchId, 'rejected');
+    this.emitCollabChange(payload.dispatchId, 'rejected', payload.originTeam, payload.targetTeam);
   }
 
-  /** List pending requests for a team (for MCP/UI). */
+  // ── Deliver / Approve / Revision ────────────────────────────────
+
+  async deliverTask(
+    teamSlug: string,
+    dispatchId: string,
+    result: string
+  ): Promise<{ ok: boolean }> {
+    const collabTask = this.collabBoard.getTask(dispatchId);
+    if (!collabTask) {
+      throw new Error(`No collab task found for dispatchId: ${dispatchId}`);
+    }
+
+    const deliveredAt = new Date().toISOString();
+
+    // Send deliver response to origin team
+    const response: TaskHandshakeResponse = {
+      dispatchId,
+      type: 'task_deliver',
+      fromTeam: teamSlug,
+      toTeam: collabTask.fromTeam,
+      result,
+      deliveredAt,
+    };
+
+    const isLocalOrigin = await this.isLocalTeam(collabTask.fromTeam);
+    if (isLocalOrigin) {
+      await this.handleLocalResponse(response);
+    } else if (this.redis) {
+      await this.redis
+        .xadd(`task:response:${collabTask.fromTeam}`, '*', 'payload', JSON.stringify(response))
+        .catch((err: Error) => {
+          console.error('[TaskDispatchService] deliver xadd failed:', err.message);
+        });
+    }
+
+    // Update local collab board
+    this.collabBoard.updateStatus(dispatchId, 'delivered', { result, deliveredAt });
+    this.emitCollabChange(dispatchId, 'delivered', collabTask.fromTeam, collabTask.toTeam);
+
+    return { ok: true };
+  }
+
+  async approveTask(teamSlug: string, dispatchId: string): Promise<{ ok: boolean }> {
+    const collabTask = this.collabBoard.getTask(dispatchId);
+    if (!collabTask) {
+      throw new Error(`No collab task found for dispatchId: ${dispatchId}`);
+    }
+
+    const approvedAt = new Date().toISOString();
+
+    // Send approve response to target team
+    const response: TaskHandshakeResponse = {
+      dispatchId,
+      type: 'task_approve',
+      fromTeam: teamSlug,
+      toTeam: collabTask.toTeam,
+      approvedAt,
+    };
+
+    const isLocalTarget = await this.isLocalTeam(collabTask.toTeam);
+    if (isLocalTarget) {
+      await this.handleLocalResponse(response);
+    } else if (this.redis) {
+      await this.redis
+        .xadd(`task:response:${collabTask.toTeam}`, '*', 'payload', JSON.stringify(response))
+        .catch((err: Error) => {
+          console.error('[TaskDispatchService] approve xadd failed:', err.message);
+        });
+    }
+
+    // Update collab board
+    this.collabBoard.updateStatus(dispatchId, 'approved', { approvedAt });
+    this.emitCollabChange(dispatchId, 'approved', collabTask.fromTeam, collabTask.toTeam);
+
+    return { ok: true };
+  }
+
+  async rejectResult(
+    teamSlug: string,
+    dispatchId: string,
+    feedback: string
+  ): Promise<{ ok: boolean }> {
+    const collabTask = this.collabBoard.getTask(dispatchId);
+    if (!collabTask) {
+      throw new Error(`No collab task found for dispatchId: ${dispatchId}`);
+    }
+
+    const newRevisionCount = collabTask.revisionCount + 1;
+
+    // Send revision response to target team
+    const response: TaskHandshakeResponse = {
+      dispatchId,
+      type: 'task_revision',
+      fromTeam: teamSlug,
+      toTeam: collabTask.toTeam,
+      feedback,
+    };
+
+    const isLocalTarget = await this.isLocalTeam(collabTask.toTeam);
+    if (isLocalTarget) {
+      await this.handleLocalResponse(response);
+    } else if (this.redis) {
+      await this.redis
+        .xadd(`task:response:${collabTask.toTeam}`, '*', 'payload', JSON.stringify(response))
+        .catch((err: Error) => {
+          console.error('[TaskDispatchService] revision xadd failed:', err.message);
+        });
+    }
+
+    // Update collab board
+    this.collabBoard.updateStatus(dispatchId, 'revision', {
+      feedback,
+      revisionCount: newRevisionCount,
+    });
+    this.emitCollabChange(dispatchId, 'revision', collabTask.fromTeam, collabTask.toTeam);
+
+    return { ok: true };
+  }
+
+  /** Get the collaboration board. */
+  getCollabBoard() {
+    return this.collabBoard.getBoard();
+  }
+
+  /** Get a single collab task. */
+  getCollabTask(dispatchId: string) {
+    return this.collabBoard.getTask(dispatchId);
+  }
   listPendingRequests(teamSlug: string): TaskDispatchPayload[] {
     const results: TaskDispatchPayload[] = [];
     for (const [, req] of this.pendingRequests) {
@@ -345,9 +510,9 @@ export class TaskDispatchService {
 
   private async handleLocalHandshakeDispatch(
     dispatchMeta: DispatchMeta,
-    task: { subject: string; description?: string; prompt?: string }
+    task: { subject: string; description?: string; prompt?: string },
+    needsHumanReview?: boolean
   ): Promise<void> {
-    // For local dispatch, store directly in pendingRequests
     const payload: TaskDispatchPayload = {
       dispatchId: dispatchMeta.dispatchId,
       originTeam: dispatchMeta.originTeam,
@@ -355,6 +520,7 @@ export class TaskDispatchService {
       task: { subject: task.subject, description: task.description, prompt: task.prompt },
       dispatchedAt: dispatchMeta.dispatchedAt,
       deadline: dispatchMeta.deadline,
+      needsHumanReview,
     };
 
     this.pendingRequests.set(dispatchMeta.dispatchId, {
@@ -369,7 +535,8 @@ export class TaskDispatchService {
 
   private async handleRemoteHandshakeDispatch(
     dispatchMeta: DispatchMeta,
-    task: { subject: string; description?: string; prompt?: string }
+    task: { subject: string; description?: string; prompt?: string },
+    needsHumanReview?: boolean
   ): Promise<void> {
     const payload: TaskDispatchPayload = {
       dispatchId: dispatchMeta.dispatchId,
@@ -378,6 +545,7 @@ export class TaskDispatchService {
       task: { subject: task.subject, description: task.description, prompt: task.prompt },
       dispatchedAt: dispatchMeta.dispatchedAt,
       deadline: dispatchMeta.deadline,
+      needsHumanReview,
     };
 
     const streamKey = `task:dispatch:${dispatchMeta.targetTeam}`;
@@ -408,6 +576,7 @@ export class TaskDispatchService {
 
       await this.redis.ping();
 
+      this.collabBoard.setRedis(this.redis);
       this.startHeartbeat();
       this.startConsumers();
       this.startResponseConsumers();
@@ -653,7 +822,6 @@ export class TaskDispatchService {
   }
 
   private async applyResponse(response: TaskHandshakeResponse): Promise<void> {
-    // Find shadow task in origin team and update dispatch meta
     const originTeam = response.toTeam;
     const tasks = await this.workspace.readTasks(originTeam);
     const shadowTask = tasks.find((t) => t.dispatchMeta?.dispatchId === response.dispatchId);
@@ -665,10 +833,34 @@ export class TaskDispatchService {
       meta.status = 'accepted';
       meta.acceptedAt = response.acceptedAt;
       meta.remoteTaskId = response.remoteTaskId;
-    } else {
+      // Collab board update already done in acceptTask
+    } else if (response.type === 'task_reject') {
       meta.status = 'rejected';
       meta.rejectedAt = response.rejectedAt;
       meta.rejectionReason = response.reason;
+      // Collab board update already done in rejectTask
+    } else if (response.type === 'task_deliver') {
+      meta.status = 'completed';
+      meta.completedAt = response.deliveredAt;
+      await this.workspace.patchTask(originTeam, shadowTask.id, {
+        dispatchMeta: meta,
+      } as any);
+
+      // Auto-approve if no human review needed
+      const collabTask = this.collabBoard.getTask(response.dispatchId);
+      if (collabTask && !collabTask.needsHumanReview) {
+        this.collabBoard.updateStatus(response.dispatchId, 'approved', {
+          approvedAt: new Date().toISOString(),
+        });
+        this.emitCollabChange(response.dispatchId, 'approved', response.fromTeam, response.toTeam);
+      }
+      return;
+    } else if (response.type === 'task_approve') {
+      // Received by target team — already handled in approveTask
+      return;
+    } else if (response.type === 'task_revision') {
+      // Received by target team — already handled in rejectResult
+      return;
     }
 
     await this.workspace.patchTask(originTeam, shadowTask.id, {
@@ -736,5 +928,22 @@ export class TaskDispatchService {
       caps.push({ skill: 'general', description: team.description });
     }
     return caps;
+  }
+
+  private async safeReadManifest(teamSlug: string): Promise<TeamManifest | null> {
+    try {
+      return await this.workspace.readTeamManifest(teamSlug);
+    } catch {
+      return null;
+    }
+  }
+
+  private emitCollabChange(
+    dispatchId: string,
+    status: string,
+    fromTeam: string,
+    toTeam: string
+  ): void {
+    this.onCollabChange?.(dispatchId, status, fromTeam, toTeam);
   }
 }
