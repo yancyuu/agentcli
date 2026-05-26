@@ -43,6 +43,7 @@ import {
   Download,
   FolderOpen,
   GitBranch,
+  Loader2,
   Play,
   RotateCcw,
   Search,
@@ -276,6 +277,7 @@ export const TeamListView = (): React.JSX.Element => {
   const [copyData, setCopyData] = useState<TeamCopyData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<TeamListFilterState>(EMPTY_TEAM_FILTER);
+  const [deletingTeamName, setDeletingTeamName] = useState<string | null>(null);
   const [aliveTeams, setAliveTeams] = useState<string[]>([]);
   const {
     teams,
@@ -533,25 +535,28 @@ export const TeamListView = (): React.JSX.Element => {
         }
         const confirmed = await confirm({
           title: '删除团队',
-          message: `确定删除团队“${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地团队数据。`,
-          confirmLabel: '删除',
+          message: `确定删除团队”${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地团队数据。`,
+          confirmLabel: '删除并重启',
           cancelLabel: '取消',
           variant: 'danger',
         });
         if (confirmed) {
+          setDeletingTeamName(teamName);
           try {
             const result = await deleteTeam(teamName);
             if (result.restartRequired) {
               await api.ccSettings.restart();
-              emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
             }
+            await fetchTeams();
           } catch (err) {
             console.error('Failed to delete team:', err);
+          } finally {
+            setDeletingTeamName(null);
           }
         }
       })();
     },
-    [deleteTeam, teams]
+    [deleteTeam, teams, fetchTeams]
   );
 
   const handleRestoreTeam = useCallback(
@@ -1101,6 +1106,7 @@ export const TeamListView = (): React.JSX.Element => {
             const matchesCurrentProject = currentProjectPath
               ? teamMatchesProjectSelection(team, currentProjectPath)
               : false;
+            const isDeleting = deletingTeamName === team.teamName;
             return (
               <div
                 key={team.teamName}
@@ -1108,14 +1114,22 @@ export const TeamListView = (): React.JSX.Element => {
                 tabIndex={0}
                 className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-l-[3px] border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
                 style={teamColorSet ? { borderLeftColor: teamColorSet.border } : undefined}
-                onClick={() => openTeamTab(team.teamName, team.projectPath)}
+                onClick={
+                  isDeleting ? undefined : () => openTeamTab(team.teamName, team.projectPath)
+                }
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    openTeamTab(team.teamName, team.projectPath);
+                    if (!isDeleting) openTeamTab(team.teamName, team.projectPath);
                   }
                 }}
               >
+                {isDeleting && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/60 text-sm text-white">
+                    <Loader2 size={16} className="animate-spin" />
+                    删除并重启中…
+                  </div>
+                )}
                 <div className="flex flex-1 flex-col">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1172,7 +1186,7 @@ export const TeamListView = (): React.JSX.Element => {
                           <TooltipContent side="bottom">复制团队</TooltipContent>
                         </Tooltip>
                       )}
-                      {team.teamName !== 'default' && (
+                      {team.teamName !== 'default' && team.teamName !== 'my-project' && (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button

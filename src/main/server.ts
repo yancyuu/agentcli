@@ -682,7 +682,17 @@ app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request)
 app.post('/api/cc-restart', async () => {
   try {
     await cc.restart();
-    return { ok: true };
+    // Wait for cc-connect to come back (restart only signals, process respawns async)
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        await cc.listProjects();
+        return { ok: true };
+      } catch {
+        /* not back yet */
+      }
+    }
+    return reply500(new Error('cc-connect did not come back within 30s'));
   } catch (err) {
     return reply500(err);
   }
@@ -764,7 +774,9 @@ app.get('/api/teams', async () => {
         };
       })
     );
-    return summaries.filter((team) => team.pendingDelete !== true);
+    return summaries.filter(
+      (team) => team.pendingDelete !== true && team.teamName !== 'my-project'
+    );
   } catch {
     return [];
   }
@@ -1050,8 +1062,8 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   '/api/teams/:name',
   async (request, reply) => {
     const teamName = request.params.name;
-    if (teamName === 'default') {
-      return reply.code(403).send({ error: 'default 团队不可删除' });
+    if (teamName === 'default' || teamName === 'my-project') {
+      return reply.code(403).send({ error: '该团队不可删除' });
     }
     try {
       let restartRequired = false;

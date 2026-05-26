@@ -67,6 +67,7 @@ import {
   Plus,
   Terminal,
   Trash2,
+  Loader2,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -1065,6 +1066,7 @@ export const TeamDetailView = ({
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [sendDialogDefaultText, setSendDialogDefaultText] = useState<string | undefined>(undefined);
@@ -1824,20 +1826,25 @@ export const TeamDetailView = ({
   }, []);
 
   const confirmDeleteTeam = useCallback((): void => {
-    setDeleteConfirmOpen(false);
+    setDeleting(true);
     void (async () => {
       try {
         const result = await deleteTeam(teamName);
         if (result.restartRequired) {
           await api.ccSettings.restart();
         }
+        await fetchTeams();
+        setDeleteConfirmOpen(false);
         if (tabId) closeTab(tabId);
         openTeamsTab();
       } catch (err) {
         console.error('Failed to delete team:', err);
+        setDeleteConfirmOpen(false);
+      } finally {
+        setDeleting(false);
       }
     })();
-  }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId]);
+  }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId, fetchTeams]);
 
   const handleCreateTask = (
     subject: string,
@@ -2151,7 +2158,7 @@ export const TeamDetailView = ({
                         {isTeamProvisioning ? '团队仍在编排中，暂时无法编辑' : '编辑团队'}
                       </TooltipContent>
                     </Tooltip>
-                    {teamName !== 'default' && (
+                    {teamName !== 'default' && teamName !== 'my-project' && (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
@@ -2657,7 +2664,9 @@ export const TeamDetailView = ({
                   void fetchTeams();
                   void selectTeam(teamName);
                 }}
-                onDeleteTeam={teamName !== 'default' ? handleDeleteTeam : undefined}
+                onDeleteTeam={
+                  teamName !== 'default' && teamName !== 'my-project' ? handleDeleteTeam : undefined
+                }
                 onRestartTeam={handleRestartTeamFromEdit}
               />
 
@@ -2695,7 +2704,12 @@ export const TeamDetailView = ({
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+              <Dialog
+                open={deleteConfirmOpen}
+                onOpenChange={(v) => {
+                  if (!deleting) setDeleteConfirmOpen(v);
+                }}
+              >
                 <DialogContent className="max-w-sm">
                   <DialogHeader>
                     <DialogTitle>删除团队</DialogTitle>
@@ -2708,8 +2722,14 @@ export const TeamDetailView = ({
                     <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmOpen(false)}>
                       取消
                     </Button>
-                    <Button variant="destructive" size="sm" onClick={confirmDeleteTeam}>
-                      删除
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={confirmDeleteTeam}
+                      disabled={deleting}
+                    >
+                      {deleting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+                      删除并重启
                     </Button>
                   </DialogFooter>
                 </DialogContent>
