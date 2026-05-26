@@ -15,6 +15,7 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
@@ -359,6 +360,10 @@ function parseTomlToken(raw, section) {
   return match?.[1] || '';
 }
 
+function randomToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -435,17 +440,94 @@ function ensureClaudeCodeCliIfNeeded(raw) {
   console.log('[openHermit] Claude Code CLI installed and available in PATH.');
 }
 
-function readCcConnectConfigState() {
+function hasTomlSection(raw, section) {
+  return new RegExp(`^\\[${section}\\]\\s*$`, 'm').test(raw);
+}
+
+function buildOpenHermitStarterConfig(managementToken, bridgeToken) {
+  return `# cc-connect configuration
+# Docs: https://github.com/chenhg5/cc-connect
+
+data_dir = "${escapeTomlPath(path.join(hermitHome, 'cc-connect', 'data'))}"
+language = "zh"
+
+[management]
+enabled = true
+host = "127.0.0.1"
+port = 9820
+token = "${managementToken}"
+
+[bridge]
+enabled = true
+host = "127.0.0.1"
+port = 9810
+token = "${bridgeToken}"
+path = "/bridge/ws"
+
+[log]
+level = "info"
+
+[[projects]]
+name = "my-project"
+
+[projects.agent]
+type = "claudecode"   # "claudecode", "codex", "cursor", "gemini", "qoder", "opencode", or "iflow"
+
+[projects.agent.options]
+work_dir = "/path/to/your/project"
+mode = "default"
+# model = "claude-sonnet-4-20250514"
+
+# --- Choose at least one platform below ---
+
+[[projects.platforms]]
+type = "feishu"
+
+[projects.platforms.options]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+`;
+}
+
+function ensureOpenHermitRuntimeConfig() {
   mkdirSync(path.dirname(ccConnectConfigPath), { recursive: true });
   if (!existsSync(ccConnectConfigPath)) {
-    return {
-      configExists: false,
-      managementToken: process.env.CC_CONNECT_TOKEN || process.env.CC_CONNECT_MANAGEMENT_TOKEN || '',
-      bridgeToken: process.env.CC_CONNECT_BRIDGE_TOKEN || process.env.CC_CONNECT_TOKEN || '',
-      hasRunnableProjects: false,
-      isStarterConfig: false,
-    };
+    writeFileSync(ccConnectConfigPath, buildOpenHermitStarterConfig(randomToken(), randomToken()), 'utf-8');
+    return;
   }
+
+  let raw = readFileSync(ccConnectConfigPath, 'utf-8');
+  let changed = false;
+  if (!hasTomlSection(raw, 'management')) {
+    raw = `${raw.trimEnd()}
+
+[management]
+enabled = true
+host = "127.0.0.1"
+port = 9820
+token = "${randomToken()}"
+`;
+    changed = true;
+  }
+  if (!hasTomlSection(raw, 'bridge')) {
+    raw = `${raw.trimEnd()}
+
+[bridge]
+enabled = true
+host = "127.0.0.1"
+port = 9810
+token = "${randomToken()}"
+path = "/bridge/ws"
+`;
+    changed = true;
+  }
+  if (changed) {
+    writeFileSync(ccConnectConfigPath, raw, 'utf-8');
+  }
+}
+
+function readCcConnectConfigState() {
+  ensureOpenHermitRuntimeConfig();
 
   const raw = readFileSync(ccConnectConfigPath, 'utf-8');
 
@@ -604,48 +686,6 @@ if (!skipCcConnect) {
   const alreadyRunning = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 1_000);
   if (alreadyRunning) {
     console.log(`[openHermit] Runtime service already running: ${ccBaseUrl}`);
-  } else if (!ccTokens.configExists) {
-    console.log('[openHermit] Initializing runtime config with bundled runtime service...');
-    console.log(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
-    const initProcess = spawn(process.execPath, [resolveCcConnectRunner(), '-config', ccConnectConfigPath], {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        CC_CONNECT_TOKEN: ccTokens.managementToken,
-        CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
-        CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    initProcess.stdout?.on('data', (chunk) => {
-      process.stdout.write(chunk);
-      appendLog(runtimeLogPath, chunk);
-    });
-    initProcess.stderr?.on('data', (chunk) => {
-      process.stderr.write(chunk);
-      appendLog(runtimeLogPath, chunk);
-    });
-
-    const initCode = await new Promise((resolve) => {
-      initProcess.on('exit', (code) => resolve(code ?? 1));
-      initProcess.on('error', () => resolve(1));
-    });
-
-    ccTokens = readCcConnectConfigState();
-    if (initCode === 0 && ccTokens.configExists) {
-      console.log('[openHermit] Runtime starter config created.');
-      try {
-        ensureClaudeCodeCliIfNeeded(ccTokens.raw);
-      } catch {
-        printLogTail('Runtime', runtimeLogPath);
-        process.exit(1);
-      }
-      shouldStartRuntime = true;
-    } else {
-      console.error(`[openHermit] Runtime config initialization failed (code ${initCode}).`);
-      printLogTail('Runtime', runtimeLogPath);
-      process.exit(1);
-    }
   } else if (ccTokens.hasProjects) {
     try {
       ensureClaudeCodeCliIfNeeded(ccTokens.raw);

@@ -11,6 +11,7 @@ import { providersApi } from '@renderer/api/providers';
 import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
 import type { CcAgentType } from '@renderer/components/team/HarnessCards';
 import { cn } from '@renderer/lib/utils';
+import { OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { CheckCircle2 } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components/SettingsSectionHeader';
@@ -68,6 +69,16 @@ export const HarnessSection = (): React.JSX.Element => {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const handleProvidersChanged = () => {
+      void refresh();
+    };
+    window.addEventListener(OPEN_HERMIT_EVENTS.providersChanged, handleProvidersChanged);
+    return () => {
+      window.removeEventListener(OPEN_HERMIT_EVENTS.providersChanged, handleProvidersChanged);
+    };
   }, [refresh]);
 
   // Build coverage map: agent type -> list of sources (providers + projects)

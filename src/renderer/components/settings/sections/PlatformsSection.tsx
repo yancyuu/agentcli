@@ -19,6 +19,7 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import {
   Select,
   SelectContent,
@@ -507,6 +508,7 @@ function AddPlatformDialog({
         });
         if (shouldRestart) {
           await api.ccSettings.restart();
+          emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
         }
       }
     } catch (e) {

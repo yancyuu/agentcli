@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { Textarea } from '@renderer/components/ui/textarea';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import appIcon from '@renderer/favicon.png';
 import { Check, FileEdit, Loader2, RefreshCw, RotateCcw, X } from 'lucide-react';
 
@@ -147,6 +148,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
     setRestartMsg(null);
     try {
       await api.ccSettings.restart();
+      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
       setRestartMsg('已重启');
     } catch {
       setRestartMsg('重启失败');

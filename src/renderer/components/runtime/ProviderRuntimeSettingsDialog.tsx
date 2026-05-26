@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { Loader2, RefreshCw } from 'lucide-react';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
@@ -127,6 +128,7 @@ export const ProviderRuntimeSettingsDialog = ({
       setNewProviderBaseUrl('');
       setNewProviderApiKey('');
       await refreshProviders();
+      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.providersChanged);
     } catch (err) {
       setAddError(err instanceof Error ? err.message : '添加 Provider 失败');
     } finally {

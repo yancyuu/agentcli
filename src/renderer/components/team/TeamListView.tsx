@@ -33,6 +33,7 @@ import {
 } from '@renderer/store/utils/stateResetHelpers';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
@@ -550,6 +551,7 @@ export const TeamListView = (): React.JSX.Element => {
               });
               if (shouldRestart) {
                 await api.ccSettings.restart();
+                emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
               }
             }
           } catch {
@@ -672,6 +674,19 @@ export const TeamListView = (): React.JSX.Element => {
   useEffect(() => {
     void fetchTeams();
     void fetchAllTasks();
+  }, [fetchTeams, fetchAllTasks]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void fetchTeams();
+      void fetchAllTasks();
+    };
+    window.addEventListener(OPEN_HERMIT_EVENTS.runtimeRestarted, refresh);
+    window.addEventListener(OPEN_HERMIT_EVENTS.teamsChanged, refresh);
+    return () => {
+      window.removeEventListener(OPEN_HERMIT_EVENTS.runtimeRestarted, refresh);
+      window.removeEventListener(OPEN_HERMIT_EVENTS.teamsChanged, refresh);
+    };
   }, [fetchTeams, fetchAllTasks]);
 
   const taskCountsByTeam = useMemo(() => buildTaskCountsByTeam(globalTasks), [globalTasks]);
@@ -798,6 +813,7 @@ export const TeamListView = (): React.JSX.Element => {
     async (request: TeamCreateRequest) => {
       await createTeam(request);
       await Promise.all([fetchTeams(), fetchAllTasks()]);
+      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.teamsChanged);
       window.setTimeout(() => {
         void fetchTeams();
         void fetchAllTasks();
