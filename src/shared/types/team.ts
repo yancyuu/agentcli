@@ -166,6 +166,11 @@ export interface TaskBusConfig {
     password?: string;
     db?: number;
   };
+  telemetry?: {
+    enabled: boolean;
+    /** Data source platform. Currently only 'claudecode'. */
+    platform: 'claudecode';
+  };
 }
 
 export interface TaskDispatchPayload {

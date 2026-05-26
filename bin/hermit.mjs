@@ -370,7 +370,7 @@ function escapeRegExp(value) {
 
 function findProjectBlock(raw, name) {
   const projectPattern = new RegExp(
-    `\\[\\[projects\\]\\]\\nname\\s*=\\s*"${escapeRegExp(name)}"[\\s\\S]*?(?=\\n\\[\\[projects\\]\\]|\\s*$)`
+    `\\[\\[projects\\]\\]\\s*\\n\\s*name\\s*=\\s*"${escapeRegExp(name)}"[\\s\\S]*?(?=\\n\\s*\\[\\[projects\\]\\]|\\s*$)`
   );
   const match = raw.match(projectPattern);
   return match ? { pattern: projectPattern, match } : null;
@@ -403,7 +403,7 @@ function configRequiresClaudeCode(raw) {
 }
 
 function hasProjectEntries(raw) {
-  const projectPattern = /\[\[projects\]\]\nname\s*=\s*"([^"]+)"[\s\S]*?(?=\n\[\[projects\]\]|\s*$)/g;
+  const projectPattern = /\[\[projects\]\]\s*\n\s*name\s*=\s*"([^"]+)"[\s\S]*?(?=\n\s*\[\[projects\]\]|\s*$)/g;
   return [...raw.matchAll(projectPattern)].some((match) => !isManagedBootstrapBlock(match[0]));
 }
 

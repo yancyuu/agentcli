@@ -49,6 +49,12 @@ import { TeamProvisioningService } from './services/teams-mvp';
 import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
 import type { TaskBusConfig } from '@shared/types/team';
 import { UpdateService } from './services/UpdateService';
+import {
+  startTelemetry,
+  stopTelemetry,
+  triggerScan,
+  getTelemetryStatus,
+} from './services/session-intelligence/UsageTelemetryService';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
@@ -3938,18 +3944,29 @@ app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (req
   return { pending };
 });
 
-// Task bus settings
+// GET /api/settings/task-bus → full config including telemetry
 app.get('/api/settings/task-bus', async () => {
   const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const settings = JSON.parse(raw);
-    return settings.taskBus ?? { enabled: false, redis: { host: '127.0.0.1', port: 6379 } };
+    return (
+      settings.taskBus ?? {
+        enabled: false,
+        redis: { host: '127.0.0.1', port: 6379 },
+        telemetry: { enabled: false, platform: 'claudecode' },
+      }
+    );
   } catch {
-    return { enabled: false, redis: { host: '127.0.0.1', port: 6379 } };
+    return {
+      enabled: false,
+      redis: { host: '127.0.0.1', port: 6379 },
+      telemetry: { enabled: false, platform: 'claudecode' },
+    };
   }
 });
 
+// PUT /api/settings/task-bus → save config + start/stop telemetry
 app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   const config = request.body;
   const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
@@ -3963,6 +3980,13 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   settings.taskBus = config;
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify(settings, null, 2));
+
+  // Sync telemetry service
+  if (config.telemetry?.enabled) {
+    await startTelemetry(config);
+  } else {
+    await stopTelemetry();
+  }
 
   // Auto-inject CLAUDE.md instructions when enabling
   if (config?.enabled) {
@@ -4014,6 +4038,99 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
 
   taskDispatch.dispose();
   return { ok: true, connected: false, message: 'Task bus disabled' };
+});
+
+// POST /api/telemetry/scan → trigger manual scan
+app.post('/api/telemetry/scan', async (request, reply) => {
+  try {
+    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+    let settings: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      settings = JSON.parse(raw);
+    } catch {
+      // no settings
+    }
+    const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
+    if (!taskBus.telemetry?.enabled) {
+      return reply.code(400).send({ error: 'Telemetry is not enabled' });
+    }
+    const result = await triggerScan(taskBus);
+    if (!result) {
+      return reply.code(503).send({ error: 'Redis not available' });
+    }
+    return {
+      ok: true,
+      ...result.aggregate,
+      sessions: result.sessions.length,
+      lastScan: new Date().toISOString(),
+    };
+  } catch (err) {
+    return reply.code(500).send({ error: String(err) });
+  }
+});
+
+// GET /api/telemetry/status → current telemetry status (full stats)
+app.get('/api/telemetry/status', async (request, reply) => {
+  try {
+    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+    let settings: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      settings = JSON.parse(raw);
+    } catch {
+      // no settings
+    }
+    const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
+    if (!taskBus.redis) {
+      return {
+        connected: false,
+        lastScan: null,
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        activeDays: 0,
+        hourly: [],
+        projects: [],
+        workSecondsByDay: {},
+      };
+    }
+    const status = await getTelemetryStatus(taskBus.redis);
+    return (
+      status ?? {
+        connected: false,
+        lastScan: null,
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        activeDays: 0,
+        hourly: [],
+        projects: [],
+        workSecondsByDay: {},
+      }
+    );
+  } catch {
+    return {
+      connected: false,
+      lastScan: null,
+      sessions: 0,
+      messages: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      activeDays: 0,
+      hourly: [],
+      projects: [],
+      workSecondsByDay: {},
+    };
+  }
 });
 
 app.get<{ Params: { name: string; memberName: string } }>(
