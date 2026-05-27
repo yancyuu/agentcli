@@ -1,65 +1,74 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
-import type { CollabTask, CollabTaskStatus } from '@shared/types';
-import {
-  ArrowRight,
-  Calendar,
-  CheckCircle2,
-  Clock,
-  Columns3,
-  Eye,
-  MessageSquare,
-  RotateCcw,
-  XCircle,
-} from 'lucide-react';
+import { useStore } from '@renderer/store';
+import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
+import { Calendar, CheckCircle2, Circle, Columns3, Loader2, RefreshCw } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
-import { api } from '@renderer/api';
 import { SchedulesView } from '../schedules/SchedulesView';
 
-// ── Sub-tab definitions ────────────────────────────────────────────
+import type { GlobalTask, TeamTaskStatus } from '@shared/types';
 
-type TasksSubTab = 'collab' | 'schedules';
+type TasksSubTab = 'overview' | 'schedules';
+type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'collab', label: '协作看板', icon: <Columns3 size={14} /> },
+  { id: 'overview', label: '总览池', icon: <Columns3 size={14} /> },
   { id: 'schedules', label: '定时任务', icon: <Calendar size={14} /> },
 ];
 
-// ── Collab column definitions ──────────────────────────────────────
-
-interface CollabColumn {
-  id: CollabTaskStatus;
+const COLUMNS: {
+  id: OverviewStatus;
   title: string;
-  accent: string;
-}
-
-const COLLAB_COLUMNS: CollabColumn[] = [
-  { id: 'pending_accept', title: '待接受', accent: 'rgba(234,179,8,0.2)' },
-  { id: 'accepted', title: '进行中', accent: 'rgba(59,130,246,0.2)' },
-  { id: 'delivered', title: '待审核', accent: 'rgba(168,85,247,0.2)' },
-  { id: 'revision', title: '修改中', accent: 'rgba(249,115,22,0.2)' },
-  { id: 'approved', title: '已完成', accent: 'rgba(34,197,94,0.2)' },
+  icon: React.ReactNode;
+  headerBg: string;
+  bodyBg: string;
+}[] = [
+  {
+    id: 'pending',
+    title: 'TODO',
+    icon: <Circle size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(59, 130, 246, 0.22)',
+    bodyBg: 'rgba(59, 130, 246, 0.05)',
+  },
+  {
+    id: 'in_progress',
+    title: 'IN PROGRESS',
+    icon: <Loader2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(234, 179, 8, 0.24)',
+    bodyBg: 'rgba(234, 179, 8, 0.06)',
+  },
+  {
+    id: 'completed',
+    title: 'DONE',
+    icon: <CheckCircle2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(34, 197, 94, 0.22)',
+    bodyBg: 'rgba(34, 197, 94, 0.05)',
+  },
 ];
 
-const STATUS_ICONS: Record<string, React.ReactNode> = {
-  pending_accept: <Clock size={12} />,
-  accepted: <ArrowRight size={12} />,
-  delivered: <Eye size={12} />,
-  revision: <RotateCcw size={12} />,
-  approved: <CheckCircle2 size={12} />,
-  rejected: <XCircle size={12} />,
-};
+function isOverviewStatus(status: TeamTaskStatus): status is OverviewStatus {
+  return status === 'pending' || status === 'in_progress' || status === 'completed';
+}
 
-// ── Collaboration View ─────────────────────────────────────────────
+function getTaskUpdatedAt(task: GlobalTask): number {
+  const raw = task.updatedAt ?? task.createdAt;
+  const time = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
 
-export function TasksView() {
-  const [activeTab, setActiveTab] = useState<TasksSubTab>('collab');
+function buildOptionLabel(value: string | null | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+}
+
+export const TasksView = (): React.JSX.Element => {
+  const [activeTab, setActiveTab] = useState<TasksSubTab>('overview');
 
   return (
     <div className="flex h-full flex-col">
-      {/* Sub-tab header */}
       <div className="flex items-center border-b border-[var(--color-border)] px-4 pt-2">
         {SUB_TABS.map((tab) => (
           <button
@@ -78,297 +87,258 @@ export function TasksView() {
         ))}
       </div>
 
-      {/* Sub-tab content */}
       <div className="flex-1 overflow-auto">
-        {activeTab === 'collab' && <CollabBoardSection />}
+        {activeTab === 'overview' && <TaskOverviewPool />}
         {activeTab === 'schedules' && <SchedulesView />}
       </div>
     </div>
   );
-}
+};
 
-// ── Collab Board Section ───────────────────────────────────────────
-
-function CollabBoardSection() {
-  const [tasks, setTasks] = useState<CollabTask[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [revisionInput, setRevisionInput] = useState<Record<string, string>>({});
-
-  const fetchBoard = useCallback(async () => {
-    try {
-      const res = await api.collab.getBoard();
-      setTasks(res.tasks);
-    } catch {
-      // degraded
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+const TaskOverviewPool = (): React.JSX.Element => {
+  const {
+    globalTasks,
+    globalTasksLoading,
+    globalTasksInitialized,
+    fetchAllTasks,
+    openGlobalTaskDetail,
+  } = useStore(
+    useShallow((s) => ({
+      globalTasks: s.globalTasks,
+      globalTasksLoading: s.globalTasksLoading,
+      globalTasksInitialized: s.globalTasksInitialized,
+      fetchAllTasks: s.fetchAllTasks,
+      openGlobalTaskDetail: s.openGlobalTaskDetail,
+    }))
+  );
+  const [teamFilter, setTeamFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | OverviewStatus>('all');
+  const [ownerFilter, setOwnerFilter] = useState('all');
 
   useEffect(() => {
-    fetchBoard();
-    const interval = setInterval(fetchBoard, 10_000);
-    return () => clearInterval(interval);
-  }, [fetchBoard]);
+    void fetchAllTasks();
+  }, [fetchAllTasks]);
 
-  const handleApprove = async (task: CollabTask) => {
-    try {
-      await api.collab.approve(task.fromTeam, task.dispatchId);
-      await fetchBoard();
-    } catch {
-      // error
-    }
-  };
-
-  const handleRevision = async (task: CollabTask) => {
-    const feedback = revisionInput[task.dispatchId];
-    if (!feedback?.trim()) return;
-    try {
-      await api.collab.revision(task.fromTeam, task.dispatchId, feedback.trim());
-      setRevisionInput((prev) => {
-        const next = { ...prev };
-        delete next[task.dispatchId];
-        return next;
-      });
-      await fetchBoard();
-    } catch {
-      // error
-    }
-  };
-
-  const handleDeliver = async (task: CollabTask) => {
-    const result = prompt('输入交付结果:');
-    if (!result?.trim()) return;
-    try {
-      await api.collab.deliver(task.toTeam, task.dispatchId, result.trim());
-      await fetchBoard();
-    } catch {
-      // error
-    }
-  };
-
-  // Group tasks by status
-  const grouped = new Map<CollabTaskStatus, CollabTask[]>();
-  for (const task of tasks) {
-    const list = grouped.get(task.status) ?? [];
-    list.push(task);
-    grouped.set(task.status, list);
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
-        Loading...
-      </div>
-    );
-  }
-
-  if (tasks.length === 0) {
-    return (
-      <div className="flex w-full flex-col items-center justify-center gap-3 py-16 text-sm text-[var(--color-text-muted)]">
-        <MessageSquare size={28} />
-        <span>暂无协作任务</span>
-        <span className="text-xs">
-          通过{' '}
-          <code className="rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-xs">
-            /api/cross-team/send
-          </code>{' '}
-          向其他团队派发任务
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex gap-3 overflow-x-auto p-4 pb-4">
-      {COLLAB_COLUMNS.map((col) => {
-        const colTasks = grouped.get(col.id) ?? [];
-        return (
-          <div
-            key={col.id}
-            className="flex min-w-[240px] flex-shrink-0 flex-col rounded-lg"
-            style={{ backgroundColor: col.accent }}
-          >
-            <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-[var(--color-text)]">
-              {STATUS_ICONS[col.id]}
-              <span>{col.title}</span>
-              <span className="ml-auto text-[var(--color-text-muted)]">{colTasks.length}</span>
-            </div>
-            <div className="flex flex-col gap-2 px-2 pb-2">
-              {colTasks.map((task) => (
-                <CollabTaskCard
-                  key={task.dispatchId}
-                  task={task}
-                  revisionInput={revisionInput[task.dispatchId] ?? ''}
-                  onRevisionInputChange={(v) =>
-                    setRevisionInput((prev) => ({ ...prev, [task.dispatchId]: v }))
-                  }
-                  onApprove={() => handleApprove(task)}
-                  onRevision={() => handleRevision(task)}
-                  onDeliver={() => handleDeliver(task)}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Rejected/failed bucket */}
-      {(grouped.get('rejected')?.length ?? grouped.get('failed')?.length ?? 0) > 0 && (
-        <div className="flex min-w-[240px] flex-shrink-0 flex-col rounded-lg bg-[rgba(239,68,68,0.15)]">
-          <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-[var(--color-text)]">
-            <XCircle size={12} />
-            <span>已拒绝/失败</span>
-          </div>
-          <div className="flex flex-col gap-2 px-2 pb-2">
-            {(grouped.get('rejected') ?? []).map((task) => (
-              <CollabTaskCard
-                key={task.dispatchId}
-                task={task}
-                revisionInput=""
-                onRevisionInputChange={() => {}}
-                onApprove={() => {}}
-                onRevision={() => {}}
-                onDeliver={() => {}}
-              />
-            ))}
-            {(grouped.get('failed') ?? []).map((task) => (
-              <CollabTaskCard
-                key={task.dispatchId}
-                task={task}
-                revisionInput=""
-                onRevisionInputChange={() => {}}
-                onApprove={() => {}}
-                onRevision={() => {}}
-                onDeliver={() => {}}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+  const overviewTasks = useMemo(
+    () => globalTasks.filter((task) => isOverviewStatus(task.status) && !task.teamDeleted),
+    [globalTasks]
   );
-}
 
-// ── Single task card ────────────────────────────────────────────────
+  const teamOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(overviewTasks.map((task) => [task.teamName, task.teamDisplayName])).entries()
+      ).sort((a, b) => a[1].localeCompare(b[1])),
+    [overviewTasks]
+  );
 
-interface CollabTaskCardProps {
-  task: CollabTask;
-  revisionInput: string;
-  onRevisionInputChange: (value: string) => void;
-  onApprove: () => void;
-  onRevision: () => void;
-  onDeliver: () => void;
-}
+  const ownerOptions = useMemo(() => {
+    const owners = new Set<string>();
+    for (const task of overviewTasks) {
+      if (task.owner?.trim()) owners.add(task.owner.trim());
+    }
+    return Array.from(owners).sort((a, b) => a.localeCompare(b));
+  }, [overviewTasks]);
 
-function CollabTaskCard({
-  task,
-  revisionInput,
-  onRevisionInputChange,
-  onApprove,
-  onRevision,
-  onDeliver,
-}: CollabTaskCardProps) {
+  const filteredTasks = useMemo(
+    () =>
+      overviewTasks
+        .filter((task) => teamFilter === 'all' || task.teamName === teamFilter)
+        .filter((task) => statusFilter === 'all' || task.status === statusFilter)
+        .filter((task) => ownerFilter === 'all' || task.owner === ownerFilter)
+        .sort((a, b) => getTaskUpdatedAt(b) - getTaskUpdatedAt(a)),
+    [overviewTasks, ownerFilter, statusFilter, teamFilter]
+  );
+
+  const grouped = useMemo(() => {
+    const map = new Map<OverviewStatus, GlobalTask[]>();
+    for (const column of COLUMNS) {
+      map.set(column.id, []);
+    }
+    for (const task of filteredTasks) {
+      if (isOverviewStatus(task.status)) {
+        map.get(task.status)?.push(task);
+      }
+    }
+    return map;
+  }, [filteredTasks]);
+
+  const clearFilters = useCallback(() => {
+    setTeamFilter('all');
+    setStatusFilter('all');
+    setOwnerFilter('all');
+  }, []);
+
+  if (globalTasksLoading && !globalTasksInitialized) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
+        加载团队任务…
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 text-xs shadow-sm">
-      {/* Team tags */}
-      <div className="mb-2 flex items-center gap-1.5">
-        <span className="rounded bg-[rgba(59,130,246,0.15)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-          {task.fromTeamDisplay}
-        </span>
-        <ArrowRight size={10} className="text-[var(--color-text-muted)]" />
-        <span className="rounded bg-[rgba(34,197,94,0.15)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-          {task.toTeamDisplay}
-        </span>
+    <div className="flex h-full min-w-0 flex-col gap-3 p-4">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[180px]">
+          <label
+            htmlFor="tasks-overview-team-filter"
+            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
+          >
+            团队
+          </label>
+          <select
+            id="tasks-overview-team-filter"
+            value={teamFilter}
+            onChange={(event) => setTeamFilter(event.target.value)}
+            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+          >
+            <option value="all">全部团队</option>
+            {teamOptions.map(([teamName, displayName]) => (
+              <option key={teamName} value={teamName}>
+                {displayName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="min-w-[160px]">
+          <label
+            htmlFor="tasks-overview-status-filter"
+            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
+          >
+            状态
+          </label>
+          <select
+            id="tasks-overview-status-filter"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as 'all' | OverviewStatus)}
+            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+          >
+            <option value="all">全部状态</option>
+            <option value="pending">TODO</option>
+            <option value="in_progress">IN PROGRESS</option>
+            <option value="completed">DONE</option>
+          </select>
+        </div>
+
+        <div className="min-w-[160px]">
+          <label
+            htmlFor="tasks-overview-owner-filter"
+            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
+          >
+            负责人
+          </label>
+          <select
+            id="tasks-overview-owner-filter"
+            value={ownerFilter}
+            onChange={(event) => setOwnerFilter(event.target.value)}
+            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+          >
+            <option value="all">全部负责人</option>
+            {ownerOptions.map((owner) => (
+              <option key={owner} value={owner}>
+                {owner}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={clearFilters}>
+          清空筛选
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-8 gap-1.5 text-xs text-[var(--color-text-muted)]"
+          onClick={() => void fetchAllTasks()}
+        >
+          <RefreshCw size={12} />
+          刷新
+        </Button>
       </div>
 
-      {/* Subject */}
-      <div className="line-clamp-2 font-medium text-[var(--color-text)]">{task.subject}</div>
-
-      {/* Description */}
-      {task.description && (
-        <div className="mt-1 line-clamp-2 text-[var(--color-text-muted)]">{task.description}</div>
-      )}
-
-      {/* Result */}
-      {task.result && (
-        <div className="mt-2 rounded bg-[rgba(34,197,94,0.1)] p-2 text-[var(--color-text-muted)]">
-          <span className="font-medium text-[var(--color-text)]">交付: </span>
-          {task.result}
-        </div>
-      )}
-
-      {/* Feedback */}
-      {task.feedback && (
-        <div className="mt-2 rounded bg-[rgba(249,115,22,0.1)] p-2 text-[var(--color-text-muted)]">
-          <span className="font-medium text-[var(--color-text)]">退回: </span>
-          {task.feedback}
-        </div>
-      )}
-
-      {/* Revision count */}
-      {task.revisionCount > 0 && (
-        <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
-          修改次数: {task.revisionCount}/3
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {task.status === 'delivered' && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-2 text-xs text-green-500 hover:text-green-400"
-              onClick={onApprove}
-            >
-              <CheckCircle2 size={12} />
-              通过
-            </Button>
-            <div className="flex flex-1 gap-1">
-              <input
-                type="text"
-                placeholder="退回原因..."
-                value={revisionInput}
-                onChange={(e) => onRevisionInputChange(e.target.value)}
-                className={cn(
-                  'h-6 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 text-xs',
-                  'text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]',
-                  'focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]'
-                )}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 gap-1 px-2 text-xs text-orange-500 hover:text-orange-400"
-                onClick={onRevision}
-                disabled={!revisionInput.trim()}
+      <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-6">
+        <div className="grid min-w-[900px] grid-cols-3 items-start gap-3">
+          {COLUMNS.map((column) => {
+            const tasks = grouped.get(column.id) ?? [];
+            return (
+              <section
+                key={column.id}
+                className="relative rounded-md"
+                style={{ backgroundColor: column.bodyBg }}
               >
-                <RotateCcw size={12} />
-                退回
-              </Button>
-            </div>
-          </>
-        )}
-
-        {(task.status === 'accepted' || task.status === 'revision') && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 gap-1 px-2 text-xs text-blue-500 hover:text-blue-400"
-            onClick={onDeliver}
-          >
-            <CheckCircle2 size={12} />
-            {task.status === 'revision' ? '重新交付' : '交付结果'}
-          </Button>
-        )}
-      </div>
-
-      {/* Timestamp */}
-      <div className="mt-2 text-[10px] text-[var(--color-text-muted)]">
-        {new Date(task.updatedAt).toLocaleString()}
+                {tasks.length > 0 ? (
+                  <span className="absolute -right-2 -top-2 z-10 min-w-5 rounded-full bg-[var(--color-surface-raised)] px-1.5 py-0 text-center text-[10px] font-medium leading-5 text-[var(--color-text-secondary)] ring-1 ring-[var(--color-border)]">
+                    {tasks.length}
+                  </span>
+                ) : null}
+                <header
+                  className="rounded-t-md px-3 py-2"
+                  style={{ backgroundColor: column.headerBg }}
+                >
+                  <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text)]">
+                    {column.icon}
+                    {column.title}
+                  </h4>
+                </header>
+                <div className="flex flex-col gap-1.5 p-2">
+                  {tasks.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
+                      No tasks
+                    </div>
+                  ) : (
+                    tasks.map((task) => (
+                      <GlobalOverviewTaskCard
+                        key={`${task.teamName}:${task.id}`}
+                        task={task}
+                        onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
-}
+};
+
+const GlobalOverviewTaskCard = ({
+  task,
+  onOpen,
+}: {
+  task: GlobalTask;
+  onOpen: () => void;
+}): React.JSX.Element => {
+  const ownerLabel = buildOptionLabel(task.owner, '未分配');
+  const dispatchFrom = task.dispatchMeta?.originTeam;
+  const dispatchTo = task.dispatchMeta?.targetTeam;
+  return (
+    <button
+      type="button"
+      className="relative w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-1.5 py-3 text-left text-xs transition-colors hover:border-[var(--color-border-emphasis)]"
+      onClick={onOpen}
+    >
+      <span className="absolute left-[3px] top-[2px] text-[9px] leading-none text-[var(--color-text-muted)]">
+        #{task.displayId ?? deriveTaskDisplayId(task.id)}
+      </span>
+      <div className="mb-2 pt-[11px]">
+        <h5 className="line-clamp-2 text-xs font-medium text-[var(--color-text)]">
+          {task.subject}
+        </h5>
+        {task.dispatchMeta ? (
+          <span className="mt-1 inline-flex items-center rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+            {dispatchFrom} 给 {dispatchTo} 派单
+          </span>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
+        <span className="rounded bg-white/5 px-1.5 py-0.5">{task.teamDisplayName}</span>
+        <span className="rounded bg-white/5 px-1.5 py-0.5">{ownerLabel}</span>
+      </div>
+    </button>
+  );
+};

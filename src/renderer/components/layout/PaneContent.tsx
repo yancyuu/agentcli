@@ -12,9 +12,9 @@ import { NotificationsView } from '../notifications/NotificationsView';
 import { SessionReportTab } from '../report/SessionReportTab';
 import { SchedulesView } from '../schedules/SchedulesView';
 import { SettingsView } from '../settings/SettingsView';
+import { TasksView } from '../tasks/TasksView';
 import { TeamDetailView } from '../team/TeamDetailView';
 import { TeamListView } from '../team/TeamListView';
-import { TasksView } from '../tasks/TasksView';
 
 import { SessionTabContent } from './SessionTabContent';
 

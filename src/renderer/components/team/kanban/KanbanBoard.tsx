@@ -274,7 +274,11 @@ export const KanbanBoard = ({
 }: KanbanBoardProps): React.JSX.Element => {
   const boardRef = useRef<HTMLDivElement>(null);
   const scrollRestoreTimeoutsRef = useRef<number[]>([]);
-  const [viewMode, setViewMode] = useState<KanbanViewMode>('grid');
+  const [viewMode, setViewMode] = useState<KanbanViewMode>('columns');
+
+  useEffect(() => {
+    setViewMode('columns');
+  }, []);
   const enableTaskSorting =
     viewMode === 'columns' && !!onColumnOrderChange && sort.field === 'manual';
 

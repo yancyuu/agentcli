@@ -4360,8 +4360,28 @@ app.post<{
       },
     });
 
+    const existingTasks = await svc.readTasks(resolvedToTeam).catch(() => []);
+    const existingTask = existingTasks.find((task) => task.dispatchMeta?.dispatchId === threadId);
+    if (!existingTask) {
+      const now = new Date().toISOString();
+      await svc.createTask(resolvedToTeam, {
+        title: summary || trimmedText.split(/\r?\n/, 1)[0]?.slice(0, 120) || '跨团队 @ 消息',
+        description: trimmedText,
+        status: 'todo',
+        dispatchMeta: {
+          dispatchId: threadId,
+          originTeam: fromTeam,
+          targetTeam: resolvedToTeam,
+          status: 'pending_accept',
+          dispatchedAt: now,
+          receivedAt: now,
+        },
+      });
+    }
+
     broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
     broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
+    broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
 
     void sendHarnessMessageViaBridge({
       teamName: resolvedToTeam,

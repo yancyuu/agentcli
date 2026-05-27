@@ -80,7 +80,6 @@ import { ReviewDialog } from './dialogs/ReviewDialog';
 import { SendMessageDialog } from './dialogs/SendMessageDialog';
 import { TaskDetailDialog } from './dialogs/TaskDetailDialog';
 import { executeTeamRelaunch } from './dialogs/teamRelaunchFlow';
-import { CollabBoardPanel } from './kanban/CollabBoardPanel';
 import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { KanbanSearchInput } from './kanban/KanbanSearchInput';
@@ -2299,13 +2298,191 @@ export const TeamDetailView = ({
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
-                sectionId="collab"
-                title="跨团队协作"
-                icon={<MessageSquare size={14} />}
-                badge="Beta"
-                defaultOpen={false}
+                sectionId="kanban"
+                title="外部派单"
+                icon={<Columns3 size={14} />}
+                badge={filteredTasks.length}
+                defaultOpen
+                forceOpen={kanbanSearch.trim().length > 0}
+                action={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openCreateTaskDialog();
+                    }}
+                  >
+                    <Plus size={12} />
+                    新建
+                  </Button>
+                }
               >
-                <CollabBoardPanel teamName={teamName} />
+                <div className="min-w-0">
+                  <KanbanBoard
+                    tasks={kanbanDisplayTasks}
+                    teamName={teamName}
+                    kanbanState={data.kanbanState}
+                    filter={kanbanFilter}
+                    sort={kanbanSort}
+                    sessions={teamSessions}
+                    leadSessionId={data.config.leadSessionId}
+                    members={activeMembers}
+                    onFilterChange={setKanbanFilter}
+                    onSortChange={setKanbanSort}
+                    toolbarLeft={
+                      <KanbanSearchInput
+                        value={kanbanSearch}
+                        onChange={setKanbanSearch}
+                        tasks={filteredTasks}
+                        members={activeMembers}
+                      />
+                    }
+                    onRequestReview={(taskId) => {
+                      void (async () => {
+                        try {
+                          await requestReview(teamName, taskId);
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onApprove={(taskId) => {
+                      void (async () => {
+                        try {
+                          await updateKanban(teamName, taskId, {
+                            op: 'set_column',
+                            column: 'approved',
+                          });
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onRequestChanges={(taskId) => {
+                      setRequestChangesTaskId(taskId);
+                    }}
+                    onMoveBackToDone={(taskId) => {
+                      void (async () => {
+                        try {
+                          await updateKanban(teamName, taskId, { op: 'remove' });
+                          await updateTaskStatus(teamName, taskId, 'completed');
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onStartTask={(taskId) => {
+                      void (async () => {
+                        try {
+                          const result = await startTaskByUser(teamName, taskId);
+                          if (data?.isAlive) {
+                            const task = data.tasks.find((t) => t.id === taskId);
+                            try {
+                              if (result.notifiedOwner && task?.owner) {
+                                await api.teams.processSend(
+                                  teamName,
+                                  `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
+                                );
+                              } else if (!result.notifiedOwner) {
+                                const desc = task?.description?.trim()
+                                  ? `\nDescription: ${task.description.trim()}`
+                                  : '';
+                                await api.teams.processSend(
+                                  teamName,
+                                  `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
+                                );
+                              }
+                            } catch {
+                              // best-effort
+                            }
+                          }
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onCompleteTask={(taskId) => {
+                      void (async () => {
+                        try {
+                          await updateTaskStatus(teamName, taskId, 'completed');
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onCancelTask={(taskId) => {
+                      void (async () => {
+                        try {
+                          const task = data?.tasks.find((t) => t.id === taskId);
+                          await updateTaskStatus(teamName, taskId, 'pending');
+
+                          if (task?.owner) {
+                            try {
+                              await api.teams.sendMessage(teamName, {
+                                member: task.owner,
+                                text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
+                                summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
+                              });
+                            } catch {
+                              // best-effort
+                            }
+                          }
+
+                          if (data?.isAlive) {
+                            try {
+                              const ownerSuffix = task?.owner
+                                ? ` ${task.owner} has been notified to stop.`
+                                : '';
+                              await api.teams.processSend(
+                                teamName,
+                                `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
+                              );
+                            } catch {
+                              // best-effort
+                            }
+                          }
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onColumnOrderChange={(columnId, orderedTaskIds) => {
+                      void (async () => {
+                        try {
+                          await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
+                        } catch {
+                          // error via store
+                        }
+                      })();
+                    }}
+                    onScrollToTask={(taskId) => {
+                      const el = document.querySelector(`[data-task-id="${taskId}"]`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        el.classList.remove('kanban-card-focus-pulse');
+                        void (el as HTMLElement).offsetWidth;
+                        el.classList.add('kanban-card-focus-pulse');
+                        el.addEventListener(
+                          'animationend',
+                          () => el.classList.remove('kanban-card-focus-pulse'),
+                          { once: true }
+                        );
+                      }
+                    }}
+                    onTaskClick={(task) => {
+                      setSelectedTask(task);
+                    }}
+                    onViewChanges={handleViewChanges}
+                    onAddTask={(startImmediately) =>
+                      openCreateTaskDialog('', '', '', startImmediately)
+                    }
+                    onDeleteTask={handleDeleteTask}
+                    deletedTaskCount={deletedTasks.length}
+                    onOpenTrash={() => setTrashOpen(true)}
+                  />
+                </div>
               </CollapsibleTeamSection>
 
               <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
