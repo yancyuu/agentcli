@@ -68,6 +68,9 @@ export class TaskDispatchService {
     this.config = config ?? null;
     if (config?.enabled && config.redis) {
       await this.connectRedis();
+      if (!this.redis) {
+        throw new Error('Redis connection failed: PING did not succeed');
+      }
     }
   }
 

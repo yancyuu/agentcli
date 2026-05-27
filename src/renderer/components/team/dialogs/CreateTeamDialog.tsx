@@ -44,7 +44,8 @@ import {
   X,
 } from 'lucide-react';
 
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '../HarnessCards';
+import { AGENT_TYPE_LABELS } from '../HarnessCards';
+import { HarnessSelect } from '../HarnessSelect';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
@@ -549,18 +550,12 @@ export const CreateTeamDialog = ({
 
             <div className="space-y-1.5">
               <Label htmlFor="team-harness">Agent 类型</Label>
-              <select
+              <HarnessSelect
                 id="team-harness"
-                className="flex w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm"
                 value={selectedHarness}
-                onChange={(e) => setSelectedHarness(e.target.value as CcAgentType)}
-              >
-                {ALL_AGENT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {AGENT_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedHarness}
+                className="w-full"
+              />
             </div>
 
             <ProjectPathSelector

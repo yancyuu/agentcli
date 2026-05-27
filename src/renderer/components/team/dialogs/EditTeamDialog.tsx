@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import { api } from '@renderer/api';
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
+import { AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
+import { HarnessSelect } from '@renderer/components/team/HarnessSelect';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
 import {
@@ -259,20 +260,14 @@ export const EditTeamDialog = ({
                 <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
                   Agent 类型
                 </label>
-                <select
-                  value={agentType}
-                  onChange={(event) => {
+                <HarnessSelect
+                  value={agentType as CcAgentType}
+                  onChange={(v) => {
                     clearError();
-                    setAgentType(event.target.value);
+                    setAgentType(v);
                   }}
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-border-emphasis)]"
-                >
-                  {ALL_AGENT_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {AGENT_TYPE_LABELS[type]}
-                    </option>
-                  ))}
-                </select>
+                  className="w-full"
+                />
               </div>
 
               <div>
