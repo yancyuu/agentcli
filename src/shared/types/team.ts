@@ -1801,6 +1801,7 @@ export interface CrossTeamSendRequest {
   toTeam: string;
   timestamp?: string;
   messageId?: string;
+  sessionKey?: string;
   conversationId?: string;
   replyToConversationId?: string;
   text: string;

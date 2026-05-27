@@ -536,7 +536,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   const sessionScopedMessages = useMemo(() => {
     const newestFirst = (items: InboxMessage[]) =>
       [...items].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-    if (!selectedSessionKey) return [];
+    if (!selectedSessionKey) return newestFirst(effectiveMessages);
     if (selectedSession && !selectedIsHermitLocalSession) {
       if (!selectedSessionDetail) {
         return [];
@@ -733,12 +733,16 @@ export const MessagesPanel = memo(function MessagesPanel({
         fromMember: 'user',
         toTeam,
         text,
+        sessionKey:
+          selectedSessionKey && selectedSessionKey !== '__unassigned__'
+            ? selectedSessionKey
+            : undefined,
         taskRefs,
         actionMode,
         summary,
       });
     },
-    [teamName, sendCrossTeamMessage]
+    [teamName, selectedSessionKey, sendCrossTeamMessage]
   );
 
   const handleDispatchTaskToTeam = useCallback(

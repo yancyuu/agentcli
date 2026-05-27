@@ -2302,6 +2302,7 @@ export const TeamDetailView = ({
                 sectionId="collab"
                 title="跨团队协作"
                 icon={<MessageSquare size={14} />}
+                badge="Beta"
                 defaultOpen={false}
               >
                 <CollabBoardPanel teamName={teamName} />

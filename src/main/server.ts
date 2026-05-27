@@ -3144,12 +3144,13 @@ app.get<{ Params: { name: string }; Querystring: { cursor?: string; limit?: stri
       const newestFirstMessages = [...msgs].reverse();
       const pageSlice = newestFirstMessages.slice(offset, offset + limit);
       const page = pageSlice.map((m) => {
-        const sessionKey =
+        const explicitSessionKey =
           typeof m.meta?.sessionKey === 'string'
             ? m.meta.sessionKey
             : typeof m.meta?.session_key === 'string'
               ? m.meta.session_key
               : undefined;
+        const sessionKey = explicitSessionKey ?? buildFallbackSessionKey(name);
         const session = sessionKey ? sessionByKey.get(sessionKey) : undefined;
         return {
           messageId: m.id,
@@ -4318,6 +4319,11 @@ app.post<{
     const depth = Number.isFinite(Number(chainDepth)) ? Number(chainDepth) : 0;
     const threadId = conversationId || messageId || `cross-team-${Date.now()}`;
     const sender = fromMember || 'user';
+    const fromSessionKey =
+      typeof sessionKey === 'string' && sessionKey.trim().length > 0
+        ? sessionKey.trim()
+        : buildFallbackSessionKey(fromTeam);
+    const toSessionKey = buildFallbackSessionKey(resolvedToTeam);
     const sentText = formatCrossTeamText(`${fromTeam}.${sender}`, depth, trimmedText, {
       conversationId: threadId,
       replyToConversationId,
@@ -4336,7 +4342,7 @@ app.post<{
       to: resolvedToTeam,
       role: 'user',
       content: trimmedText,
-      meta: { ...meta, source: CROSS_TEAM_SENT_SOURCE },
+      meta: { ...meta, source: CROSS_TEAM_SENT_SOURCE, sessionKey: fromSessionKey },
     });
 
     await svc.appendMessage(resolvedToTeam, {
@@ -4344,7 +4350,12 @@ app.post<{
       to: resolvedToTeam,
       role: 'user',
       content: sentText,
-      meta: { ...meta, source: CROSS_TEAM_SOURCE, relayOfMessageId: outgoing.id },
+      meta: {
+        ...meta,
+        source: CROSS_TEAM_SOURCE,
+        relayOfMessageId: outgoing.id,
+        sessionKey: toSessionKey,
+      },
     });
 
     broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
