@@ -182,22 +182,8 @@ export class TaskDispatchService {
       dispatchMeta,
     } as any);
 
-    // Route: local or remote
-    const isLocal = await this.isLocalTeam(targetTeam);
-    if (isLocal) {
-      await this.handleLocalHandshakeDispatch(dispatchMeta, task, opts?.needsHumanReview);
-    } else if (this.redis) {
-      await this.handleRemoteHandshakeDispatch(dispatchMeta, task, opts?.needsHumanReview);
-    } else {
-      return {
-        dispatchId,
-        status: 'failed',
-        targetTeam,
-        message: 'Redis not configured — remote dispatch unavailable.',
-      };
-    }
-
-    // Add to collaboration board
+    // Add to collaboration board before external delivery. Even failed dispatches
+    // must remain visible in the canonical task projection for diagnosis/retry.
     const fromTeamManifest = await this.safeReadManifest(fromTeam);
     const toTeamManifest = await this.safeReadManifest(targetTeam);
     const collabTask: CollabTask = {
@@ -217,6 +203,56 @@ export class TaskDispatchService {
       updatedAt: now.toISOString(),
     };
     this.collabBoard.addTask(collabTask);
+
+    // Route: all dispatches require Redis
+    if (!this.redis) {
+      const failedTask = this.collabBoard.transition({
+        dispatchId,
+        expected: 'pending_accept',
+        next: 'failed',
+        actor: { type: 'system', id: 'task-dispatch' },
+        eventType: 'task_failed',
+        payload: { reason: 'Redis not configured' },
+        extra: { reason: 'Redis not configured — cross-team dispatch requires task bus.' },
+      });
+      await this.workspace.patchTask(fromTeam, shadow.id, {
+        dispatchMeta: { ...dispatchMeta, status: 'failed' },
+      } as any);
+      this.emitCollabChange(dispatchId, failedTask.status, fromTeam, targetTeam);
+      return {
+        dispatchId,
+        status: 'failed',
+        targetTeam,
+        message: 'Redis not configured — cross-team dispatch requires task bus.',
+      };
+    }
+
+    try {
+      await this.handleRedisDispatch(dispatchMeta, task, opts?.needsHumanReview);
+    } catch (err) {
+      this.pendingRequests.delete(dispatchId);
+      const reason = err instanceof Error ? err.message : 'Unknown Redis dispatch failure';
+      const failedTask = this.collabBoard.transition({
+        dispatchId,
+        expected: 'pending_accept',
+        next: 'failed',
+        actor: { type: 'system', id: 'task-dispatch' },
+        eventType: 'task_failed',
+        payload: { reason },
+        extra: { reason },
+      });
+      await this.workspace.patchTask(fromTeam, shadow.id, {
+        dispatchMeta: { ...dispatchMeta, status: 'failed' },
+      } as any);
+      this.emitCollabChange(dispatchId, failedTask.status, fromTeam, targetTeam);
+      return {
+        dispatchId,
+        status: 'failed',
+        targetTeam,
+        message: `Task dispatch failed: ${reason}`,
+      };
+    }
+
     this.emitCollabChange(dispatchId, 'pending_accept', fromTeam, targetTeam);
 
     return {
@@ -285,8 +321,52 @@ export class TaskDispatchService {
 
     // Update collab board
     const acceptedAt = new Date().toISOString();
-    this.collabBoard.updateStatus(payload.dispatchId, 'accepted', { acceptedAt });
+    this.collabBoard.transition({
+      dispatchId: payload.dispatchId,
+      expected: 'pending_accept',
+      next: 'accepted',
+      actor: { type: 'team', id: teamSlug },
+      eventType: 'task_accepted',
+      payload: { remoteTaskId: created.id },
+      extra: { acceptedAt },
+    });
     this.emitCollabChange(payload.dispatchId, 'accepted', payload.originTeam, payload.targetTeam);
+
+    // Fixed flow: notify receiving agent to start executing
+    try {
+      await this.workspace.appendMessage(teamSlug, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务已确认] "${payload.task.subject}" — 来自 ${payload.originTeam} 的任务已被人工确认接单，请开始执行。任务描述：${payload.task.description ?? '无'}`,
+        meta: {
+          source: 'cross_team_accepted',
+          dispatchId: payload.dispatchId,
+          originTeam: payload.originTeam,
+          taskId: created.id,
+        },
+      });
+    } catch {}
+
+    // Fixed flow: notify originating agent that task was accepted
+    try {
+      await this.workspace.appendMessage(payload.originTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务已接单] "${payload.task.subject}" — ${teamSlug} 已确认接单，正在执行中。`,
+        meta: {
+          source: 'cross_team_accepted_notify',
+          dispatchId: payload.dispatchId,
+          targetTeam: teamSlug,
+        },
+      });
+    } catch {}
+
+    // Feishu notification
+    this.sendFeishuNotification(
+      `跨团队任务已接单：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n状态：执行中`
+    );
 
     return { taskId: created.id };
   }
@@ -326,8 +406,37 @@ export class TaskDispatchService {
     this.pendingRequests.delete(dispatchId);
 
     // Update collab board
-    this.collabBoard.updateStatus(payload.dispatchId, 'rejected');
+    this.collabBoard.transition({
+      dispatchId: payload.dispatchId,
+      expected: 'pending_accept',
+      next: 'rejected',
+      actor: { type: 'team', id: teamSlug },
+      eventType: 'task_rejected',
+      payload: { reason },
+      extra: { reason, rejectedAt: response.rejectedAt },
+    });
     this.emitCollabChange(payload.dispatchId, 'rejected', payload.originTeam, payload.targetTeam);
+
+    // Fixed flow: notify originating agent that task was rejected
+    try {
+      await this.workspace.appendMessage(payload.originTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务被拒绝] "${payload.task.subject}" — ${teamSlug} 拒绝了此任务。原因：${reason ?? '未说明'}`,
+        meta: {
+          source: 'cross_team_rejected',
+          dispatchId: payload.dispatchId,
+          targetTeam: teamSlug,
+          rejectReason: reason,
+        },
+      });
+    } catch {}
+
+    // Feishu notification
+    this.sendFeishuNotification(
+      `跨团队任务被拒绝：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n原因：${reason ?? '未说明'}`
+    );
   }
 
   // ── Deliver / Approve / Revision ────────────────────────────────
@@ -366,8 +475,36 @@ export class TaskDispatchService {
     }
 
     // Update local collab board
-    this.collabBoard.updateStatus(dispatchId, 'delivered', { result, deliveredAt });
-    this.emitCollabChange(dispatchId, 'delivered', collabTask.fromTeam, collabTask.toTeam);
+    const deliveredTask = this.collabBoard.transition({
+      dispatchId,
+      expected: ['accepted', 'revision'],
+      next: 'delivered',
+      actor: { type: 'team', id: teamSlug },
+      eventType: 'task_delivered',
+      payload: { summary: result.slice(0, 1000) },
+      extra: { result, deliveredAt },
+    });
+    this.emitCollabChange(dispatchId, 'delivered', deliveredTask.fromTeam, deliveredTask.toTeam);
+
+    // Notify origin agent: task is ready for review
+    try {
+      await this.workspace.appendMessage(collabTask.fromTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务待审核] "${collabTask.subject}" — ${teamSlug} 已完成任务并提交交付结果，请审核。结果：${result}`,
+        meta: {
+          source: 'cross_team_delivered',
+          dispatchId,
+          targetTeam: teamSlug,
+          result,
+        },
+      });
+    } catch {}
+
+    this.sendFeishuNotification(
+      `跨团队任务待审核：${collabTask.fromTeam} ← ${teamSlug}\n${collabTask.subject}\n状态：待审核`
+    );
 
     return { ok: true };
   }
@@ -401,8 +538,50 @@ export class TaskDispatchService {
     }
 
     // Update collab board
-    this.collabBoard.updateStatus(dispatchId, 'approved', { approvedAt });
-    this.emitCollabChange(dispatchId, 'approved', collabTask.fromTeam, collabTask.toTeam);
+    const approvedTask = this.collabBoard.transition({
+      dispatchId,
+      expected: 'delivered',
+      next: 'approved',
+      actor: { type: 'team', id: teamSlug },
+      eventType: 'task_approved',
+      payload: { approvedAt },
+      extra: { approvedAt },
+    });
+    this.emitCollabChange(dispatchId, 'approved', approvedTask.fromTeam, approvedTask.toTeam);
+
+    // Notify origin agent: task is fully complete, you can continue
+    try {
+      await this.workspace.appendMessage(collabTask.fromTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务已完成] "${collabTask.subject}" — ${collabTask.toTeam} 的交付已通过审核，此跨团队任务结束。`,
+        meta: {
+          source: 'cross_team_approved',
+          dispatchId,
+          targetTeam: collabTask.toTeam,
+        },
+      });
+    } catch {}
+
+    // Notify target agent: approved
+    try {
+      await this.workspace.appendMessage(collabTask.toTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务审核通过] "${collabTask.subject}" — ${teamSlug} 已通过审核，任务完成。`,
+        meta: {
+          source: 'cross_team_approved_target',
+          dispatchId,
+          originTeam: teamSlug,
+        },
+      });
+    } catch {}
+
+    this.sendFeishuNotification(
+      `跨团队任务完成：${collabTask.fromTeam} ← ${collabTask.toTeam}\n${collabTask.subject}\n状态：已完成`
+    );
 
     return { ok: true };
   }
@@ -440,11 +619,23 @@ export class TaskDispatchService {
     }
 
     // Update collab board
-    this.collabBoard.updateStatus(dispatchId, 'revision', {
-      feedback,
-      revisionCount: newRevisionCount,
+    const revisionTask = this.collabBoard.transition({
+      dispatchId,
+      expected: 'delivered',
+      next: 'revision',
+      actor: { type: 'team', id: teamSlug },
+      eventType: 'revision_requested',
+      payload: {
+        feedback,
+        previousResult: collabTask.result,
+        revisionCount: newRevisionCount,
+      },
+      extra: {
+        feedback,
+        revisionCount: newRevisionCount,
+      },
     });
-    this.emitCollabChange(dispatchId, 'revision', collabTask.fromTeam, collabTask.toTeam);
+    this.emitCollabChange(dispatchId, 'revision', revisionTask.fromTeam, revisionTask.toTeam);
 
     return { ok: true };
   }
@@ -458,6 +649,12 @@ export class TaskDispatchService {
   getCollabTask(dispatchId: string) {
     return this.collabBoard.getTask(dispatchId);
   }
+
+  /** Get event log for a collab task. */
+  getCollabTaskEvents(dispatchId: string) {
+    return this.collabBoard.getEvents(dispatchId);
+  }
+
   listPendingRequests(teamSlug: string): TaskDispatchPayload[] {
     const results: TaskDispatchPayload[] = [];
     for (const [, req] of this.pendingRequests) {
@@ -506,9 +703,9 @@ export class TaskDispatchService {
     }
   }
 
-  // ── Local handshake dispatch (same machine) ───────────────────
+  // ── Unified Redis dispatch ───────────────────────────────────────
 
-  private async handleLocalHandshakeDispatch(
+  private async handleRedisDispatch(
     dispatchMeta: DispatchMeta,
     task: { subject: string; description?: string; prompt?: string },
     needsHumanReview?: boolean
@@ -523,33 +720,56 @@ export class TaskDispatchService {
       needsHumanReview,
     };
 
+    // Store in memory for accept/reject
     this.pendingRequests.set(dispatchMeta.dispatchId, {
       payload,
-      msgId: `local-${Date.now()}`,
-      groupName: 'local',
+      msgId: `redis-${Date.now()}`,
+      groupName: 'dispatch-group',
       teamSlug: dispatchMeta.targetTeam,
     });
-  }
 
-  // ── Remote dispatch (Redis Streams) ───────────────────────────
-
-  private async handleRemoteHandshakeDispatch(
-    dispatchMeta: DispatchMeta,
-    task: { subject: string; description?: string; prompt?: string },
-    needsHumanReview?: boolean
-  ): Promise<void> {
-    const payload: TaskDispatchPayload = {
-      dispatchId: dispatchMeta.dispatchId,
-      originTeam: dispatchMeta.originTeam,
-      targetTeam: dispatchMeta.targetTeam,
-      task: { subject: task.subject, description: task.description, prompt: task.prompt },
-      dispatchedAt: dispatchMeta.dispatchedAt,
-      deadline: dispatchMeta.deadline,
-      needsHumanReview,
-    };
-
+    // Publish to Redis stream
     const streamKey = `task:dispatch:${dispatchMeta.targetTeam}`;
     await this.redis!.xadd(streamKey, '*', 'payload', JSON.stringify(payload));
+
+    // If local team, also write to inbox
+    const isLocal = await this.isLocalTeam(dispatchMeta.targetTeam);
+    if (isLocal) {
+      try {
+        await this.workspace.appendMessage(dispatchMeta.targetTeam, {
+          from: dispatchMeta.originTeam,
+          to: 'team',
+          role: 'agent',
+          content: `[跨团队任务] ${task.subject}${task.description ? '\n' + task.description : ''}`,
+          meta: {
+            source: 'cross_team_dispatch',
+            dispatchId: dispatchMeta.dispatchId,
+            originTeam: dispatchMeta.originTeam,
+            needsHumanReview,
+          },
+        });
+      } catch (err) {
+        console.error('[TaskDispatchService] inbox write failed:', (err as Error).message);
+      }
+    }
+
+    this.sendFeishuNotification(
+      `跨团队任务派发：${dispatchMeta.originTeam} → ${dispatchMeta.targetTeam}\n${task.subject}`
+    );
+  }
+
+  // ── Feishu notification helper ──────────────────────────────────
+
+  private sendFeishuNotification(text: string): void {
+    try {
+      const { execSync } = require('node:child_process');
+      execSync(
+        `feishu-cli msg send --receive-id-type chat_id --receive-id oc_e7d4204895f8f9d763d9f0e42ead1e5e --text ${JSON.stringify(text)}`,
+        { timeout: 5000, stdio: 'pipe' }
+      );
+    } catch {
+      // best effort
+    }
   }
 
   // ── Local response (same machine) ─────────────────────────────
@@ -848,9 +1068,16 @@ export class TaskDispatchService {
 
       // Auto-approve if no human review needed
       const collabTask = this.collabBoard.getTask(response.dispatchId);
-      if (collabTask && !collabTask.needsHumanReview) {
-        this.collabBoard.updateStatus(response.dispatchId, 'approved', {
-          approvedAt: new Date().toISOString(),
+      if (collabTask && !collabTask.needsHumanReview && collabTask.status === 'delivered') {
+        const approvedAt = new Date().toISOString();
+        this.collabBoard.transition({
+          dispatchId: response.dispatchId,
+          expected: 'delivered',
+          next: 'approved',
+          actor: { type: 'system', id: 'auto-approve' },
+          eventType: 'task_approved',
+          payload: { auto: true },
+          extra: { approvedAt },
         });
         this.emitCollabChange(response.dispatchId, 'approved', response.fromTeam, response.toTeam);
       }

@@ -202,7 +202,9 @@ export function TaskBusSection(): React.JSX.Element {
   const [connected, setConnected] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [collectionEnabled, setCollectionEnabled] = useState(false);
+  const [uploadEnabled, setUploadEnabled] = useState(false);
+  const [collaborationEnabled, setCollaborationEnabled] = useState(false);
   const [telemetryPlatform, setTelemetryPlatform] = useState('claudecode');
   const [scanning, setScanning] = useState(false);
   const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
@@ -218,9 +220,11 @@ export function TaskBusSection(): React.JSX.Element {
           setPassword(data.redis.password ?? '');
         }
         if (data.telemetry) {
-          setTelemetryEnabled(data.telemetry.enabled);
+          setCollectionEnabled(data.telemetry.enabled);
+          setUploadEnabled(data.telemetry.uploadEnabled ?? false);
           setTelemetryPlatform(data.telemetry.platform ?? 'claudecode');
         }
+        setCollaborationEnabled(data.collaboration ?? false);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -235,7 +239,7 @@ export function TaskBusSection(): React.JSX.Element {
       .catch(() => {});
 
     const poll = setInterval(() => {
-      if (telemetryEnabled) {
+      if (collectionEnabled) {
         fetch('/api/telemetry/status')
           .then((r) => r.json())
           .then((s: TelemetryStatus) => setTelemetryStatus(s))
@@ -243,19 +247,23 @@ export function TaskBusSection(): React.JSX.Element {
       }
     }, 30000);
     return () => clearInterval(poll);
-  }, [telemetryEnabled]);
+  }, [collectionEnabled]);
 
   const buildConfig = (
     overrides: Partial<{
       enabled: boolean;
-      telemetryEnabled: boolean;
+      collectionEnabled: boolean;
+      uploadEnabled: boolean;
+      collaborationEnabled: boolean;
       telemetryPlatform: string;
     }> = {}
   ): TaskBusConfig => ({
     enabled: overrides.enabled ?? enabled,
     redis: { host, port, password: password || undefined },
+    collaboration: overrides.collaborationEnabled ?? collaborationEnabled,
     telemetry: {
-      enabled: overrides.telemetryEnabled ?? telemetryEnabled,
+      enabled: overrides.collectionEnabled ?? collectionEnabled,
+      uploadEnabled: overrides.uploadEnabled ?? uploadEnabled,
       platform: (overrides.telemetryPlatform ?? telemetryPlatform) as 'claudecode',
     },
   });
@@ -296,45 +304,58 @@ export function TaskBusSection(): React.JSX.Element {
       .catch(() => setMessage('操作失败'));
   };
 
-  const toggleTelemetry = async (value: boolean) => {
-    if (!value) {
-      setTelemetryEnabled(false);
-      const config = buildConfig({ telemetryEnabled: false });
-      fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      }).catch(() => setMessage('操作失败'));
-      setTelemetryStatus(null);
-      return;
-    }
-
-    // Optimistic update: toggle on immediately
-    setTelemetryEnabled(true);
-
-    // Test Redis if not already connected
-    let redisReady = connected;
-    if (!redisReady) {
-      setMessage('正在测试 Redis 连接...');
-      redisReady = await testRedisConnection();
-      if (!redisReady) {
-        setTelemetryEnabled(false);
-        setMessage('Redis 连接失败，无法启用数据上报');
-        return;
-      }
-    }
-
-    setMessage(null);
-    const config = buildConfig({ telemetryEnabled: true });
+  const toggleCollection = async (value: boolean) => {
+    setCollectionEnabled(value);
+    const config = buildConfig({ collectionEnabled: value });
     try {
       await fetch('/api/settings/task-bus', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
-      triggerScan();
+      if (value) triggerScan();
+      else setTelemetryStatus(null);
     } catch {
-      setTelemetryEnabled(false);
+      setCollectionEnabled(!value);
+      setMessage('操作失败');
+    }
+  };
+
+  const toggleUpload = async (value: boolean) => {
+    if (!value) {
+      setUploadEnabled(false);
+      const config = buildConfig({ uploadEnabled: false });
+      fetch('/api/settings/task-bus', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      }).catch(() => setMessage('操作失败'));
+      return;
+    }
+
+    // Upload requires Redis
+    let redisReady = connected;
+    if (!redisReady) {
+      setMessage('正在测试 Redis 连接...');
+      redisReady = await testRedisConnection();
+      if (!redisReady) {
+        setUploadEnabled(false);
+        setMessage('Redis 连接失败，无法启用数据上报');
+        return;
+      }
+    }
+
+    setUploadEnabled(true);
+    setMessage(null);
+    const config = buildConfig({ uploadEnabled: true });
+    try {
+      await fetch('/api/settings/task-bus', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+    } catch {
+      setUploadEnabled(false);
       setMessage('操作失败');
     }
   };
@@ -349,7 +370,7 @@ export function TaskBusSection(): React.JSX.Element {
           setTelemetryStatus(result);
         }
       })
-      .catch(() => setMessage('采集失败，请检查 Redis 连接'))
+      .catch(() => setMessage('采集失败，请检查本地 Claude Code 会话目录'))
       .finally(() => setScanning(false));
   };
 
@@ -362,6 +383,18 @@ export function TaskBusSection(): React.JSX.Element {
     }).catch(() => {});
   };
 
+  const toggleCollaboration = (value: boolean) => {
+    setCollaborationEnabled(value);
+    const config = buildConfig({ collaborationEnabled: value });
+    fetch('/api/settings/task-bus', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+      .then(() => setMessage(value ? '已开启分布式团队协作' : '已关闭分布式团队协作'))
+      .catch(() => setMessage('操作失败'));
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -372,11 +405,65 @@ export function TaskBusSection(): React.JSX.Element {
 
   return (
     <div>
+      <SettingsSectionHeader title="本地数据采集" icon={<BarChart3 size={12} />} />
+
+      <SettingRow
+        label="数据采集"
+        description="扫描本机 ~/.claude/projects 会话文件，采集使用指标；不需要 Redis，也不会上传对话内容"
+      >
+        <div className="flex items-center gap-2">
+          <select
+            value={telemetryPlatform}
+            onChange={(e) => {
+              const nextPlatform = e.target.value;
+              setTelemetryPlatform(nextPlatform);
+              saveTelemetryPlatform(nextPlatform);
+            }}
+            className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
+          >
+            <option value="claudecode">Claude Code</option>
+          </select>
+          <SettingsToggle
+            enabled={collectionEnabled}
+            onChange={(value) => void toggleCollection(value)}
+          />
+        </div>
+      </SettingRow>
+
+      {collectionEnabled && (
+        <>
+          <div
+            className="flex items-center gap-3 border-b py-3"
+            style={{ borderColor: 'var(--color-border-subtle)' }}
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={triggerScan}
+              disabled={scanning}
+              className="gap-1.5"
+            >
+              {scanning ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
+              {scanning ? '采集中...' : '立即采集'}
+            </Button>
+            <span className="text-[10px] text-[var(--color-text-muted)]">
+              本地扫描，不依赖团队总线或 Redis。
+            </span>
+          </div>
+
+          {telemetryStatus && (
+            <div className="py-3">
+              <UsageDashboard status={telemetryStatus} />
+            </div>
+          )}
+        </>
+      )}
+
       <SettingsSectionHeader title="团队总线" icon={<Radio size={12} />} />
 
       <SettingRow
         label="启用团队总线"
-        description="开启后自动为所有团队注入跨团队协作指令到 CLAUDE.md"
+        description="用于 Redis 连接、数据上报和跨团队协作；本地数据采集不依赖它"
       >
         <SettingsToggle enabled={enabled} onChange={toggle} />
       </SettingRow>
@@ -388,7 +475,9 @@ export function TaskBusSection(): React.JSX.Element {
             <div className="flex items-center gap-2 px-1 pb-2">
               <span className="text-sm font-medium text-red-500">*</span>
               <span className="text-sm font-medium">Redis</span>
-              <span className="text-xs text-[var(--color-text-muted)]">（数据上报必填）</span>
+              <span className="text-xs text-[var(--color-text-muted)]">
+                （上报和跨团队协作必填）
+              </span>
               <div className="ml-auto flex items-center gap-2">
                 {connected ? (
                   <span className="flex items-center gap-1 text-xs text-emerald-500">
@@ -465,71 +554,12 @@ export function TaskBusSection(): React.JSX.Element {
             </div>
           </div>
 
-          {/* 数据采集 - 不依赖 Redis */}
-          <div style={{ borderColor: 'var(--color-border-subtle)' }}>
-            <SettingRow
-              label="数据采集"
-              description="扫描本地 ~/.claude/projects 会话文件，采集使用指标（会话、消息、Token、工作时长）"
-            >
-              <div className="flex items-center gap-2">
-                <select
-                  value={telemetryPlatform}
-                  onChange={(e) => {
-                    const nextPlatform = e.target.value;
-                    setTelemetryPlatform(nextPlatform);
-                    saveTelemetryPlatform(nextPlatform);
-                  }}
-                  className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
-                >
-                  <option value="claudecode">Claude Code</option>
-                </select>
-                <SettingsToggle
-                  enabled={telemetryEnabled}
-                  onChange={(value) => void toggleTelemetry(value)}
-                />
-              </div>
-            </SettingRow>
-
-            {telemetryEnabled && (
-              <>
-                <div
-                  className="flex items-center gap-3 border-b py-3"
-                  style={{ borderColor: 'var(--color-border-subtle)' }}
-                >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={triggerScan}
-                    disabled={scanning}
-                    className="gap-1.5"
-                  >
-                    {scanning ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <BarChart3 size={12} />
-                    )}
-                    {scanning ? '采集中...' : '立即采集'}
-                  </Button>
-                  <span className="text-[10px] text-[var(--color-text-muted)]">
-                    扫描本地 ~/.claude/projects 下的会话文件
-                  </span>
-                </div>
-
-                {telemetryStatus && (
-                  <div className="py-3">
-                    <UsageDashboard status={telemetryStatus} />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
           {/* 数据上报 - 依赖 Redis，最下面 */}
           <div>
             <SettingRow label="数据上报" description="将采集数据上报到 Redis，供团队看板使用">
               <SettingsToggle
-                enabled={telemetryEnabled && connected}
-                onChange={(value) => void toggleTelemetry(value)}
+                enabled={uploadEnabled}
+                onChange={(value) => void toggleUpload(value)}
               />
             </SettingRow>
 
@@ -537,6 +567,26 @@ export function TaskBusSection(): React.JSX.Element {
               <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
                 <AlertCircle size={12} />
                 <span>数据上报需要 Redis；请先配置并测试 Redis 连接。</span>
+              </div>
+            )}
+          </div>
+
+          {/* 分布式团队协作 - 最下面 */}
+          <div>
+            <SettingRow
+              label="分布式团队协作"
+              description="开启后 Hermit 平台识别 @团队 并创建跨团队协作任务；Agent 只读取团队列表，不直接派发"
+            >
+              <SettingsToggle
+                enabled={collaborationEnabled}
+                onChange={(value) => void toggleCollaboration(value)}
+              />
+            </SettingRow>
+
+            {!connected && collaborationEnabled && (
+              <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
+                <AlertCircle size={12} />
+                <span>跨团队协作需要 Redis 连接。</span>
               </div>
             )}
           </div>

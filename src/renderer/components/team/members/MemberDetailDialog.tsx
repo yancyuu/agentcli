@@ -26,7 +26,6 @@ import { type MemberActivityFilter, type MemberDetailTab } from './memberDetailT
 import { MemberLaunchDiagnosticsButton } from './MemberLaunchDiagnosticsButton';
 import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
-import { MemberTasksTab } from './MemberTasksTab';
 import { MemberWorkspaceTab } from './MemberWorkspaceTab';
 
 import type { TeamLaunchParams } from '@renderer/store/slices/teamSlice';
@@ -56,8 +55,10 @@ interface MemberDetailDialogProps {
   launchParams?: TeamLaunchParams;
   onClose: () => void;
   onSendMessage: () => void;
-  onAssignTask: () => void;
-  onTaskClick: (task: TeamTaskWithKanban) => void;
+  /** Deprecated: team tasks UI has been removed, kept for compatibility with older callers/tests. */
+  onAssignTask?: () => void;
+  /** Deprecated: team tasks UI has been removed, kept for compatibility with older callers/tests. */
+  onTaskClick?: (task: TeamTaskWithKanban) => void;
   onRemoveMember?: () => void;
   onRestartMember?: (memberName: string) => Promise<void> | void;
   onUpdateRole?: (memberName: string, role: string | undefined) => Promise<void> | void;
@@ -83,18 +84,12 @@ export const MemberDetailDialog = ({
   launchParams,
   onClose,
   onSendMessage,
-  onAssignTask,
-  onTaskClick,
   onRemoveMember,
   onRestartMember,
   onUpdateRole,
   updatingRole,
   onViewMemberChanges,
 }: MemberDetailDialogProps): React.JSX.Element | null => {
-  const memberTasks = useMemo(
-    () => (member ? tasks.filter((t) => t.owner === member.name) : []),
-    [tasks, member]
-  );
   const memberMessages = useStore((state) =>
     selectMemberMessagesForTeamMember(state, teamName, member?.name ?? null)
   );
@@ -111,17 +106,9 @@ export const MemberDetailDialog = ({
     }).length;
   }, [member, memberMessages, members, tasks, teamName]);
 
-  const inProgressTasks = useMemo(
-    () => memberTasks.filter((t) => t.status === 'in_progress').length,
-    [memberTasks]
+  const [activeTab, setActiveTab] = useState<MemberDetailTab>(
+    initialTab === 'tasks' ? 'workspace' : initialTab
   );
-
-  const completedTasks = useMemo(
-    () => memberTasks.filter((t) => t.status === 'completed').length,
-    [memberTasks]
-  );
-
-  const [activeTab, setActiveTab] = useState<MemberDetailTab>(initialTab);
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
 
@@ -202,8 +189,8 @@ export const MemberDetailDialog = ({
           </DialogHeader>
 
           <MemberDetailStats
-            totalTasks={memberTasks.length}
-            inProgressTasks={inProgressTasks}
+            totalTasks={0}
+            inProgressTasks={0}
             totalTokens={totalTokens}
             statsLoading={statsLoading}
             statsComputedAt={memberStats?.computedAt}
@@ -217,14 +204,6 @@ export const MemberDetailDialog = ({
           className="min-w-0 overflow-hidden"
         >
           <TabsList className="w-full">
-            <TabsTrigger value="tasks" className="flex-1 gap-1.5">
-              Tasks
-              {memberTasks.length > 0 && (
-                <span className="rounded-full bg-[var(--color-surface)] px-1.5 text-[10px]">
-                  {memberTasks.length}
-                </span>
-              )}
-            </TabsTrigger>
             <TabsTrigger value="workspace" className="flex-1 gap-1.5">
               <FolderOpen size={12} />
               Workspace
@@ -242,9 +221,6 @@ export const MemberDetailDialog = ({
               Stats
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="tasks">
-            <MemberTasksTab tasks={memberTasks} onTaskClick={onTaskClick} />
-          </TabsContent>
           <TabsContent value="workspace">
             <MemberWorkspaceTab
               teamName={teamName}
@@ -260,7 +236,6 @@ export const MemberDetailDialog = ({
               members={members}
               tasks={tasks}
               initialFilter={initialActivityFilter}
-              onTaskClick={onTaskClick}
             />
           </TabsContent>
           <TabsContent value="stats">

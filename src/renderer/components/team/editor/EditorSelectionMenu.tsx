@@ -7,7 +7,7 @@
 
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { ListTodo, MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 
 import type { EditorSelectionInfo } from '@shared/types/editor';
 
@@ -20,7 +20,6 @@ interface EditorSelectionMenuProps {
   /** Bounding rect of the editor content container (for viewport → container conversion) */
   containerRect: DOMRect;
   onSendMessage: () => void;
-  onCreateTask: () => void;
 }
 
 // =============================================================================
@@ -39,7 +38,6 @@ export const EditorSelectionMenu = ({
   info,
   containerRect,
   onSendMessage,
-  onCreateTask,
 }: EditorSelectionMenuProps): React.ReactElement | null => {
   if (!info.text.trim()) return null;
 
@@ -70,11 +68,6 @@ export const EditorSelectionMenu = ({
         icon={<MessageSquare className="size-3.5" />}
         label="Write Teammate"
         onClick={onSendMessage}
-      />
-      <MenuButton
-        icon={<ListTodo className="size-3.5" />}
-        label="Create Task"
-        onClick={onCreateTask}
       />
     </div>
   );

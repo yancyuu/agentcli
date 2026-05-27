@@ -245,15 +245,106 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 - Prefer designs where the high-level feature code can swap local browser/Electron storage for a server-backed implementation without rewriting the rendering layer.
 - Reuse generic persistence/layout infrastructure when adding new draggable/resizable surfaces instead of copying feature-specific storage code.
 
+<!-- hermit:team-collaboration:start -->
 
-## Cross-Team Task Dispatch (Hermit)
+## Agent Collaboration (Hermit)
 
-You can dispatch tasks to other teams via the Hermit local API:
+You can collaborate with other teams (local or remote) via the Hermit local API.
+Current team slug: `hermit`
 
-- **List available teams**: `curl -s http://127.0.0.1:5680/api/cross-team/targets`
-- **Dispatch a task**: `curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"openHermit","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'`
+### Discovery
 
-Current team slug: `openHermit`
+- **List available teams**: `curl -s http://127.0.0.1:5680/api/cross-team/discover | jq '.teams[]'`
+
+### Send a task to another team
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/send \
+  -H 'Content-Type: application/json' \
+  -d '{"fromTeam":"hermit","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description","deadlineMinutes":5,"needsHumanReview":false}'
+```
+
+Returns `{"ok":true,"dispatchId":"...","status":"pending_accept"}`
+
+You must actually run this API call before telling the user a task was dispatched.
+Never invent or guess a `dispatchId`. Only report success when the JSON response has `ok: true`.
+If the response has `ok: false` or `status: "failed"`, report the error instead of saying the task was dispatched.
+After a successful send, verify the task is visible on the collaboration board:
+
+```bash
+curl -s http://127.0.0.1:5680/api/collab/board | jq '.tasks[] | select(.dispatchId=="DISPATCH_ID")'
+```
+
+Set `needsHumanReview: true` if the deliverable requires human approval before completion.
+
+### Check pending requests (tasks others sent to you)
+
+```bash
+curl -s http://127.0.0.1:5680/api/cross-team/pending-requests/hermit
+```
+
+### Accept a task request
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/accept \
+  -H 'Content-Type: application/json' \
+  -d '{"team_slug":"hermit","dispatch_id":"DISPATCH_ID"}'
+```
+
+### Reject a task request
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/reject \
+  -H 'Content-Type: application/json' \
+  -d '{"team_slug":"hermit","dispatch_id":"DISPATCH_ID","reason":"Optional reason"}'
+```
+
+### Deliver task result (target team)
+
+After completing the task, deliver the result:
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/deliver \
+  -H 'Content-Type: application/json' \
+  -d '{"team_slug":"hermit","dispatch_id":"DISPATCH_ID","result":"Result description"}'
+```
+
+If `needsHumanReview` was false, the task is auto-approved after delivery.
+If `needsHumanReview` was true, the origin team must approve or request revision.
+
+### Approve a delivered task (origin team)
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/approve \
+  -H 'Content-Type: application/json' \
+  -d '{"team_slug":"hermit","dispatch_id":"DISPATCH_ID"}'
+```
+
+### Request revision (origin team)
+
+```bash
+curl -s -X POST http://127.0.0.1:5680/api/cross-team/revision \
+  -H 'Content-Type: application/json' \
+  -d '{"team_slug":"hermit","dispatch_id":"DISPATCH_ID","feedback":"What needs to change"}'
+```
+
+After revision, the target team should re-deliver with `/api/cross-team/deliver`.
+Max 3 revision rounds before requiring human intervention.
+
+### View collaboration board
+
+```bash
+curl -s http://127.0.0.1:5680/api/collab/board | jq '.tasks[]'
+```
+
+### Full Workflow
+
+1. **Discover**: `/api/cross-team/discover` — find available teams
+2. **Dispatch**: `/api/cross-team/send` — send task (waits for acceptance)
+3. **Accept/Reject**: Target team checks `/api/cross-team/pending-requests/:name` then accepts or rejects
+4. **Deliver**: Target team completes work and calls `/api/cross-team/deliver`
+5. **Review**: If `needsHumanReview`, origin team calls `/api/cross-team/approve` or `/api/cross-team/revision`
+6. If deadline passes without acceptance, task is marked as failed
 
 When to dispatch:
 - Task requires access to a different codebase/project
@@ -263,3 +354,4 @@ When to dispatch:
 Do NOT dispatch:
 - Task is within current team's project scope
 - Task can be completed with available tools
+<!-- hermit:team-collaboration:end -->

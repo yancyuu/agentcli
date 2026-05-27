@@ -43,6 +43,11 @@ import cors from '@fastify/cors';
 import staticPlugin from '@fastify/static';
 import Fastify from 'fastify';
 
+import {
+  CROSS_TEAM_SENT_SOURCE,
+  CROSS_TEAM_SOURCE,
+  formatCrossTeamText,
+} from '@shared/constants/crossTeam';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
@@ -205,6 +210,25 @@ function normalizeStringArray(value: unknown): string[] {
   return value
     .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
     .filter((entry) => entry.length > 0);
+}
+
+async function resolveTeamSlugForMention(rawName: string): Promise<string | null> {
+  const normalized = rawName.trim().replace(/^@/, '');
+  if (!normalized) return null;
+  try {
+    await svc.readTeamManifest(normalized);
+    return normalized;
+  } catch {
+    // Try display name / case-insensitive slug match.
+  }
+  const lower = normalized.toLowerCase();
+  const teams = await svc.listTeams().catch(() => []);
+  const matched = teams.find((team) => {
+    const slug = team.slug.toLowerCase();
+    const displayName = (team.displayName ?? '').toLowerCase();
+    return slug === lower || displayName === lower;
+  });
+  return matched?.slug ?? null;
 }
 
 function normalizePlatformAllowFrom(value: unknown): Record<string, string> {
@@ -1660,34 +1684,11 @@ const MCP_TOOLS = [
   },
   {
     name: 'list_teams',
-    description: '列出所有可用的团队（本地和远程），包含能力信息。用于发现可以派发任务的目标团队。',
+    description:
+      '只读：列出所有可用团队（本地和远程）及能力信息。跨团队派发由 Hermit 平台根据用户 @团队 自动处理，agent 不应自行派发。',
     inputSchema: {
       type: 'object',
       properties: {},
-    },
-  },
-  {
-    name: 'dispatch_task',
-    description: `将任务派发给另一个团队，等待对方接受。当前团队通过 team_slug 参数指定。${taskDispatch.dispatchRulesText}`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        team_slug: { type: 'string', description: '当前团队 slug（即发出派发的团队）' },
-        target_team: { type: 'string', description: '目标团队 slug（可通过 list_teams 查询）' },
-        subject: { type: 'string', description: '任务标题' },
-        description: { type: 'string', description: '任务描述（可选）' },
-        prompt: { type: 'string', description: '给目标团队的执行指令（可选）' },
-        deadline_minutes: {
-          type: 'number',
-          description: '握手超时时间（分钟），默认 5 分钟。超时后任务标记为 failed。',
-        },
-        needs_human_review: {
-          type: 'boolean',
-          description:
-            '交付结果是否需要人工审核。默认 false（自动通过）。设为 true 时，交付后需要人在看板上审核。',
-        },
-      },
-      required: ['team_slug', 'target_team', 'subject'],
     },
   },
   {
@@ -1795,22 +1796,6 @@ async function executeMcpTool(
   if (toolName === 'list_teams') {
     const teams = await taskDispatch.discoverTeams();
     return text(teams);
-  }
-
-  if (toolName === 'dispatch_task') {
-    const deadlineMinutes = args.deadline_minutes ? Number(args.deadline_minutes) : undefined;
-    const needsHumanReview = args.needs_human_review === 'true';
-    const result = await taskDispatch.dispatchTask(
-      args.team_slug,
-      {
-        subject: args.subject,
-        description: args.description,
-        prompt: args.prompt,
-      },
-      args.target_team,
-      { deadlineMinutes, needsHumanReview }
-    );
-    return text(result);
   }
 
   if (toolName === 'accept_task') {
@@ -3113,7 +3098,18 @@ app.get<{ Params: { name: string }; Querystring: { cursor?: string; limit?: stri
           text: m.content,
           timestamp: m.ts,
           read: true,
-          source: (m.role === 'user' ? 'user_sent' : 'inbox') as string,
+          source:
+            typeof m.meta?.source === 'string'
+              ? m.meta.source
+              : ((m.role === 'user' ? 'user_sent' : 'inbox') as string),
+          taskRefs: Array.isArray(m.meta?.taskRefs) ? m.meta.taskRefs : undefined,
+          summary: typeof m.meta?.summary === 'string' ? m.meta.summary : undefined,
+          conversationId:
+            typeof m.meta?.conversationId === 'string' ? m.meta.conversationId : undefined,
+          replyToConversationId:
+            typeof m.meta?.replyToConversationId === 'string'
+              ? m.meta.replyToConversationId
+              : undefined,
           session: sessionKey
             ? {
                 id: session?.id,
@@ -3801,13 +3797,71 @@ app.delete<{ Params: { name: string } }>('/api/teams/:name/draft', async () => (
 // send-message — 从 Hermit 会话面板注入到 harness，不使用 Management /send（那会回发到 IM）。
 app.post<{
   Params: { name: string };
-  Body: { member?: string; text?: string; content?: string; summary?: string; sessionKey?: string };
+  Body: {
+    member?: string;
+    text?: string;
+    content?: string;
+    summary?: string;
+    sessionKey?: string;
+    messageId?: string;
+  };
 }>('/api/teams/:name/send-message', async (request, reply) => {
   const teamName = request.params.name;
   const text = request.body?.text ?? request.body?.content ?? '';
   if (!text.trim()) return { ok: true, messageId: null };
 
-  const msgId = `hermit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestedMessageId =
+    typeof request.body?.messageId === 'string' ? request.body.messageId.trim() : '';
+  const msgId =
+    requestedMessageId || `hermit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const crossTeamDirective = text.trim().match(/^@([^\s]+)\s+([\s\S]+)$/);
+  if (crossTeamDirective) {
+    const targetTeam = await resolveTeamSlugForMention(crossTeamDirective[1] ?? '');
+    const subject = crossTeamDirective[2]?.trim();
+    if (targetTeam && subject && targetTeam !== teamName) {
+      try {
+        const sourceMsg = await svc.appendMessage(teamName, {
+          from: 'user',
+          to: targetTeam,
+          role: 'user',
+          content: text,
+          meta: { source: CROSS_TEAM_SENT_SOURCE },
+        });
+        const result = await taskDispatch.dispatchTask(
+          teamName,
+          {
+            subject,
+            description: text,
+            prompt: subject,
+          },
+          targetTeam,
+          { deadlineMinutes: 10, needsHumanReview: true }
+        );
+        broadcastSse('team-change', { type: 'inbox', teamName });
+        broadcastSse('collab-change', {
+          dispatchId: result.dispatchId,
+          status: result.status,
+          fromTeam: teamName,
+          toTeam: targetTeam,
+        });
+        return {
+          ok: result.status !== 'failed',
+          deliveredToInbox: true,
+          messageId: sourceMsg.id,
+          dispatchId: result.dispatchId,
+          status: result.status,
+          message: result.message,
+          runtimeDelivery: {
+            attempted: true,
+            delivered: result.status !== 'failed',
+          },
+        };
+      } catch (err) {
+        request.log.warn({ err, teamName, targetTeam }, 'cross-team directive dispatch failed');
+      }
+    }
+  }
 
   // 使用固定格式 session key，保证 reply 事件能正确映射回 teamName
   const requestedSessionKey =
@@ -4043,38 +4097,17 @@ app.post<{
 
 app.get<{ Querystring: { excludeTeam?: string } }>('/api/cross-team/targets', async (request) => {
   const excludeTeam = request.query.excludeTeam;
-  // Fetch teams from workspace + alive status from cc-connect
-  const allTeams = await svc.listTeams();
-  let aliveSet = new Set<string>();
-  try {
-    const projects = await cc.listProjects();
-    const states = await Promise.all(
-      projects.map(async (p) => {
-        let isAlive = false;
-        try {
-          const detail = await cc.getProject(p.name);
-          isAlive =
-            Array.isArray(detail.platforms) && detail.platforms.some((pl: any) => pl.connected);
-        } catch {
-          /* degraded */
-        }
-        return { name: p.name, isAlive };
-      })
-    );
-    aliveSet = new Set(states.filter((s) => s.isAlive).map((s) => s.name));
-  } catch {
-    /* cc-connect unavailable */
-  }
-
-  return allTeams
-    .filter((t) => t.slug !== excludeTeam && !t.pendingDelete)
-    .map((t) => ({
-      teamName: t.slug,
-      displayName: t.displayName || t.slug,
-      description: t.description,
-      color: t.color,
-      isOnline: aliveSet.has(t.bindProject),
-    }));
+  const all = await taskDispatch.discoverTeams();
+  const teams = excludeTeam ? all.filter((t) => t.slug !== excludeTeam) : all;
+  return teams.map((t) => ({
+    teamName: t.slug,
+    displayName: t.displayName || t.slug,
+    description: t.description,
+    color: undefined,
+    isOnline: t.status === 'online',
+    location: t.location,
+    harness: t.harness,
+  }));
 });
 
 app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {
@@ -4168,32 +4201,140 @@ app.get<{ Params: { dispatchId: string } }>('/api/collab/board/:dispatchId', asy
   return { task };
 });
 
+app.get<{ Params: { dispatchId: string } }>(
+  '/api/collab/board/:dispatchId/events',
+  async (request) => {
+    return { events: taskDispatch.getCollabTaskEvents(request.params.dispatchId) };
+  }
+);
+
 // Update /api/cross-team/send to support needsHumanReview
 app.post<{
   Body: {
     fromTeam: string;
+    fromMember?: string;
     toTeam: string;
-    subject: string;
+    text?: string;
+    subject?: string;
     description?: string;
     prompt?: string;
+    messageId?: string;
+    conversationId?: string;
+    replyToConversationId?: string;
+    taskRefs?: unknown[];
+    actionMode?: string;
+    summary?: string;
+    chainDepth?: number;
     deadlineMinutes?: number;
     needsHumanReview?: boolean;
   };
 }>('/api/cross-team/send', async (request) => {
-  const { fromTeam, toTeam, subject, description, prompt, deadlineMinutes, needsHumanReview } =
-    request.body ?? {};
-  if (!toTeam || !subject) return { ok: false, error: 'toTeam and subject are required' };
+  const {
+    fromTeam,
+    fromMember,
+    toTeam,
+    text,
+    subject,
+    description,
+    prompt,
+    messageId,
+    conversationId,
+    replyToConversationId,
+    taskRefs,
+    actionMode,
+    summary,
+    chainDepth,
+    deadlineMinutes,
+    needsHumanReview,
+  } = request.body ?? {};
+  if (!fromTeam || !toTeam) return { ok: false, error: 'fromTeam and toTeam are required' };
+  const resolvedToTeam = await resolveTeamSlugForMention(toTeam);
+  if (!resolvedToTeam) return { ok: false, error: `Unknown target team: ${toTeam}` };
+
+  if (typeof text === 'string') {
+    const trimmedText = text.trim();
+    if (!trimmedText) return { ok: false, error: 'text is required' };
+
+    const depth = Number.isFinite(Number(chainDepth)) ? Number(chainDepth) : 0;
+    const threadId = conversationId || messageId || `cross-team-${Date.now()}`;
+    const sender = fromMember || 'user';
+    const sentText = formatCrossTeamText(`${fromTeam}.${sender}`, depth, trimmedText, {
+      conversationId: threadId,
+      replyToConversationId,
+    });
+    const meta = {
+      taskRefs,
+      actionMode,
+      summary,
+      conversationId: threadId,
+      replyToConversationId,
+      chainDepth: depth,
+    };
+
+    const outgoing = await svc.appendMessage(fromTeam, {
+      from: `${fromTeam}.${sender}`,
+      to: resolvedToTeam,
+      role: 'user',
+      content: trimmedText,
+      meta: { ...meta, source: CROSS_TEAM_SENT_SOURCE },
+    });
+
+    await svc.appendMessage(resolvedToTeam, {
+      from: `${fromTeam}.${sender}`,
+      to: resolvedToTeam,
+      role: 'user',
+      content: sentText,
+      meta: { ...meta, source: CROSS_TEAM_SOURCE, relayOfMessageId: outgoing.id },
+    });
+
+    try {
+      await sendHarnessMessageViaBridge({
+        teamName: resolvedToTeam,
+        text: sentText,
+      });
+    } catch (err) {
+      request.log.warn({ err }, 'cross-team runtime delivery failed after persistence');
+    }
+
+    broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
+    broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
+
+    return {
+      messageId: outgoing.id,
+      deliveredToInbox: true,
+      deduplicated: false,
+    };
+  }
+
+  if (!subject) return { ok: false, error: 'subject is required' };
+
+  // Check collaboration toggle
+  try {
+    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const settings = JSON.parse(raw);
+    if (!settings.taskBus?.collaboration) {
+      return {
+        ok: false,
+        error: 'Distributed collaboration is not enabled. Enable it in Settings → Task Bus.',
+      };
+    }
+  } catch {
+    return { ok: false, error: 'Could not read task bus configuration.' };
+  }
+
   const result = await taskDispatch.dispatchTask(
     fromTeam ?? 'unknown',
     { subject, description, prompt },
-    toTeam,
+    resolvedToTeam,
     {
       deadlineMinutes: deadlineMinutes ? Number(deadlineMinutes) : undefined,
       needsHumanReview,
     }
   );
+  const ok = result.status !== 'failed';
   return {
-    ok: true,
+    ok,
     dispatchId: result.dispatchId,
     status: result.status,
     message: result.message,
@@ -4244,36 +4385,44 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
     await stopTelemetry();
   }
 
-  // Auto-inject CLAUDE.md instructions when enabling
-  if (config?.enabled) {
-    try {
-      const projects = await cc.listProjects();
-      for (const p of projects) {
-        let workDir = '';
-        let slug = p.name;
+  // Keep CLAUDE.md team instructions aligned with the collaboration toggle.
+  const syncTeamInstructions = async (enabled: boolean): Promise<void> => {
+    const projects = await cc.listProjects();
+    for (const p of projects) {
+      let workDir = '';
+      let slug = p.name;
+      try {
+        const meta = await svc.readTeamManifest(p.name);
+        if (typeof meta.workDir === 'string') workDir = meta.workDir.trim();
+        if (meta.slug) slug = meta.slug;
+      } catch {
+        /* no local manifest */
+      }
+      if (!workDir) {
         try {
-          const meta = await svc.readTeamManifest(p.name);
-          if (typeof meta.workDir === 'string') workDir = meta.workDir.trim();
-          if (meta.slug) slug = meta.slug;
+          const detail = await cc.getProject(p.name);
+          if (typeof detail.work_dir === 'string') workDir = detail.work_dir.trim();
         } catch {
-          /* no local manifest */
-        }
-        if (!workDir) {
-          try {
-            const detail = await cc.getProject(p.name);
-            if (typeof detail.work_dir === 'string') workDir = detail.work_dir.trim();
-          } catch {
-            // ignore
-          }
-        }
-        if (workDir) {
-          await svc.injectTeamInstructions(workDir, slug);
+          // ignore
         }
       }
-    } catch (err) {
-      request.log.warn({ err }, 'CLAUDE.md injection failed');
+      if (!workDir) continue;
+      if (enabled) {
+        await svc.injectTeamInstructions(workDir, slug);
+      } else {
+        await svc.removeTeamInstructions(workDir);
+      }
     }
+  };
 
+  const collaborationEnabled = config?.enabled === true && config?.collaboration === true;
+  try {
+    await syncTeamInstructions(collaborationEnabled);
+  } catch (err) {
+    request.log.warn({ err }, 'CLAUDE.md team instruction sync failed');
+  }
+
+  if (config?.enabled) {
     // Reconnect TaskDispatchService with Redis (optional)
     taskDispatch.dispose();
     try {
@@ -4313,13 +4462,22 @@ app.post('/api/telemetry/scan', async (request, reply) => {
     }
     const result = await triggerScan(taskBus);
     if (!result) {
-      return reply.code(503).send({ error: 'Redis not available' });
+      return reply.code(503).send({ error: 'Telemetry scan failed' });
     }
     return {
       ok: true,
-      ...result.aggregate,
-      sessions: result.sessions.length,
+      connected: taskBus.telemetry.uploadEnabled === true,
       lastScan: new Date().toISOString(),
+      sessions: result.aggregate.sessions,
+      messages: result.aggregate.messages,
+      tokensIn: result.aggregate.tokens.input,
+      tokensOut: result.aggregate.tokens.output,
+      cacheRead: result.aggregate.tokens.cacheRead,
+      cacheCreation: result.aggregate.tokens.cacheCreation,
+      activeDays: result.aggregate.activeDays,
+      hourly: result.aggregate.hourly,
+      projects: result.aggregate.projects,
+      workSecondsByDay: result.aggregate.workSecondsByDay,
     };
   } catch (err) {
     return reply.code(500).send({ error: String(err) });
@@ -4338,22 +4496,6 @@ app.get('/api/telemetry/status', async (request, reply) => {
       // no settings
     }
     const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
-    if (!taskBus.redis) {
-      return {
-        connected: false,
-        lastScan: null,
-        sessions: 0,
-        messages: 0,
-        tokensIn: 0,
-        tokensOut: 0,
-        cacheRead: 0,
-        cacheCreation: 0,
-        activeDays: 0,
-        hourly: [],
-        projects: [],
-        workSecondsByDay: {},
-      };
-    }
     const status = await getTelemetryStatus(taskBus.redis);
     return (
       status ?? {

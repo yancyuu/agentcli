@@ -40,7 +40,7 @@ export interface ScheduleSlice {
   /** Open a standalone Schedules tab (or focus existing) */
   openSchedulesTab(): void;
 
-  /** Open a unified Tasks tab (collab board + schedules) */
+  /** Open a unified collaboration tab (collab board + schedules) */
   openTasksTab(): void;
 }
 
@@ -261,7 +261,7 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
 
     state.openTab({
       type: 'tasks',
-      label: '任务',
+      label: '协作',
     });
 
     void get().fetchSchedules();

@@ -181,8 +181,10 @@ export interface TaskBusConfig {
     password?: string;
     db?: number;
   };
+  collaboration?: boolean;
   telemetry?: {
     enabled: boolean;
+    uploadEnabled?: boolean;
     /** Data source platform. Currently only 'claudecode'. */
     platform: 'claudecode';
   };
@@ -248,6 +250,28 @@ export type CollabTaskStatus =
   | 'rejected'
   | 'failed';
 
+export type CollabTaskEventType =
+  | 'task_sent'
+  | 'task_accepted'
+  | 'task_rejected'
+  | 'task_delivered'
+  | 'revision_requested'
+  | 'task_approved'
+  | 'task_failed';
+
+export interface CollabTaskEvent {
+  eventId: string;
+  dispatchId: string;
+  version: number;
+  type: CollabTaskEventType;
+  actor: {
+    type: 'user' | 'team' | 'agent' | 'system';
+    id: string;
+  };
+  payload?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface CollabTask {
   id: string;
   dispatchId: string;
@@ -258,6 +282,8 @@ export interface CollabTask {
   toTeam: string;
   toTeamDisplay: string;
   status: CollabTaskStatus;
+  version?: number;
+  reason?: string;
   result?: string;
   feedback?: string;
   deadline?: string;
@@ -266,6 +292,7 @@ export interface CollabTask {
   createdAt: string;
   updatedAt: string;
   acceptedAt?: string;
+  rejectedAt?: string;
   deliveredAt?: string;
   approvedAt?: string;
 }

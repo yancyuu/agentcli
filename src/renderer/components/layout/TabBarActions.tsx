@@ -110,12 +110,12 @@ export const TabBarActions = (): React.JSX.Element => {
               color: tasksHover ? 'var(--color-text)' : 'var(--color-text-muted)',
               backgroundColor: tasksHover ? 'var(--color-surface-raised)' : 'transparent',
             }}
-            aria-label="任务"
+            aria-label="协作"
           >
             <Calendar className="size-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">任务</TooltipContent>
+        <TooltipContent side="bottom">协作</TooltipContent>
       </Tooltip>
 
       {/* GitHub link */}

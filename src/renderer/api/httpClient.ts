@@ -1638,6 +1638,21 @@ export class HttpAPIClient implements ElectronAPI {
     getBoard: () => this.get<{ tasks: CollabTask[] }>('/api/collab/board'),
     getTask: (dispatchId: string) =>
       this.get<{ task: CollabTask }>(`/api/collab/board/${encodeURIComponent(dispatchId)}`),
+    getEvents: (dispatchId: string) =>
+      this.get<{ events: import('@shared/types/team').CollabTaskEvent[] }>(
+        `/api/collab/board/${encodeURIComponent(dispatchId)}/events`
+      ),
+    accept: (teamSlug: string, dispatchId: string) =>
+      this.post<{ ok: boolean; taskId: string }>('/api/cross-team/accept', {
+        team_slug: teamSlug,
+        dispatch_id: dispatchId,
+      }),
+    reject: (teamSlug: string, dispatchId: string, reason?: string) =>
+      this.post<{ ok: boolean }>('/api/cross-team/reject', {
+        team_slug: teamSlug,
+        dispatch_id: dispatchId,
+        reason,
+      }),
     deliver: (teamSlug: string, dispatchId: string, result: string) =>
       this.post<{ ok: boolean }>('/api/cross-team/deliver', {
         team_slug: teamSlug,

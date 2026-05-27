@@ -731,6 +731,9 @@ export interface CrossTeamAPI {
 export interface CollabBoardAPI {
   getBoard: () => Promise<{ tasks: CollabTask[] }>;
   getTask: (dispatchId: string) => Promise<{ task: CollabTask }>;
+  getEvents: (dispatchId: string) => Promise<{ events: import('./team').CollabTaskEvent[] }>;
+  accept: (teamSlug: string, dispatchId: string) => Promise<{ ok: boolean; taskId: string }>;
+  reject: (teamSlug: string, dispatchId: string, reason?: string) => Promise<{ ok: boolean }>;
   deliver: (teamSlug: string, dispatchId: string, result: string) => Promise<{ ok: boolean }>;
   approve: (teamSlug: string, dispatchId: string) => Promise<{ ok: boolean }>;
   revision: (teamSlug: string, dispatchId: string, feedback: string) => Promise<{ ok: boolean }>;

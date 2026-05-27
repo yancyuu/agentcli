@@ -52,7 +52,7 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   rejected: <XCircle size={12} />,
 };
 
-// ── TasksView ──────────────────────────────────────────────────────
+// ── Collaboration View ─────────────────────────────────────────────
 
 export function TasksView() {
   const [activeTab, setActiveTab] = useState<TasksSubTab>('collab');
@@ -165,7 +165,7 @@ function CollabBoardSection() {
 
   if (tasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-sm text-[var(--color-text-muted)]">
+      <div className="flex w-full flex-col items-center justify-center gap-3 py-16 text-sm text-[var(--color-text-muted)]">
         <MessageSquare size={28} />
         <span>暂无协作任务</span>
         <span className="text-xs">

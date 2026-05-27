@@ -475,7 +475,7 @@ export const SchedulesView = (): React.JSX.Element => {
             <div className="space-y-1.5">
               <p className="text-sm font-medium text-[var(--color-text-secondary)]">暂无计划任务</p>
               <p className="max-w-sm text-xs text-[var(--color-text-muted)]">
-                在任意团队中创建计划，即可使用 Cron 表达式自动执行团队任务。
+                在任意团队中创建计划，即可使用 Cron 表达式自动运行团队。
                 所有团队的计划都会显示在这里。
               </p>
             </div>

@@ -68,6 +68,7 @@ import {
   Terminal,
   Trash2,
   Loader2,
+  MessageSquare,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -79,6 +80,7 @@ import { ReviewDialog } from './dialogs/ReviewDialog';
 import { SendMessageDialog } from './dialogs/SendMessageDialog';
 import { TaskDetailDialog } from './dialogs/TaskDetailDialog';
 import { executeTeamRelaunch } from './dialogs/teamRelaunchFlow';
+import { CollabBoardPanel } from './kanban/CollabBoardPanel';
 import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { KanbanSearchInput } from './kanban/KanbanSearchInput';
@@ -1904,11 +1906,8 @@ export const TeamDetailView = ({
       pendingRepliesByMember,
       onPendingReplyChange: setPendingRepliesByMember,
       onMemberClick: handleSelectMember,
-      onTaskClick: handleOpenTask,
-      onCreateTaskFromMessage: handleCreateTaskFromMessage,
       onReplyToMessage: handleReplyToMessage,
       onRestartTeam: handleRestartTeam,
-      onTaskIdClick: handleTaskIdClick,
       inlineScrollContainerRef: contentRef,
       showPositionControls: false,
     }),
@@ -1917,12 +1916,9 @@ export const TeamDetailView = ({
       data?.config.leadSessionId,
       data?.isAlive,
       data?.tasks,
-      handleCreateTaskFromMessage,
-      handleOpenTask,
       handleReplyToMessage,
       handleRestartTeam,
       handleSelectMember,
-      handleTaskIdClick,
       pendingRepliesByMember,
       teamName,
       teamSessionIds,
@@ -2276,209 +2272,24 @@ export const TeamDetailView = ({
                 <TeamMemberListBridge
                   teamName={teamName}
                   members={membersWithLiveBranches}
-                  memberTaskCounts={memberTaskCounts}
-                  taskMap={taskMap}
                   pendingRepliesByMember={pendingRepliesByMember}
                   isTeamAlive={data.isAlive}
                   isTeamProvisioning={isTeamProvisioning}
                   launchParams={launchParams}
                   onMemberClick={handleSelectMember}
                   onSendMessage={handleSendMessageToMember}
-                  onAssignTask={handleAssignTaskToMember}
-                  onOpenTask={handleOpenTaskById}
                   onRestartMember={handleRestartMember}
                   onSkipMemberForLaunch={handleSkipMemberForLaunch}
                 />
               </CollapsibleTeamSection>
 
               <CollapsibleTeamSection
-                sectionId="kanban"
-                title="外部派单"
-                icon={<Columns3 size={14} />}
-                badge={filteredTasks.length}
-                defaultOpen
-                forceOpen={kanbanSearch.trim().length > 0}
-                action={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openCreateTaskDialog();
-                    }}
-                  >
-                    <Plus size={12} />
-                    新建
-                  </Button>
-                }
+                sectionId="collab"
+                title="跨团队协作"
+                icon={<MessageSquare size={14} />}
+                defaultOpen={false}
               >
-                <div className="min-w-0">
-                  <KanbanBoard
-                    tasks={kanbanDisplayTasks}
-                    teamName={teamName}
-                    kanbanState={data.kanbanState}
-                    filter={kanbanFilter}
-                    sort={kanbanSort}
-                    sessions={teamSessions}
-                    leadSessionId={data.config.leadSessionId}
-                    members={activeMembers}
-                    onFilterChange={setKanbanFilter}
-                    onSortChange={setKanbanSort}
-                    toolbarLeft={
-                      <KanbanSearchInput
-                        value={kanbanSearch}
-                        onChange={setKanbanSearch}
-                        tasks={filteredTasks}
-                        members={activeMembers}
-                      />
-                    }
-                    onRequestReview={(taskId) => {
-                      void (async () => {
-                        try {
-                          await requestReview(teamName, taskId);
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onApprove={(taskId) => {
-                      void (async () => {
-                        try {
-                          await updateKanban(teamName, taskId, {
-                            op: 'set_column',
-                            column: 'approved',
-                          });
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onRequestChanges={(taskId) => {
-                      setRequestChangesTaskId(taskId);
-                    }}
-                    onMoveBackToDone={(taskId) => {
-                      void (async () => {
-                        try {
-                          await updateKanban(teamName, taskId, { op: 'remove' });
-                          await updateTaskStatus(teamName, taskId, 'completed');
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onStartTask={(taskId) => {
-                      void (async () => {
-                        try {
-                          const result = await startTaskByUser(teamName, taskId);
-                          if (data?.isAlive) {
-                            const task = data.tasks.find((t) => t.id === taskId);
-                            try {
-                              if (result.notifiedOwner && task?.owner) {
-                                await api.teams.processSend(
-                                  teamName,
-                                  `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
-                                );
-                              } else if (!result.notifiedOwner) {
-                                const desc = task?.description?.trim()
-                                  ? `\nDescription: ${task.description.trim()}`
-                                  : '';
-                                await api.teams.processSend(
-                                  teamName,
-                                  `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been moved to IN PROGRESS but has no assignee.${desc}\nPlease assign it to an available team member, or take it yourself if everyone is busy.`
-                                );
-                              }
-                            } catch {
-                              // best-effort
-                            }
-                          }
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onCompleteTask={(taskId) => {
-                      void (async () => {
-                        try {
-                          await updateTaskStatus(teamName, taskId, 'completed');
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onCancelTask={(taskId) => {
-                      void (async () => {
-                        try {
-                          const task = data?.tasks.find((t) => t.id === taskId);
-                          await updateTaskStatus(teamName, taskId, 'pending');
-
-                          // Notify assignee directly via inbox — they'll see it immediately
-                          if (task?.owner) {
-                            try {
-                              await api.teams.sendMessage(teamName, {
-                                member: task.owner,
-                                text: `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has been CANCELLED by the user and moved back to TODO. Stop working on it immediately.`,
-                                summary: `Task ${formatTaskDisplayLabel(task)} cancelled`,
-                              });
-                            } catch {
-                              // best-effort
-                            }
-                          }
-
-                          // Also notify team lead so they can reassign/coordinate
-                          if (data?.isAlive) {
-                            try {
-                              const ownerSuffix = task?.owner
-                                ? ` ${task.owner} has been notified to stop.`
-                                : '';
-                              await api.teams.processSend(
-                                teamName,
-                                `Task #${deriveTaskDisplayId(taskId)} "${task?.subject ?? ''}" has been cancelled and moved back to TODO.${ownerSuffix}`
-                              );
-                            } catch {
-                              // best-effort
-                            }
-                          }
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onColumnOrderChange={(columnId, orderedTaskIds) => {
-                      void (async () => {
-                        try {
-                          await updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onScrollToTask={(taskId) => {
-                      const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                      if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        el.classList.remove('kanban-card-focus-pulse');
-                        void (el as HTMLElement).offsetWidth;
-                        el.classList.add('kanban-card-focus-pulse');
-                        el.addEventListener(
-                          'animationend',
-                          () => el.classList.remove('kanban-card-focus-pulse'),
-                          { once: true }
-                        );
-                      }
-                    }}
-                    onTaskClick={(task) => {
-                      setSelectedTask(task);
-                    }}
-                    onViewChanges={handleViewChanges}
-                    onAddTask={(startImmediately) =>
-                      openCreateTaskDialog('', '', '', startImmediately)
-                    }
-                    onDeleteTask={handleDeleteTask}
-                    deletedTaskCount={deletedTasks.length}
-                    onOpenTrash={() => setTrashOpen(true)}
-                  />
-                </div>
+                <CollabBoardPanel teamName={teamName} />
               </CollapsibleTeamSection>
 
               <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
@@ -2556,16 +2367,7 @@ export const TeamDetailView = ({
                   setReplyQuote(undefined);
                   setSendDialogOpen(true);
                 }}
-                onAssignTask={() => {
-                  const name = selectedMember?.name ?? '';
-                  closeSelectedMemberDialog();
-                  openCreateTaskDialog('', '', name);
-                }}
                 onRestartMember={handleRestartMember}
-                onTaskClick={(task) => {
-                  closeSelectedMemberDialog();
-                  setSelectedTask(task);
-                }}
                 onUpdateRole={async (memberName, role) => {
                   setUpdatingRoleLoading(true);
                   try {
@@ -2596,22 +2398,6 @@ export const TeamDetailView = ({
                     initialFilePath: filePath,
                   });
                 }}
-              />
-
-              <CreateTaskDialog
-                open={createTaskDialog.open}
-                teamName={teamName}
-                members={activeMembers}
-                tasks={data.tasks}
-                isTeamAlive={data.isAlive && !isTeamProvisioning}
-                defaultSubject={createTaskDialog.defaultSubject}
-                defaultDescription={createTaskDialog.defaultDescription}
-                defaultOwner={createTaskDialog.defaultOwner}
-                defaultStartImmediately={createTaskDialog.defaultStartImmediately}
-                defaultChip={createTaskDialog.defaultChip}
-                onClose={closeCreateTaskDialog}
-                onSubmit={handleCreateTask}
-                submitting={creatingTask}
               />
 
               <EditTeamDialog
@@ -2803,63 +2589,6 @@ export const TeamDetailView = ({
                   setReplyQuote(undefined);
                   setSendDialogDefaultText(undefined);
                   setSendDialogDefaultChip(undefined);
-                }}
-              />
-
-              <TaskDetailDialog
-                open={selectedTask !== null}
-                task={selectedTask}
-                teamName={teamName}
-                kanbanTaskState={
-                  selectedTask ? data?.kanbanState.tasks[selectedTask.id] : undefined
-                }
-                taskMap={taskMap}
-                members={activeMembers}
-                onClose={() => setSelectedTask(null)}
-                onScrollToTask={(taskId) => {
-                  setSelectedTask(null);
-                  const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                  if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    el.classList.remove('kanban-card-focus-pulse');
-                    void (el as HTMLElement).offsetWidth;
-                    el.classList.add('kanban-card-focus-pulse');
-                    el.addEventListener(
-                      'animationend',
-                      () => el.classList.remove('kanban-card-focus-pulse'),
-                      { once: true }
-                    );
-                  }
-                }}
-                onOwnerChange={(taskId, owner) => {
-                  void (async () => {
-                    try {
-                      await updateTaskOwner(teamName, taskId, owner);
-                    } catch {
-                      // error via store
-                    }
-                  })();
-                }}
-                onViewChanges={handleViewChangesForFile}
-                onOpenInEditor={(filePath) => {
-                  const { revealFileInEditor } = useStore.getState();
-                  revealFileInEditor(filePath);
-                }}
-                onDeleteTask={handleDeleteTask}
-              />
-
-              <TrashDialog
-                open={trashOpen}
-                tasks={deletedTasks}
-                onClose={() => setTrashOpen(false)}
-                onRestore={(taskId) => {
-                  void (async () => {
-                    try {
-                      await restoreTask(teamName, taskId);
-                    } catch {
-                      // error via store
-                    }
-                  })();
                 }}
               />
 

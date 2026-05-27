@@ -211,6 +211,7 @@ export const MessagesPanel = memo(function MessagesPanel({
     messagesState,
     loadOlderTeamMessages,
     refreshTeamMessagesHead,
+    addOptimisticTeamMessage,
   } = useStore(
     useShallow((s) => ({
       sendTeamMessage: s.sendTeamMessage,
@@ -226,6 +227,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
       loadOlderTeamMessages: s.loadOlderTeamMessages,
       refreshTeamMessagesHead: s.refreshTeamMessagesHead,
+      addOptimisticTeamMessage: s.addOptimisticTeamMessage,
     }))
   );
   const bootstrapHeadRefreshAttemptedForTeamRef = useRef<string | null>(null);
@@ -739,6 +741,34 @@ export const MessagesPanel = memo(function MessagesPanel({
     [teamName, sendCrossTeamMessage]
   );
 
+  const handleDispatchTaskToTeam = useCallback(
+    async (toTeam: string, subject: string, description: string) => {
+      addOptimisticTeamMessage(teamName, {
+        from: 'user',
+        to: toTeam,
+        text: `@${toTeam} ${subject}`,
+        timestamp: new Date().toISOString(),
+        read: true,
+        messageId: `optimistic-cross-team-${Date.now()}`,
+        source: 'cross_team_sent',
+      });
+      const result = await api.collab.dispatch(teamName, toTeam, subject, {
+        description,
+        deadlineMinutes: 10,
+        needsHumanReview: true,
+      });
+      if (!result.ok) {
+        throw new Error(result.message || '跨团队任务派发失败');
+      }
+      window.dispatchEvent(new CustomEvent('collab:refresh'));
+      await refreshTeamMessagesHead(teamName);
+      window.setTimeout(() => {
+        void refreshTeamMessagesHead(teamName);
+      }, 300);
+    },
+    [addOptimisticTeamMessage, teamName, refreshTeamMessagesHead]
+  );
+
   const moveToInline = useCallback(() => {
     onPositionChange('inline');
   }, [onPositionChange]);
@@ -869,6 +899,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         onSessionChange={setSelectedSessionKey}
         textareaRef={composerTextareaRef}
         onSend={handleSend}
+        onDispatchTask={handleDispatchTaskToTeam}
       />
       <StatusBlock
         members={members}
@@ -1065,6 +1096,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               onSessionChange={setSelectedSessionKey}
               textareaRef={composerTextareaRef}
               onSend={handleSend}
+              onDispatchTask={handleDispatchTaskToTeam}
             />
             <StatusBlock
               members={members}
@@ -1352,6 +1384,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     onSessionChange={setSelectedSessionKey}
                     textareaRef={composerTextareaRef}
                     onSend={handleSend}
+                    onDispatchTask={handleDispatchTaskToTeam}
                   />
                 </div>
               </div>
