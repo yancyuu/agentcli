@@ -252,7 +252,9 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 Current team slug: `hermit`
 
 Available teams:
-- No other teams currently registered.
+- feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_82906a790206a1e6698714b2bae9e070
+- hemit-cursor
+- product
 
 Cross-team work is routed by Hermit itself. If the user mentions another team with `@team`,
 Hermit will create and track the cross-team collaboration task automatically.

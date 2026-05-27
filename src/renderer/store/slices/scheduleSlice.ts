@@ -40,7 +40,7 @@ export interface ScheduleSlice {
   /** Open a standalone Schedules tab (or focus existing) */
   openSchedulesTab(): void;
 
-  /** Open the task overview tab (team task pool + schedules). */
+  /** Open the standalone task overview tab. */
   openTasksTab(): void;
 }
 

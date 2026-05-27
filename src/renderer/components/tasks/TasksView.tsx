@@ -15,7 +15,7 @@ type TasksSubTab = 'overview' | 'schedules';
 type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'overview', label: '总览池', icon: <Columns3 size={14} /> },
+  { id: 'overview', label: '任务总览', icon: <Columns3 size={14} /> },
   { id: 'schedules', label: '定时任务', icon: <Calendar size={14} /> },
 ];
 
@@ -86,7 +86,6 @@ export const TasksView = (): React.JSX.Element => {
           </button>
         ))}
       </div>
-
       <div className="flex-1 overflow-auto">
         {activeTab === 'overview' && <TaskOverviewPool />}
         {activeTab === 'schedules' && <SchedulesView />}

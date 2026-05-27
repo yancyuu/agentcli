@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import { api } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
-import { Calendar, PanelRight, Puzzle, Users } from 'lucide-react';
+import { ListTodo, PanelRight, Puzzle, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MoreMenu } from './MoreMenu';
@@ -112,7 +112,7 @@ export const TabBarActions = (): React.JSX.Element => {
             }}
             aria-label="任务"
           >
-            <Calendar className="size-4" />
+            <ListTodo className="size-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">任务</TooltipContent>

@@ -74,9 +74,9 @@ const ScheduleListItem = ({
   }, [expanded, runs.length, runsLoading, fetchRunHistory, schedule.id]);
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] font-sans">
+    <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white/[0.025] font-sans shadow-[0_14px_32px_rgba(0,0,0,0.14)] transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-white/[0.04]">
       {/* Main row */}
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-3 px-4 py-3.5">
         {/* Expand toggle */}
         <button
           type="button"
@@ -106,7 +106,7 @@ const ScheduleListItem = ({
         {/* Team badge */}
         <button
           type="button"
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
           onClick={() => onTeamClick(schedule.teamName)}
         >
           <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: teamColor }} />
@@ -116,7 +116,7 @@ const ScheduleListItem = ({
         {/* Next run */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
+            <span className="shrink-0 rounded-full bg-white/[0.035] px-2 py-1 text-xs text-[var(--color-text-muted)]">
               下次：{formatNextRun(schedule.nextRunAt)}
             </span>
           </TooltipTrigger>
@@ -194,7 +194,7 @@ const ScheduleListItem = ({
 
       {/* Expanded: Run history */}
       {expanded ? (
-        <div className="border-t border-[var(--color-border)]">
+        <div className="border-t border-white/[0.06] bg-black/10">
           {runsLoading ? (
             <div className="flex items-center justify-center py-4 text-xs text-[var(--color-text-muted)]">
               正在加载运行历史...
@@ -328,6 +328,16 @@ export const SchedulesView = (): React.JSX.Element => {
     });
   }, [getTeamDisplayName, schedules, teamFilter, searchQuery]);
 
+  const scheduleStats = useMemo(
+    () => ({
+      total: schedules.length,
+      active: schedules.filter((schedule) => schedule.status === 'active').length,
+      paused: schedules.filter((schedule) => schedule.status === 'paused').length,
+      teams: new Set(schedules.map((schedule) => schedule.teamName)).size,
+    }),
+    [schedules]
+  );
+
   const handleEdit = useCallback((schedule: Schedule) => {
     setEditingSchedule(schedule);
     setDialogOpen(true);
@@ -367,18 +377,38 @@ export const SchedulesView = (): React.JSX.Element => {
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-surface)]">
-      <div className="mx-auto w-full max-w-5xl px-6 py-8">
+      <div className="mx-auto w-full max-w-6xl px-6 py-8">
         {/* Header */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Calendar className="size-5 text-[var(--color-text-muted)]" />
-              <h1 className="text-lg font-semibold text-[var(--color-text)]">计划任务</h1>
-              {schedules.length > 0 && (
-                <span className="rounded-full bg-[var(--color-surface-raised)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]">
-                  {schedules.length}
+        <div className="mb-5 rounded-2xl border border-[var(--color-border-subtle)] bg-white/[0.025] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.12)]">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                  <Calendar className="size-4" />
                 </span>
-              )}
+                <div>
+                  <h1 className="text-lg font-semibold text-[var(--color-text)]">定时任务</h1>
+                  <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                    集中管理所有团队的 Cron 计划、运行状态和历史记录。
+                  </p>
+                </div>
+              </div>
+              {schedules.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
+                    全部 {scheduleStats.total}
+                  </span>
+                  <span className="rounded-full border border-emerald-400/15 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-400">
+                    运行中 {scheduleStats.active}
+                  </span>
+                  <span className="rounded-full border border-yellow-400/15 bg-yellow-400/10 px-2.5 py-1 text-xs text-yellow-400">
+                    已暂停 {scheduleStats.paused}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
+                    团队 {scheduleStats.teams}
+                  </span>
+                </div>
+              ) : null}
             </div>
             <Button size="sm" className="gap-1.5" onClick={handleCreate}>
               <Plus className="size-3.5" />
@@ -388,9 +418,9 @@ export const SchedulesView = (): React.JSX.Element => {
 
           {/* Filters row */}
           {schedules.length > 0 && (
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.06] bg-black/10 p-2">
               {/* Search */}
-              <div className="relative max-w-xs flex-1">
+              <div className="relative min-w-[220px] flex-1">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
                 <Input
                   placeholder="搜索计划..."
@@ -470,10 +500,12 @@ export const SchedulesView = (): React.JSX.Element => {
           </div>
         ) : schedules.length === 0 ? (
           /* Global empty state */
-          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <Calendar className="size-12 text-[var(--color-text-muted)]" />
+          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--color-border)] bg-white/[0.02] py-16 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
+              <Calendar className="size-7" />
+            </div>
             <div className="space-y-1.5">
-              <p className="text-sm font-medium text-[var(--color-text-secondary)]">暂无计划任务</p>
+              <p className="text-sm font-medium text-[var(--color-text-secondary)]">暂无定时任务</p>
               <p className="max-w-sm text-xs text-[var(--color-text-muted)]">
                 在任意团队中创建计划，即可使用 Cron 表达式自动运行团队。
                 所有团队的计划都会显示在这里。
@@ -486,7 +518,7 @@ export const SchedulesView = (): React.JSX.Element => {
           </div>
         ) : filteredSchedules.length === 0 ? (
           /* No results for current filters */
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+          <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-border)] bg-white/[0.02] py-12 text-center">
             <Search className="size-8 text-[var(--color-text-muted)]" />
             <p className="text-sm text-[var(--color-text-muted)]">没有符合当前筛选条件的计划</p>
             <button
