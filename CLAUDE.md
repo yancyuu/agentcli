@@ -245,21 +245,20 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 - Prefer designs where the high-level feature code can swap local browser/Electron storage for a server-backed implementation without rewriting the rendering layer.
 - Reuse generic persistence/layout infrastructure when adding new draggable/resizable surfaces instead of copying feature-specific storage code.
 
+<!-- hermit:team-collaboration:start -->
 
-## Cross-Team Task Dispatch (Hermit)
+## Hermit Team Context
 
-You can dispatch tasks to other teams via the Hermit local API:
+Current team slug: `hermit`
 
-- **List available teams**: `curl -s http://127.0.0.1:5680/api/cross-team/targets`
-- **Dispatch a task**: `curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"openHermit","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'`
+Available teams:
+- feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_82906a790206a1e6698714b2bae9e070
+- hemit-cursor
+- product
 
-Current team slug: `openHermit`
+Cross-team work is routed by Hermit itself. If the user mentions another team with `@team`,
+Hermit will create and track the cross-team collaboration task automatically.
 
-When to dispatch:
-- Task requires access to a different codebase/project
-- Task explicitly mentions another team's domain
-- Task is blocked by work owned by another team
-
-Do NOT dispatch:
-- Task is within current team's project scope
-- Task can be completed with available tools
+Do not call cross-team dispatch APIs yourself and do not invent dispatch IDs.
+You may use the team list only to understand which teams exist and when a user is referring to one.
+<!-- hermit:team-collaboration:end -->

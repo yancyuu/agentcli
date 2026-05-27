@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import { api } from '@renderer/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
-import { Calendar, PanelRight, Puzzle, Users } from 'lucide-react';
+import { ListTodo, PanelRight, Puzzle, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MoreMenu } from './MoreMenu';
@@ -18,7 +18,7 @@ export const TabBarActions = (): React.JSX.Element => {
   const {
     unreadCount,
     openExtensionsTab,
-    openSchedulesTab,
+    openTasksTab,
     openTeamsTab,
     activeTabId,
     openTabs,
@@ -29,7 +29,7 @@ export const TabBarActions = (): React.JSX.Element => {
     useShallow((s) => ({
       unreadCount: s.unreadCount,
       openExtensionsTab: s.openExtensionsTab,
-      openSchedulesTab: s.openSchedulesTab,
+      openTasksTab: s.openTasksTab,
       openTeamsTab: s.openTeamsTab,
       activeTabId: s.activeTabId,
       openTabs: s.openTabs,
@@ -42,7 +42,7 @@ export const TabBarActions = (): React.JSX.Element => {
   // Hover states for buttons
   const [teamsHover, setTeamsHover] = useState(false);
   const [extensionsHover, setExtensionsHover] = useState(false);
-  const [schedulesHover, setSchedulesHover] = useState(false);
+  const [tasksHover, setTasksHover] = useState(false);
   const [githubHover, setGithubHover] = useState(false);
   const [expandHover, setExpandHover] = useState(false);
 
@@ -102,20 +102,20 @@ export const TabBarActions = (): React.JSX.Element => {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={openSchedulesTab}
-            onMouseEnter={() => setSchedulesHover(true)}
-            onMouseLeave={() => setSchedulesHover(false)}
+            onClick={openTasksTab}
+            onMouseEnter={() => setTasksHover(true)}
+            onMouseLeave={() => setTasksHover(false)}
             className="rounded-md p-2 transition-colors"
             style={{
-              color: schedulesHover ? 'var(--color-text)' : 'var(--color-text-muted)',
-              backgroundColor: schedulesHover ? 'var(--color-surface-raised)' : 'transparent',
+              color: tasksHover ? 'var(--color-text)' : 'var(--color-text-muted)',
+              backgroundColor: tasksHover ? 'var(--color-surface-raised)' : 'transparent',
             }}
-            aria-label="定时任务"
+            aria-label="任务"
           >
-            <Calendar className="size-4" />
+            <ListTodo className="size-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">定时任务</TooltipContent>
+        <TooltipContent side="bottom">任务</TooltipContent>
       </Tooltip>
 
       {/* GitHub link */}

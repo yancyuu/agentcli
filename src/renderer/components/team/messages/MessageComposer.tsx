@@ -69,6 +69,11 @@ interface MessageComposerProps {
     actionMode?: AgentActionMode,
     taskRefs?: TaskRef[]
   ) => void;
+  onDispatchTask?: (
+    toTeam: string,
+    subject: string,
+    description: string
+  ) => Promise<boolean | void> | boolean | void;
 }
 
 export const MessageComposer = ({
@@ -86,6 +91,7 @@ export const MessageComposer = ({
   onSessionChange,
   textareaRef: externalTextareaRef,
   onSend,
+  onDispatchTask,
 }: MessageComposerProps): React.JSX.Element => {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useMemo(() => {
@@ -223,7 +229,26 @@ export const MessageComposer = ({
           ? '斜杠命令需要团队负责人在线'
           : null
     : null;
-  const canSend =
+  const teamDispatch = useMemo(() => {
+    const match = trimmed.match(/^@([^\s]+)\s+([\s\S]+)$/);
+    if (!match || !onDispatchTask) return null;
+    const mentioned = match[1];
+    const subject = match[2]?.trim();
+    if (!mentioned || !subject) return null;
+    const targetTeam = teamMentionSuggestions.find((team) => {
+      const slug = team.id.startsWith('team:') ? team.id.slice('team:'.length) : team.id;
+      return slug === mentioned || team.name === mentioned;
+    });
+    const slug = targetTeam
+      ? targetTeam.id.startsWith('team:')
+        ? targetTeam.id.slice('team:'.length)
+        : targetTeam.id
+      : mentioned;
+    return { slug, subject };
+  }, [onDispatchTask, teamMentionSuggestions, trimmed]);
+  const canDispatchToTeam =
+    teamDispatch !== null && trimmed.length > 0 && trimmed.length <= MAX_TEXT_LENGTH && !sending;
+  const canSendRegularMessage =
     recipient.length > 0 &&
     trimmed.length > 0 &&
     trimmed.length <= MAX_TEXT_LENGTH &&
@@ -231,6 +256,7 @@ export const MessageComposer = ({
     !isProvisioning &&
     !attachmentsBlocked &&
     !slashCommandRestrictionReason;
+  const canSend = canDispatchToTeam || canSendRegularMessage;
 
   // Track whether we initiated a send — clear draft only on confirmed success
   const pendingSendRef = useRef(false);
@@ -238,9 +264,19 @@ export const MessageComposer = ({
   const handleSend = useCallback(() => {
     if (!canSend) return;
     dismissMentionsRef.current?.();
-    pendingSendRef.current = true;
     const taskRefs = extractTaskRefsFromText(draft.text, taskSuggestions);
     const serialized = serializeChipsWithText(trimmed, draft.chips);
+
+    if (teamDispatch && onDispatchTask) {
+      void Promise.resolve(
+        onDispatchTask(teamDispatch.slug, teamDispatch.subject, serialized)
+      ).then((dispatched) => {
+        if (dispatched !== false) draft.clearDraft();
+      });
+      return;
+    }
+
+    pendingSendRef.current = true;
     onSend(
       recipient,
       serialized,
@@ -249,7 +285,7 @@ export const MessageComposer = ({
       undefined,
       taskRefs
     );
-  }, [canSend, recipient, trimmed, onSend, draft.attachments, draft.chips, taskSuggestions]);
+  }, [canSend, recipient, trimmed, onSend, draft, taskSuggestions, teamDispatch, onDispatchTask]);
 
   // Clear draft only after send completes successfully (sending: true → false, no error)
   useEffect(() => {

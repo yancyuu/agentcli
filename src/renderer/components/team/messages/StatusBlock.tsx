@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { computePendingCrossTeamReplies } from '@renderer/utils/crossTeamPendingReplies';
 import { ChevronRight } from 'lucide-react';
 
-import { ActiveTasksBlock } from '../activity/ActiveTasksBlock';
 import { PendingRepliesBlock } from '../activity/PendingRepliesBlock';
 
 import type { InboxMessage, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
@@ -29,13 +28,10 @@ interface StatusBlockProps {
  */
 export const StatusBlock = ({
   members,
-  tasks,
   messages,
   pendingRepliesByMember,
-  position,
   layout = 'overlay',
   onMemberClick,
-  onTaskClick,
 }: StatusBlockProps): React.JSX.Element | null => {
   const [collapsed, setCollapsed] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -50,21 +46,11 @@ export const StatusBlock = ({
     );
     return hasMemberPendingReplies || pendingCrossTeamReplies.length > 0;
   }, [members, pendingRepliesByMember, pendingCrossTeamReplies.length]);
-  const hasActiveTasks = useMemo(() => {
-    const tMap = new Map(tasks.map((t) => [t.id, t]));
-    return members.some((m) => {
-      if (!m.currentTaskId) return false;
-      const task = tMap.get(m.currentTaskId);
-      if (task && (task.reviewState === 'approved' || task.status === 'completed')) return false;
-      return true;
-    });
-  }, [members, tasks]);
 
   /** Whether the Status block has any visible items. */
   const hasItems = useMemo(() => {
-    if (hasPendingReplies) return true;
-    return hasActiveTasks;
-  }, [hasActiveTasks, hasPendingReplies]);
+    return hasPendingReplies;
+  }, [hasPendingReplies]);
 
   // Only run the 1-second timer when the block actually has content to show.
   useEffect(() => {
@@ -111,14 +97,6 @@ export const StatusBlock = ({
               onMemberClick={onMemberClick}
             />
           ) : null}
-          <ActiveTasksBlock
-            members={members}
-            tasks={tasks}
-            defaultCollapsed={position === 'sidebar'}
-            headerRight={!hasPendingReplies ? flowInlineToggle : undefined}
-            onMemberClick={onMemberClick}
-            onTaskClick={onTaskClick}
-          />
         </div>
       )}
     </>

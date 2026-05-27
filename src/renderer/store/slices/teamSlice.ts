@@ -2067,6 +2067,7 @@ export interface TeamSlice {
     delayMs?: number
   ) => void;
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<SendMessageResult>;
+  addOptimisticTeamMessage: (teamName: string, message: InboxMessage) => void;
   crossTeamTargets: {
     teamName: string;
     displayName: string;
@@ -3988,6 +3989,39 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   },
 
   sendTeamMessage: async (teamName: string, request: SendMessageRequest) => {
+    const optimisticMessageId =
+      request.messageId ?? `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticTimestamp = request.timestamp ?? nowIso();
+    const requestWithMessageId: SendMessageRequest = {
+      ...request,
+      messageId: optimisticMessageId,
+      timestamp: optimisticTimestamp,
+    };
+    const optimisticMessage: InboxMessage = {
+      from: requestWithMessageId.from ?? 'user',
+      to: requestWithMessageId.to ?? requestWithMessageId.member,
+      text: requestWithMessageId.text,
+      timestamp: optimisticTimestamp,
+      read: true,
+      taskRefs: requestWithMessageId.taskRefs?.length ? requestWithMessageId.taskRefs : undefined,
+      actionMode: requestWithMessageId.actionMode,
+      summary: requestWithMessageId.summary,
+      color: requestWithMessageId.color,
+      messageId: optimisticMessageId,
+      relayOfMessageId: requestWithMessageId.relayOfMessageId,
+      source: requestWithMessageId.source ?? 'user_sent',
+      attachments: requestWithMessageId.attachments?.length
+        ? requestWithMessageId.attachments
+        : undefined,
+      leadSessionId: requestWithMessageId.leadSessionId,
+      conversationId: requestWithMessageId.conversationId,
+      replyToConversationId: requestWithMessageId.replyToConversationId,
+      toolSummary: requestWithMessageId.toolSummary,
+      toolCalls: requestWithMessageId.toolCalls,
+      messageKind: requestWithMessageId.messageKind,
+      slashCommand: requestWithMessageId.slashCommand,
+      commandOutput: requestWithMessageId.commandOutput,
+    };
     set({
       sendingMessage: true,
       sendMessageError: null,
@@ -3995,35 +4029,25 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       sendMessageDebugDetails: null,
       lastSendMessageResult: null,
     });
+    set((state) => ({
+      teamMessagesByName: {
+        ...state.teamMessagesByName,
+        [teamName]: upsertOptimisticTeamMessage(
+          getTeamMessagesCacheEntry(state, teamName),
+          optimisticMessage
+        ),
+      },
+    }));
     try {
       const result = await unwrapIpc('team:sendMessage', () =>
-        api.teams.sendMessage(teamName, request)
+        api.teams.sendMessage(teamName, requestWithMessageId)
       );
       const runtimeDeliveryFailed =
         result.runtimeDelivery?.attempted === true && result.runtimeDelivery.delivered === false;
       const runtimeDeliveryDiagnostics = buildOpenCodeRuntimeDeliveryDiagnostics(result);
-      const optimisticMessage: InboxMessage = {
-        from: request.from ?? 'user',
-        to: request.to ?? request.member,
-        text: request.text,
-        timestamp: request.timestamp ?? nowIso(),
-        read: true,
-        taskRefs: request.taskRefs?.length ? request.taskRefs : undefined,
-        actionMode: request.actionMode,
-        summary: request.summary,
-        color: request.color,
+      const confirmedOptimisticMessage: InboxMessage = {
+        ...optimisticMessage,
         messageId: result.messageId,
-        relayOfMessageId: request.relayOfMessageId,
-        source: request.source ?? 'user_sent',
-        attachments: request.attachments?.length ? request.attachments : undefined,
-        leadSessionId: request.leadSessionId,
-        conversationId: request.conversationId,
-        replyToConversationId: request.replyToConversationId,
-        toolSummary: request.toolSummary,
-        toolCalls: request.toolCalls,
-        messageKind: request.messageKind,
-        slashCommand: request.slashCommand,
-        commandOutput: request.commandOutput,
       };
       set((state) => ({
         sendingMessage: false,
@@ -4035,7 +4059,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           ...state.teamMessagesByName,
           [teamName]: upsertOptimisticTeamMessage(
             getTeamMessagesCacheEntry(state, teamName),
-            optimisticMessage
+            confirmedOptimisticMessage
           ),
         },
       }));
@@ -4051,6 +4075,18 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       });
       throw error;
     }
+  },
+
+  addOptimisticTeamMessage: (teamName: string, message: InboxMessage) => {
+    set((state) => ({
+      teamMessagesByName: {
+        ...state.teamMessagesByName,
+        [teamName]: upsertOptimisticTeamMessage(
+          getTeamMessagesCacheEntry(state, teamName),
+          message
+        ),
+      },
+    }));
   },
 
   fetchCrossTeamTargets: async () => {

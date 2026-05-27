@@ -133,6 +133,9 @@ export type TeamReviewState = 'none' | 'review' | 'needsFix' | 'approved';
 
 export type DispatchStatus =
   | 'dispatched'
+  | 'pending_accept'
+  | 'accepted'
+  | 'rejected'
   | 'received'
   | 'in_progress'
   | 'completed'
@@ -148,6 +151,15 @@ export interface DispatchMeta {
   receivedAt?: string;
   completedAt?: string;
   remoteTaskId?: string;
+  deadline?: string;
+  acceptedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface AgentCapability {
+  skill: string;
+  description: string;
 }
 
 export interface DiscoverableTeam {
@@ -156,6 +168,9 @@ export interface DiscoverableTeam {
   location: 'local' | 'remote';
   status: 'online' | 'offline';
   collaboration: boolean;
+  capabilities?: AgentCapability[];
+  description?: string;
+  harness?: string;
 }
 
 export interface TaskBusConfig {
@@ -166,8 +181,10 @@ export interface TaskBusConfig {
     password?: string;
     db?: number;
   };
+  collaboration?: boolean;
   telemetry?: {
     enabled: boolean;
+    uploadEnabled?: boolean;
     /** Data source platform. Currently only 'claudecode'. */
     platform: 'claudecode';
   };
@@ -185,6 +202,8 @@ export interface TaskDispatchPayload {
     promptTaskRefs?: string[];
   };
   dispatchedAt: string;
+  deadline?: string;
+  needsHumanReview?: boolean;
 }
 
 export interface TaskStatusUpdate {
@@ -201,6 +220,81 @@ export interface TaskAckPayload {
   status: 'received';
   remoteTaskId: string;
   timestamp: string;
+}
+
+export interface TaskHandshakeResponse {
+  dispatchId: string;
+  type: 'task_accept' | 'task_reject' | 'task_deliver' | 'task_approve' | 'task_revision';
+  fromTeam: string;
+  toTeam: string;
+  remoteTaskId?: string;
+  reason?: string;
+  result?: string;
+  feedback?: string;
+  acceptedAt?: string;
+  rejectedAt?: string;
+  deliveredAt?: string;
+  approvedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration Board — global cross-team task view
+// ---------------------------------------------------------------------------
+
+export type CollabTaskStatus =
+  | 'pending_accept'
+  | 'accepted'
+  | 'delivered'
+  | 'approved'
+  | 'revision'
+  | 'rejected'
+  | 'failed';
+
+export type CollabTaskEventType =
+  | 'task_sent'
+  | 'task_accepted'
+  | 'task_rejected'
+  | 'task_delivered'
+  | 'revision_requested'
+  | 'task_approved'
+  | 'task_failed';
+
+export interface CollabTaskEvent {
+  eventId: string;
+  dispatchId: string;
+  version: number;
+  type: CollabTaskEventType;
+  actor: {
+    type: 'user' | 'team' | 'agent' | 'system';
+    id: string;
+  };
+  payload?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CollabTask {
+  id: string;
+  dispatchId: string;
+  subject: string;
+  description?: string;
+  fromTeam: string;
+  fromTeamDisplay: string;
+  toTeam: string;
+  toTeamDisplay: string;
+  status: CollabTaskStatus;
+  version?: number;
+  reason?: string;
+  result?: string;
+  feedback?: string;
+  deadline?: string;
+  needsHumanReview: boolean;
+  revisionCount: number;
+  createdAt: string;
+  updatedAt: string;
+  acceptedAt?: string;
+  rejectedAt?: string;
+  deliveredAt?: string;
+  approvedAt?: string;
 }
 
 export interface TaskWorkInterval {
@@ -863,7 +957,15 @@ export type TeamLaunchAggregateState =
   | 'partial_skipped';
 export type PersistedTeamLaunchPhase = 'active' | 'finished' | 'reconciled';
 
-export type KanbanColumnId = 'todo' | 'in_progress' | 'done' | 'review' | 'approved';
+export type KanbanColumnId =
+  | 'todo'
+  | 'in_progress'
+  | 'done'
+  | 'review'
+  | 'approved'
+  | 'pending_accept'
+  | 'delivered'
+  | 'revision';
 
 export interface KanbanTaskState {
   column: Extract<KanbanColumnId, 'review' | 'approved'>;
@@ -1699,6 +1801,7 @@ export interface CrossTeamSendRequest {
   toTeam: string;
   timestamp?: string;
   messageId?: string;
+  sessionKey?: string;
   conversationId?: string;
   replyToConversationId?: string;
   text: string;

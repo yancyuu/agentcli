@@ -16,7 +16,6 @@ import {
   FilePlus,
   FolderOpen,
   FolderPlus,
-  ListTodo,
   MessageSquare,
   Pencil,
   Trash2,
@@ -39,8 +38,6 @@ interface EditorContextMenuProps {
   onNewFolder: (parentDir: string) => void;
   onDelete: (path: string) => void;
   onRename: (path: string) => void;
-  /** Trigger "Create Task" with a file mention (files only, not directories) */
-  onCreateTask?: (filePath: string) => void;
   /** Trigger "Write Teammate" with a file mention (files only, not directories) */
   onSendMessage?: (filePath: string) => void;
 }
@@ -56,7 +53,6 @@ export const EditorContextMenu = ({
   onNewFolder,
   onDelete,
   onRename,
-  onCreateTask,
   onSendMessage,
 }: EditorContextMenuProps): React.ReactElement => {
   const [target, setTarget] = useState<TargetEntry | null>(null);
@@ -183,27 +179,16 @@ export const EditorContextMenu = ({
           )}
 
           {/* Team actions — file only */}
-          {target && !target.isDir && (onCreateTask || onSendMessage) && (
+          {target && !target.isDir && onSendMessage && (
             <>
               <ContextMenu.Separator className="my-1 h-px bg-border" />
-              {onSendMessage && (
-                <ContextMenu.Item
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-text outline-none hover:bg-surface-raised focus:bg-surface-raised"
-                  onSelect={() => onSendMessage(target.path)}
-                >
-                  <MessageSquare className="size-3.5 text-text-muted" />
-                  Write Teammate
-                </ContextMenu.Item>
-              )}
-              {onCreateTask && (
-                <ContextMenu.Item
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-text outline-none hover:bg-surface-raised focus:bg-surface-raised"
-                  onSelect={() => onCreateTask(target.path)}
-                >
-                  <ListTodo className="size-3.5 text-text-muted" />
-                  Create Task
-                </ContextMenu.Item>
-              )}
+              <ContextMenu.Item
+                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-text outline-none hover:bg-surface-raised focus:bg-surface-raised"
+                onSelect={() => onSendMessage(target.path)}
+              >
+                <MessageSquare className="size-3.5 text-text-muted" />
+                Write Teammate
+              </ContextMenu.Item>
             </>
           )}
         </ContextMenu.Content>

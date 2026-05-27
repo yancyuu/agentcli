@@ -17,6 +17,7 @@ const KEY_WORK_SECONDS = (slug: string) => `hermit:usage:${slug}:workSeconds`;
 const KEY_PROJECTS = (slug: string) => `hermit:usage:${slug}:projects`;
 
 let scanInterval: ReturnType<typeof setInterval> | null = null;
+let lastLocalScan: TelemetryStatusResult | null = null;
 
 function redisConfig(cfg: TaskBusConfig) {
   return {
@@ -103,12 +104,19 @@ async function uploadMetrics(client: Redis, slug: string, result: ParseResult): 
 async function doScan(cfg: TaskBusConfig): Promise<ParseResult | null> {
   if (!cfg.telemetry?.enabled) return null;
 
+  const result = await scanSessions();
+  lastLocalScan = statusFromParseResult(result, false);
+
+  if (!cfg.telemetry.uploadEnabled) {
+    return result;
+  }
+
   const client = await getRedis(cfg);
-  if (!client) return null;
+  if (!client) return result;
 
   try {
-    const result = await scanSessions();
     await uploadMetrics(client, 'global', result);
+    lastLocalScan = statusFromParseResult(result, true);
     return result;
   } finally {
     try {
@@ -171,15 +179,35 @@ interface TelemetryStatusResult {
   workSecondsByDay: Record<string, number>;
 }
 
+function statusFromParseResult(result: ParseResult, connected: boolean): TelemetryStatusResult {
+  const { aggregate } = result;
+  return {
+    connected,
+    lastScan: new Date().toISOString(),
+    sessions: aggregate.sessions,
+    messages: aggregate.messages,
+    tokensIn: aggregate.tokens.input,
+    tokensOut: aggregate.tokens.output,
+    cacheRead: aggregate.tokens.cacheRead,
+    cacheCreation: aggregate.tokens.cacheCreation,
+    activeDays: aggregate.activeDays,
+    hourly: aggregate.hourly,
+    projects: aggregate.projects,
+    workSecondsByDay: aggregate.workSecondsByDay,
+  };
+}
+
 export async function getTelemetryStatus(
-  redisCfg: TaskBusConfig['redis']
+  redisCfg?: TaskBusConfig['redis']
 ): Promise<TelemetryStatusResult | null> {
+  if (!redisCfg) return lastLocalScan;
+
   let Redis: typeof import('ioredis').default;
   try {
     const mod = await import('ioredis');
     Redis = mod.default;
   } catch {
-    return null;
+    return lastLocalScan;
   }
 
   const cfg = { redis: redisCfg };
@@ -188,20 +216,7 @@ export async function getTelemetryStatus(
     await client.connect();
     await client.ping();
   } catch {
-    return {
-      connected: false,
-      lastScan: null,
-      sessions: 0,
-      messages: 0,
-      tokensIn: 0,
-      tokensOut: 0,
-      cacheRead: 0,
-      cacheCreation: 0,
-      activeDays: 0,
-      hourly: [],
-      projects: [],
-      workSecondsByDay: {},
-    };
+    return lastLocalScan;
   }
 
   try {

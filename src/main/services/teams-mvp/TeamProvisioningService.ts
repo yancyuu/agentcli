@@ -24,6 +24,26 @@ import {
 } from './TeamWorkspaceService';
 
 const logger = createLogger('TeamProvisioningService');
+const TEAM_INSTRUCTIONS_BEGIN = '<!-- hermit:team-collaboration:start -->';
+const TEAM_INSTRUCTIONS_END = '<!-- hermit:team-collaboration:end -->';
+
+function removeSectionByHeading(content: string, heading: string): string {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return content.replace(
+    new RegExp(`\\n{0,2}## ${escapedHeading}\\n[\\s\\S]*?(?=\\n## |\\s*$)`, 'g'),
+    ''
+  );
+}
+
+function removeManagedTeamInstructions(content: string): string {
+  let next = content.replace(
+    new RegExp(`\\n{0,2}${TEAM_INSTRUCTIONS_BEGIN}[\\s\\S]*?${TEAM_INSTRUCTIONS_END}\\n?`, 'g'),
+    '\n'
+  );
+  next = removeSectionByHeading(next, 'Agent Collaboration (Hermit)');
+  next = removeSectionByHeading(next, 'Cross-Team Task Dispatch (Hermit)');
+  return next.replace(/\n{3,}/g, '\n\n').trimEnd();
+}
 
 export class TeamProvisioningService {
   private readonly workspace: TeamWorkspaceService;
@@ -76,8 +96,6 @@ export class TeamProvisioningService {
         // 不中断流程 — project 可能已存在
       }
     }
-
-    await this.injectTeamInstructions(manifest.workDir, slug);
 
     return { slug, manifest };
   }
@@ -244,25 +262,33 @@ export class TeamProvisioningService {
 
   async injectTeamInstructions(workDir: string, teamSlug: string): Promise<void> {
     const mdPath = path.join(workDir, 'CLAUDE.md');
+    const teams = await this.workspace.listTeams().catch(() => []);
+    const availableTeams = teams
+      .filter((team) => team.slug !== teamSlug)
+      .map((team) => {
+        const label =
+          team.displayName && team.displayName !== team.slug
+            ? `${team.slug} (${team.displayName})`
+            : team.slug;
+        return team.description ? `- ${label}: ${team.description}` : `- ${label}`;
+      });
     const section = `
 
-## Cross-Team Task Dispatch (Hermit)
+${TEAM_INSTRUCTIONS_BEGIN}
 
-You can dispatch tasks to other teams via the Hermit local API:
-
-- **List available teams**: \`curl -s http://127.0.0.1:5680/api/cross-team/targets\`
-- **Dispatch a task**: \`curl -s -X POST http://127.0.0.1:5680/api/cross-team/send -H 'Content-Type: application/json' -d '{"fromTeam":"${teamSlug}","toTeam":"TARGET_TEAM","subject":"Task title","description":"Optional description"}'\`
+## Hermit Team Context
 
 Current team slug: \`${teamSlug}\`
 
-When to dispatch:
-- Task requires access to a different codebase/project
-- Task explicitly mentions another team's domain
-- Task is blocked by work owned by another team
+Available teams:
+${availableTeams.length > 0 ? availableTeams.join('\n') : '- No other teams currently registered.'}
 
-Do NOT dispatch:
-- Task is within current team's project scope
-- Task can be completed with available tools
+Cross-team work is routed by Hermit itself. If the user mentions another team with \`@team\`,
+Hermit will create and track the cross-team collaboration task automatically.
+
+Do not call cross-team dispatch APIs yourself and do not invent dispatch IDs.
+You may use the team list only to understand which teams exist and when a user is referring to one.
+${TEAM_INSTRUCTIONS_END}
 `;
 
     try {
@@ -273,15 +299,28 @@ Do NOT dispatch:
         // File doesn't exist yet
       }
 
-      if (existing.includes('Cross-Team Task Dispatch (Hermit)')) {
-        return;
-      }
-
-      await fs.promises.writeFile(mdPath, existing + section, 'utf8');
+      const cleaned = removeManagedTeamInstructions(existing);
+      await fs.promises.writeFile(mdPath, `${cleaned}${section}`, 'utf8');
       logger.info(`injected team instructions → ${mdPath}`);
     } catch (err) {
       logger.warn(
         `Team instructions injection failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  async removeTeamInstructions(workDir: string): Promise<void> {
+    const mdPath = path.join(workDir, 'CLAUDE.md');
+    try {
+      const existing = await fs.promises.readFile(mdPath, 'utf8');
+      const cleaned = removeManagedTeamInstructions(existing);
+      if (cleaned === existing.trimEnd()) return;
+      await fs.promises.writeFile(mdPath, cleaned ? `${cleaned}\n` : '', 'utf8');
+      logger.info(`removed team instructions → ${mdPath}`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      logger.warn(
+        `Team instructions removal failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

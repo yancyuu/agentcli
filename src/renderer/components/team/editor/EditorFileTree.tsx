@@ -54,8 +54,6 @@ import type { FileTreeEntry, GitFileStatusType } from '@shared/types/editor';
 interface EditorFileTreeProps {
   selectedFilePath: string | null;
   onFileSelect: (filePath: string) => void;
-  /** Trigger "Create Task" with a file mention from context menu */
-  onCreateTask?: (filePath: string) => void;
   /** Trigger "Write Teammate" with a file mention from context menu */
   onSendMessage?: (filePath: string) => void;
 }
@@ -91,7 +89,6 @@ let fileTreeRenderCount = 0;
 export const EditorFileTree = ({
   selectedFilePath,
   onFileSelect,
-  onCreateTask,
   onSendMessage,
 }: EditorFileTreeProps): React.ReactElement => {
   fileTreeRenderCount++;
@@ -452,7 +449,6 @@ export const EditorFileTree = ({
       onNewFolder={handleNewFolder}
       onDelete={handleDelete}
       onRename={handleRename}
-      onCreateTask={onCreateTask}
       onSendMessage={onSendMessage}
     >
       <DndContext

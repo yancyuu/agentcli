@@ -68,6 +68,7 @@ import {
   Terminal,
   Trash2,
   Loader2,
+  MessageSquare,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -1591,6 +1592,24 @@ export const TeamDetailView = ({
     openLaunchDialog('relaunch');
   }, [openLaunchDialog]);
 
+  const handleStartCcConnectTeam = useCallback(() => {
+    void (async () => {
+      if (!data?.config.projectPath) {
+        openLaunchDialog('launch');
+        return;
+      }
+      await api.ccSettings.restart();
+      await api.teams.launchTeam({
+        teamName,
+        cwd: data.config.projectPath,
+      });
+      window.setTimeout(() => {
+        void fetchTeams();
+        void selectTeam(teamName);
+      }, 1500);
+    })();
+  }, [data?.config.projectPath, fetchTeams, openLaunchDialog, selectTeam, teamName]);
+
   const handleLaunchDialogSubmit = useCallback(
     async (request: TeamLaunchRequest): Promise<void> => {
       await launchTeam(request);
@@ -1904,11 +1923,8 @@ export const TeamDetailView = ({
       pendingRepliesByMember,
       onPendingReplyChange: setPendingRepliesByMember,
       onMemberClick: handleSelectMember,
-      onTaskClick: handleOpenTask,
-      onCreateTaskFromMessage: handleCreateTaskFromMessage,
       onReplyToMessage: handleReplyToMessage,
       onRestartTeam: handleRestartTeam,
-      onTaskIdClick: handleTaskIdClick,
       inlineScrollContainerRef: contentRef,
       showPositionControls: false,
     }),
@@ -1917,12 +1933,9 @@ export const TeamDetailView = ({
       data?.config.leadSessionId,
       data?.isAlive,
       data?.tasks,
-      handleCreateTaskFromMessage,
-      handleOpenTask,
       handleReplyToMessage,
       handleRestartTeam,
       handleSelectMember,
-      handleTaskIdClick,
       pendingRepliesByMember,
       teamName,
       teamSessionIds,
@@ -2245,10 +2258,7 @@ export const TeamDetailView = ({
               </div>
 
               {!data.isAlive && !isTeamProvisioning ? (
-                <TeamOfflineStatusBanner
-                  teamName={teamName}
-                  onLaunch={() => openLaunchDialog('launch')}
-                />
+                <TeamOfflineStatusBanner teamName={teamName} onLaunch={handleStartCcConnectTeam} />
               ) : null}
 
               <div ref={provisioningBannerRef}>
@@ -2276,16 +2286,12 @@ export const TeamDetailView = ({
                 <TeamMemberListBridge
                   teamName={teamName}
                   members={membersWithLiveBranches}
-                  memberTaskCounts={memberTaskCounts}
-                  taskMap={taskMap}
                   pendingRepliesByMember={pendingRepliesByMember}
                   isTeamAlive={data.isAlive}
                   isTeamProvisioning={isTeamProvisioning}
                   launchParams={launchParams}
                   onMemberClick={handleSelectMember}
                   onSendMessage={handleSendMessageToMember}
-                  onAssignTask={handleAssignTaskToMember}
-                  onOpenTask={handleOpenTaskById}
                   onRestartMember={handleRestartMember}
                   onSkipMemberForLaunch={handleSkipMemberForLaunch}
                 />
@@ -2412,7 +2418,6 @@ export const TeamDetailView = ({
                           const task = data?.tasks.find((t) => t.id === taskId);
                           await updateTaskStatus(teamName, taskId, 'pending');
 
-                          // Notify assignee directly via inbox — they'll see it immediately
                           if (task?.owner) {
                             try {
                               await api.teams.sendMessage(teamName, {
@@ -2425,7 +2430,6 @@ export const TeamDetailView = ({
                             }
                           }
 
-                          // Also notify team lead so they can reassign/coordinate
                           if (data?.isAlive) {
                             try {
                               const ownerSuffix = task?.owner
@@ -2556,16 +2560,7 @@ export const TeamDetailView = ({
                   setReplyQuote(undefined);
                   setSendDialogOpen(true);
                 }}
-                onAssignTask={() => {
-                  const name = selectedMember?.name ?? '';
-                  closeSelectedMemberDialog();
-                  openCreateTaskDialog('', '', name);
-                }}
                 onRestartMember={handleRestartMember}
-                onTaskClick={(task) => {
-                  closeSelectedMemberDialog();
-                  setSelectedTask(task);
-                }}
                 onUpdateRole={async (memberName, role) => {
                   setUpdatingRoleLoading(true);
                   try {
@@ -2596,22 +2591,6 @@ export const TeamDetailView = ({
                     initialFilePath: filePath,
                   });
                 }}
-              />
-
-              <CreateTaskDialog
-                open={createTaskDialog.open}
-                teamName={teamName}
-                members={activeMembers}
-                tasks={data.tasks}
-                isTeamAlive={data.isAlive && !isTeamProvisioning}
-                defaultSubject={createTaskDialog.defaultSubject}
-                defaultDescription={createTaskDialog.defaultDescription}
-                defaultOwner={createTaskDialog.defaultOwner}
-                defaultStartImmediately={createTaskDialog.defaultStartImmediately}
-                defaultChip={createTaskDialog.defaultChip}
-                onClose={closeCreateTaskDialog}
-                onSubmit={handleCreateTask}
-                submitting={creatingTask}
               />
 
               <EditTeamDialog
@@ -2803,63 +2782,6 @@ export const TeamDetailView = ({
                   setReplyQuote(undefined);
                   setSendDialogDefaultText(undefined);
                   setSendDialogDefaultChip(undefined);
-                }}
-              />
-
-              <TaskDetailDialog
-                open={selectedTask !== null}
-                task={selectedTask}
-                teamName={teamName}
-                kanbanTaskState={
-                  selectedTask ? data?.kanbanState.tasks[selectedTask.id] : undefined
-                }
-                taskMap={taskMap}
-                members={activeMembers}
-                onClose={() => setSelectedTask(null)}
-                onScrollToTask={(taskId) => {
-                  setSelectedTask(null);
-                  const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                  if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    el.classList.remove('kanban-card-focus-pulse');
-                    void (el as HTMLElement).offsetWidth;
-                    el.classList.add('kanban-card-focus-pulse');
-                    el.addEventListener(
-                      'animationend',
-                      () => el.classList.remove('kanban-card-focus-pulse'),
-                      { once: true }
-                    );
-                  }
-                }}
-                onOwnerChange={(taskId, owner) => {
-                  void (async () => {
-                    try {
-                      await updateTaskOwner(teamName, taskId, owner);
-                    } catch {
-                      // error via store
-                    }
-                  })();
-                }}
-                onViewChanges={handleViewChangesForFile}
-                onOpenInEditor={(filePath) => {
-                  const { revealFileInEditor } = useStore.getState();
-                  revealFileInEditor(filePath);
-                }}
-                onDeleteTask={handleDeleteTask}
-              />
-
-              <TrashDialog
-                open={trashOpen}
-                tasks={deletedTasks}
-                onClose={() => setTrashOpen(false)}
-                onRestore={(taskId) => {
-                  void (async () => {
-                    try {
-                      await restoreTask(teamName, taskId);
-                    } catch {
-                      // error via store
-                    }
-                  })();
                 }}
               />
 

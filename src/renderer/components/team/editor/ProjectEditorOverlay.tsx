@@ -628,12 +628,6 @@ export const ProjectEditorOverlay = ({
               <EditorFileTree
                 selectedFilePath={activeTabId}
                 onFileSelect={handleFileSelect}
-                onCreateTask={
-                  onEditorAction
-                    ? (filePath: string) =>
-                        onEditorAction(buildFileAction('createTask', filePath, projectPath))
-                    : undefined
-                }
                 onSendMessage={
                   onEditorAction
                     ? (filePath: string) =>
@@ -827,10 +821,6 @@ export const ProjectEditorOverlay = ({
                 containerRect={containerRect}
                 onSendMessage={() => {
                   onEditorAction(buildSelectionAction('sendMessage', selectionInfo));
-                  setSelectionInfo(null);
-                }}
-                onCreateTask={() => {
-                  onEditorAction(buildSelectionAction('createTask', selectionInfo));
                   setSelectionInfo(null);
                 }}
               />

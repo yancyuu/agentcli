@@ -211,6 +211,7 @@ export const MessagesPanel = memo(function MessagesPanel({
     messagesState,
     loadOlderTeamMessages,
     refreshTeamMessagesHead,
+    addOptimisticTeamMessage,
   } = useStore(
     useShallow((s) => ({
       sendTeamMessage: s.sendTeamMessage,
@@ -226,6 +227,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
       loadOlderTeamMessages: s.loadOlderTeamMessages,
       refreshTeamMessagesHead: s.refreshTeamMessagesHead,
+      addOptimisticTeamMessage: s.addOptimisticTeamMessage,
     }))
   );
   const bootstrapHeadRefreshAttemptedForTeamRef = useRef<string | null>(null);
@@ -534,7 +536,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   const sessionScopedMessages = useMemo(() => {
     const newestFirst = (items: InboxMessage[]) =>
       [...items].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-    if (!selectedSessionKey) return [];
+    if (!selectedSessionKey) return newestFirst(effectiveMessages);
     if (selectedSession && !selectedIsHermitLocalSession) {
       if (!selectedSessionDetail) {
         return [];
@@ -731,12 +733,77 @@ export const MessagesPanel = memo(function MessagesPanel({
         fromMember: 'user',
         toTeam,
         text,
+        sessionKey:
+          selectedSessionKey && selectedSessionKey !== '__unassigned__'
+            ? selectedSessionKey
+            : undefined,
         taskRefs,
         actionMode,
         summary,
       });
     },
-    [teamName, sendCrossTeamMessage]
+    [teamName, selectedSessionKey, sendCrossTeamMessage]
+  );
+
+  const handleDispatchTaskToTeam = useCallback(
+    async (toTeam: string, subject: string, description: string) => {
+      const now = Date.now();
+      const optimisticMessageId = `optimistic-cross-team-${now}`;
+      addOptimisticTeamMessage(teamName, {
+        from: 'user',
+        to: toTeam,
+        text: `@${toTeam} ${subject}`,
+        timestamp: new Date(now).toISOString(),
+        read: true,
+        messageId: optimisticMessageId,
+        source: 'cross_team_sent',
+        session:
+          selectedSessionKey && selectedSessionKey !== '__unassigned__'
+            ? { key: selectedSessionKey }
+            : undefined,
+      });
+      try {
+        await sendCrossTeamMessage({
+          fromTeam: teamName,
+          fromMember: 'user',
+          toTeam,
+          text: description,
+          messageId: optimisticMessageId,
+        });
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : '跨团队任务派发失败';
+        const readableMessage = rawMessage.includes('Redis not configured')
+          ? '无法派发给其他团队：Redis 未配置或未连接。请先在设置里开启团队总线并配置 Redis。'
+          : rawMessage.includes('Distributed collaboration is not enabled')
+            ? '无法派发给其他团队：团队总线/分布式团队协作未开启。请先在设置里开启。'
+            : `无法派发给 ${toTeam}：${rawMessage}`;
+        addOptimisticTeamMessage(teamName, {
+          from: 'system',
+          to: 'user',
+          text: readableMessage,
+          timestamp: new Date(Date.now()).toISOString(),
+          read: true,
+          messageId: `optimistic-cross-team-error-${Date.now()}`,
+          source: 'system_notification',
+        });
+        window.dispatchEvent(new CustomEvent('collab:refresh'));
+        await refreshTeamMessagesHead(teamName);
+        return false;
+      }
+      window.dispatchEvent(new CustomEvent('collab:refresh'));
+      await refreshTeamMessagesHead(teamName);
+      window.setTimeout(() => {
+        void refreshTeamMessagesHead(teamName);
+      }, 300);
+      return true;
+    },
+    [
+      addOptimisticTeamMessage,
+      teamName,
+      refreshTeamMessagesHead,
+      selectedSessionKey,
+      sendCrossTeamMessage,
+    ]
   );
 
   const moveToInline = useCallback(() => {
@@ -869,6 +936,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         onSessionChange={setSelectedSessionKey}
         textareaRef={composerTextareaRef}
         onSend={handleSend}
+        onDispatchTask={handleDispatchTaskToTeam}
       />
       <StatusBlock
         members={members}
@@ -1065,6 +1133,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               onSessionChange={setSelectedSessionKey}
               textareaRef={composerTextareaRef}
               onSend={handleSend}
+              onDispatchTask={handleDispatchTaskToTeam}
             />
             <StatusBlock
               members={members}
@@ -1352,6 +1421,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     onSessionChange={setSelectedSessionKey}
                     textareaRef={composerTextareaRef}
                     onSend={handleSend}
+                    onDispatchTask={handleDispatchTaskToTeam}
                   />
                 </div>
               </div>

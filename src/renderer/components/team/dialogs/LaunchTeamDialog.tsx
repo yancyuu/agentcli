@@ -2058,7 +2058,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   ) : effectiveTeamName ? (
     `为团队“${effectiveTeamName}”创建自动运行计划`
   ) : (
-    '创建团队任务自动执行计划'
+    '创建团队自动运行计划'
   );
 
   const submitLabel = isLaunchMode
