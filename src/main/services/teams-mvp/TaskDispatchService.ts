@@ -915,6 +915,7 @@ export class TaskDispatchService {
       if (!payloadStr) return;
 
       const payload: TaskDispatchPayload = JSON.parse(payloadStr);
+      const alreadyPending = this.pendingRequests.has(payload.dispatchId);
 
       // Store in pending requests — wait for agent to accept/reject
       this.pendingRequests.set(payload.dispatchId, {
@@ -923,6 +924,48 @@ export class TaskDispatchService {
         groupName,
         teamSlug,
       });
+
+      const fromTeamManifest = await this.safeReadManifest(payload.originTeam);
+      const toTeamManifest = await this.safeReadManifest(teamSlug);
+      const createdAt = payload.dispatchedAt || new Date().toISOString();
+      this.collabBoard.addTask({
+        id: payload.dispatchId,
+        dispatchId: payload.dispatchId,
+        subject: payload.task.subject,
+        description: payload.task.description,
+        fromTeam: payload.originTeam,
+        fromTeamDisplay: fromTeamManifest?.displayName ?? payload.originTeam,
+        toTeam: teamSlug,
+        toTeamDisplay: toTeamManifest?.displayName ?? teamSlug,
+        status: 'pending_accept',
+        deadline: payload.deadline,
+        needsHumanReview: payload.needsHumanReview ?? false,
+        revisionCount: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      this.emitCollabChange(payload.dispatchId, 'pending_accept', payload.originTeam, teamSlug);
+
+      if (!alreadyPending) {
+        await this.workspace
+          .appendMessage(teamSlug, {
+            from: payload.originTeam,
+            to: 'team',
+            role: 'agent',
+            content: `[跨团队任务] ${payload.task.subject}${
+              payload.task.description ? '\n' + payload.task.description : ''
+            }`,
+            meta: {
+              source: 'cross_team_dispatch',
+              dispatchId: payload.dispatchId,
+              originTeam: payload.originTeam,
+              needsHumanReview: payload.needsHumanReview,
+            },
+          })
+          .catch((err: Error) => {
+            console.error('[TaskDispatchService] inbox write failed:', err.message);
+          });
+      }
 
       console.log(
         `[TaskDispatchService] received dispatch request: ${payload.dispatchId} from ${payload.originTeam} → ${teamSlug}`
