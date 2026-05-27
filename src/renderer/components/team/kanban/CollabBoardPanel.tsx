@@ -33,6 +33,7 @@ const COLLAB_COLUMNS: CollabColumn[] = [
 ];
 
 const TERMINAL_STATUSES: CollabTaskStatus[] = ['rejected', 'failed'];
+const DEFAULT_EXCEPTION_LIMIT = 3;
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
   pending_accept: <Clock size={12} />,
@@ -99,13 +100,20 @@ export function CollabBoardPanel({ teamName }: CollabBoardPanelProps) {
   const [loading, setLoading] = useState(true);
   const [viewFilter, setViewFilter] = useState<CollabViewFilter>('all');
   const [revisionInput, setRevisionInput] = useState<Record<string, string>>({});
+  const [showAllExceptions, setShowAllExceptions] = useState(false);
 
   const fetchBoard = useCallback(async () => {
     try {
       const res = await api.collab.getBoard();
-      setTasks(res.tasks);
+      const nextTasks = Array.isArray(res)
+        ? (res as CollabTask[])
+        : Array.isArray(res?.tasks)
+          ? res.tasks
+          : [];
+      setTasks(nextTasks);
     } catch {
       // degraded
+      setTasks([]);
     } finally {
       setLoading(false);
     }
@@ -196,6 +204,11 @@ export function CollabBoardPanel({ teamName }: CollabBoardPanelProps) {
     () => visibleTasks.filter((t) => TERMINAL_STATUSES.includes(t.status) || isException(t)),
     [visibleTasks]
   );
+  const displayedTerminalTasks = useMemo(
+    () => (showAllExceptions ? terminalTasks : terminalTasks.slice(0, DEFAULT_EXCEPTION_LIMIT)),
+    [showAllExceptions, terminalTasks]
+  );
+  const hiddenTerminalCount = Math.max(0, terminalTasks.length - displayedTerminalTasks.length);
 
   if (loading) {
     return (
@@ -304,7 +317,7 @@ export function CollabBoardPanel({ teamName }: CollabBoardPanelProps) {
           })}
 
           {terminalTasks.length > 0 && (
-            <div className="flex min-w-[200px] flex-shrink-0 flex-col rounded-lg bg-[rgba(239,68,68,0.15)]">
+            <div className="flex max-h-[480px] min-w-[220px] flex-shrink-0 flex-col rounded-lg bg-[rgba(239,68,68,0.10)]">
               <div className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--color-text)]">
                 <XCircle size={12} />
                 <span>异常/已拒绝</span>
@@ -312,8 +325,8 @@ export function CollabBoardPanel({ teamName }: CollabBoardPanelProps) {
                   {terminalTasks.length}
                 </span>
               </div>
-              <div className="flex flex-col gap-1.5 px-2 pb-2">
-                {terminalTasks.map((task) => (
+              <div className="flex flex-col gap-1.5 overflow-y-auto px-2 pb-2">
+                {displayedTerminalTasks.map((task) => (
                   <CollabTaskCard
                     key={task.dispatchId}
                     task={task}
@@ -327,6 +340,24 @@ export function CollabBoardPanel({ teamName }: CollabBoardPanelProps) {
                     onDeliver={() => {}}
                   />
                 ))}
+                {hiddenTerminalCount > 0 && (
+                  <button
+                    type="button"
+                    className="rounded-md border border-[var(--color-border-subtle)] bg-black/10 px-2 py-1.5 text-left text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+                    onClick={() => setShowAllExceptions(true)}
+                  >
+                    还有 {hiddenTerminalCount} 条异常，点击展开
+                  </button>
+                )}
+                {showAllExceptions && terminalTasks.length > DEFAULT_EXCEPTION_LIMIT && (
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-1 text-left text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+                    onClick={() => setShowAllExceptions(false)}
+                  >
+                    收起异常
+                  </button>
+                )}
               </div>
             </div>
           )}

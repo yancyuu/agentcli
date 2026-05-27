@@ -46,6 +46,8 @@ export class TaskDispatchService {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private consumerTimers: ReturnType<typeof setInterval>[] = [];
   private responseConsumerTimers: ReturnType<typeof setInterval>[] = [];
+  private consumerTeamSlugs = new Set<string>();
+  private responseConsumerTeamSlugs = new Set<string>();
   private disposed = false;
   private pendingRequests: Map<string, PendingRequest> = new Map();
   /** Callback fired when collab task state changes (for SSE broadcast). */
@@ -61,6 +63,7 @@ export class TaskDispatchService {
   }
 
   async start(config?: TaskBusConfig): Promise<void> {
+    this.disposed = false;
     this.config = config ?? null;
     if (config?.enabled && config.redis) {
       await this.connectRedis();
@@ -173,15 +176,6 @@ export class TaskDispatchService {
       deadline,
     };
 
-    // Write shadow task in origin team's board
-    const shadow = await this.workspace.createTask(fromTeam, {
-      title: `[→${targetTeam}] ${task.subject}`,
-      description: task.description,
-    });
-    await this.workspace.patchTask(fromTeam, shadow.id, {
-      dispatchMeta,
-    } as any);
-
     // Add to collaboration board before external delivery. Even failed dispatches
     // must remain visible in the canonical task projection for diagnosis/retry.
     const fromTeamManifest = await this.safeReadManifest(fromTeam);
@@ -215,9 +209,6 @@ export class TaskDispatchService {
         payload: { reason: 'Redis not configured' },
         extra: { reason: 'Redis not configured — cross-team dispatch requires task bus.' },
       });
-      await this.workspace.patchTask(fromTeam, shadow.id, {
-        dispatchMeta: { ...dispatchMeta, status: 'failed' },
-      } as any);
       this.emitCollabChange(dispatchId, failedTask.status, fromTeam, targetTeam);
       return {
         dispatchId,
@@ -241,9 +232,6 @@ export class TaskDispatchService {
         payload: { reason },
         extra: { reason },
       });
-      await this.workspace.patchTask(fromTeam, shadow.id, {
-        dispatchMeta: { ...dispatchMeta, status: 'failed' },
-      } as any);
       this.emitCollabChange(dispatchId, failedTask.status, fromTeam, targetTeam);
       return {
         dispatchId,
@@ -271,26 +259,7 @@ export class TaskDispatchService {
 
     const { payload, msgId, groupName } = pending;
 
-    // Create task in local board
-    const created = await this.workspace.createTask(teamSlug, {
-      title: payload.task.subject,
-      description: payload.task.description,
-    });
-
-    const dispatchMeta: DispatchMeta = {
-      dispatchId: payload.dispatchId,
-      originTeam: payload.originTeam,
-      targetTeam: payload.targetTeam,
-      status: 'received',
-      dispatchedAt: payload.dispatchedAt,
-      deadline: payload.deadline,
-      receivedAt: new Date().toISOString(),
-      remoteTaskId: created.id,
-    };
-
-    await this.workspace.patchTask(teamSlug, created.id, {
-      dispatchMeta,
-    } as any);
+    const remoteTaskId = payload.dispatchId;
 
     // Send accept response
     const response: TaskHandshakeResponse = {
@@ -298,7 +267,7 @@ export class TaskDispatchService {
       type: 'task_accept',
       fromTeam: teamSlug,
       toTeam: payload.originTeam,
-      remoteTaskId: created.id,
+      remoteTaskId,
       acceptedAt: new Date().toISOString(),
     };
 
@@ -327,7 +296,7 @@ export class TaskDispatchService {
       next: 'accepted',
       actor: { type: 'team', id: teamSlug },
       eventType: 'task_accepted',
-      payload: { remoteTaskId: created.id },
+      payload: { remoteTaskId },
       extra: { acceptedAt },
     });
     this.emitCollabChange(payload.dispatchId, 'accepted', payload.originTeam, payload.targetTeam);
@@ -343,7 +312,7 @@ export class TaskDispatchService {
           source: 'cross_team_accepted',
           dispatchId: payload.dispatchId,
           originTeam: payload.originTeam,
-          taskId: created.id,
+          taskId: remoteTaskId,
         },
       });
     } catch {}
@@ -368,7 +337,7 @@ export class TaskDispatchService {
       `跨团队任务已接单：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n状态：执行中`
     );
 
-    return { taskId: created.id };
+    return { taskId: remoteTaskId };
   }
 
   async rejectTask(teamSlug: string, dispatchId: string, reason?: string): Promise<void> {
@@ -761,15 +730,17 @@ export class TaskDispatchService {
   // ── Feishu notification helper ──────────────────────────────────
 
   private sendFeishuNotification(text: string): void {
-    try {
-      const { execSync } = require('node:child_process');
-      execSync(
-        `feishu-cli msg send --receive-id-type chat_id --receive-id oc_e7d4204895f8f9d763d9f0e42ead1e5e --text ${JSON.stringify(text)}`,
-        { timeout: 5000, stdio: 'pipe' }
-      );
-    } catch {
-      // best effort
-    }
+    setTimeout(() => {
+      try {
+        const { execSync } = require('node:child_process');
+        execSync(
+          `feishu-cli msg send --receive-id-type chat_id --receive-id oc_e7d4204895f8f9d763d9f0e42ead1e5e --text ${JSON.stringify(text)}`,
+          { timeout: 5000, stdio: 'pipe' }
+        );
+      } catch {
+        // best effort
+      }
+    }, 0);
   }
 
   // ── Local response (same machine) ─────────────────────────────
@@ -876,6 +847,8 @@ export class TaskDispatchService {
     if (!this.redis || !this.redisSub) return;
 
     const startForTeam = async (teamSlug: string) => {
+      if (this.consumerTeamSlugs.has(teamSlug)) return;
+      this.consumerTeamSlugs.add(teamSlug);
       const streamKey = `task:dispatch:${teamSlug}`;
       const groupName = `hermit-${teamSlug}`;
       const consumerId = `consumer-${process.pid}`;
@@ -921,11 +894,14 @@ export class TaskDispatchService {
       this.consumerTimers.push(timer);
     };
 
-    this.workspace.listTeams().then((teams) => {
-      for (const team of teams) {
-        startForTeam(team.slug);
-      }
-    });
+    const syncConsumers = () =>
+      void this.workspace.listTeams().then((teams) => {
+        for (const team of teams) {
+          void startForTeam(team.slug);
+        }
+      });
+    syncConsumers();
+    this.consumerTimers.push(setInterval(syncConsumers, 10_000));
   }
 
   private async handleIncomingDispatch(
@@ -959,6 +935,7 @@ export class TaskDispatchService {
   private stopConsumers(): void {
     for (const t of this.consumerTimers) clearInterval(t);
     this.consumerTimers = [];
+    this.consumerTeamSlugs.clear();
   }
 
   // ── Response consumers (XREADGROUP) ───────────────────────────
@@ -967,6 +944,8 @@ export class TaskDispatchService {
     if (!this.redis || !this.redisSub) return;
 
     const startForTeam = async (teamSlug: string) => {
+      if (this.responseConsumerTeamSlugs.has(teamSlug)) return;
+      this.responseConsumerTeamSlugs.add(teamSlug);
       const streamKey = `task:response:${teamSlug}`;
       const groupName = `hermit-response-${teamSlug}`;
       const consumerId = `response-consumer-${process.pid}`;
@@ -1012,11 +991,14 @@ export class TaskDispatchService {
       this.responseConsumerTimers.push(timer);
     };
 
-    this.workspace.listTeams().then((teams) => {
-      for (const team of teams) {
-        startForTeam(team.slug);
-      }
-    });
+    const syncConsumers = () =>
+      void this.workspace.listTeams().then((teams) => {
+        for (const team of teams) {
+          void startForTeam(team.slug);
+        }
+      });
+    syncConsumers();
+    this.responseConsumerTimers.push(setInterval(syncConsumers, 10_000));
   }
 
   private async handleIncomingResponse(
@@ -1098,6 +1080,7 @@ export class TaskDispatchService {
   private stopResponseConsumers(): void {
     for (const t of this.responseConsumerTimers) clearInterval(t);
     this.responseConsumerTimers = [];
+    this.responseConsumerTeamSlugs.clear();
   }
 
   // ── Status subscribe (completion notifications) ──────────────

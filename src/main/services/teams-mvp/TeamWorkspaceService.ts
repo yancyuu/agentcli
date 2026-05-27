@@ -224,7 +224,23 @@ export class TeamWorkspaceService {
   async readTeamManifest(teamSlug: string): Promise<TeamManifest> {
     const root = teamRoot(teamSlug);
     const manifest = await readJson<TeamManifest | null>(path.join(root, 'team.json'), null);
-    if (!manifest) throw new Error(`团队 "${teamSlug}" 不存在 (${root})`);
+    if (!manifest) {
+      if (!(await pathExists(root))) {
+        throw new Error(`团队 "${teamSlug}" 不存在 (${root})`);
+      }
+      const stat = await fs.promises.stat(root).catch(() => null);
+      return {
+        schemaVersion: 2,
+        slug: teamSlug,
+        displayName: teamSlug,
+        bindProject: teamSlug,
+        harness: 'claudecode',
+        workDir: '',
+        collaboration: true,
+        rootPath: root,
+        createdAt: (stat?.birthtime ?? stat?.mtime ?? new Date()).toISOString(),
+      };
+    }
     return manifest;
   }
 

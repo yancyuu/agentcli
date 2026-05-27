@@ -53,7 +53,8 @@ import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
 import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
 import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
-import type { TaskBusConfig } from '@shared/types/team';
+import type { TaskBusConfig, TeamLaunchRequest } from '@shared/types/team';
+import type { TeamManifest } from './services/teams-mvp/TeamWorkspaceService';
 import { UpdateService } from './services/UpdateService';
 import {
   startTelemetry,
@@ -80,6 +81,7 @@ const HERMIT_HOME = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit'
 const HERMIT_CONFIG_FILE = path.join(HERMIT_HOME, 'config.json');
 const HERMIT_APP_CONFIG_FILE = path.join(HERMIT_HOME, 'app-config.json');
 const HERMIT_CC_CONNECT_CONFIG_FILE = path.join(HERMIT_HOME, 'cc-connect', 'config.toml');
+const HERMIT_SETTINGS_FILE = path.join(HERMIT_HOME, 'settings.json');
 
 interface HermitConfig {
   ccBaseUrl: string;
@@ -203,6 +205,35 @@ taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
   broadcastSse('collab-change', { dispatchId, status, fromTeam, toTeam });
 };
 
+async function readSavedTaskBusConfig(): Promise<TaskBusConfig | null> {
+  try {
+    const raw = await fs.readFile(HERMIT_SETTINGS_FILE, 'utf-8');
+    const settings = JSON.parse(raw) as { taskBus?: TaskBusConfig };
+    return settings.taskBus ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function initializeTaskBusFromSettings(): Promise<void> {
+  const config = await readSavedTaskBusConfig();
+  if (!config) return;
+
+  if (config.telemetry?.enabled) {
+    await startTelemetry(config).catch((err) => {
+      app.log.warn({ err }, 'telemetry startup failed');
+    });
+  }
+
+  if (!config.enabled) {
+    taskDispatch.dispose();
+    return;
+  }
+
+  taskDispatch.dispose();
+  await taskDispatch.start(config);
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -269,19 +300,19 @@ bridge.on('reply', (msg) => {
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
   const teamName = resolveTeamFromSessionKey(sessionKey) ?? sessionKey;
 
-  // 存储 agent 回复到本地
-  svc
-    .appendMessage(teamName, {
+  void (async () => {
+    // 先落盘再广播，否则前端可能在 appendFile 完成前刷新到旧 feed。
+    await svc.appendMessage(teamName, {
       from: teamName,
       to: 'user',
       role: 'agent',
       content: (msg as { content?: string }).content ?? '',
       meta: { sessionKey },
-    })
-    .catch(() => {});
-
-  // 广播 inbox 事件 — 前端收到后会调 scheduleTrackedTeamMessageRefresh 重拉消息
-  broadcastSse('team-change', { type: 'inbox', teamName });
+    });
+    broadcastSse('team-change', { type: 'inbox', teamName });
+  })().catch((err) => {
+    app.log.warn({ err, teamName, sessionKey }, 'bridge reply persistence failed');
+  });
 });
 
 bridge.on('reply_stream', (msg) => {
@@ -292,18 +323,20 @@ bridge.on('reply_stream', (msg) => {
   if (done) {
     // 流式结束，存储完整回复
     const fullText = (msg as { full_text?: string }).full_text ?? '';
-    if (fullText) {
-      svc
-        .appendMessage(teamName, {
+    void (async () => {
+      if (fullText) {
+        await svc.appendMessage(teamName, {
           from: teamName,
           to: 'user',
           role: 'agent',
           content: fullText,
           meta: { sessionKey },
-        })
-        .catch(() => {});
-    }
-    broadcastSse('team-change', { type: 'inbox', teamName });
+        });
+      }
+      broadcastSse('team-change', { type: 'inbox', teamName });
+    })().catch((err) => {
+      app.log.warn({ err, teamName, sessionKey }, 'bridge stream reply persistence failed');
+    });
   } else {
     broadcastSse('team-change', { type: 'lead-message', teamName });
   }
@@ -1410,42 +1443,69 @@ app.get('/api/harnesses', async () => {
 });
 
 // ===========================================================================
-// 团队启动验活 — 直接复用 cc-connect heartbeat / project 状态
-// POST /api/teams/:name/launch  → 校验 bindProject 是否存在+在线，返回状态
+// 团队启动 — 直接通过 cc-connect 激活 project/runtime
+// POST /api/teams/:name/launch  → 补建 project（如缺失）并 restart cc-connect
 // POST /api/teams/:name/stop    → 无需操作（cc-connect 自管理），返回 ok
 // ===========================================================================
 
-app.post<{ Params: { name: string } }>('/api/teams/:name/launch', async (request, reply) => {
-  try {
-    const name = request.params.name;
-    let isOnline = false;
-    let projectExists = false;
+app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
+  '/api/teams/:name/launch',
+  async (request, reply) => {
     try {
-      const p = await cc.getProject(name);
-      projectExists = true;
-      isOnline = Array.isArray(p.platforms) && p.platforms.some((pl) => pl.connected);
-    } catch {
-      /* project 不存在 */
-    }
+      const name = request.params.name;
+      const body = request.body ?? {};
+      let manifest: TeamManifest | null = null;
+      try {
+        manifest = await svc.readTeamManifest(name);
+      } catch {
+        // Team may only exist in cc-connect.
+      }
+      const bindProject = manifest?.bindProject ?? name;
+      const workDir = body.cwd ?? manifest?.workDir ?? '';
+      const harness = manifest?.harness ?? 'claudecode';
+      const platformType = manifest?.platform ?? 'bridge';
+      const platformOptions = manifest?.platformOptions ?? {};
+      let isOnline = false;
+      let projectExists = false;
+      try {
+        const p = await cc.getProject(bindProject);
+        projectExists = true;
+        isOnline = Array.isArray(p.platforms) && p.platforms.some((pl) => pl.connected);
+      } catch {
+        /* project 不存在 */
+      }
 
-    return {
-      ok: true,
-      data: {
-        teamName: name,
-        bindProject: name,
-        projectExists,
-        isOnline,
-        message: projectExists
-          ? isOnline
-            ? '团队在线'
-            : '团队 project 存在但无活跃连接'
-          : `cc-connect 中不存在 project "${name}"`,
-      },
-    };
-  } catch (err) {
-    return reply.code(404).send(reply500(err));
+      if (!isOnline) {
+        if (!projectExists) {
+          if (!workDir) {
+            return reply.code(400).send({ error: '团队缺少项目路径，无法启动 cc-connect project' });
+          }
+          const result = await cc.createProject(
+            bindProject,
+            harness,
+            workDir,
+            platformType,
+            platformOptions as Record<string, string>
+          );
+          if (result.restart_required) {
+            await cc.restart();
+          }
+          projectExists = true;
+        } else {
+          await cc.restart();
+        }
+      }
+
+      return {
+        runId: `cc-connect:${bindProject}:${Date.now()}`,
+        ok: true,
+        data: { teamName: name, bindProject, projectExists, isOnline: true },
+      };
+    } catch (err) {
+      return reply.code(404).send(reply500(err));
+    }
   }
-});
+);
 
 app.post<{ Params: { name: string } }>('/api/teams/:name/stop', async (request) => {
   const name = request.params.name;
@@ -3863,24 +3923,11 @@ app.post<{
     }
   }
 
-  // 使用固定格式 session key，保证 reply 事件能正确映射回 teamName
+  // 使用固定格式 session key，保证 reply 事件能正确映射回 teamName。
+  // UI 消息先落盘并广播，bridge 投递放后台执行，避免 bridge 重连窗口卡住发送按钮。
   const requestedSessionKey =
     typeof request.body?.sessionKey === 'string' ? request.body.sessionKey.trim() : '';
-  let sessionKey = requestedSessionKey;
-
-  try {
-    sessionKey = await sendHarnessMessageViaBridge({
-      teamName,
-      text,
-      sessionKey,
-      msgId,
-    });
-  } catch (err) {
-    return reply.code(502).send({
-      ok: false,
-      error: err instanceof Error ? err.message : '发送到 harness 失败',
-    });
-  }
+  const sessionKey = requestedSessionKey || buildFallbackSessionKey(teamName);
 
   // 本地存储用户消息
   const userMsg = await svc
@@ -3896,13 +3943,24 @@ app.post<{
   // 广播 SSE 让前端触发消息刷新
   broadcastSse('team-change', { type: 'inbox', teamName });
 
+  const bridgeWasConnected = bridge.connected;
+  void sendHarnessMessageViaBridge({
+    teamName,
+    text,
+    sessionKey,
+    msgId,
+  }).catch((err) => {
+    request.log.warn({ err, teamName, sessionKey }, 'send-message bridge delivery failed');
+    broadcastSse('team-change', { type: 'inbox', teamName });
+  });
+
   return {
     ok: true,
     deliveredToInbox: true,
     messageId: userMsg?.id ?? msgId,
     runtimeDelivery: {
       attempted: true,
-      delivered: true,
+      delivered: bridgeWasConnected,
     },
   };
 });
@@ -4219,6 +4277,7 @@ app.post<{
     description?: string;
     prompt?: string;
     messageId?: string;
+    sessionKey?: string;
     conversationId?: string;
     replyToConversationId?: string;
     taskRefs?: unknown[];
@@ -4238,6 +4297,7 @@ app.post<{
     description,
     prompt,
     messageId,
+    sessionKey,
     conversationId,
     replyToConversationId,
     taskRefs,
@@ -4287,17 +4347,15 @@ app.post<{
       meta: { ...meta, source: CROSS_TEAM_SOURCE, relayOfMessageId: outgoing.id },
     });
 
-    try {
-      await sendHarnessMessageViaBridge({
-        teamName: resolvedToTeam,
-        text: sentText,
-      });
-    } catch (err) {
-      request.log.warn({ err }, 'cross-team runtime delivery failed after persistence');
-    }
-
     broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
     broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
+
+    void sendHarnessMessageViaBridge({
+      teamName: resolvedToTeam,
+      text: sentText,
+    }).catch((err) => {
+      request.log.warn({ err }, 'cross-team runtime delivery failed after persistence');
+    });
 
     return {
       messageId: outgoing.id,
@@ -4307,6 +4365,19 @@ app.post<{
   }
 
   if (!subject) return { ok: false, error: 'subject is required' };
+
+  const sentMessage = await svc.appendMessage(fromTeam, {
+    from: fromMember ? `${fromTeam}.${fromMember}` : 'user',
+    to: resolvedToTeam,
+    role: 'user',
+    content: `@${resolvedToTeam} ${subject}`,
+    meta: {
+      source: CROSS_TEAM_SENT_SOURCE,
+      sessionKey,
+      clientMessageId: messageId,
+    },
+  });
+  broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
 
   // Check collaboration toggle
   try {
@@ -4333,8 +4404,21 @@ app.post<{
     }
   );
   const ok = result.status !== 'failed';
+  if (ok) {
+    broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
+    void sendHarnessMessageViaBridge({
+      teamName: resolvedToTeam,
+      text: `[跨团队任务] ${fromTeam} 派发了任务：${subject}${description ? `\n\n${description}` : ''}`,
+    }).catch((err) => {
+      request.log.warn(
+        { err, fromTeam, resolvedToTeam },
+        'cross-team task runtime delivery failed'
+      );
+    });
+  }
   return {
     ok,
+    messageId: sentMessage.id,
     dispatchId: result.dispatchId,
     status: result.status,
     message: result.message,
@@ -4365,7 +4449,11 @@ app.get('/api/settings/task-bus', async () => {
 
 // PUT /api/settings/task-bus → save config + start/stop telemetry
 app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
-  const config = request.body;
+  const config = (
+    request.body && 'taskBus' in (request.body as unknown as Record<string, unknown>)
+      ? (request.body as unknown as { taskBus: TaskBusConfig }).taskBus
+      : request.body
+  ) as TaskBusConfig;
   const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
   let settings: Record<string, unknown> = {};
   try {
@@ -4685,6 +4773,7 @@ function reply500(err: unknown) {
 
 // 启动 cc-connect Bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
+await initializeTaskBusFromSettings();
 
 try {
   await app.listen({ host: HOST, port: PORT });

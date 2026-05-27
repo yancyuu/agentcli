@@ -1674,7 +1674,13 @@ export class HttpAPIClient implements ElectronAPI {
       fromTeam: string,
       toTeam: string,
       subject: string,
-      opts?: { description?: string; deadlineMinutes?: number; needsHumanReview?: boolean }
+      opts?: {
+        description?: string;
+        deadlineMinutes?: number;
+        needsHumanReview?: boolean;
+        messageId?: string;
+        sessionKey?: string;
+      }
     ) =>
       this.post<{
         ok: boolean;
@@ -1688,6 +1694,8 @@ export class HttpAPIClient implements ElectronAPI {
         description: opts?.description,
         deadlineMinutes: opts?.deadlineMinutes,
         needsHumanReview: opts?.needsHumanReview,
+        messageId: opts?.messageId,
+        sessionKey: opts?.sessionKey,
       }),
   };
 

@@ -741,7 +741,13 @@ export interface CollabBoardAPI {
     fromTeam: string,
     toTeam: string,
     subject: string,
-    opts?: { description?: string; deadlineMinutes?: number; needsHumanReview?: boolean }
+    opts?: {
+      description?: string;
+      deadlineMinutes?: number;
+      needsHumanReview?: boolean;
+      messageId?: string;
+      sessionKey?: string;
+    }
   ) => Promise<{ ok: boolean; dispatchId: string; status: string; message: string }>;
 }
 

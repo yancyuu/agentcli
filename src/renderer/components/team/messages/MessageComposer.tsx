@@ -69,7 +69,11 @@ interface MessageComposerProps {
     actionMode?: AgentActionMode,
     taskRefs?: TaskRef[]
   ) => void;
-  onDispatchTask?: (toTeam: string, subject: string, description: string) => Promise<void> | void;
+  onDispatchTask?: (
+    toTeam: string,
+    subject: string,
+    description: string
+  ) => Promise<boolean | void> | boolean | void;
 }
 
 export const MessageComposer = ({
@@ -266,8 +270,8 @@ export const MessageComposer = ({
     if (teamDispatch && onDispatchTask) {
       void Promise.resolve(
         onDispatchTask(teamDispatch.slug, teamDispatch.subject, serialized)
-      ).then(() => {
-        draft.clearDraft();
+      ).then((dispatched) => {
+        if (dispatched !== false) draft.clearDraft();
       });
       return;
     }

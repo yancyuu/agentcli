@@ -1593,6 +1593,24 @@ export const TeamDetailView = ({
     openLaunchDialog('relaunch');
   }, [openLaunchDialog]);
 
+  const handleStartCcConnectTeam = useCallback(() => {
+    void (async () => {
+      if (!data?.config.projectPath) {
+        openLaunchDialog('launch');
+        return;
+      }
+      await api.ccSettings.restart();
+      await api.teams.launchTeam({
+        teamName,
+        cwd: data.config.projectPath,
+      });
+      window.setTimeout(() => {
+        void fetchTeams();
+        void selectTeam(teamName);
+      }, 1500);
+    })();
+  }, [data?.config.projectPath, fetchTeams, openLaunchDialog, selectTeam, teamName]);
+
   const handleLaunchDialogSubmit = useCallback(
     async (request: TeamLaunchRequest): Promise<void> => {
       await launchTeam(request);
@@ -2241,10 +2259,7 @@ export const TeamDetailView = ({
               </div>
 
               {!data.isAlive && !isTeamProvisioning ? (
-                <TeamOfflineStatusBanner
-                  teamName={teamName}
-                  onLaunch={() => openLaunchDialog('launch')}
-                />
+                <TeamOfflineStatusBanner teamName={teamName} onLaunch={handleStartCcConnectTeam} />
               ) : null}
 
               <div ref={provisioningBannerRef}>

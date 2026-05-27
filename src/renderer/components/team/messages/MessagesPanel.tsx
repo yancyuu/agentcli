@@ -743,30 +743,63 @@ export const MessagesPanel = memo(function MessagesPanel({
 
   const handleDispatchTaskToTeam = useCallback(
     async (toTeam: string, subject: string, description: string) => {
+      const now = Date.now();
+      const optimisticMessageId = `optimistic-cross-team-${now}`;
       addOptimisticTeamMessage(teamName, {
         from: 'user',
         to: toTeam,
         text: `@${toTeam} ${subject}`,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(now).toISOString(),
         read: true,
-        messageId: `optimistic-cross-team-${Date.now()}`,
+        messageId: optimisticMessageId,
         source: 'cross_team_sent',
+        session:
+          selectedSessionKey && selectedSessionKey !== '__unassigned__'
+            ? { key: selectedSessionKey }
+            : undefined,
       });
-      const result = await api.collab.dispatch(teamName, toTeam, subject, {
-        description,
-        deadlineMinutes: 10,
-        needsHumanReview: true,
-      });
-      if (!result.ok) {
-        throw new Error(result.message || '跨团队任务派发失败');
+      try {
+        await sendCrossTeamMessage({
+          fromTeam: teamName,
+          fromMember: 'user',
+          toTeam,
+          text: description,
+          messageId: optimisticMessageId,
+        });
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : '跨团队任务派发失败';
+        const readableMessage = rawMessage.includes('Redis not configured')
+          ? '无法派发给其他团队：Redis 未配置或未连接。请先在设置里开启团队总线并配置 Redis。'
+          : rawMessage.includes('Distributed collaboration is not enabled')
+            ? '无法派发给其他团队：团队总线/分布式团队协作未开启。请先在设置里开启。'
+            : `无法派发给 ${toTeam}：${rawMessage}`;
+        addOptimisticTeamMessage(teamName, {
+          from: 'system',
+          to: 'user',
+          text: readableMessage,
+          timestamp: new Date(Date.now()).toISOString(),
+          read: true,
+          messageId: `optimistic-cross-team-error-${Date.now()}`,
+          source: 'system_notification',
+        });
+        window.dispatchEvent(new CustomEvent('collab:refresh'));
+        await refreshTeamMessagesHead(teamName);
+        return false;
       }
       window.dispatchEvent(new CustomEvent('collab:refresh'));
       await refreshTeamMessagesHead(teamName);
       window.setTimeout(() => {
         void refreshTeamMessagesHead(teamName);
       }, 300);
+      return true;
     },
-    [addOptimisticTeamMessage, teamName, refreshTeamMessagesHead]
+    [
+      addOptimisticTeamMessage,
+      teamName,
+      refreshTeamMessagesHead,
+      selectedSessionKey,
+      sendCrossTeamMessage,
+    ]
   );
 
   const moveToInline = useCallback(() => {
