@@ -1183,6 +1183,7 @@ function toTeamTask(task: {
   updatedAt: string;
   order: number;
   teamSlug: string;
+  dispatchMeta?: import('@shared/types/team').DispatchMeta;
 }) {
   const statusMap: Record<string, string> = {
     todo: 'pending',
@@ -1199,6 +1200,7 @@ function toTeamTask(task: {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     result: task.result ?? undefined,
+    dispatchMeta: task.dispatchMeta,
   };
 }
 

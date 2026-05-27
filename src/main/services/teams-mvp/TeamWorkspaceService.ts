@@ -375,7 +375,13 @@ export class TeamWorkspaceService {
 
   async createTask(
     teamSlug: string,
-    payload: { title: string; description?: string; assignee?: string | null; status?: TaskStatus }
+    payload: {
+      title: string;
+      description?: string;
+      assignee?: string | null;
+      status?: TaskStatus;
+      dispatchMeta?: import('@shared/types/team').DispatchMeta;
+    }
   ): Promise<Task> {
     if (!payload?.title) throw new Error('title is required');
     const board = await this.readBoard(teamSlug);
@@ -394,6 +400,7 @@ export class TeamWorkspaceService {
       createdAt: now,
       updatedAt: now,
       order,
+      dispatchMeta: payload.dispatchMeta,
     };
     board.tasks = [...(board.tasks || []), task];
     await this.writeBoard(teamSlug, board);

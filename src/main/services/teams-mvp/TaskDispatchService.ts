@@ -28,6 +28,7 @@ interface PendingRequest {
   msgId: string;
   groupName: string;
   teamSlug: string;
+  localTaskId?: string;
 }
 
 export interface DispatchResult {
@@ -257,9 +258,9 @@ export class TaskDispatchService {
       throw new Error(`No pending request found for dispatchId: ${dispatchId}`);
     }
 
-    const { payload, msgId, groupName } = pending;
+    const { payload, msgId, groupName, localTaskId } = pending;
 
-    const remoteTaskId = payload.dispatchId;
+    const remoteTaskId = localTaskId ?? payload.dispatchId;
 
     // Send accept response
     const response: TaskHandshakeResponse = {
@@ -917,14 +918,6 @@ export class TaskDispatchService {
       const payload: TaskDispatchPayload = JSON.parse(payloadStr);
       const alreadyPending = this.pendingRequests.has(payload.dispatchId);
 
-      // Store in pending requests — wait for agent to accept/reject
-      this.pendingRequests.set(payload.dispatchId, {
-        payload,
-        msgId,
-        groupName,
-        teamSlug,
-      });
-
       const fromTeamManifest = await this.safeReadManifest(payload.originTeam);
       const toTeamManifest = await this.safeReadManifest(teamSlug);
       const createdAt = payload.dispatchedAt || new Date().toISOString();
@@ -945,6 +938,36 @@ export class TaskDispatchService {
         updatedAt: createdAt,
       });
       this.emitCollabChange(payload.dispatchId, 'pending_accept', payload.originTeam, teamSlug);
+
+      const existingTasks = await this.workspace.readTasks(teamSlug).catch(() => []);
+      const existingTask = existingTasks.find(
+        (task) => task.dispatchMeta?.dispatchId === payload.dispatchId
+      );
+      const localTask =
+        existingTask ??
+        (await this.workspace.createTask(teamSlug, {
+          title: payload.task.subject,
+          description: payload.task.description ?? payload.task.prompt ?? '',
+          status: 'todo',
+          dispatchMeta: {
+            dispatchId: payload.dispatchId,
+            originTeam: payload.originTeam,
+            targetTeam: teamSlug,
+            status: 'pending_accept',
+            dispatchedAt: payload.dispatchedAt,
+            receivedAt: new Date().toISOString(),
+            deadline: payload.deadline,
+          },
+        }));
+
+      // Store in pending requests — wait for a human to accept/reject the agent-created dispatch.
+      this.pendingRequests.set(payload.dispatchId, {
+        payload,
+        msgId,
+        groupName,
+        teamSlug,
+        localTaskId: localTask.id,
+      });
 
       if (!alreadyPending) {
         await this.workspace
