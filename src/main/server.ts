@@ -231,7 +231,11 @@ async function initializeTaskBusFromSettings(): Promise<void> {
   }
 
   taskDispatch.dispose();
-  await taskDispatch.start(config);
+  try {
+    await taskDispatch.start(config);
+  } catch (err) {
+    app.log.warn({ err }, 'Redis connection failed on startup — task bus disabled');
+  }
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -4617,7 +4621,8 @@ app.get('/api/telemetry/status', async (request, reply) => {
       // no settings
     }
     const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
-    const status = await getTelemetryStatus(taskBus.redis);
+    const redisCfg = taskBus.enabled ? taskBus.redis : undefined;
+    const status = await getTelemetryStatus(redisCfg);
     return (
       status ?? {
         connected: false,

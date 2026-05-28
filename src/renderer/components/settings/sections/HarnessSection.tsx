@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { providersApi } from '@renderer/api/providers';
 import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
 import type { CcAgentType } from '@renderer/components/team/HarnessCards';
+import { HarnessIcon } from '@renderer/components/team/HarnessSelect';
 import { cn } from '@renderer/lib/utils';
 import { OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { CheckCircle2 } from 'lucide-react';
@@ -115,12 +116,7 @@ export const HarnessSection = (): React.JSX.Element => {
                   background: 'var(--color-surface-raised)',
                 }}
               >
-                <div
-                  className={cn(
-                    'h-2 w-2 shrink-0 rounded-full',
-                    covered ? 'bg-green-500' : 'bg-gray-500'
-                  )}
-                />
+                <HarnessIcon type={type} className="size-5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p
                     className="truncate text-xs font-medium"

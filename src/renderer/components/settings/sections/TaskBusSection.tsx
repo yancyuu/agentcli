@@ -230,24 +230,34 @@ export function TaskBusSection(): React.JSX.Element {
       .finally(() => setLoading(false));
 
     // Restore telemetry status + Redis connection state on mount
-    fetch('/api/telemetry/status')
+    fetch('/api/settings/task-bus')
       .then((r) => r.json())
-      .then((s: TelemetryStatus) => {
-        if (s.connected) setConnected(true);
-        if ('sessions' in s && s.sessions > 0) setTelemetryStatus(s);
+      .then((busConfig: TaskBusConfig) => {
+        if (busConfig.enabled) {
+          fetch('/api/telemetry/status')
+            .then((r) => r.json())
+            .then((s: TelemetryStatus) => {
+              if (s.connected) setConnected(true);
+              if ('sessions' in s && s.sessions > 0) setTelemetryStatus(s);
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {});
 
     const poll = setInterval(() => {
-      if (collectionEnabled) {
+      if (enabled && collectionEnabled) {
         fetch('/api/telemetry/status')
           .then((r) => r.json())
-          .then((s: TelemetryStatus) => setTelemetryStatus(s))
+          .then((s: TelemetryStatus) => {
+            setTelemetryStatus(s);
+            setConnected(s.connected === true);
+          })
           .catch(() => {});
       }
     }, 30000);
     return () => clearInterval(poll);
-  }, [collectionEnabled]);
+  }, [enabled, collectionEnabled]);
 
   const buildConfig = (
     overrides: Partial<{
