@@ -162,8 +162,11 @@ importers:
         specifier: ^3.20.4
         version: 3.20.4
       cc-connect:
-        specifier: ^1.3.3-beta.2
-        version: 1.3.3-beta.2
+        specifier: 1.3.3-beta.3
+        version: 1.3.3-beta.3
+      chokidar:
+        specifier: ^5.0.0
+        version: 5.0.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -197,6 +200,9 @@ importers:
       idb-keyval:
         specifier: ^6.2.2
         version: 6.2.2
+      isbinaryfile:
+        specifier: ^6.0.0
+        version: 6.0.0
       lucide-react:
         specifier: ^0.577.0
         version: 0.577.0(react@19.2.4)
@@ -2716,8 +2722,8 @@ packages:
   caniuse-lite@1.0.30001781:
     resolution: {integrity: sha512-RdwNCyMsNBftLjW6w01z8bKEvT6e/5tpPVEgtn22TiLGlstHOVecsX2KHFkD5e/vRnIE4EGzpuIODb3mtswtkw==}
 
-  cc-connect@1.3.3-beta.2:
-    resolution: {integrity: sha512-qiOpcpeakpyppLBp4PXumtA6kA9epl05Nw2VB0QoBJHb54E3Kp3Ne1ZSxPcJ1JEgy0LGGH1wbHkt79nI9bC/9Q==}
+  cc-connect@1.3.3-beta.3:
+    resolution: {integrity: sha512-dQ89cSlccuX8jF7D9u1p8Cif6T7VCShJ9Ruar+cuorZPnESxAqqqQa5N91n69tizmK564ScDc4Y4joHBLWPO2g==}
     hasBin: true
 
   ccount@2.0.1:
@@ -2762,6 +2768,10 @@ packages:
   chokidar@4.0.3:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
     engines: {node: '>= 14.16.0'}
+
+  chokidar@5.0.0:
+    resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
+    engines: {node: '>= 20.19.0'}
 
   class-variance-authority@0.7.1:
     resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
@@ -3863,6 +3873,10 @@ packages:
   isarray@2.0.5:
     resolution: {integrity: sha512-xHjhDr3cNBK0BzdUJSPXZntQUx/mwMS5Rw4A7lPJ90XGAO6ISP/ePDNuo0vhqOZU+UD5JoodwCAAoZQd3FeAKw==}
 
+  isbinaryfile@6.0.0:
+    resolution: {integrity: sha512-2FN2B8MAqKv6d5TaKsLvMrwMcghxwHTpcKy0L5mhNbRqjNqo2++SpCqN6eG1lCC1GmTQgvrYJYXv2+Chvyevag==}
+    engines: {node: '>= 24.0.0'}
+
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
@@ -4767,6 +4781,10 @@ packages:
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
+
+  readdirp@5.0.0:
+    resolution: {integrity: sha512-9u/XQ1pvrQtYyMpZe7DXKv2p5CNvyVwzUB6uhLAnQwHMSgKMBR62lc7AHljaeteeHXn11XTAaLLUVZYVZyuRBQ==}
+    engines: {node: '>= 20.19.0'}
 
   real-require@0.2.0:
     resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
@@ -8026,7 +8044,7 @@ snapshots:
 
   caniuse-lite@1.0.30001781: {}
 
-  cc-connect@1.3.3-beta.2: {}
+  cc-connect@1.3.3-beta.3: {}
 
   ccount@2.0.1: {}
 
@@ -8083,6 +8101,10 @@ snapshots:
     dependencies:
       readdirp: 4.1.2
     optional: true
+
+  chokidar@5.0.0:
+    dependencies:
+      readdirp: 5.0.0
 
   class-variance-authority@0.7.1:
     dependencies:
@@ -9444,6 +9466,8 @@ snapshots:
 
   isarray@2.0.5: {}
 
+  isbinaryfile@6.0.0: {}
+
   isexe@2.0.0: {}
 
   istanbul-lib-coverage@3.2.2: {}
@@ -10566,6 +10590,8 @@ snapshots:
 
   readdirp@4.1.2:
     optional: true
+
+  readdirp@5.0.0: {}
 
   real-require@0.2.0: {}
 

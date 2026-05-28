@@ -111,6 +111,7 @@ export interface McpInstallRequest {
   projectPath?: string; // required for 'project' scope
   envValues: Record<string, string>;
   headers: McpHeaderDef[]; // for HTTP/SSE servers (CLI --header flag)
+  harnessType?: string; // which harness to install to (defaults to claudecode)
 }
 
 // ── Custom install request (bypasses registry, user provides spec) ──────────
@@ -122,6 +123,7 @@ export interface McpCustomInstallRequest {
   installSpec: McpInstallSpec; // user provides directly
   envValues: Record<string, string>;
   headers: McpHeaderDef[];
+  harnessType?: string; // which harness to install to
 }
 
 // ── Search result wrapper ──────────────────────────────────────────────────

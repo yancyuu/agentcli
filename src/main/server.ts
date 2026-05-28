@@ -4737,6 +4737,129 @@ app.get('/api/extensions/mcp/browse', async () => ({
   items: [],
 }));
 
+// ── Extension Store routes (wired to extensionHandlers) ────────────────
+
+import { extensionHandlers as ext } from './ipc/extensions';
+
+app.get('/api/extensions/plugins', async () => {
+  const result = await ext.pluginGetAll();
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/plugins/readme/:pluginId', async (request) => {
+  const { pluginId } = request.params as { pluginId: string };
+  const result = await ext.pluginGetReadme(pluginId);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/plugins/install', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.pluginInstall(body as any);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/plugins/uninstall', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.pluginUninstall(
+    body.pluginId as string,
+    body.scope as string,
+    body.projectPath as string,
+    body.harnessType as string
+  );
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/mcp/search', async (request) => {
+  const query = (request.query as Record<string, string>).q ?? '';
+  const limit = Number((request.query as Record<string, string>).limit) || 20;
+  const result = await ext.mcpSearch(query, limit);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/mcp/installed', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.mcpGetInstalled(projectPath);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/mcp/:registryId', async (request) => {
+  const { registryId } = request.params as { registryId: string };
+  const result = await ext.mcpGetById(registryId);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/mcp/install', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpInstall(body as any);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/mcp/install-custom', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpInstallCustom(body as any);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/mcp/uninstall', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpUninstall(
+    body.name as string,
+    body.scope as string,
+    body.projectPath as string,
+    body.harnessType as string
+  );
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/skills', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.skillsList(projectPath);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/skills/:skillId', async (request) => {
+  const { skillId } = request.params as { skillId: string };
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.skillsGetDetail(skillId, projectPath);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/credentials/status', async () => {
+  const result = await ext.credentialsStatus();
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/credentials/mcp/:mcpName', async (request) => {
+  const { mcpName } = request.params as { mcpName: string };
+  const result = await ext.credentialsGetMcp(mcpName);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/credentials/mcp', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsSaveMcp(
+    body.mcpName as string,
+    body.envValues as Record<string, string>
+  );
+  return result.success ? result.data : { error: result.error };
+});
+
+app.get('/api/extensions/credentials/project-env', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  if (!projectPath) return { error: 'projectPath required' };
+  const result = await ext.credentialsGetProjectEnv(projectPath);
+  return result.success ? result.data : { error: result.error };
+});
+
+app.post('/api/extensions/credentials/project-env', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsSaveProjectEnv(
+    body.projectPath as string,
+    body.vars as Record<string, string>
+  );
+  return result.success ? result.data : { error: result.error };
+});
+
 app.setNotFoundHandler((request, reply) => {
   const u = request.url;
   if (!u.startsWith('/api/')) {

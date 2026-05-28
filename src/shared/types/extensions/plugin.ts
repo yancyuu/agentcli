@@ -71,6 +71,7 @@ export interface PluginInstallRequest {
   pluginId: string; // canonical key — main resolves qualifiedName from catalog
   scope: InstallScope;
   projectPath?: string; // required for repo-scoped installs ('project' or 'local')
+  harnessType?: string; // which harness to install to (defaults to claudecode)
 }
 
 // ── Filters (renderer-only concern) ────────────────────────────────────────
