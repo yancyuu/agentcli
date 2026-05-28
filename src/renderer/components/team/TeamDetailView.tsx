@@ -2302,6 +2302,11 @@ export const TeamDetailView = ({
                 title="外部派单"
                 icon={<Columns3 size={14} />}
                 badge={filteredTasks.length}
+                headerExtra={
+                  <span className="ml-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-500">
+                    Beta
+                  </span>
+                }
                 defaultOpen
                 forceOpen={kanbanSearch.trim().length > 0}
                 action={

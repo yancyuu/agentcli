@@ -361,49 +361,26 @@ export const KanbanBoard = ({
     columnTasks: TeamTask[],
     compact?: boolean
   ): React.JSX.Element => {
-    const addHandler =
-      onAddTask && columnId === 'todo'
-        ? () => onAddTask(false)
-        : onAddTask && columnId === 'in_progress'
-          ? () => onAddTask(true)
-          : undefined;
-
-    const addButton = addHandler ? (
-      <button
-        type="button"
-        onClick={addHandler}
-        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text-secondary)]"
-      >
-        <Plus size={13} />
-        Add task
-      </button>
-    ) : null;
-
     if (columnTasks.length === 0) {
       return (
-        addButton ?? (
-          <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
-            No tasks
-          </div>
-        )
+        <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
+          No tasks
+        </div>
       );
     }
     if (enableTaskSorting) {
       const itemIds = columnTasks.map((t) => t.id);
       return (
-        <>
-          <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-            {columnTasks.map((task) => (
-              <SortableKanbanTaskCard
-                key={task.id}
-                task={task}
-                columnId={columnId}
-                memberColorMap={memberColorMap}
-              />
-            ))}
-          </SortableContext>
-          {addButton}
-        </>
+        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+          {columnTasks.map((task) => (
+            <SortableKanbanTaskCard
+              key={task.id}
+              task={task}
+              columnId={columnId}
+              memberColorMap={memberColorMap}
+            />
+          ))}
+        </SortableContext>
       );
     }
     return (
@@ -432,7 +409,6 @@ export const KanbanBoard = ({
             onDeleteTask={onDeleteTask}
           />
         ))}
-        {addButton}
       </>
     );
   };
@@ -614,36 +590,22 @@ export const KanbanBoard = ({
         </div>
       ) : (
         <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden px-1 pb-6 pr-4 pt-2">
-          <div className="flex min-w-max items-start pr-1">
-            {visibleColumns.map((column, index) => {
+          <div className="flex w-full items-start gap-3">
+            {visibleColumns.map((column) => {
               const columnTasks = groupedOrdered.get(column.id) ?? [];
               const accent = COLUMN_ACCENTS[column.id as 'todo' | 'in_progress' | 'done'];
-              const width = columnWidths.get(column.id) ?? 256;
-              const handleProps = getHandleProps(column.id);
               return (
-                <div key={column.id} className="flex shrink-0">
-                  <div style={{ width }}>
-                    <KanbanColumn
-                      title={column.title}
-                      count={columnTasks.length}
-                      icon={accent.icon}
-                      headerBg={accent.headerBg}
-                      bodyBg={accent.bodyBg}
-                      bodyClassName="max-h-none overflow-visible"
-                    >
-                      {renderCards(column.id, columnTasks, true)}
-                    </KanbanColumn>
-                  </div>
-                  {index < visibleColumns.length - 1 ? (
-                    <div
-                      className="group relative mx-0.5 flex items-center justify-center"
-                      onPointerDown={handleProps.onPointerDown}
-                      style={handleProps.style}
-                      aria-label={handleProps['aria-label']}
-                    >
-                      <div className="h-full w-px bg-[var(--color-border)] transition-colors group-hover:bg-blue-500/50 group-active:bg-blue-500" />
-                    </div>
-                  ) : null}
+                <div key={column.id} className="min-w-0 flex-1">
+                  <KanbanColumn
+                    title={column.title}
+                    count={columnTasks.length}
+                    icon={accent.icon}
+                    headerBg={accent.headerBg}
+                    bodyBg={accent.bodyBg}
+                    bodyClassName="max-h-none overflow-visible"
+                  >
+                    {renderCards(column.id, columnTasks, true)}
+                  </KanbanColumn>
                 </div>
               );
             })}
