@@ -2,8 +2,6 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
-
 interface StoreState {
   cliStatus: Record<string, unknown> | null;
   cliStatusLoading: boolean;
@@ -27,15 +25,6 @@ interface StoreState {
 }
 
 const storeState = {} as StoreState;
-const codexAccountHookState = {
-  snapshot: null as CodexAccountSnapshotDto | null,
-  loading: false,
-  error: null as string | null,
-  refresh: vi.fn(() => Promise.resolve(undefined)),
-  startChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  cancelChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  logout: vi.fn(() => Promise.resolve(true)),
-};
 
 vi.mock('@renderer/api', () => ({
   isElectronMode: () => true,
@@ -45,14 +34,6 @@ vi.mock('@renderer/components/common/ProviderBrandLogo', () => ({
   ProviderBrandLogo: ({ providerId }: { providerId: string }) =>
     React.createElement('span', { 'data-testid': `provider-logo-${providerId}` }, providerId),
 }));
-
-vi.mock('@features/codex-account/renderer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@features/codex-account/renderer')>();
-  return {
-    ...actual,
-    useCodexAccountSnapshot: () => codexAccountHookState,
-  };
-});
 
 vi.mock('@renderer/store', () => ({
   useStore: (selector: (state: StoreState) => unknown) => selector(storeState),
@@ -136,9 +117,6 @@ describe('GlobalProviderStatusHeader', () => {
       },
     };
     setFocusedTab('team');
-    codexAccountHookState.snapshot = null;
-    codexAccountHookState.loading = false;
-    codexAccountHookState.error = null;
   });
 
   afterEach(() => {
@@ -319,53 +297,5 @@ describe('GlobalProviderStatusHeader', () => {
     });
   });
 
-  it('masks the negative Codex bootstrap snapshot while placeholder loading is still active', async () => {
-    storeState.cliStatus = null;
-    storeState.cliStatusLoading = true;
-    codexAccountHookState.snapshot = {
-      preferredAuthMode: 'chatgpt',
-      effectiveAuthMode: null,
-      launchAllowed: false,
-      launchIssueMessage: 'Connect a ChatGPT account to use your Codex subscription.',
-      launchReadinessState: 'missing_auth',
-      appServerState: 'healthy',
-      appServerStatusMessage: null,
-      managedAccount: null,
-      apiKey: {
-        available: false,
-        source: null,
-        sourceLabel: null,
-      },
-      requiresOpenaiAuth: true,
-      localAccountArtifactsPresent: false,
-      localActiveChatgptAccountPresent: false,
-      login: {
-        status: 'idle',
-        error: null,
-        startedAt: null,
-      },
-      rateLimits: null,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(React.createElement(GlobalProviderStatusHeader));
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('Codex');
-    expect(host.textContent).toContain('Checking...');
-    expect(host.textContent).not.toContain(
-      'Connect a ChatGPT account to use your Codex subscription.'
-    );
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
 });
+

@@ -37,7 +37,6 @@ import {
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
-import { getExtensionActionDisableReason } from '@shared/utils/extensionNormalizers';
 import { getCliProviderExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 import {
   AlertTriangle,
@@ -48,15 +47,20 @@ import {
   Puzzle,
   RefreshCw,
   Server,
+  Sliders,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { CustomMcpServerDialog } from './mcp/CustomMcpServerDialog';
+import { EnvVarPanel } from './env/EnvVarPanel';
 import { McpServersPanel } from './mcp/McpServersPanel';
+import { PluginsPanel } from './plugins/PluginsPanel';
 import { SkillsPanel } from './skills/SkillsPanel';
+import { StoreExtensionToast } from './common/ExtensionToast';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
+import type { ExtensionsSubTab } from '@renderer/hooks/useExtensionsTabState';
 
 const ProviderCapabilityCardSkeleton = ({
   providerId,
@@ -114,6 +118,12 @@ function isCodexSnapshotPending(
 
 const EXTENSION_SUB_TABS = [
   {
+    value: 'plugins' as const,
+    label: '插件',
+    icon: Puzzle,
+    description: 'Claude Code 私有扩展，增强运行时的能力与集成。',
+  },
+  {
     value: 'mcp-servers' as const,
     label: 'MCP 服务器',
     icon: Server,
@@ -125,6 +135,12 @@ const EXTENSION_SUB_TABS = [
     icon: BookOpen,
     description: '面向常见任务的可复用指令，帮助运行时更稳定地处理重复工作。',
   },
+  {
+    value: 'env-vars' as const,
+    label: '环境变量',
+    icon: Sliders,
+    description: '管理运行时环境变量，启动 agent 时自动注入。',
+  },
 ] as const;
 
 export const ExtensionStoreView = (): React.JSX.Element => {
@@ -132,6 +148,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   const {
     bootstrapCliStatus,
     fetchCliStatus,
+    fetchPluginCatalog,
     fetchSkillsCatalog,
     mcpBrowse,
     mcpFetchInstalled,
@@ -149,7 +166,9 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     useShallow((s) => ({
       bootstrapCliStatus: s.bootstrapCliStatus,
       fetchCliStatus: s.fetchCliStatus,
+      fetchPluginCatalog: s.fetchPluginCatalog,
       fetchSkillsCatalog: s.fetchSkillsCatalog,
+      pluginCatalog: s.pluginCatalog,
       mcpBrowse: s.mcpBrowse,
       mcpFetchInstalled: s.mcpFetchInstalled,
       mcpBrowseLoading: s.mcpBrowseLoading,
@@ -239,6 +258,11 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     void mcpFetchInstalled(projectPath ?? undefined);
   }, [mcpFetchInstalled, projectPath]);
 
+  // Fetch Plugin catalog on mount / project change
+  useEffect(() => {
+    void fetchPluginCatalog(projectPath ?? undefined);
+  }, [fetchPluginCatalog, projectPath]);
+
   // Fetch Skills catalog on mount / project change
   useEffect(() => {
     void fetchSkillsCatalog(projectPath ?? undefined);
@@ -265,16 +289,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   ]);
 
   const isRefreshing = effectiveCliStatusLoading || mcpBrowseLoading || skillsLoading;
-  const mcpMutationDisableReason = useMemo(
-    () =>
-      getExtensionActionDisableReason({
-        isInstalled: false,
-        cliStatus: effectiveCliStatus,
-        cliStatusLoading: effectiveCliStatusLoading,
-        section: 'mcp',
-      }),
-    [effectiveCliStatus, effectiveCliStatusLoading]
-  );
   const cliStatusBanner = useMemo(() => {
     const providers = effectiveCliStatus?.providers ?? [];
     const visibleProviders = getVisibleMultimodelProviders(providers);
@@ -504,7 +518,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             )}
             <Tabs
               value={tabState.activeSubTab}
-              onValueChange={(v) => tabState.setActiveSubTab(v as 'mcp-servers' | 'skills')}
+              onValueChange={(v) => tabState.setActiveSubTab(v as ExtensionsSubTab)}
             >
               <div className="-mx-6 flex items-end justify-between border-b border-border px-6">
                 <TabsList className="gap-1 rounded-b-none">
@@ -519,27 +533,36 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   ))}
                 </TabsList>
                 {tabState.activeSubTab === 'mcp-servers' && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={mcpMutationDisableReason ? 0 : -1}>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCustomMcpDialogOpen(true)}
-                          className="mb-1 whitespace-nowrap"
-                          disabled={Boolean(mcpMutationDisableReason)}
-                        >
-                          <Plus className="mr-1 size-3.5" />
-                          添加自定义
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    {mcpMutationDisableReason && (
-                      <TooltipContent>{mcpMutationDisableReason}</TooltipContent>
-                    )}
-                  </Tooltip>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCustomMcpDialogOpen(true)}
+                    className="mb-1 whitespace-nowrap"
+                  >
+                    <Plus className="mr-1 size-3.5" />
+                    添加自定义
+                  </Button>
                 )}
               </div>
+
+              <TabsContent value="plugins" className="mt-0 pt-4">
+                <PluginsPanel
+                  projectPath={projectPath}
+                  pluginFilters={tabState.pluginFilters}
+                  pluginSort={tabState.pluginSort}
+                  setPluginSort={tabState.setPluginSort}
+                  selectedPluginId={tabState.selectedPluginId}
+                  setSelectedPluginId={tabState.setSelectedPluginId}
+                  updatePluginSearch={tabState.updatePluginSearch}
+                  toggleCategory={tabState.toggleCategory}
+                  toggleCapability={tabState.toggleCapability}
+                  toggleInstalledOnly={tabState.toggleInstalledOnly}
+                  clearFilters={tabState.clearFilters}
+                  hasActiveFilters={tabState.hasActiveFilters}
+                  cliStatus={effectiveCliStatus}
+                  cliStatusLoading={effectiveCliStatusLoading}
+                />
+              </TabsContent>
 
               <TabsContent value="mcp-servers" className="mt-0 pt-4">
                 <McpServersPanel
@@ -568,19 +591,21 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   setSelectedSkillId={tabState.setSelectedSkillId}
                 />
               </TabsContent>
+
+              <TabsContent value="env-vars" className="mt-0 pt-4">
+                <EnvVarPanel projectPath={projectPath} />
+              </TabsContent>
             </Tabs>
 
             {/* Custom MCP server dialog (lifted to store view level) */}
             <CustomMcpServerDialog
               open={customMcpDialogOpen}
               onClose={() => setCustomMcpDialogOpen(false)}
-              projectPath={projectPath}
-              cliStatus={effectiveCliStatus}
-              cliStatusLoading={effectiveCliStatusLoading}
             />
           </div>
         </div>
       </div>
+      <StoreExtensionToast />
     </TooltipProvider>
   );
 };

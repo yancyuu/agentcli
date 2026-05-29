@@ -217,13 +217,7 @@ const TeamWorkspace = ({
                 <button
                   key={entry.name}
                   type="button"
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
-                    entry.isDirectory
-                      ? 'cursor-pointer hover:bg-[var(--color-surface-raised)]'
-                      : onFileClick
-                        ? 'cursor-pointer hover:bg-[var(--color-surface-raised)]'
-                        : 'hover:bg-[var(--color-surface-raised)]/50 cursor-default'
-                  }`}
+                  className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]"
                   onClick={() => handleEntryClick(entry)}
                 >
                   {entry.isDirectory ? (

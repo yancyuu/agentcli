@@ -21,6 +21,7 @@ export interface ProviderAwareCliEnvOptions {
   connectionMode?: 'strict' | 'augment';
   allowStoredApiKeyDecryption?: boolean;
   allowedStoredApiKeyEnvVarNames?: readonly string[];
+  projectPath?: string;
 }
 
 export interface ProviderAwareCliEnvResult {
@@ -37,6 +38,19 @@ export async function buildProviderAwareCliEnv(
   // Remove ELECTRON_RUN_AS_NODE to prevent child processes from thinking
   // they are running in Node.js mode instead of Electron mode.
   delete env.ELECTRON_RUN_AS_NODE;
+
+  // Inject project-level env vars (from CredentialService) when a projectPath is provided
+  if (options.projectPath) {
+    try {
+      const { CredentialService } =
+        await import('@main/services/extensions/credentials/CredentialService');
+      const credentials = new CredentialService();
+      const projectEnv = await credentials.resolveAgentEnv(options.projectPath);
+      Object.assign(env, projectEnv);
+    } catch {
+      // Non-critical — CLI will use system env as fallback
+    }
+  }
 
   return {
     env,

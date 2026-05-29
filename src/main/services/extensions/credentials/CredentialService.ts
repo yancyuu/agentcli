@@ -92,6 +92,10 @@ function getProjectEnvPath(projectPath: string): string {
   return path.join(getCredentialsDir(), `project-${encoded}.json`);
 }
 
+function getSkillGlobalEnvPath(): string {
+  return path.join(getCredentialsDir(), 'skill-env.json');
+}
+
 // ── Service ────────────────────────────────────────────────────────────
 
 export class CredentialService {
@@ -137,6 +141,25 @@ export class CredentialService {
     }
   }
 
+  // ── Skill Global Environment Variables ──
+
+  async saveSkillGlobalEnv(skillFolderName: string, vars: Record<string, string>): Promise<void> {
+    const all = await this.loadJson(getSkillGlobalEnvPath());
+    all[skillFolderName] = vars;
+    await this.writeJson(getSkillGlobalEnvPath(), all);
+  }
+
+  async getSkillGlobalEnv(skillFolderName: string): Promise<Record<string, string>> {
+    const all = await this.loadJson(getSkillGlobalEnvPath());
+    return (all[skillFolderName] as Record<string, string>) ?? {};
+  }
+
+  async getAllSkillGlobalEnv(): Promise<Record<string, Record<string, string>>> {
+    return this.loadJson(getSkillGlobalEnvPath()) as Promise<
+      Record<string, Record<string, string>>
+    >;
+  }
+
   // ── Scan Required Env ──
 
   async scanRequiredEnv(
@@ -145,7 +168,10 @@ export class CredentialService {
       name: string;
       envVars?: { name: string; isRequired: boolean; description?: string }[];
     }[],
-    skillEnvRequirements: { name: string; envVars: string[] }[]
+    skillEnvRequirements: {
+      name: string;
+      envVars: { name: string; isRequired?: boolean; description?: string }[];
+    }[]
   ): Promise<RequiredEnvResult> {
     const envMap = new Map<string, RequiredEnvVar>();
 
@@ -170,15 +196,16 @@ export class CredentialService {
 
     // Collect from skills
     for (const skill of skillEnvRequirements) {
-      for (const varName of skill.envVars) {
-        const existing = envMap.get(varName);
+      for (const v of skill.envVars) {
+        const existing = envMap.get(v.name);
         if (existing) {
           existing.sources.push(skill.name);
-          existing.isRequired = true;
+          if (v.isRequired !== false) existing.isRequired = true;
         } else {
-          envMap.set(varName, {
-            name: varName,
-            isRequired: true,
+          envMap.set(v.name, {
+            name: v.name,
+            isRequired: v.isRequired !== false,
+            description: v.description,
             sources: [skill.name],
           });
         }
@@ -190,19 +217,31 @@ export class CredentialService {
     // Check which are filled
     const projectEnv = await this.getProjectEnv(projectPath);
     const globalEnv = await this.getAllMcpCredentials();
+    const skillGlobalEnv = await this.getAllSkillGlobalEnv();
 
     const filled: Record<string, string> = {};
     const missing: string[] = [];
 
     for (const v of required) {
+      // Layer 2: Project env (highest priority)
       const projectValue = projectEnv[v.name];
       if (projectValue) {
         filled[v.name] = maskValue(projectValue);
         continue;
       }
 
-      // Check global MCP credentials
+      // Layer 1.5: Skill global env
       let found = false;
+      for (const skillVars of Object.values(skillGlobalEnv)) {
+        if (skillVars[v.name]) {
+          filled[v.name] = maskValue(skillVars[v.name]);
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
+
+      // Layer 1: Global MCP credentials
       for (const mcpVars of Object.values(globalEnv)) {
         if (mcpVars[v.name]) {
           filled[v.name] = maskValue(mcpVars[v.name]);
@@ -227,6 +266,12 @@ export class CredentialService {
     // Layer 1: Global MCP credentials
     const globalCreds = await this.getAllMcpCredentials();
     for (const vars of Object.values(globalCreds)) {
+      Object.assign(result, vars);
+    }
+
+    // Layer 1.5: Global skill env
+    const skillGlobalEnv = await this.getAllSkillGlobalEnv();
+    for (const vars of Object.values(skillGlobalEnv)) {
       Object.assign(result, vars);
     }
 

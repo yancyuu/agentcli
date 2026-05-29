@@ -153,7 +153,7 @@ export class McpInstallService {
       // Add header flags
       for (const header of headers) {
         if (header.key && header.value) {
-          args.push('-H', `${header.key}: ${header.value}`);
+          args.push('-H', `${header.key}:${header.value}`);
         }
       }
 
@@ -274,18 +274,19 @@ export class McpInstallService {
       const transport = installSpec.transportType === 'sse' ? 'sse' : 'http';
       args.push('-t', transport);
 
+      // Positional args must come before variadic flags (-H, -e)
+      args.push(serverName);
+      args.push(installSpec.url);
+
       for (const header of headers) {
         if (header.key && header.value) {
-          args.push('-H', `${header.key}: ${header.value}`);
+          args.push('-H', `${header.key}:${header.value}`);
         }
       }
 
       for (const [key, value] of Object.entries(envValues)) {
         if (key && value) args.push('-e', `${key}=${value}`);
       }
-
-      args.push(serverName);
-      args.push(installSpec.url);
     } else {
       return { state: 'error', error: 'Unsupported install spec type' };
     }

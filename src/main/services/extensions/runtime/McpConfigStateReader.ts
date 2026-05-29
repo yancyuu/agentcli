@@ -20,12 +20,24 @@ export class McpConfigStateReader {
 
     entries.push(...this.readUserMcpServers(claudeConfig));
 
+    // Also read from ~/.claude/settings.json (newer Claude Code versions)
+    const settingsConfig = await this.readClaudeSettingsConfig();
+    entries.push(...this.readUserMcpServers(settingsConfig));
+
     if (projectPath) {
       entries.push(...this.readLocalMcpServers(claudeConfig, projectPath));
       entries.push(...(await this.readProjectMcpServers(projectPath)));
     }
 
-    return entries;
+    // Deduplicate by name (settings.json takes precedence if both exist)
+    const seen = new Map<string, InstalledMcpEntry>();
+    for (const entry of entries) {
+      if (!seen.has(entry.name)) {
+        seen.set(entry.name, entry);
+      }
+    }
+
+    return [...seen.values()];
   }
 
   async readConfigured(projectPath?: string): Promise<ConfiguredMcpEntry[]> {
@@ -34,16 +46,44 @@ export class McpConfigStateReader {
 
     entries.push(...this.readConfiguredMcpServersFromConfig(claudeConfig?.mcpServers, 'user'));
 
+    const settingsConfig = await this.readClaudeSettingsConfig();
+    entries.push(...this.readConfiguredMcpServersFromConfig(settingsConfig?.mcpServers, 'user'));
+
     if (projectPath) {
       entries.push(...this.readLocalConfiguredMcpServers(claudeConfig, projectPath));
       entries.push(...(await this.readProjectConfiguredMcpServers(projectPath)));
     }
 
-    return entries;
+    // Deduplicate by name
+    const seen = new Map<string, ConfiguredMcpEntry>();
+    for (const entry of entries) {
+      if (!seen.has(entry.name)) {
+        seen.set(entry.name, entry);
+      }
+    }
+
+    return [...seen.values()];
   }
 
   private async readClaudeConfig(): Promise<Record<string, unknown> | null> {
     const configPath = path.join(getHomeDir(), '.claude.json');
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      logger.error(`Failed to read MCP servers from ${configPath}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Read ~/.claude/settings.json — newer Claude Code versions store MCP configs here.
+   */
+  private async readClaudeSettingsConfig(): Promise<Record<string, unknown> | null> {
+    const configPath = path.join(getHomeDir(), '.claude', 'settings.json');
     try {
       const raw = await fs.readFile(configPath, 'utf-8');
       return JSON.parse(raw) as Record<string, unknown>;

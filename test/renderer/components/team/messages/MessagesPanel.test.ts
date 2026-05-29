@@ -59,7 +59,10 @@ const sidebarUiState = {
 };
 
 vi.mock('@renderer/store', () => ({
-  useStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+  useStore: Object.assign(
+    (selector: (state: typeof storeState) => unknown) => selector(storeState),
+    { getState: () => storeState }
+  ),
 }));
 
 vi.mock('@renderer/hooks/useStableTeamMentionMeta', () => ({

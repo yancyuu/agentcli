@@ -119,6 +119,9 @@ export class ClaudeCodeAdapter implements HarnessInstallAdapter {
       args.push(spec.npmVersion ? `${spec.npmPackage}@${spec.npmVersion}` : spec.npmPackage);
     } else if (spec.type === 'http') {
       args.push('-t', spec.transportType === 'sse' ? 'sse' : 'http');
+      // Positional args must come before variadic flags (-H, -e)
+      // to prevent the CLI parser from consuming them as flag values
+      args.push(name, spec.url);
       for (const header of headers) {
         if (header.key && header.value && HEADER_KEY_RE.test(header.key))
           args.push('-H', `${header.key}: ${header.value}`);
@@ -126,7 +129,6 @@ export class ClaudeCodeAdapter implements HarnessInstallAdapter {
       for (const [key, value] of Object.entries(envValues)) {
         if (key && value && ENV_KEY_RE.test(key)) args.push('-e', `${key}=${value}`);
       }
-      args.push(name, spec.url);
     } else {
       return { state: 'error', error: `Unsupported install spec type` };
     }

@@ -8,9 +8,12 @@
  * - Deduplicates concurrent requests
  */
 
+import { promises as fsp } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import path from 'node:path';
 
+import { getClaudeBasePath } from '@main/utils/pathDecoder';
 import { buildPluginId } from '@shared/utils/extensionNormalizers';
 import { createLogger } from '@shared/utils/logger';
 
@@ -126,6 +129,8 @@ interface RawMarketplacePlugin {
   category?: string;
   author?: { name: string; email?: string };
   source: string | { source: string; url: string; sha?: string };
+  homepage?: string;
+  tags?: string[];
   strict?: boolean;
   lspServers?: Record<string, unknown>;
   mcpServers?: Record<string, unknown>;
@@ -150,10 +155,33 @@ export class PluginCatalogService {
   private readmeCache = new Map<string, { content: string | null; fetchedAt: number }>();
 
   /**
-   * Get all plugins from the marketplace catalog.
-   * Uses in-memory cache with ETag validation.
+   * Get all plugins shown in the store: the official Anthropic marketplace plus
+   * any plugins from marketplaces the user has registered locally (e.g. custom
+   * git marketplaces like `oh-my-claudecode@omc`). Each source is resilient —
+   * a failure in one does not hide the other.
    */
   async getPlugins(forceRefresh = false): Promise<PluginCatalogItem[]> {
+    const [official, local] = await Promise.all([
+      this.getOfficialPlugins(forceRefresh).catch((err) => {
+        logger.warn('Official marketplace unavailable:', err);
+        return [] as PluginCatalogItem[];
+      }),
+      this.getLocalPlugins().catch((err) => {
+        logger.warn('Local marketplaces unavailable:', err);
+        return [] as PluginCatalogItem[];
+      }),
+    ]);
+
+    // Official wins on pluginId collisions; append local plugins not already present.
+    const seen = new Set(official.map((p) => p.pluginId));
+    return [...official, ...local.filter((p) => !seen.has(p.pluginId))];
+  }
+
+  /**
+   * Get plugins from the official Anthropic marketplace.
+   * Uses in-memory cache with ETag validation.
+   */
+  private async getOfficialPlugins(forceRefresh = false): Promise<PluginCatalogItem[]> {
     // Return cached if fresh and not forcing
     if (!forceRefresh && this.cache && Date.now() - this.cache.fetchedAt < CACHE_TTL_MS) {
       return this.cache.items;
@@ -169,6 +197,46 @@ export class PluginCatalogService {
     });
 
     return this.fetchInFlight;
+  }
+
+  /**
+   * Read plugins from marketplaces the user has registered locally.
+   *
+   * Source of truth: `~/.claude/plugins/known_marketplaces.json`, which maps a
+   * marketplace name to its on-disk `installLocation`. Each location holds a
+   * `.claude-plugin/marketplace.json` describing its plugins.
+   */
+  private async getLocalPlugins(): Promise<PluginCatalogItem[]> {
+    const pluginsDir = path.join(getClaudeBasePath(), 'plugins');
+    const knownPath = path.join(pluginsDir, 'known_marketplaces.json');
+
+    let known: Record<string, { installLocation?: string }>;
+    try {
+      known = JSON.parse(await fsp.readFile(knownPath, 'utf-8')) as Record<
+        string,
+        { installLocation?: string }
+      >;
+    } catch {
+      return []; // No known marketplaces (or unreadable) — nothing local to add.
+    }
+
+    const items: PluginCatalogItem[] = [];
+    for (const [, entry] of Object.entries(known)) {
+      const installLocation = entry?.installLocation;
+      if (!installLocation) continue;
+      const marketplaceJsonPath = path.join(installLocation, '.claude-plugin', 'marketplace.json');
+      try {
+        const json = JSON.parse(
+          await fsp.readFile(marketplaceJsonPath, 'utf-8')
+        ) as MarketplaceJson;
+        if (Array.isArray(json.plugins)) {
+          items.push(...this.parseMarketplace(json, 'local'));
+        }
+      } catch (err) {
+        logger.warn(`Failed to read local marketplace at ${marketplaceJsonPath}:`, err);
+      }
+    }
+    return items;
   }
 
   /**
@@ -277,26 +345,30 @@ export class PluginCatalogService {
     }
   }
 
-  private parseMarketplace(json: MarketplaceJson): PluginCatalogItem[] {
+  private parseMarketplace(
+    json: MarketplaceJson,
+    source: 'official' | 'local' = 'official'
+  ): PluginCatalogItem[] {
     const marketplaceName = json.name;
 
     return json.plugins.map((raw): PluginCatalogItem => {
       const qualifiedName = buildPluginId(raw.name, marketplaceName);
       const isExternal = typeof raw.source === 'object';
-      const homepage = isExternal ? (raw.source as { url: string }).url : undefined;
+      const homepage =
+        raw.homepage ?? (isExternal ? (raw.source as { url: string }).url : undefined);
 
       return {
         pluginId: qualifiedName,
         marketplaceId: qualifiedName,
         qualifiedName,
         name: raw.name,
-        source: 'official',
+        source,
         description: raw.description ?? '',
         category: raw.category ?? 'other',
         author: raw.author,
         version: raw.version,
         homepage: homepage?.replace(/\.git$/, ''),
-        tags: undefined,
+        tags: raw.tags,
         hasLspServers: raw.lspServers != null && Object.keys(raw.lspServers).length > 0,
         hasMcpServers: raw.mcpServers != null && Object.keys(raw.mcpServers).length > 0,
         hasAgents: raw.agents != null && Object.keys(raw.agents).length > 0,

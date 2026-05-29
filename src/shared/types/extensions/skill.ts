@@ -12,6 +12,12 @@ export type SkillInvocationMode = 'auto' | 'manual-only';
 
 export type SkillIssueSeverity = 'info' | 'warning' | 'error';
 
+export interface SkillEnvVarDef {
+  name: string;
+  description?: string;
+  isRequired?: boolean;
+}
+
 export interface SkillDirectoryFlags {
   hasScripts: boolean;
   hasReferences: boolean;
@@ -57,6 +63,7 @@ export interface SkillCatalogItem {
   isValid: boolean;
   issues: SkillValidationIssue[];
   modifiedAt: number;
+  requiredEnv?: SkillEnvVarDef[];
 }
 
 export interface SkillDetail {

@@ -8,6 +8,7 @@ import type {
   SkillCatalogItem,
   SkillDetail,
   SkillDirectoryFlags,
+  SkillEnvVarDef,
   SkillInvocationMode,
   SkillValidationIssue,
 } from '@shared/types/extensions';
@@ -23,6 +24,7 @@ const ALLOWED_FRONTMATTER_KEYS = new Set([
   'compatibility',
   'metadata',
   'allowed-tools',
+  'required-env',
   'disable-model-invocation',
 ]);
 
@@ -122,6 +124,7 @@ export class SkillMetadataParser {
     }
 
     const allowedTools = this.readAllowedTools(parsed.data['allowed-tools']);
+    const requiredEnv = this.readRequiredEnv(parsed.data['required-env']);
     if (allowedTools) {
       issues.push({
         code: 'allowed-tools-advisory',
@@ -167,6 +170,7 @@ export class SkillMetadataParser {
       isValid,
       issues,
       modifiedAt,
+      requiredEnv,
     };
   }
 
@@ -293,5 +297,27 @@ export class SkillMetadataParser {
 
   private readInvocationMode(value: unknown): SkillInvocationMode {
     return value === true ? 'manual-only' : 'auto';
+  }
+
+  private readRequiredEnv(value: unknown): SkillEnvVarDef[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const defs: SkillEnvVarDef[] = [];
+    for (const entry of value) {
+      if (typeof entry === 'string') {
+        const name = entry.trim();
+        if (name) defs.push({ name, isRequired: true });
+      } else if (entry && typeof entry === 'object') {
+        const obj = entry as Record<string, unknown>;
+        const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+        if (name) {
+          defs.push({
+            name,
+            description: typeof obj.description === 'string' ? obj.description.trim() : undefined,
+            isRequired: obj['is-required'] !== false && obj.isRequired !== false,
+          });
+        }
+      }
+    }
+    return defs.length > 0 ? defs : undefined;
   }
 }

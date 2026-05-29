@@ -71,7 +71,7 @@ export class MultimodelExtensionsAdapter implements ExtensionsRuntimeAdapter {
   async getInstalledMcp(projectPath?: string): Promise<InstalledMcpEntry[]> {
     const binaryPath = await ClaudeBinaryResolver.resolve();
     if (!binaryPath) {
-      throw new Error(CLI_NOT_FOUND_MESSAGE);
+      return this.stateReader.readInstalled(projectPath);
     }
 
     const env = await this.buildManagementCliEnv(binaryPath);
@@ -95,7 +95,7 @@ export class MultimodelExtensionsAdapter implements ExtensionsRuntimeAdapter {
   async diagnoseMcp(projectPath?: string): Promise<McpServerDiagnostic[]> {
     const binaryPath = await ClaudeBinaryResolver.resolve();
     if (!binaryPath) {
-      throw new Error(CLI_NOT_FOUND_MESSAGE);
+      return [];
     }
 
     const env = await this.buildManagementCliEnv(binaryPath);

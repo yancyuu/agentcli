@@ -11,6 +11,10 @@ import type {
   McpCustomInstallRequest,
   OperationResult,
   PluginInstallRequest,
+  SkillDeleteRequest,
+  SkillImportRequest,
+  SkillUpsertRequest,
+  SkillWatcherEvent,
 } from '@shared/types/extensions';
 
 import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
@@ -22,6 +26,7 @@ import { PluginInstallationStateService } from '@main/services/extensions/state/
 import { McpInstallationStateService } from '@main/services/extensions/state/McpInstallationStateService';
 import { SkillsCatalogService } from '@main/services/extensions/skills/SkillsCatalogService';
 import { SkillsMutationService } from '@main/services/extensions/skills/SkillsMutationService';
+import { SkillsWatcherService } from '@main/services/extensions/skills/SkillsWatcherService';
 import { CredentialService } from '@main/services/extensions/credentials/CredentialService';
 import { getAdapter } from '@main/services/extensions/runtime/adapterRegistry';
 import { createLogger } from '@shared/utils/logger';
@@ -50,6 +55,7 @@ function wrapHandler<T>(handler: () => Promise<T>): Promise<IpcResult<T>> {
 let facade: ExtensionFacadeService | null = null;
 let skillsCatalog: SkillsCatalogService | null = null;
 let skillsMutation: SkillsMutationService | null = null;
+let skillsWatcher: SkillsWatcherService | null = null;
 let credentials: CredentialService | null = null;
 
 function getFacade(): ExtensionFacadeService {
@@ -73,6 +79,20 @@ function getSkillsCatalog(): SkillsCatalogService {
 function getSkillsMutation(): SkillsMutationService {
   if (!skillsMutation) skillsMutation = new SkillsMutationService();
   return skillsMutation;
+}
+
+function getSkillsWatcher(): SkillsWatcherService {
+  if (!skillsWatcher) skillsWatcher = new SkillsWatcherService();
+  return skillsWatcher;
+}
+
+/**
+ * Wire the skills file-watcher to a transport-specific event emitter.
+ * Called once at startup by each transport (Electron IPC → webContents.send,
+ * standalone server → SSE broadcast).
+ */
+export function setSkillsWatcherEmitter(emit: (event: SkillWatcherEvent) => void): void {
+  getSkillsWatcher().setEmitter(emit);
 }
 
 function getCredentials(): CredentialService {
@@ -123,7 +143,8 @@ export const extensionHandlers = {
 
   pluginInstall: (request: PluginInstallRequest) =>
     wrapHandler(async () => {
-      const harnessType = (request.harnessType ?? 'claudecode') as CcAgentType;
+      // Plugins are claudecode-only — no other harness supports them
+      const harnessType = 'claudecode' as CcAgentType;
       const adapter = getAdapter(harnessType);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${harnessType}` };
 
@@ -255,6 +276,41 @@ export const extensionHandlers = {
   skillsGetDetail: (skillId: string, projectPath?: string) =>
     wrapHandler(() => getSkillsCatalog().getDetail(skillId, projectPath)),
 
+  skillsUpsert: (request: SkillUpsertRequest) =>
+    wrapHandler(async () => {
+      const mutation = getSkillsMutation();
+      await mutation.applyUpsert(request);
+      return { ok: true };
+    }),
+
+  skillsDelete: (request: SkillDeleteRequest) =>
+    wrapHandler(async () => {
+      const mutation = getSkillsMutation();
+      await mutation.deleteSkill(request);
+      return { ok: true };
+    }),
+
+  skillsPreviewUpsert: (request: SkillUpsertRequest) =>
+    wrapHandler(() => getSkillsMutation().previewUpsert(request)),
+
+  skillsApplyUpsert: (request: SkillUpsertRequest) =>
+    wrapHandler(() => getSkillsMutation().applyUpsert(request)),
+
+  skillsPreviewImport: (request: SkillImportRequest) =>
+    wrapHandler(() => getSkillsMutation().previewImport(request)),
+
+  skillsApplyImport: (request: SkillImportRequest) =>
+    wrapHandler(() => getSkillsMutation().applyImport(request)),
+
+  skillsStartWatching: (projectPath?: string) =>
+    wrapHandler(() => getSkillsWatcher().start(projectPath)),
+
+  skillsStopWatching: (watchId: string) =>
+    wrapHandler(async () => {
+      await getSkillsWatcher().stop(watchId);
+      return { ok: true };
+    }),
+
   // ── Credentials ──
 
   credentialsGetMcp: (mcpName: string) =>
@@ -275,11 +331,20 @@ export const extensionHandlers = {
       name: string;
       envVars?: { name: string; isRequired: boolean; description?: string }[];
     }[],
-    skillReqs: { name: string; envVars: string[] }[]
+    skillReqs: {
+      name: string;
+      envVars: { name: string; isRequired?: boolean; description?: string }[];
+    }[]
   ) => wrapHandler(() => getCredentials().scanRequiredEnv(projectPath, mcpServers, skillReqs)),
 
   credentialsResolveAgentEnv: (projectPath: string) =>
     wrapHandler(() => getCredentials().resolveAgentEnv(projectPath)),
+
+  credentialsGetSkillGlobalEnv: (skillFolderName: string) =>
+    wrapHandler(() => getCredentials().getSkillGlobalEnv(skillFolderName)),
+
+  credentialsSaveSkillGlobalEnv: (skillFolderName: string, vars: Record<string, string>) =>
+    wrapHandler(() => getCredentials().saveSkillGlobalEnv(skillFolderName, vars)),
 
   credentialsStatus: () => wrapHandler(() => getCredentials().getStorageStatus()),
 };

@@ -41,6 +41,7 @@ export type {
   CreateSkillRequest,
   DeleteSkillRequest,
   SkillCatalogItem,
+  SkillEnvVarDef,
   SkillDeleteRequest,
   SkillDetail,
   SkillDirectoryFlags,

@@ -53,7 +53,13 @@ import { platformMeta, isQRPlatform } from './platformMeta';
 import PlatformSetupQR from './PlatformSetupQR';
 import PlatformManualForm from './PlatformManualForm';
 
-import type { Project, TeamCreateRequest } from '@shared/types';
+import type {
+  EffortLevel,
+  Project,
+  TeamCreateRequest,
+  TeamFastMode,
+  TeamProviderId,
+} from '@shared/types';
 import type { CcAgentType } from '@shared/types/ccConnect';
 import type { GlobalProvider } from '@shared/types/providers';
 
@@ -70,6 +76,14 @@ export interface TeamCopyData {
   teamName: string;
   description?: string;
   color?: string;
+  providerId?: TeamProviderId;
+  model?: string;
+  effort?: EffortLevel;
+  fastMode?: TeamFastMode;
+  limitContext?: boolean;
+  skipPermissions?: boolean;
+  templateSourceId?: string;
+  templateDirectoryId?: string;
 }
 
 // ---------------------------------------------------------------------------

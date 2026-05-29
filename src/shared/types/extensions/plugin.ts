@@ -14,7 +14,7 @@ export interface PluginCatalogItem {
   name: string; // display name only
 
   // Metadata
-  source: 'official';
+  source: 'official' | 'local'; // 'local' = discovered from a user-registered custom marketplace
   description: string;
   category: string; // open-ended string, derived from marketplace.json
   author?: { name: string; email?: string };

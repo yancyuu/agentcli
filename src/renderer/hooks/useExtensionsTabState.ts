@@ -16,7 +16,7 @@ import type {
   PluginSortField,
 } from '@shared/types/extensions';
 
-export type ExtensionsSubTab = 'plugins' | 'mcp-servers' | 'skills' | 'api-keys';
+export type ExtensionsSubTab = 'plugins' | 'mcp-servers' | 'skills' | 'env-vars';
 export type SkillsSortState = 'name-asc' | 'recent-desc';
 
 interface PluginSortState {
@@ -33,7 +33,7 @@ const DEFAULT_FILTERS: PluginFilters = {
 
 export function useExtensionsTabState() {
   // ── Sub-tab navigation ──
-  const [activeSubTab, setActiveSubTab] = useState<ExtensionsSubTab>('mcp-servers');
+  const [activeSubTab, setActiveSubTab] = useState<ExtensionsSubTab>('plugins');
 
   // ── Plugin filters & sort ──
   const [pluginFilters, setPluginFilters] = useState<PluginFilters>(DEFAULT_FILTERS);
