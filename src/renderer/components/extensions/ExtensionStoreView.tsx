@@ -30,6 +30,7 @@ import { useExtensionsTabState } from '@renderer/hooks/useExtensionsTabState';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import {
+  filterExtensionStoreProviders,
   formatCliExtensionCapabilityStatus,
   getVisibleMultimodelProviders,
   isMultimodelRuntimeStatus,
@@ -291,7 +292,9 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   const isRefreshing = effectiveCliStatusLoading || mcpBrowseLoading || skillsLoading;
   const cliStatusBanner = useMemo(() => {
     const providers = effectiveCliStatus?.providers ?? [];
-    const visibleProviders = getVisibleMultimodelProviders(providers);
+    const visibleProviders = filterExtensionStoreProviders(
+      getVisibleMultimodelProviders(providers)
+    );
     const isMultimodel = isMultimodelRuntimeStatus(effectiveCliStatus);
     const shouldShowMultimodelProviderCards =
       isMultimodel && visibleProviders.length > 0 && effectiveCliStatus !== null;
