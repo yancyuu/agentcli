@@ -2221,6 +2221,67 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   // ---------------------------------------------------------------------------
+  // Credentials (project env, MCP credentials)
+  // ---------------------------------------------------------------------------
+
+  credentials = {
+    getStatus: async () =>
+      this.get<{ encryption: string; storagePath: string } | null>(
+        '/api/extensions/credentials/status'
+      ),
+
+    getProjectEnv: async (projectPath: string) =>
+      this.get<Record<string, string>>(
+        `/api/extensions/credentials/project-env?projectPath=${encodeURIComponent(projectPath)}`
+      ),
+
+    saveProjectEnv: async (projectPath: string, vars: Record<string, string>): Promise<void> => {
+      await this.post('/api/extensions/credentials/project-env', { projectPath, vars });
+    },
+
+    scanRequired: async (
+      projectPath: string,
+      mcpServers: {
+        name: string;
+        envVars?: { name: string; isRequired: boolean; description?: string };
+      }[],
+      skillReqs: {
+        name: string;
+        envVars: { name: string; isRequired?: boolean; description?: string }[];
+      }[]
+    ) =>
+      this.post<{
+        required: {
+          name: string;
+          isRequired: boolean;
+          description?: string;
+          source: string;
+          value?: string;
+        }[];
+      }>('/api/extensions/credentials/scan-required', { projectPath, mcpServers, skillReqs }),
+
+    resolveAgentEnv: async (projectPath: string) =>
+      this.get<Record<string, string>>(
+        `/api/extensions/credentials/resolve-agent-env?projectPath=${encodeURIComponent(projectPath)}`
+      ),
+
+    getSkillGlobalEnv: async (skillFolderName: string) =>
+      this.get<Record<string, string>>(
+        `/api/extensions/credentials/skill-env?folderName=${encodeURIComponent(skillFolderName)}`
+      ),
+
+    saveSkillGlobalEnv: async (
+      skillFolderName: string,
+      vars: Record<string, string>
+    ): Promise<void> => {
+      await this.post('/api/extensions/credentials/skill-env', {
+        folderName: skillFolderName,
+        vars,
+      });
+    },
+  };
+
+  // ---------------------------------------------------------------------------
   // Workspace (file system browsing)
   // ---------------------------------------------------------------------------
 

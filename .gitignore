@@ -51,4 +51,7 @@ eslint-fix/
 .eslintcache
 remotion/*
 
+# OMC tooling session/state
+.omc/
+
 .home/

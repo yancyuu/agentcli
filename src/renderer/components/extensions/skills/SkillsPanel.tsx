@@ -23,7 +23,6 @@ import {
   Info,
   Plus,
   Search,
-  Trash2,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -35,12 +34,7 @@ import { SkillImportDialog } from './SkillImportDialog';
 import { resolveSkillProjectPath } from './skillProjectUtils';
 
 import type { SkillsSortState } from '@renderer/hooks/useExtensionsTabState';
-import type {
-  SkillCatalogItem,
-  SkillDetail,
-  SkillSource,
-  SkillValidationIssue,
-} from '@shared/types/extensions';
+import type { SkillCatalogItem, SkillDetail, SkillValidationIssue } from '@shared/types/extensions';
 
 const SUCCESS_BANNER_MS = 2500;
 const NEW_SKILL_HIGHLIGHT_MS = 4000;
@@ -141,10 +135,6 @@ export const SkillsPanel = ({
   const [quickFilter, setQuickFilter] = useState<SkillsQuickFilter>('all');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);
-  const [skillSources, setSkillSources] = useState<SkillSource[]>([]);
-  const [newSkillSourceUrl, setNewSkillSourceUrl] = useState('');
-  const [skillSourceLoading, setSkillSourceLoading] = useState(false);
-  const [skillSourceError, setSkillSourceError] = useState<string | null>(null);
   const selectedSkillIdRef = useRef<string | null>(selectedSkillId);
   const selectedSkillItemRef = useRef<SkillCatalogItem | null>(null);
   selectedSkillIdRef.current = selectedSkillId;
@@ -221,55 +211,6 @@ export const SkillsPanel = ({
     };
   }, [fetchSkillDetail, fetchSkillsCatalog, projectPath]);
 
-  useEffect(() => {
-    if (!api.skills) return;
-    void api.skills
-      .listSources()
-      .then((snapshot) => setSkillSources(snapshot.sources))
-      .catch(() => undefined);
-  }, []);
-
-  const saveAndRefreshSkillSources = async (sources: SkillSource[]): Promise<void> => {
-    if (!api.skills) return;
-    setSkillSourceLoading(true);
-    setSkillSourceError(null);
-    try {
-      const saved = await api.skills.saveSources(sources);
-      setSkillSources(saved.sources);
-      const refreshed = await api.skills.refreshSources();
-      setSkillSources(refreshed.sources);
-      await fetchSkillsCatalog(projectPath ?? undefined);
-      setSuccessMessage('Skills 源已同步到 ~/.hermit/skills');
-    } catch (error) {
-      setSkillSourceError(error instanceof Error ? error.message : '同步 Skills 源失败');
-    } finally {
-      setSkillSourceLoading(false);
-    }
-  };
-
-  const handleAddSkillSource = async (): Promise<void> => {
-    const url = newSkillSourceUrl.trim();
-    if (!url) return;
-    const id =
-      url
-        .replace(/\.git$/, '')
-        .split(/[/:]/)
-        .filter(Boolean)
-        .slice(-2)
-        .join('-')
-        .toLowerCase()
-        .replace(/[^a-z0-9._-]+/g, '-') || `source-${Date.now().toString(36)}`;
-    await saveAndRefreshSkillSources([
-      ...skillSources,
-      { id, name: id, url, enabled: true, branch: 'main' },
-    ]);
-    setNewSkillSourceUrl('');
-  };
-
-  const handleRemoveSkillSource = async (sourceId: string): Promise<void> => {
-    await saveAndRefreshSkillSources(skillSources.filter((source) => source.id !== sourceId));
-  };
-
   const visibleSkills = useMemo(() => {
     const q = skillsSearchQuery.trim().toLowerCase();
     const filteredByQuery = q
@@ -307,71 +248,6 @@ export const SkillsPanel = ({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-md border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
-        全局技能由 `~/.hermit/skills` 管理，并在团队启动前投影到各 runtime 的全局 skills
-        目录。项目技能直接安装到你选择的项目 runtime 目录。
-      </div>
-      <div className="bg-surface-raised/20 rounded-xl border border-border p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="text-sm font-semibold text-text">全局 Skills 源</h3>
-            <p className="text-xs text-text-muted">
-              Git 源会同步到 `~/.hermit/skills`，随后由 Hermit 投影给 Claude、Cursor、Codex
-              等运行时。
-            </p>
-            <p className="text-xs text-text-muted">
-              打开面板只读取本地缓存；只有点击“添加并同步”或“刷新源”才会访问 GitHub 更新。
-            </p>
-            <input
-              value={newSkillSourceUrl}
-              onChange={(event) => setNewSkillSourceUrl(event.target.value)}
-              placeholder="https://github.com/yancyuu/HermitSkills"
-              className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-2 text-xs text-text"
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={skillSourceLoading || !newSkillSourceUrl.trim()}
-            onClick={() => void handleAddSkillSource()}
-          >
-            {skillSourceLoading ? '同步中...' : '添加并同步'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={skillSourceLoading || skillSources.length === 0}
-            onClick={() => void saveAndRefreshSkillSources(skillSources)}
-          >
-            刷新源
-          </Button>
-        </div>
-        {skillSourceError ? <p className="mt-2 text-xs text-red-400">{skillSourceError}</p> : null}
-        {skillSources.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {skillSources.map((source) => (
-              <span
-                key={source.id}
-                className="inline-flex max-w-full items-center gap-1 rounded bg-surface-raised px-1.5 py-0.5 text-[10px] text-text-muted"
-                title={source.url}
-              >
-                <span className="max-w-44 truncate">
-                  {source.name}
-                  {source.lastError ? ' · 同步失败' : ''}
-                </span>
-                <button
-                  type="button"
-                  className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded hover:bg-red-500/10 hover:text-red-300"
-                  onClick={() => void handleRemoveSkillSource(source.id)}
-                  aria-label={`删除 Skills 源 ${source.name}`}
-                >
-                  <Trash2 size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
       <div className="bg-surface-raised/20 rounded-xl border border-border p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-1 xl:max-w-2xl">
@@ -387,7 +263,6 @@ export const SkillsPanel = ({
             </p>
             <p className="max-w-2xl text-xs leading-5 text-text-muted">
               需要到处生效的习惯请使用个人技能；只对当前代码库有意义的流程请使用项目技能。
-              全局技能从 Hermit 源统一投影；项目技能直接写入所选项目 runtime 目录。
             </p>
           </div>
 

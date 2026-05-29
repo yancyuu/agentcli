@@ -904,7 +904,9 @@ function pruneOptimisticMessages(
   canonical: readonly InboxMessage[]
 ): InboxMessage[] {
   if (optimistic.length === 0) {
-    return [];
+    // Preserve the input reference so selectTeamMessages' identity cache stays
+    // warm across no-op head refreshes (otherwise every poll churns `messages`).
+    return optimistic as InboxMessage[];
   }
 
   const canonicalIds = new Set(
@@ -913,10 +915,14 @@ function pruneOptimisticMessages(
       .filter((messageId) => messageId.length > 0)
   );
 
-  return optimistic.filter((message) => {
+  const pruned = optimistic.filter((message) => {
     const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
     return !messageId || !canonicalIds.has(messageId);
   });
+
+  // Nothing was actually pruned — return the original reference so downstream
+  // identity checks (merged-messages selector) can short-circuit re-renders.
+  return pruned.length === optimistic.length ? (optimistic as InboxMessage[]) : pruned;
 }
 
 function clearPendingReplyRefreshTimer(teamName: string): void {

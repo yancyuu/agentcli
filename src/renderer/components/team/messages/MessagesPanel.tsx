@@ -208,7 +208,8 @@ export const MessagesPanel = memo(function MessagesPanel({
     teams,
     openTeamTab,
     messages,
-    messagesState,
+    hasMore,
+    loadingOlderMessages,
     loadOlderTeamMessages,
     refreshTeamMessagesHead,
     addOptimisticTeamMessage,
@@ -224,7 +225,13 @@ export const MessagesPanel = memo(function MessagesPanel({
       teams: s.teams,
       openTeamTab: s.openTeamTab,
       messages: selectTeamMessages(s, teamName),
-      messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
+      // Subscribe to only the primitive flags the panel renders. The full
+      // cache entry object is rebuilt on every (even no-op) head refresh —
+      // selecting it wholesale would re-render this heavy panel every poll.
+      hasMore: teamName ? (s.teamMessagesByName[teamName]?.hasMore ?? false) : false,
+      loadingOlderMessages: teamName
+        ? (s.teamMessagesByName[teamName]?.loadingOlder ?? false)
+        : false,
       loadOlderTeamMessages: s.loadOlderTeamMessages,
       refreshTeamMessagesHead: s.refreshTeamMessagesHead,
       addOptimisticTeamMessage: s.addOptimisticTeamMessage,
@@ -233,16 +240,15 @@ export const MessagesPanel = memo(function MessagesPanel({
   const bootstrapHeadRefreshAttemptedForTeamRef = useRef<string | null>(null);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!messagesState?.hasMore || messagesState.loadingHead || messagesState.loadingOlder) {
+    // Read the live cache entry instead of subscribing to it — loadingHead
+    // toggles on every background head refresh and must not re-render us.
+    const entry = useStore.getState().teamMessagesByName[teamName];
+    if (!entry?.hasMore || entry.loadingHead || entry.loadingOlder) {
       return;
     }
     await loadOlderTeamMessages(teamName);
-  }, [loadOlderTeamMessages, messagesState, teamName]);
+  }, [loadOlderTeamMessages, teamName]);
 
-  const messagesLoading =
-    (messagesState?.loadingHead ?? false) || (messagesState?.loadingOlder ?? false);
-  const loadingOlderMessages = messagesState?.loadingOlder ?? false;
-  const hasMore = messagesState?.hasMore ?? false;
   const effectiveMessages = messages;
   const loadedMessageCount = effectiveMessages.length;
   const autoLoadOlderLockRef = useRef(false);
@@ -271,12 +277,11 @@ export const MessagesPanel = memo(function MessagesPanel({
 
   const maybeAutoLoadOlderMessages = useCallback(
     (scrollTop: number) => {
-      if (
-        scrollTop > AUTO_LOAD_OLDER_SCROLL_TOP_PX ||
-        !hasMore ||
-        messagesState?.loadingHead ||
-        loadingOlderMessages
-      ) {
+      if (scrollTop > AUTO_LOAD_OLDER_SCROLL_TOP_PX || !hasMore || loadingOlderMessages) {
+        return;
+      }
+      // loadingHead is read live (not subscribed) to avoid per-poll re-renders.
+      if (useStore.getState().teamMessagesByName[teamName]?.loadingHead) {
         return;
       }
       if (autoLoadOlderLockRef.current) {
@@ -285,7 +290,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       autoLoadOlderLockRef.current = true;
       void loadOlderMessages();
     },
-    [hasMore, loadOlderMessages, loadingOlderMessages, messagesState?.loadingHead]
+    [hasMore, loadOlderMessages, loadingOlderMessages, teamName]
   );
 
   useEffect(() => {
@@ -379,7 +384,9 @@ export const MessagesPanel = memo(function MessagesPanel({
     return () => {
       cancelled = true;
     };
-  }, [teamName]);
+    // Refetch when the lead session id changes (e.g. a new session is spawned)
+    // so the session list/selector reflects the updated id without a remount.
+  }, [teamName, currentLeadSessionId]);
 
   const selectedSession = useMemo(
     () => teamSessions.find((session) => session.sessionKey === selectedSessionKey) ?? null,
@@ -455,7 +462,10 @@ export const MessagesPanel = memo(function MessagesPanel({
       bootstrapHeadRefreshAttemptedForTeamRef.current = null;
       return;
     }
-    if (messagesState?.loadingHead || messagesState?.loadingOlder) {
+    // Read loading flags live rather than subscribing — they toggle on every
+    // background head refresh and must not drive this bootstrap effect.
+    const entry = useStore.getState().teamMessagesByName[teamName];
+    if (entry?.loadingHead || entry?.loadingOlder) {
       return;
     }
     if (bootstrapHeadRefreshAttemptedForTeamRef.current === teamName) {
@@ -463,13 +473,7 @@ export const MessagesPanel = memo(function MessagesPanel({
     }
     bootstrapHeadRefreshAttemptedForTeamRef.current = teamName;
     void refreshTeamMessagesHead(teamName).catch(() => undefined);
-  }, [
-    effectiveMessages.length,
-    messagesState?.loadingHead,
-    messagesState?.loadingOlder,
-    refreshTeamMessagesHead,
-    teamName,
-  ]);
+  }, [effectiveMessages.length, refreshTeamMessagesHead, teamName]);
 
   useLayoutEffect(() => {
     if (position !== 'sidebar') return;

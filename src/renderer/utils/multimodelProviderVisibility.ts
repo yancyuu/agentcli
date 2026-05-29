@@ -12,6 +12,23 @@ export function getVisibleMultimodelProviders(
   return filterMainScreenCliProviders(providers);
 }
 
+/**
+ * Further filters the visible providers to those the Extension Store can actually manage.
+ * Providers where ALL extension capabilities are 'provider-scoped' own their own config
+ * and cannot be managed via the Extension Store UI, so they are excluded from capability cards.
+ */
+export function filterExtensionStoreProviders(providers: CliProviderStatus[]): CliProviderStatus[] {
+  return providers.filter((p) => {
+    const ext = p.capabilities?.extensions;
+    if (!ext) return false;
+    return (
+      ext.plugins.ownership !== 'provider-scoped' ||
+      ext.mcp.ownership !== 'provider-scoped' ||
+      ext.skills.ownership !== 'provider-scoped'
+    );
+  });
+}
+
 export function isMultimodelRuntimeStatus(
   cliStatus: Pick<CliInstallationStatus, 'flavor' | 'providers'> | null | undefined
 ): boolean {

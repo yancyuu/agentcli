@@ -18,9 +18,6 @@ import { findPaneByTabId, updatePane } from '../utils/paneHelpers';
 
 import type { AppState } from '../types';
 import type {
-  ApiKeyEntry,
-  ApiKeySaveRequest,
-  ApiKeyStorageStatus,
   EnrichedPlugin,
   ExtensionOperationState,
   InstalledMcpEntry,
@@ -74,12 +71,13 @@ export interface ExtensionsSlice {
   mcpInstallProgress: Record<string, ExtensionOperationState>;
   installErrors: Record<string, string>; // keyed by scoped operation key
 
-  // ── API Keys ──
-  apiKeys: ApiKeyEntry[];
-  apiKeysLoading: boolean;
-  apiKeysError: string | null;
-  apiKeySaving: boolean;
-  apiKeyStorageStatus: ApiKeyStorageStatus | null;
+  // ── Toast notifications ──
+  extensionToasts: Array<{
+    id: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    title: string;
+    message?: string;
+  }>;
 
   // ── Skills catalog cache ──
   skillsUserCatalog: SkillCatalogItem[];
@@ -111,6 +109,14 @@ export interface ExtensionsSlice {
   applySkillImport: (request: SkillImportRequest) => Promise<SkillDetail | null>;
   deleteSkill: (request: SkillDeleteRequest) => Promise<void>;
 
+  // ── Toast actions ──
+  addExtensionToast: (
+    type: 'success' | 'error' | 'warning' | 'info',
+    title: string,
+    message?: string
+  ) => void;
+  dismissExtensionToast: (id: string) => void;
+
   // ── Mutation actions ──
   installPlugin: (request: PluginInstallRequest) => Promise<void>;
   uninstallPlugin: (pluginId: string, scope?: InstallScope, projectPath?: string) => Promise<void>;
@@ -122,12 +128,6 @@ export interface ExtensionsSlice {
     scope?: string,
     projectPath?: string
   ) => Promise<void>;
-
-  // ── API Keys actions ──
-  fetchApiKeys: () => Promise<void>;
-  fetchApiKeyStorageStatus: () => Promise<void>;
-  saveApiKey: (request: ApiKeySaveRequest) => Promise<void>;
-  deleteApiKey: (id: string) => Promise<void>;
 
   // ── Tab opener ──
   openExtensionsTab: () => void;
@@ -337,11 +337,6 @@ function getSkillsCatalogKey(projectPath?: string): string {
   return projectPath ?? USER_SKILLS_CATALOG_KEY;
 }
 
-function upsertApiKeyEntry(entries: ApiKeyEntry[], entry: ApiKeyEntry): ApiKeyEntry[] {
-  const nextEntries = entries.filter((candidate) => candidate.id !== entry.id);
-  return [entry, ...nextEntries];
-}
-
 /** Duration to show "success" state before returning to idle */
 const SUCCESS_DISPLAY_MS = 2_000;
 const PROJECT_SCOPE_REQUIRED_MESSAGE =
@@ -397,12 +392,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
   pluginInstallProgress: {},
   mcpInstallProgress: {},
   installErrors: {},
-
-  apiKeys: [],
-  apiKeysLoading: false,
-  apiKeysError: null,
-  apiKeySaving: false,
-  apiKeyStorageStatus: null,
+  extensionToasts: [],
 
   skillsUserCatalog: [],
   skillsProjectCatalogByProjectPath: {},
@@ -631,6 +621,11 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
         const diagnosticsRecord = Object.fromEntries(
           diagnostics.map((entry) => [getMcpDiagnosticKey(entry.name, entry.scope), entry] as const)
         );
+        const failedServers = diagnostics.filter((d) => d.status === 'failed');
+        if (failedServers.length > 0) {
+          const names = failedServers.map((s) => s.name).join(', ');
+          get().addExtensionToast('warning', 'MCP 连接异常', `${names} 连接失败`);
+        }
         const checkedAt = Date.now();
         set({
           mcpDiagnostics: diagnosticsRecord,
@@ -956,6 +951,11 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
       set((prev) => ({
         pluginInstallProgress: { ...prev.pluginInstallProgress, [operationKey]: 'success' },
       }));
+      get().addExtensionToast(
+        'success',
+        '插件已安装',
+        `已安装到 claudecode (${effectiveRequest.scope ?? 'user'})`
+      );
 
       // Refresh catalog to pick up new installed state
       void get().fetchPluginCatalog(
@@ -1183,6 +1183,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
       set((prev) => ({
         mcpInstallProgress: { ...prev.mcpInstallProgress, [progressKey]: 'success' },
       }));
+      get().addExtensionToast('success', 'MCP 服务器已安装', `已安装 ${request.serverName}`);
 
       scheduleMcpSuccessReset(progressKey, set);
     } catch (err) {
@@ -1264,6 +1265,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
       set((prev) => ({
         mcpInstallProgress: { ...prev.mcpInstallProgress, [operationKey]: 'success' },
       }));
+      get().addExtensionToast('success', 'MCP 服务器已卸载');
 
       scheduleMcpSuccessReset(operationKey, set);
     } catch (err) {
@@ -1276,92 +1278,25 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     }
   },
 
-  // ── API Keys fetch ──
-  fetchApiKeys: async () => {
-    if (!api.apiKeys) return;
-
-    set({ apiKeysLoading: true, apiKeysError: null });
-    try {
-      const keys = await api.apiKeys.list();
-      set({ apiKeys: keys, apiKeysLoading: false });
-    } catch (err) {
-      set({
-        apiKeysLoading: false,
-        apiKeysError: err instanceof Error ? err.message : 'Failed to load API keys',
-      });
-    }
-  },
-
-  fetchApiKeyStorageStatus: async () => {
-    if (!api.apiKeys) return;
-    try {
-      const status = await api.apiKeys.getStorageStatus();
-      set({ apiKeyStorageStatus: status });
-    } catch {
-      // Non-critical — UI will just not show the info icon
-    }
-  },
-
-  // ── API Key save ──
-  saveApiKey: async (request: ApiKeySaveRequest) => {
-    if (!api.apiKeys) return;
-
-    set({ apiKeySaving: true, apiKeysError: null });
-    try {
-      const savedKey = await api.apiKeys.save(request);
-      const warnings: string[] = [];
-
-      try {
-        const keys = await api.apiKeys.list();
-        set({ apiKeys: keys });
-      } catch (listError) {
-        warnings.push(
-          listError instanceof Error
-            ? `API key saved, but failed to refresh key list. ${listError.message}`
-            : 'API key saved, but failed to refresh key list.'
-        );
+  // ── Toast notifications ──
+  addExtensionToast: (type, title, message) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    set((prev) => ({
+      extensionToasts: [...prev.extensionToasts, { id, type, title, message }],
+    }));
+    if (type === 'success') {
+      setTimeout(() => {
         set((prev) => ({
-          apiKeys: upsertApiKeyEntry(prev.apiKeys, savedKey),
+          extensionToasts: prev.extensionToasts.filter((t) => t.id !== id),
         }));
-      }
-
-      await refreshConfiguredCliStatus(get());
-      const refreshError = get().cliStatusError;
-      if (refreshError) {
-        warnings.push(`API key saved, but failed to refresh provider status. ${refreshError}`);
-      }
-      set({ apiKeySaving: false, apiKeysError: warnings.length > 0 ? warnings.join(' ') : null });
-    } catch (err) {
-      set({
-        apiKeySaving: false,
-        apiKeysError: err instanceof Error ? err.message : 'Failed to save API key',
-      });
-      throw err; // Re-throw so the dialog can show the error
+      }, 3000);
     }
   },
 
-  // ── API Key delete ──
-  deleteApiKey: async (id: string) => {
-    if (!api.apiKeys) return;
-
-    try {
-      await api.apiKeys.delete(id);
-      set((prev) => ({
-        apiKeys: prev.apiKeys.filter((k) => k.id !== id),
-      }));
-      await refreshConfiguredCliStatus(get());
-      const refreshError = get().cliStatusError;
-      set({
-        apiKeysError: refreshError
-          ? `API key deleted, but failed to refresh provider status. ${refreshError}`
-          : null,
-      });
-    } catch (err) {
-      set({
-        apiKeysError: err instanceof Error ? err.message : 'Failed to delete API key',
-      });
-      throw err;
-    }
+  dismissExtensionToast: (id) => {
+    set((prev) => ({
+      extensionToasts: prev.extensionToasts.filter((t) => t.id !== id),
+    }));
   },
 
   // ── Tab opener ──

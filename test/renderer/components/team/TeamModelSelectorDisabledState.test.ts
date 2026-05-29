@@ -2,8 +2,6 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
-
 vi.mock('@renderer/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children),
@@ -70,27 +68,10 @@ const storeState = {
   appConfig: { general: { multimodelEnabled: true } },
   fetchCliProviderStatus: vi.fn().mockResolvedValue(undefined),
 };
-const codexAccountHookState = {
-  snapshot: null as CodexAccountSnapshotDto | null,
-  loading: false,
-  error: null as string | null,
-  refresh: vi.fn(() => Promise.resolve(undefined)),
-  startChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  cancelChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  logout: vi.fn(() => Promise.resolve(true)),
-};
 
 vi.mock('@renderer/store', () => ({
   useStore: (selector: (state: unknown) => unknown) => selector(storeState),
 }));
-
-vi.mock('@features/codex-account/renderer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@features/codex-account/renderer')>();
-  return {
-    ...actual,
-    useCodexAccountSnapshot: () => codexAccountHookState,
-  };
-});
 
 import { TeamModelSelector } from '@renderer/components/team/dialogs/TeamModelSelector';
 
@@ -100,13 +81,6 @@ describe('TeamModelSelector Anthropic-only surface', () => {
     storeState.cliStatus = null;
     storeState.cliStatusLoading = false;
     storeState.fetchCliProviderStatus.mockClear();
-    codexAccountHookState.snapshot = null;
-    codexAccountHookState.loading = false;
-    codexAccountHookState.error = null;
-    codexAccountHookState.refresh.mockClear();
-    codexAccountHookState.startChatgptLogin.mockClear();
-    codexAccountHookState.cancelChatgptLogin.mockClear();
-    codexAccountHookState.logout.mockClear();
   });
 
   it('renders the default model option even while runtime status is loading', async () => {

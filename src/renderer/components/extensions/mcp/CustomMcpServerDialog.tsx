@@ -5,7 +5,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -24,16 +23,11 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
-import { getExtensionActionDisableReason } from '@shared/utils/extensionNormalizers';
-import {
-  getDefaultMcpSharedScope,
-  getMcpScopeLabel,
-  isProjectScopedMcpScope,
-  isSharedMcpScope,
-} from '@shared/utils/mcpScopes';
+import { getDefaultMcpSharedScope } from '@shared/utils/mcpScopes';
 import { Plus, Server, Trash2 } from 'lucide-react';
 
-import type { CliInstallationStatus } from '@shared/types';
+import { HarnessSelector } from '../common/HarnessSelector';
+
 import type {
   McpCustomInstallRequest,
   McpHeaderDef,
@@ -45,17 +39,10 @@ const SERVER_NAME_RE = /^[\w.-]{1,100}$/;
 interface CustomMcpServerDialogProps {
   open: boolean;
   onClose: () => void;
-  projectPath: string | null;
-  cliStatus?: Pick<
-    CliInstallationStatus,
-    'installed' | 'authLoggedIn' | 'binaryPath' | 'launchError' | 'flavor' | 'providers'
-  > | null;
-  cliStatusLoading?: boolean;
 }
 
 type TransportMode = 'stdio' | 'http';
 type HttpTransport = 'streamable-http' | 'sse' | 'http';
-type Scope = 'local' | 'user' | 'project' | 'global';
 
 const HTTP_TRANSPORT_OPTIONS: { value: HttpTransport; label: string }[] = [
   { value: 'streamable-http', label: 'Streamable HTTP' },
@@ -63,34 +50,19 @@ const HTTP_TRANSPORT_OPTIONS: { value: HttpTransport; label: string }[] = [
   { value: 'http', label: 'HTTP' },
 ];
 
-interface EnvEntry {
-  key: string;
-  value: string;
-}
-
 export const CustomMcpServerDialog = ({
   open,
   onClose,
-  projectPath,
-  cliStatus: cliStatusOverride,
-  cliStatusLoading: cliStatusLoadingOverride,
 }: CustomMcpServerDialogProps): React.JSX.Element => {
   const installCustomMcpServer = useStore((s) => s.installCustomMcpServer);
   const storedCliStatus = useStore((s) => s.cliStatus);
-  const storedCliStatusLoading = useStore((s) => s.cliStatusLoading);
-  const cliStatus = cliStatusOverride ?? storedCliStatus;
-  const cliStatusLoading = cliStatusLoadingOverride ?? storedCliStatusLoading;
-  const defaultSharedScope = getDefaultMcpSharedScope(cliStatus?.flavor);
-  const scopeOptions: { value: Scope; label: string }[] = [
-    { value: defaultSharedScope, label: getMcpScopeLabel(defaultSharedScope, cliStatus?.flavor) },
-    { value: 'project', label: 'Project' },
-    { value: 'local', label: 'Local' },
-  ];
+  const defaultSharedScope = getDefaultMcpSharedScope(storedCliStatus?.flavor);
+  const installScope = defaultSharedScope === 'global' ? 'user' : defaultSharedScope;
 
   // Form state
   const [serverName, setServerName] = useState('');
   const [transportMode, setTransportMode] = useState<TransportMode>('stdio');
-  const [scope, setScope] = useState<Scope>(defaultSharedScope);
+  const [harnessType, setHarnessType] = useState('claudecode');
 
   // Stdio fields
   const [npmPackage, setNpmPackage] = useState('');
@@ -102,26 +74,9 @@ export const CustomMcpServerDialog = ({
   const [headers, setHeaders] = useState<McpHeaderDef[]>([]);
 
   // Shared
-  const [envVars, setEnvVars] = useState<EnvEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
-  const autoFilledValuesRef = useRef<Record<string, string>>({});
   const wasOpenRef = useRef(false);
-  const previousDefaultSharedScopeRef = useRef<Scope>(defaultSharedScope);
-  const envVarLookupNames = envVars
-    .map((entry) => entry.key.trim())
-    .filter(Boolean)
-    .sort()
-    .join('\0');
-  const apiKeyLookupProjectPath = isProjectScopedMcpScope(scope)
-    ? (projectPath ?? undefined)
-    : undefined;
-  const mutationDisableReason = getExtensionActionDisableReason({
-    isInstalled: false,
-    cliStatus,
-    cliStatusLoading,
-    section: 'mcp',
-  });
 
   // Reset on open
   useEffect(() => {
@@ -129,106 +84,19 @@ export const CustomMcpServerDialog = ({
     if (justOpened) {
       setServerName('');
       setTransportMode('stdio');
-      setScope(defaultSharedScope);
       setNpmPackage('');
       setNpmVersion('');
       setHttpUrl('');
       setHttpTransport('streamable-http');
       setHeaders([]);
-      setEnvVars([]);
       setError(null);
       setInstalling(false);
-      autoFilledValuesRef.current = {};
     }
     wasOpenRef.current = open;
-    if (!open) {
-      previousDefaultSharedScopeRef.current = defaultSharedScope;
-    }
-  }, [defaultSharedScope, open]);
-
-  useEffect(() => {
-    if (!open) {
-      previousDefaultSharedScopeRef.current = defaultSharedScope;
-      return;
-    }
-
-    const previousDefaultSharedScope = previousDefaultSharedScopeRef.current;
-    if (
-      previousDefaultSharedScope !== defaultSharedScope &&
-      scope === previousDefaultSharedScope &&
-      isSharedMcpScope(scope)
-    ) {
-      setScope(defaultSharedScope);
-    }
-
-    previousDefaultSharedScopeRef.current = defaultSharedScope;
-  }, [defaultSharedScope, open, scope]);
-
-  useEffect(() => {
-    if (open && isProjectScopedMcpScope(scope) && !projectPath) {
-      setScope(defaultSharedScope);
-    }
-  }, [defaultSharedScope, open, projectPath, scope]);
-
-  // Auto-fill env vars from saved API keys
-  useEffect(() => {
-    if (!open || envVars.length === 0 || !api.apiKeys) return;
-
-    const envVarNames = envVars.map((e) => e.key.trim()).filter(Boolean);
-    if (envVarNames.length === 0) return;
-
-    void api.apiKeys.lookup(envVarNames, apiKeyLookupProjectPath).then(
-      (results) => {
-        const previousAutoFilledValues = autoFilledValuesRef.current;
-        const nextAutoFilledValues = Object.fromEntries(
-          results.map((result) => [result.envVarName, result.value])
-        );
-        setEnvVars((prev) => {
-          let changed = false;
-          const next = prev.map((entry) => {
-            const envVarName = entry.key.trim();
-            if (!envVarName) {
-              return entry;
-            }
-
-            const previousValue = previousAutoFilledValues[envVarName];
-            const nextValue = nextAutoFilledValues[envVarName];
-
-            if (!nextValue) {
-              if (previousValue && entry.value === previousValue) {
-                changed = true;
-                return { ...entry, value: '' };
-              }
-              return entry;
-            }
-
-            if (!entry.value || entry.value === previousValue) {
-              if (entry.value !== nextValue) {
-                changed = true;
-                return { ...entry, value: nextValue };
-              }
-            }
-
-            return entry;
-          });
-
-          return changed ? next : prev;
-        });
-        autoFilledValuesRef.current = nextAutoFilledValues;
-      },
-      () => {
-        // Silently fail
-      }
-    );
-  }, [apiKeyLookupProjectPath, envVarLookupNames, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleInstall = async () => {
     setError(null);
-
-    if (mutationDisableReason) {
-      setError(mutationDisableReason);
-      return;
-    }
 
     if (!serverName.trim()) {
       setError('Server name is required');
@@ -263,20 +131,13 @@ export const CustomMcpServerDialog = ({
       };
     }
 
-    const envValues: Record<string, string> = {};
-    for (const entry of envVars) {
-      if (entry.key.trim() && entry.value) {
-        envValues[entry.key.trim()] = entry.value;
-      }
-    }
-
     const request: McpCustomInstallRequest = {
       serverName,
-      scope,
-      projectPath: isProjectScopedMcpScope(scope) ? (projectPath ?? undefined) : undefined,
+      scope: installScope,
       installSpec,
-      envValues,
+      envValues: {},
       headers: headers.filter((h) => h.key.trim() && h.value.trim()),
+      harnessType,
     };
 
     setInstalling(true);
@@ -290,11 +151,6 @@ export const CustomMcpServerDialog = ({
     }
   };
 
-  const addEnvVar = () => setEnvVars((prev) => [...prev, { key: '', value: '' }]);
-  const removeEnvVar = (i: number) => setEnvVars((prev) => prev.filter((_, idx) => idx !== i));
-  const updateEnvVar = (i: number, field: 'key' | 'value', val: string) =>
-    setEnvVars((prev) => prev.map((e, idx) => (idx === i ? { ...e, [field]: val } : e)));
-
   const addHeader = () => setHeaders((prev) => [...prev, { key: '', value: '' }]);
   const removeHeader = (i: number) => setHeaders((prev) => prev.filter((_, idx) => idx !== i));
   const updateHeader = (i: number, field: 'key' | 'value', val: string) =>
@@ -303,13 +159,11 @@ export const CustomMcpServerDialog = ({
   const canSubmit =
     serverName.trim() &&
     (transportMode === 'stdio' ? npmPackage.trim() : httpUrl.trim()) &&
-    !(isProjectScopedMcpScope(scope) && !projectPath) &&
-    !mutationDisableReason &&
     !installing;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[85vh] w-full max-w-lg overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="flex size-8 items-center justify-center rounded-lg border border-border bg-surface-raised">
@@ -440,7 +294,7 @@ export const CustomMcpServerDialog = ({
                   </Button>
                 </div>
                 {headers.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="max-h-32 space-y-2 overflow-y-auto">
                     {headers.map((header, i) => (
                       <div key={i} className="flex items-center gap-2">
                         <Input
@@ -471,73 +325,10 @@ export const CustomMcpServerDialog = ({
             </div>
           )}
 
-          {/* Scope */}
-          <div className="space-y-1.5">
-            <Label className="text-xs">作用域</Label>
-            <Select value={scope} onValueChange={(v) => setScope(v as Scope)}>
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {scopeOptions.map((opt) => (
-                  <SelectItem
-                    key={opt.value}
-                    value={opt.value}
-                    disabled={isProjectScopedMcpScope(opt.value) && !projectPath}
-                  >
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Environment variables */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">环境变量</Label>
-              <Button variant="ghost" size="sm" onClick={addEnvVar} className="h-6 px-1.5 text-xs">
-                <Plus className="mr-1 size-3" />
-                添加
-              </Button>
-            </div>
-            {envVars.length > 0 && (
-              <div className="space-y-2">
-                {envVars.map((entry, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Input
-                      value={entry.key}
-                      onChange={(e) => updateEnvVar(i, 'key', e.target.value)}
-                      className="h-7 w-40 font-mono text-xs"
-                      placeholder="ENV_VAR_NAME"
-                    />
-                    <Input
-                      type="password"
-                      value={entry.value}
-                      onChange={(e) => updateEnvVar(i, 'value', e.target.value)}
-                      className="h-7 flex-1 text-xs"
-                      placeholder="value"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-red-400 hover:bg-red-500/10"
-                      onClick={() => removeEnvVar(i)}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Harness selector */}
+          <HarnessSelector capability="mcp" value={harnessType} onChange={setHarnessType} />
 
           {/* Error */}
-          {mutationDisableReason && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
-              {mutationDisableReason}
-            </div>
-          )}
           {error && (
             <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
               {error}

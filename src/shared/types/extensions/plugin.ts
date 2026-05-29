@@ -14,7 +14,7 @@ export interface PluginCatalogItem {
   name: string; // display name only
 
   // Metadata
-  source: 'official';
+  source: 'official' | 'local'; // 'local' = discovered from a user-registered custom marketplace
   description: string;
   category: string; // open-ended string, derived from marketplace.json
   author?: { name: string; email?: string };
@@ -71,6 +71,7 @@ export interface PluginInstallRequest {
   pluginId: string; // canonical key — main resolves qualifiedName from catalog
   scope: InstallScope;
   projectPath?: string; // required for repo-scoped installs ('project' or 'local')
+  harnessType?: string; // which harness to install to (defaults to claudecode)
 }
 
 // ── Filters (renderer-only concern) ────────────────────────────────────────

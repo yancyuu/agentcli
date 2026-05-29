@@ -1102,19 +1102,19 @@ describe('stable slot layout planner', () => {
       },
     };
 
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const snapshot = buildStableSlotLayoutSnapshot({
       teamName,
       nodes: [lead, narrow, wide, ...wideTasks],
       layout,
     });
     const wideFrame = snapshot?.memberSlotFrames.find((frame) => frame.ownerId === wide.id);
-    const warnMock = vi.mocked(console.warn);
 
     expect(snapshot).not.toBeNull();
     expect(wideFrame).toBeDefined();
     expect(wideFrame?.ringIndex).toBe(1);
     expect(wideFrame?.sectorIndex).toBe(1);
     expect(warnMock.mock.calls).toHaveLength(1);
-    warnMock.mockClear();
+    warnMock.mockRestore();
   });
 });

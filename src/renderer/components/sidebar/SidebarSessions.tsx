@@ -402,6 +402,29 @@ const SessionRow = ({
     };
   }, [historyLimit, isExpanded, session.teamName, session.id]);
 
+  // While a live session stays expanded, keep its detail fresh with a silent
+  // refetch (no skeleton flash) so newly arrived messages show without needing
+  // to collapse and reopen.
+  useEffect(() => {
+    if (!isExpanded || !session.live) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      void (async () => {
+        try {
+          const d = await api.teams.getSessionDetail(session.teamName, session.id, historyLimit);
+          setDetail(d);
+        } catch {
+          // silent — transient fetch failures are retried on the next tick
+        }
+      })();
+    }, REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isExpanded, session.live, session.teamName, session.id, historyLimit]);
+
   const handleLoadMoreHistory = useCallback(() => {
     if (loadingDetail || loadingMoreHistory || !hasMoreHistory) {
       return;

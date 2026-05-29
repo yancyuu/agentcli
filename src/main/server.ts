@@ -48,6 +48,7 @@ import {
   CROSS_TEAM_SOURCE,
   formatCrossTeamText,
 } from '@shared/constants/crossTeam';
+import type { CcAgentType } from '../shared/types/ccConnect';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
@@ -4732,10 +4733,207 @@ app.get('/api/events', (request, reply) => {
 
 const SSE_FALLBACK_RE = /^\/api\/(.*\/(events|stream|notifications\/stream))$/;
 
-app.get('/api/extensions/mcp/browse', async () => ({
-  servers: [],
-  items: [],
-}));
+// ── Extension Store routes (wired to extensionHandlers) ────────────────
+
+import { extensionHandlers as ext, setSkillsWatcherEmitter } from './ipc/extensions';
+
+// Broadcast skill file-watcher changes to connected frontends via SSE.
+setSkillsWatcherEmitter((event) => broadcastSse('skills:changed', event));
+
+app.get('/api/extensions/plugins', async () => {
+  const result = await ext.pluginGetAll();
+  return result;
+});
+
+app.get('/api/extensions/plugins/readme/:pluginId', async (request) => {
+  const { pluginId } = request.params as { pluginId: string };
+  const result = await ext.pluginGetReadme(pluginId);
+  return result;
+});
+
+app.post('/api/extensions/plugins/install', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.pluginInstall(body as any);
+  return result;
+});
+
+app.post('/api/extensions/plugins/uninstall', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.pluginUninstall(
+    body.pluginId as string,
+    body.scope as string,
+    body.projectPath as string,
+    body.harnessType as CcAgentType | undefined
+  );
+  return result;
+});
+
+app.get('/api/extensions/mcp/search', async (request) => {
+  const query = (request.query as Record<string, string>).q ?? '';
+  const limit = Number((request.query as Record<string, string>).limit) || 20;
+  const result = await ext.mcpSearch(query, limit);
+  return result;
+});
+
+app.get('/api/extensions/mcp/browse', async (request) => {
+  const cursor = (request.query as Record<string, string>).cursor;
+  const limit = Number((request.query as Record<string, string>).limit) || 20;
+  const result = await ext.mcpBrowse(cursor || undefined, limit);
+  return result;
+});
+
+app.get('/api/extensions/mcp/installed', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.mcpGetInstalled(projectPath);
+  return result;
+});
+
+app.get('/api/extensions/mcp/:registryId', async (request) => {
+  const { registryId } = request.params as { registryId: string };
+  const result = await ext.mcpGetById(registryId);
+  return result;
+});
+
+app.post('/api/extensions/mcp/install', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpInstall(body as any);
+  return result;
+});
+
+app.post('/api/extensions/mcp/install-custom', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpInstallCustom(body as any);
+  return result;
+});
+
+app.post('/api/extensions/mcp/uninstall', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.mcpUninstall(
+    body.name as string,
+    body.scope as string,
+    body.projectPath as string,
+    body.harnessType as CcAgentType | undefined
+  );
+  return result;
+});
+
+app.get('/api/extensions/skills', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.skillsList(projectPath);
+  return result;
+});
+
+app.get('/api/extensions/skills/:skillId', async (request) => {
+  const { skillId } = request.params as { skillId: string };
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  const result = await ext.skillsGetDetail(skillId, projectPath);
+  return result;
+});
+
+app.post('/api/extensions/skills/upsert', async (request) => {
+  const result = await ext.skillsUpsert(request.body as any);
+  return result;
+});
+
+app.post('/api/extensions/skills/delete', async (request) => {
+  const result = await ext.skillsDelete(request.body as any);
+  return result;
+});
+
+app.post('/api/extensions/skills/preview-upsert', async (request) => {
+  return ext.skillsPreviewUpsert(request.body as any);
+});
+
+app.post('/api/extensions/skills/apply-upsert', async (request) => {
+  return ext.skillsApplyUpsert(request.body as any);
+});
+
+app.post('/api/extensions/skills/preview-import', async (request) => {
+  return ext.skillsPreviewImport(request.body as any);
+});
+
+app.post('/api/extensions/skills/apply-import', async (request) => {
+  return ext.skillsApplyImport(request.body as any);
+});
+
+app.post('/api/extensions/skills/watching/start', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  return ext.skillsStartWatching(projectPath);
+});
+
+app.post('/api/extensions/skills/watching/stop', async (request) => {
+  const { watchId } = (request.body ?? {}) as { watchId?: string };
+  return ext.skillsStopWatching(watchId as string);
+});
+
+app.get('/api/extensions/credentials/status', async () => {
+  const result = await ext.credentialsStatus();
+  return result;
+});
+
+app.get('/api/extensions/credentials/mcp/:mcpName', async (request) => {
+  const { mcpName } = request.params as { mcpName: string };
+  const result = await ext.credentialsGetMcp(mcpName);
+  return result;
+});
+
+app.post('/api/extensions/credentials/mcp', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsSaveMcp(
+    body.mcpName as string,
+    body.envValues as Record<string, string>
+  );
+  return result;
+});
+
+app.get('/api/extensions/credentials/project-env', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  if (!projectPath) return { error: 'projectPath required' };
+  const result = await ext.credentialsGetProjectEnv(projectPath);
+  return result;
+});
+
+app.post('/api/extensions/credentials/project-env', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsSaveProjectEnv(
+    body.projectPath as string,
+    body.vars as Record<string, string>
+  );
+  return result;
+});
+
+app.post('/api/extensions/credentials/scan-required', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsScanRequired(
+    body.projectPath as string,
+    body.mcpServers as any,
+    body.skillReqs as any
+  );
+  return result;
+});
+
+app.get('/api/extensions/credentials/resolve-agent-env', async (request) => {
+  const projectPath = (request.query as Record<string, string>).projectPath;
+  if (!projectPath) return { error: 'projectPath required' };
+  const result = await ext.credentialsResolveAgentEnv(projectPath);
+  return result;
+});
+
+app.get('/api/extensions/credentials/skill-env', async (request) => {
+  const folderName = (request.query as Record<string, string>).folderName;
+  if (!folderName) return { error: 'folderName required' };
+  const result = await ext.credentialsGetSkillGlobalEnv(folderName);
+  return result;
+});
+
+app.post('/api/extensions/credentials/skill-env', async (request) => {
+  const body = request.body as Record<string, unknown>;
+  const result = await ext.credentialsSaveSkillGlobalEnv(
+    body.folderName as string,
+    body.vars as Record<string, string>
+  );
+  return result;
+});
 
 app.setNotFoundHandler((request, reply) => {
   const u = request.url;

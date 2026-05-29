@@ -256,7 +256,7 @@ export const McpServersPanel = ({
     }
   };
 
-  // Sort displayed servers
+  // Sort displayed catalog servers
   const displayServers = useMemo(() => sortMcpServers(rawServers, mcpSort), [rawServers, mcpSort]);
   const runtimeLabel = getRuntimeDisplayName(cliStatus, true);
 
@@ -471,6 +471,56 @@ export const McpServersPanel = ({
             {mcpDiagnosticsError}
           </div>
         ))}
+
+      {/* Installed servers (catalog-style cards for custom installs) */}
+      {installedServers.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-text">已安装</p>
+            <Badge variant="secondary" className="font-normal">
+              {installedServers.length}
+            </Badge>
+          </div>
+          <div className="mcp-servers-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {installedServers.map((entry) => {
+              // Find matching catalog item
+              const catalogMatch = browseCatalog.find(
+                (c) => sanitizeMcpServerName(c.name) === entry.name.toLowerCase()
+              );
+              const fakeItem: McpCatalogItem = catalogMatch ?? {
+                id: `custom:${entry.name}`,
+                name: entry.name,
+                description: entry.transport === 'http' ? 'HTTP/SSE 服务器' : 'Stdio 服务器',
+                source: 'official',
+                installSpec: null,
+                envVars: [],
+                requiresAuth: false,
+                tools: [],
+              };
+              const diagnostic =
+                mcpDiagnostics[getMcpDiagnosticKey(entry.name, entry.scope)] ??
+                mcpDiagnostics[getMcpDiagnosticKey(entry.name)] ??
+                mcpDiagnostics[entry.name] ??
+                null;
+
+              return (
+                <McpServerCard
+                  key={`${entry.name}-${entry.scope}`}
+                  server={fakeItem}
+                  isInstalled={true}
+                  installedEntry={entry}
+                  installedEntries={[entry]}
+                  diagnostic={diagnostic}
+                  diagnosticsLoading={mcpDiagnosticsLoading}
+                  onClick={setSelectedMcpServerId}
+                  cliStatus={cliStatus}
+                  cliStatusLoading={cliStatusLoading}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Empty state */}
       {!isLoading && displayServers.length === 0 && (

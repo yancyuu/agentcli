@@ -69,6 +69,7 @@ import {
   Trash2,
   Loader2,
   MessageSquare,
+  Shield,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -96,6 +97,7 @@ const ProjectEditorOverlay = lazy(() =>
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
+import { ProjectEnvPanel } from '../extensions/env/ProjectEnvPanel';
 import {
   getTeamPendingRepliesState,
   setTeamPendingRepliesState,
@@ -880,6 +882,7 @@ export const TeamDetailView = ({
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [savedLaunchRequest, setSavedLaunchRequest] = useState<TeamLaunchRequest | null>(null);
   useEffect(() => {
     if (!editDialogOpen || !teamName) return;
@@ -2155,6 +2158,21 @@ export const TeamDetailView = ({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    {data.config.projectPath && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                            onClick={() => setEnvDialogOpen(true)}
+                          >
+                            <Shield size={12} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">环境变量</TooltipContent>
+                      </Tooltip>
+                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -2653,6 +2671,18 @@ export const TeamDetailView = ({
                 }
                 onRestartTeam={handleRestartTeamFromEdit}
               />
+
+              <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
+                <DialogContent className="max-h-[80vh] max-w-lg overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>项目环境变量</DialogTitle>
+                    <DialogDescription>
+                      管理当前项目所需的环境变量，供 MCP 和 Skills 使用。
+                    </DialogDescription>
+                  </DialogHeader>
+                  <ProjectEnvPanel projectPath={data.config.projectPath ?? null} />
+                </DialogContent>
+              </Dialog>
 
               <Dialog
                 open={removeMemberConfirm !== null}

@@ -40,6 +40,7 @@ import {
 import { ExternalLink, Lock, Plus, Star, Trash2, Wrench } from 'lucide-react';
 
 import { InstallButton } from '../common/InstallButton';
+import { HarnessSelector } from '../common/HarnessSelector';
 import { SourceBadge } from '../common/SourceBadge';
 
 import type { CliInstallationStatus } from '@shared/types';
@@ -98,6 +99,7 @@ export const McpServerDetailDialog = ({
   );
 
   const [serverName, setServerName] = useState('');
+  const [harnessType, setHarnessType] = useState('claudecode');
   const [envValues, setEnvValues] = useState<Record<string, string>>({});
   const [headers, setHeaders] = useState<McpHeaderDef[]>([]);
   const [imgError, setImgError] = useState(false);
@@ -271,6 +273,7 @@ export const McpServerDetailDialog = ({
       projectPath: isProjectScopedMcpScope(scope) ? (projectPath ?? undefined) : undefined,
       envValues,
       headers,
+      harnessType,
     });
   };
 
@@ -492,6 +495,14 @@ export const McpServerDetailDialog = ({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Harness selector */}
+            <HarnessSelector
+              capability="mcp"
+              value={harnessType}
+              onChange={setHarnessType}
+              disabled={isInstalledForScope}
+            />
 
             {/* Environment variables */}
             {server.envVars.length > 0 && (

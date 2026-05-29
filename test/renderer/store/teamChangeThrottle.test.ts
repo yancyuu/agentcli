@@ -70,6 +70,7 @@ describe('team change throttling', () => {
 
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     __resetTeamSliceModuleStateForTests();
     const fetchTeams = vi.fn(async () => undefined);
     const fetchMemberSpawnStatuses = vi.fn(async () => undefined);
@@ -117,7 +118,7 @@ describe('team change throttling', () => {
     cleanup?.();
     cleanup = null;
     __resetTeamSliceModuleStateForTests();
-    vi.mocked(console.warn).mockClear();
+    vi.mocked(console.warn).mockRestore();
     vi.useRealTimers();
   });
 

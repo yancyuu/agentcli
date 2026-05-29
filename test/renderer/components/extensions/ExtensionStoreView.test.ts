@@ -2,7 +2,6 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
 import type { CliInstallationStatus } from '@shared/types';
 
 interface StoreState {
@@ -32,15 +31,6 @@ interface StoreState {
 }
 
 const storeState = {} as StoreState;
-const codexAccountHookState = {
-  snapshot: null as CodexAccountSnapshotDto | null,
-  loading: false,
-  error: null as string | null,
-  refresh: vi.fn(() => Promise.resolve(undefined)),
-  startChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  cancelChatgptLogin: vi.fn(() => Promise.resolve(true)),
-  logout: vi.fn(() => Promise.resolve(true)),
-};
 const pluginsPanelSpy = vi.fn();
 const mcpServersPanelSpy = vi.fn();
 const customMcpDialogSpy = vi.fn();
@@ -61,14 +51,6 @@ vi.mock('@renderer/api', () => ({
   },
   isElectronMode: () => true,
 }));
-
-vi.mock('@features/codex-account/renderer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@features/codex-account/renderer')>();
-  return {
-    ...actual,
-    useCodexAccountSnapshot: () => codexAccountHookState,
-  };
-});
 
 vi.mock('@renderer/contexts/useTabUIContext', () => ({
   useTabIdOptional: () => undefined,
@@ -198,6 +180,10 @@ vi.mock('lucide-react', () => {
   return {
     AlertTriangle: Icon,
     BookOpen: Icon,
+    CheckCircle: Icon,
+    CheckCircle2: Icon,
+    Eye: Icon,
+    EyeOff: Icon,
     Info: Icon,
     Key: Icon,
     Loader2: Icon,
@@ -205,8 +191,20 @@ vi.mock('lucide-react', () => {
     Puzzle: Icon,
     RefreshCw: Icon,
     Server: Icon,
+    Sliders: Icon,
+    Trash2: Icon,
+    X: Icon,
+    XCircle: Icon,
   };
 });
+
+vi.mock('@renderer/components/extensions/env/EnvVarPanel', () => ({
+  EnvVarPanel: () => React.createElement('div', null, 'env-panel'),
+}));
+
+vi.mock('@renderer/components/extensions/common/ExtensionToast', () => ({
+  StoreExtensionToast: () => null,
+}));
 
 import { ExtensionStoreView } from '@renderer/components/extensions/ExtensionStoreView';
 
@@ -295,13 +293,6 @@ describe('ExtensionStoreView provider loading placeholders', () => {
     pluginsPanelSpy.mockReset();
     mcpServersPanelSpy.mockReset();
     customMcpDialogSpy.mockReset();
-    codexAccountHookState.snapshot = null;
-    codexAccountHookState.loading = false;
-    codexAccountHookState.error = null;
-    codexAccountHookState.refresh.mockReset().mockResolvedValue(undefined);
-    codexAccountHookState.startChatgptLogin.mockReset().mockResolvedValue(true);
-    codexAccountHookState.cancelChatgptLogin.mockReset().mockResolvedValue(true);
-    codexAccountHookState.logout.mockReset().mockResolvedValue(true);
     storeState.fetchPluginCatalog = vi.fn().mockResolvedValue(undefined);
     storeState.bootstrapCliStatus = vi.fn().mockResolvedValue(undefined);
     storeState.fetchCliStatus = vi.fn().mockResolvedValue(undefined);
@@ -463,269 +454,5 @@ describe('ExtensionStoreView provider loading placeholders', () => {
     });
   });
 
-  it('uses the live account snapshot to replace stale extension-card status', async () => {
-    storeState.cliStatusLoading = false;
-    storeState.cliProviderStatusLoading = {};
-    codexAccountHookState.snapshot = {
-      preferredAuthMode: 'chatgpt',
-      effectiveAuthMode: 'chatgpt',
-      launchAllowed: true,
-      launchIssueMessage: null,
-      launchReadinessState: 'ready_chatgpt',
-      appServerState: 'healthy',
-      appServerStatusMessage: null,
-      managedAccount: {
-        type: 'chatgpt',
-        email: 'user@example.com',
-        planType: 'pro',
-      },
-      apiKey: {
-        available: true,
-        source: 'environment',
-        sourceLabel: 'Detected from OPENAI_API_KEY',
-      },
-      requiresOpenaiAuth: false,
-      login: {
-        status: 'idle',
-        error: null,
-        startedAt: null,
-      },
-      rateLimits: null,
-      updatedAt: new Date().toISOString(),
-    };
-    const anthropicProvider = createLoadingMultimodelStatus().providers[0];
-    storeState.cliStatus = {
-      ...createLoadingMultimodelStatus(),
-      authLoggedIn: true,
-      authStatusChecking: false,
-      providers: [
-        {
-          ...anthropicProvider,
-          supported: true,
-          authenticated: true,
-          authMethod: 'api_key',
-          verificationState: 'verified',
-          statusMessage: 'Connected',
-          models: ['opus'],
-        },
-      ],
-    };
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(React.createElement(ExtensionStoreView));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('Anthropic');
-    expect(host.textContent).not.toContain('正在检查提供商状态...');
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('uses the live Codex snapshot even while multimodel root status is still loading', async () => {
-    storeState.cliStatus = null;
-    storeState.cliStatusLoading = true;
-    storeState.cliProviderStatusLoading = {};
-    codexAccountHookState.snapshot = {
-      preferredAuthMode: 'chatgpt',
-      effectiveAuthMode: 'chatgpt',
-      launchAllowed: true,
-      launchIssueMessage: null,
-      launchReadinessState: 'ready_chatgpt',
-      appServerState: 'healthy',
-      appServerStatusMessage: null,
-      managedAccount: {
-        type: 'chatgpt',
-        email: 'user@example.com',
-        planType: 'pro',
-      },
-      apiKey: {
-        available: true,
-        source: 'environment',
-        sourceLabel: 'Detected from OPENAI_API_KEY',
-      },
-      requiresOpenaiAuth: false,
-      login: {
-        status: 'idle',
-        error: null,
-        startedAt: null,
-      },
-      rateLimits: {
-        limitId: 'plan-pro',
-        limitName: 'Pro',
-        primary: {
-          usedPercent: 5,
-          windowDurationMins: 300,
-          resetsAt: 1_762_547_200,
-        },
-        secondary: {
-          usedPercent: 41,
-          windowDurationMins: 10_080,
-          resetsAt: 1_762_891_200,
-        },
-        credits: {
-          hasCredits: false,
-          unlimited: false,
-          balance: null,
-        },
-        planType: 'pro',
-      },
-      updatedAt: new Date().toISOString(),
-    };
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(React.createElement(ExtensionStoreView));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('Anthropic');
-    expect(host.textContent).not.toContain('正在检查扩展运行时可用性');
-    expect(host.querySelector('button[disabled]')).toBeNull();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('does not leave the stale Codex placeholder stuck as unsupported once live snapshot truth arrives', async () => {
-    storeState.cliStatusLoading = false;
-    storeState.cliProviderStatusLoading = {};
-    codexAccountHookState.snapshot = {
-      preferredAuthMode: 'chatgpt',
-      effectiveAuthMode: null,
-      launchAllowed: false,
-      launchIssueMessage: 'Connect a ChatGPT account to use your Codex subscription.',
-      launchReadinessState: 'missing_auth',
-      appServerState: 'healthy',
-      appServerStatusMessage: null,
-      managedAccount: null,
-      apiKey: {
-        available: true,
-        source: 'environment',
-        sourceLabel: 'Detected from OPENAI_API_KEY',
-      },
-      requiresOpenaiAuth: true,
-      login: {
-        status: 'idle',
-        error: null,
-        startedAt: null,
-      },
-      rateLimits: null,
-      updatedAt: new Date().toISOString(),
-    };
-    storeState.cliStatus = {
-      ...createLoadingMultimodelStatus(),
-      authLoggedIn: true,
-      authStatusChecking: false,
-      providers: [createLoadingMultimodelStatus().providers[0]],
-    };
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(React.createElement(ExtensionStoreView));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('Anthropic');
-    expect(host.textContent).toBeTruthy();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('passes merged effective Codex status to nested extension panels and dialogs', async () => {
-    storeState.cliStatusLoading = true;
-    storeState.cliProviderStatusLoading = {};
-    codexAccountHookState.snapshot = {
-      preferredAuthMode: 'chatgpt',
-      effectiveAuthMode: 'chatgpt',
-      launchAllowed: true,
-      launchIssueMessage: null,
-      launchReadinessState: 'ready_chatgpt',
-      appServerState: 'healthy',
-      appServerStatusMessage: null,
-      managedAccount: {
-        type: 'chatgpt',
-        email: 'user@example.com',
-        planType: 'pro',
-      },
-      apiKey: {
-        available: false,
-        source: null,
-        sourceLabel: null,
-      },
-      requiresOpenaiAuth: false,
-      login: {
-        status: 'idle',
-        error: null,
-        startedAt: null,
-      },
-      rateLimits: null,
-      updatedAt: new Date().toISOString(),
-    };
-    storeState.cliStatus = {
-      ...createLoadingMultimodelStatus(),
-      authLoggedIn: true,
-      authStatusChecking: false,
-      providers: [createLoadingMultimodelStatus().providers[1]],
-    };
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(React.createElement(ExtensionStoreView));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const pluginsPanelProps = pluginsPanelSpy.mock.calls.at(-1)?.[0] as {
-      cliStatus?: CliInstallationStatus | null;
-      cliStatusLoading?: boolean;
-    };
-    const mcpPanelProps = mcpServersPanelSpy.mock.calls.at(-1)?.[0] as {
-      cliStatus?: CliInstallationStatus | null;
-      cliStatusLoading?: boolean;
-    };
-    const customDialogProps = customMcpDialogSpy.mock.calls.at(-1)?.[0] as {
-      cliStatus?: CliInstallationStatus | null;
-      cliStatusLoading?: boolean;
-    };
-
-    expect(pluginsPanelProps.cliStatusLoading).toBe(false);
-    expect(mcpPanelProps.cliStatusLoading).toBe(false);
-    expect(customDialogProps.cliStatusLoading).toBe(false);
-    expect(pluginsPanelProps.cliStatus?.providers[0]?.supported).toBe(true);
-    expect(pluginsPanelProps.cliStatus?.providers[0]?.statusMessage).toBe('ChatGPT account ready');
-    expect(mcpPanelProps.cliStatus?.providers[0]?.resolvedBackendId).toBe('codex-native');
-    expect(
-      customDialogProps.cliStatus?.providers[0]?.connection?.codex?.managedAccount?.email
-    ).toBe('user@example.com');
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
 });
+

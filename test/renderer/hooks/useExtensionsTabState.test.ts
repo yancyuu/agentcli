@@ -143,7 +143,7 @@ describe('useExtensionsTabState', () => {
     expect(capturedState?.selectedSkillId).toBe('skill-1');
 
     await act(async () => {
-      capturedState?.setActiveSubTab('api-keys');
+      capturedState?.setActiveSubTab('plugins');
       await Promise.resolve();
     });
     expect(capturedState?.selectedSkillId).toBeNull();

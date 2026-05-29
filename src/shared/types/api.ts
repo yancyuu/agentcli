@@ -1122,6 +1122,35 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
   // Extension Store — Skills Catalog API (Electron-only, optional)
   skills?: SkillsCatalogAPI;
 
+  // Extension Store — Credentials (project env, MCP credentials)
+  credentials?: {
+    getStatus: () => Promise<{ encryption: string; storagePath: string } | null>;
+    getProjectEnv: (projectPath: string) => Promise<Record<string, string>>;
+    saveProjectEnv: (projectPath: string, vars: Record<string, string>) => Promise<void>;
+    scanRequired: (
+      projectPath: string,
+      mcpServers: {
+        name: string;
+        envVars?: { name: string; isRequired: boolean; description?: string };
+      }[],
+      skillReqs: {
+        name: string;
+        envVars: { name: string; isRequired?: boolean; description?: string }[];
+      }[]
+    ) => Promise<{
+      required: {
+        name: string;
+        isRequired: boolean;
+        description?: string;
+        source: string;
+        value?: string;
+      }[];
+    }>;
+    resolveAgentEnv: (projectPath: string) => Promise<Record<string, string>>;
+    getSkillGlobalEnv: (skillFolderName: string) => Promise<Record<string, string>>;
+    saveSkillGlobalEnv: (skillFolderName: string, vars: Record<string, string>) => Promise<void>;
+  };
+
   // Extension Store — API Keys Management (Electron-only, optional)
   apiKeys?: ApiKeysAPI;
 
