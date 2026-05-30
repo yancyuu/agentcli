@@ -11,7 +11,14 @@ interface StoreState {
   uninstallMcpServer: ReturnType<typeof vi.fn>;
   installErrors: Record<string, string>;
   mcpGitHubStars: Record<string, number>;
-  cliStatus?: { flavor: 'claude' | 'agent_teams_orchestrator' } | null;
+  cliStatus?: {
+    installed?: boolean;
+    authLoggedIn?: boolean;
+    binaryPath?: string;
+    launchError?: string;
+    flavor: 'claude' | 'agent_teams_orchestrator';
+    providers?: unknown[];
+  } | null;
 }
 
 const storeState = {} as StoreState;
@@ -40,6 +47,7 @@ vi.mock('@renderer/components/ui/button', () => ({
     onClick,
     type = 'button',
     disabled,
+    ...rest
   }: React.PropsWithChildren<{
     onClick?: () => void;
     type?: 'button' | 'submit' | 'reset';
@@ -51,6 +59,7 @@ vi.mock('@renderer/components/ui/button', () => ({
         type,
         disabled,
         onClick,
+        ...rest,
       },
       children
     ),
@@ -134,10 +143,19 @@ vi.mock('@renderer/components/extensions/common/SourceBadge', () => ({
   SourceBadge: ({ source }: { source: string }) => React.createElement('span', null, source),
 }));
 
+vi.mock('@renderer/components/ui/tooltip', () => ({
+  Tooltip: ({ children }: React.PropsWithChildren) => React.createElement(React.Fragment, null, children),
+  TooltipContent: ({ children }: React.PropsWithChildren) => React.createElement('span', null, children),
+  TooltipProvider: ({ children }: React.PropsWithChildren) => React.createElement(React.Fragment, null, children),
+  TooltipTrigger: ({ children }: React.PropsWithChildren) => React.createElement(React.Fragment, null, children),
+}));
+
 vi.mock('lucide-react', () => {
   const Icon = (props: React.SVGProps<SVGSVGElement>) => React.createElement('svg', props);
   return {
+    Check: Icon,
     ExternalLink: Icon,
+    Loader2: Icon,
     Lock: Icon,
     Plus: Icon,
     Star: Icon,
@@ -182,7 +200,7 @@ describe('McpServerDetailDialog installed entry handling', () => {
     storeState.uninstallMcpServer = vi.fn();
     storeState.installErrors = {};
     storeState.mcpGitHubStars = {};
-    storeState.cliStatus = null;
+    storeState.cliStatus = { installed: true, flavor: 'claude' };
     lookupMock.mockReset();
     lookupMock.mockResolvedValue([]);
   });
@@ -225,7 +243,7 @@ describe('McpServerDetailDialog installed entry handling', () => {
     const scopeSelect = host.querySelector('[data-testid="scope-select"]') as HTMLSelectElement;
     expect(scopeSelect.value).toBe('local');
 
-    const uninstallButton = host.querySelector('[data-testid="install-button"]') as HTMLButtonElement;
+    const uninstallButton = host.querySelector('[data-testid="uninstall-button"]') as HTMLButtonElement;
     await act(async () => {
       uninstallButton.click();
       await Promise.resolve();
@@ -564,7 +582,7 @@ describe('McpServerDetailDialog installed entry handling', () => {
     const scopeSelect = host.querySelector('[data-testid="scope-select"]') as HTMLSelectElement;
     expect(scopeSelect.value).toBe('project');
 
-    const uninstallButton = host.querySelector('[data-testid="install-button"]') as HTMLButtonElement;
+    const uninstallButton = host.querySelector('[data-testid="uninstall-button"]') as HTMLButtonElement;
     await act(async () => {
       uninstallButton.click();
       await Promise.resolve();
@@ -648,7 +666,7 @@ describe('McpServerDetailDialog installed entry handling', () => {
       await Promise.resolve();
     });
 
-    const uninstallButton = host.querySelector('[data-testid="install-button"]') as HTMLButtonElement;
+    const uninstallButton = host.querySelector('[data-testid="uninstall-button"]') as HTMLButtonElement;
     await act(async () => {
       uninstallButton.click();
       await Promise.resolve();

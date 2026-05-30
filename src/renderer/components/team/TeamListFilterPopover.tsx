@@ -79,10 +79,6 @@ export const TeamListFilterPopover = ({
     () => teams.filter((t) => aliveSet.has(t.teamName)).length,
     [teams, aliveSet]
   );
-  const offlineCount = useMemo(
-    () => teams.filter((t) => !aliveSet.has(t.teamName)).length,
-    [teams, aliveSet]
-  );
 
   return (
     <Popover>
@@ -123,18 +119,6 @@ export const TeamListFilterPopover = ({
                 <span className="size-1.5 rounded-full bg-emerald-400" />
                 运行中
                 <span className="text-[var(--color-text-muted)]">({runningCount})</span>
-              </span>
-            </label>
-            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control -- Radix Checkbox renders a button, not a native input */}
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]">
-              <Checkbox
-                checked={filter.selectedStatuses.has('offline')}
-                onCheckedChange={() => handleStatusToggle('offline')}
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="size-1.5 rounded-full bg-zinc-500" />
-                离线
-                <span className="text-[var(--color-text-muted)]">({offlineCount})</span>
               </span>
             </label>
           </div>

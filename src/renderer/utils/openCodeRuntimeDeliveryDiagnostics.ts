@@ -19,8 +19,6 @@ interface OpenCodeRuntimeDeliveryDiagnostics {
 
 const PENDING_WARNING =
   'OpenCode runtime delivery is still being checked. Message was saved and will be retried if needed.';
-const FAILED_WARNING =
-  'OpenCode runtime delivery failed. Message was saved to inbox, but live delivery did not complete.';
 
 export function buildOpenCodeRuntimeDeliveryDiagnostics(
   result: SendMessageResult
@@ -30,22 +28,44 @@ export function buildOpenCodeRuntimeDeliveryDiagnostics(
     return { warning: null, debugDetails: null };
   }
 
+  // Delivery failed but message is safely in inbox — will be picked up on restart.
+  // No user-facing warning needed; keep debug details for development only.
   const isFailed = runtimeDelivery.delivered === false;
+  if (isFailed) {
+    return {
+      warning: null,
+      debugDetails: {
+        messageId: result.messageId,
+        providerId: runtimeDelivery.providerId,
+        delivered: false,
+        responsePending:
+          typeof runtimeDelivery.responsePending === 'boolean'
+            ? runtimeDelivery.responsePending
+            : null,
+        responseState: runtimeDelivery.responseState ?? null,
+        ledgerStatus: runtimeDelivery.ledgerStatus ?? null,
+        acceptanceUnknown:
+          typeof runtimeDelivery.acceptanceUnknown === 'boolean'
+            ? runtimeDelivery.acceptanceUnknown
+            : null,
+        reason: runtimeDelivery.reason ?? null,
+        diagnostics: runtimeDelivery.diagnostics ?? [],
+      },
+    };
+  }
+
   const isPending = runtimeDelivery.responsePending === true;
-  if (!isFailed && !isPending) {
+  if (!isPending) {
     return { warning: null, debugDetails: null };
   }
 
   return {
-    warning: isFailed ? FAILED_WARNING : PENDING_WARNING,
+    warning: PENDING_WARNING,
     debugDetails: {
       messageId: result.messageId,
       providerId: runtimeDelivery.providerId,
-      delivered: typeof runtimeDelivery.delivered === 'boolean' ? runtimeDelivery.delivered : null,
-      responsePending:
-        typeof runtimeDelivery.responsePending === 'boolean'
-          ? runtimeDelivery.responsePending
-          : null,
+      delivered: null,
+      responsePending: true,
       responseState: runtimeDelivery.responseState ?? null,
       ledgerStatus: runtimeDelivery.ledgerStatus ?? null,
       acceptanceUnknown:

@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
@@ -69,6 +70,7 @@ import {
   Trash2,
   Loader2,
   MessageSquare,
+  MoreHorizontal,
   Shield,
   Users,
 } from 'lucide-react';
@@ -883,22 +885,7 @@ export const TeamDetailView = ({
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [envDialogOpen, setEnvDialogOpen] = useState(false);
-  const [savedLaunchRequest, setSavedLaunchRequest] = useState<TeamLaunchRequest | null>(null);
-  useEffect(() => {
-    if (!editDialogOpen || !teamName) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const saved = await api.teams.getSavedRequest(teamName);
-        if (!cancelled) setSavedLaunchRequest(saved ?? null);
-      } catch {
-        if (!cancelled) setSavedLaunchRequest(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [editDialogOpen, teamName]);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
     mode: TeamLaunchDialogMode;
@@ -1643,11 +1630,7 @@ export const TeamDetailView = ({
 
   const handleRestartTeamFromEdit = useCallback(async (): Promise<void> => {
     await api.ccSettings.restart();
-    // Wait for cc-connect to come back, then refresh
-    setTimeout(() => {
-      void fetchTeams();
-      void selectTeam(teamName);
-    }, 3000);
+    await Promise.all([fetchTeams(), selectTeam(teamName)]);
   }, [fetchTeams, selectTeam, teamName]);
 
   const handleSaveAndRestartFromEdit = useCallback(
@@ -2089,24 +2072,6 @@ export const TeamDetailView = ({
     const headerColorSet = data.config.color
       ? getTeamColorSet(data.config.color)
       : nameColorSet(data.config.name);
-    const rawTeamSettings = (data.settings ?? {}) as Record<string, unknown>;
-    const currentManagedSources =
-      data.config.managedSources ??
-      (typeof rawTeamSettings.admin_from === 'string' ? rawTeamSettings.admin_from : '*');
-    const currentDisabledCommands =
-      data.config.disabledCommands ??
-      (Array.isArray(rawTeamSettings.disabled_commands)
-        ? rawTeamSettings.disabled_commands.filter(
-            (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0
-          )
-        : []);
-    const currentPlatformAllowFrom =
-      data.config.platformAllowFrom ??
-      (typeof rawTeamSettings.platform_allow_from === 'object' &&
-      rawTeamSettings.platform_allow_from !== null &&
-      !Array.isArray(rawTeamSettings.platform_allow_from)
-        ? (rawTeamSettings.platform_allow_from as Record<string, string>)
-        : {});
 
     return (
       <>
@@ -2158,52 +2123,55 @@ export const TeamDetailView = ({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    {data.config.projectPath && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                            onClick={() => setEnvDialogOpen(true)}
-                          >
-                            <Shield size={12} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">环境变量</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2.5 text-xs text-[var(--color-text-secondary)]"
+                      disabled={isTeamProvisioning}
+                      onClick={() => setEditDialogOpen(true)}
+                    >
+                      <Pencil size={12} />
+                      编辑
+                    </Button>
+                    <Popover open={headerMenuOpen} onOpenChange={setHeaderMenuOpen}>
+                      <PopoverTrigger asChild>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                          disabled={isTeamProvisioning}
-                          onClick={() => setEditDialogOpen(true)}
+                          className="h-7 w-7 px-0 text-[var(--color-text-muted)]"
                         >
-                          <Pencil size={12} />
+                          <MoreHorizontal size={14} />
                         </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {isTeamProvisioning ? '团队仍在编排中，暂时无法编辑' : '编辑团队'}
-                      </TooltipContent>
-                    </Tooltip>
-                    {teamName !== 'default' && teamName !== 'my-project' && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            onClick={handleDeleteTeam}
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-44 p-1">
+                        {data.config.projectPath && (
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              setEnvDialogOpen(true);
+                            }}
                           >
-                            <Trash2 size={12} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">删除团队</TooltipContent>
-                      </Tooltip>
-                    )}
+                            <Shield size={13} />
+                            环境变量
+                          </button>
+                        )}
+                        {teamName !== 'default' && teamName !== 'my-project' && (
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              handleDeleteTeam();
+                            }}
+                          >
+                            <Trash2 size={13} />
+                            删除团队
+                          </button>
+                        )}
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
                 {data.config.description && (
@@ -2274,10 +2242,6 @@ export const TeamDetailView = ({
                   );
                 })()}
               </div>
-
-              {!data.isAlive && !isTeamProvisioning ? (
-                <TeamOfflineStatusBanner teamName={teamName} onLaunch={handleStartCcConnectTeam} />
-              ) : null}
 
               <div ref={provisioningBannerRef}>
                 <TeamProvisioningBanner teamName={teamName} />
@@ -2616,62 +2580,6 @@ export const TeamDetailView = ({
                 }}
               />
 
-              <EditTeamDialog
-                open={editDialogOpen}
-                teamName={teamName}
-                currentName={data.config.name}
-                currentDescription={data.config.description ?? ''}
-                currentColor={data.config.color ?? ''}
-                currentAgentType={data.config.agentType ?? data.harness ?? 'cursor'}
-                currentWorkDir={data.workDir ?? data.config.projectPath ?? ''}
-                currentPermissionMode={
-                  data.config.permissionMode ?? data.permissionMode ?? 'default'
-                }
-                currentLanguage={
-                  data.config.language ??
-                  (typeof rawTeamSettings.language === 'string' ? rawTeamSettings.language : 'zh')
-                }
-                currentShowContextIndicator={
-                  data.config.showContextIndicator ??
-                  (typeof rawTeamSettings.show_context_indicator === 'boolean'
-                    ? rawTeamSettings.show_context_indicator
-                    : true)
-                }
-                currentReplyFooter={
-                  data.config.replyFooter ??
-                  (typeof rawTeamSettings.reply_footer === 'boolean'
-                    ? rawTeamSettings.reply_footer
-                    : true)
-                }
-                currentInjectSender={
-                  data.config.injectSender ??
-                  (typeof rawTeamSettings.inject_sender === 'boolean'
-                    ? rawTeamSettings.inject_sender
-                    : false)
-                }
-                currentManagedSources={currentManagedSources}
-                currentDisabledCommands={currentDisabledCommands}
-                currentPlatformAllowFrom={currentPlatformAllowFrom}
-                currentProviderRefs={data.providerRefs ?? []}
-                globalProviders={data.globalProviders ?? []}
-                currentMembers={membersWithLiveBranches.filter((m) => !isLeadMember(m))}
-                leadMember={membersWithLiveBranches.find((m) => isLeadMember(m)) ?? null}
-                resolvedMemberColorMap={resolvedMemberColorMap}
-                isTeamAlive={data.isAlive && !isTeamProvisioning}
-                isTeamProvisioning={isTeamProvisioning}
-                projectPath={data.config.projectPath}
-                savedLaunchRequest={savedLaunchRequest}
-                onClose={() => setEditDialogOpen(false)}
-                onSaved={() => {
-                  void fetchTeams();
-                  void selectTeam(teamName);
-                }}
-                onDeleteTeam={
-                  teamName !== 'default' && teamName !== 'my-project' ? handleDeleteTeam : undefined
-                }
-                onRestartTeam={handleRestartTeamFromEdit}
-              />
-
               <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
                 <DialogContent className="max-h-[80vh] max-w-lg overflow-y-auto">
                   <DialogHeader>
@@ -2863,6 +2771,14 @@ export const TeamDetailView = ({
       {teamAgentRuntimeWatcher}
       {leadContextWatcher}
       {renderBody()}
+      <EditTeamDialog
+        open={editDialogOpen}
+        teamName={teamName}
+        onClose={() => setEditDialogOpen(false)}
+        onDeleteTeam={
+          teamName !== 'default' && teamName !== 'my-project' ? handleDeleteTeam : undefined
+        }
+      />
     </>
   );
 };

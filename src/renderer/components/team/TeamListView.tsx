@@ -85,7 +85,7 @@ function generateUniqueName(sourceName: string, existingNames: string[]): string
   }
 }
 
-type TeamStatus = 'active' | 'idle' | 'provisioning' | 'offline';
+type TeamStatus = 'active' | 'idle' | 'provisioning';
 
 function getRecentProjects(team: TeamSummary): string[] {
   const history = team.projectPathHistory;
@@ -162,7 +162,7 @@ function renderMemberChips(members: TeamSummaryMember[], isLight: boolean): Reac
 
 function renderTeamRecentPaths(
   team: TeamSummary,
-  status: TeamStatus,
+  status: TeamStatus | null,
   matchesCurrentProject: boolean,
   isLight: boolean
 ): React.JSX.Element | null {
@@ -211,7 +211,7 @@ function resolveTeamStatus(
   aliveTeams: string[],
   currentProgress: ReturnType<typeof getCurrentProvisioningProgressForTeam>,
   leadActivityByTeam: Record<string, string>
-): TeamStatus {
+): TeamStatus | null {
   if (aliveTeams.includes(teamName)) {
     return leadActivityByTeam[teamName] === 'active' ? 'active' : 'idle';
   }
@@ -223,10 +223,11 @@ function resolveTeamStatus(
   ) {
     return 'provisioning';
   }
-  return 'offline';
+  return null;
 }
 
-const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
+const StatusBadge = ({ status }: { status: TeamStatus | null }): React.JSX.Element | null => {
+  if (!status) return null;
   switch (status) {
     case 'active':
       return (
@@ -247,13 +248,6 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
         <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
           <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
           启动中...
-        </span>
-      );
-    case 'offline':
-      return (
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-zinc-500/15 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
-          <span className="size-1.5 rounded-full bg-zinc-500" />
-          离线
         </span>
       );
   }
@@ -436,9 +430,8 @@ export const TeamListView = (): React.JSX.Element => {
           getCurrentProvisioningProgressForTeam(provisioningState, t.teamName),
           leadActivityByTeam
         );
-        const isRunning = status !== 'offline';
+        const isRunning = status !== null;
         if (filter.selectedStatuses.has('running') && isRunning) return true;
-        if (filter.selectedStatuses.has('offline') && !isRunning) return true;
         return false;
       });
     }
@@ -1154,24 +1147,6 @@ export const TeamListView = (): React.JSX.Element => {
                         })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
-                      {status === 'offline' && team.projectPath && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
-                              onClick={(e) => handleLaunchTeam(team.teamName, team.projectPath, e)}
-                              disabled={launchingTeamName === team.teamName}
-                              aria-label="启动团队"
-                            >
-                              <Play size={14} fill="currentColor" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {launchingTeamName === team.teamName ? '启动中…' : '启动团队'}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
                       {!team.pendingCreate && (
                         <Tooltip>
                           <TooltipTrigger asChild>

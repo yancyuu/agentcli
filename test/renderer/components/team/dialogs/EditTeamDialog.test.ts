@@ -2,260 +2,72 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// ── API mock ──────────────────────────────────────────────────
 vi.mock('@renderer/api', () => ({
   api: {
     teams: {
       updateConfig: vi.fn(async () => {}),
-      replaceMembers: vi.fn(async () => {}),
-      removeMember: vi.fn(async () => {}),
-      restartMember: vi.fn(async () => {}),
+    },
+    ccSettings: {
+      restart: vi.fn(async () => {}),
     },
   },
 }));
 
-vi.mock('@renderer/components/team/members/MembersEditorSection', () => ({
-  MembersEditorSection: ({
-    members,
-    onChange,
-    fieldError,
-    headerExtra,
-  }: {
-    members: Array<{
-      id: string;
-      name: string;
-      originalName?: string;
-      roleSelection?: string;
-      customRole?: string;
-      providerId?: string;
-      model?: string;
-      effort?: string;
-    }>;
-    onChange: (
-      members: Array<{
-        id: string;
-        name: string;
-        originalName?: string;
-        roleSelection?: string;
-        customRole?: string;
-        providerId?: string;
-        model?: string;
-        effort?: string;
-      }>
-    ) => void;
-    fieldError?: string;
-    headerExtra?: React.ReactNode;
-  }) =>
-    React.createElement(
-      'div',
-      null,
-      'members-editor',
-      headerExtra,
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'rename-existing-member',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 0 ? { ...member, name: 'alice-renamed' } : member
-              )
-            ),
-        },
-        'rename-existing-member'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'remove-existing-member',
-          onClick: () => onChange(members.slice(1)),
-        },
-        'remove-existing-member'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'duplicate-member-name',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 1 ? { ...member, name: members[0]?.name ?? member.name } : member
-              )
-            ),
-        },
-        'duplicate-member-name'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'invalid-member-name',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 0 ? { ...member, name: 'lead' } : member
-              )
-            ),
-        },
-        'invalid-member-name'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'change-member-runtime',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 0 ? { ...member, providerId: 'codex', model: 'gpt-5.4' } : member
-              )
-            ),
-        },
-        'change-member-runtime'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'revert-member-runtime',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 0 ? { ...member, providerId: 'codex', model: 'gpt-5.2' } : member
-              )
-            ),
-        },
-        'revert-member-runtime'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'change-member-role',
-          onClick: () =>
-            onChange(
-              members.map((member, index) =>
-                index === 0 ? { ...member, roleSelection: 'developer' } : member
-              )
-            ),
-        },
-        'change-member-role'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'add-new-member',
-          onClick: () =>
-            onChange([
-              ...members,
-              {
-                id: 'draft-new',
-                name: 'charlie',
-                roleSelection: '',
-                customRole: '',
-              },
-            ]),
-        },
-        'add-new-member'
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'remove-new-member',
-          onClick: () => onChange(members.filter((member) => member.id !== 'draft-new')),
-        },
-        'remove-new-member'
-      ),
-      fieldError ? React.createElement('div', { 'data-testid': 'members-field-error' }, fieldError) : null
-    ),
-  buildMembersFromDrafts: vi.fn((members) =>
-    (
-      members as Array<{
-        name: string;
-        roleSelection?: string;
-        customRole?: string;
-        providerId?: string;
-        model?: string;
-        effort?: string;
-      }>
-    ).map((member) => ({
-      name: member.name,
-      role:
-        member.roleSelection === 'developer'
-          ? 'Developer'
-          : member.roleSelection === 'reviewer'
-            ? 'Reviewer'
-            : member.customRole || undefined,
-      providerId: member.providerId,
-      model: member.model,
-      effort: member.effort,
-    }))
-  ),
-  createMemberDraftsFromInputs: vi.fn((members) =>
-    (
-      members as Array<{
-        name: string;
-        role?: string;
-        providerId?: string;
-        model?: string;
-        effort?: string;
-      }>
-    ).map((member, index) => ({
-      id: `draft-${index}`,
-      name: member.name,
-      originalName: member.name,
-      roleSelection:
-        member.role === 'Developer'
-          ? 'developer'
-          : member.role === 'Reviewer'
-            ? 'reviewer'
-            : member.role
-              ? '__custom__'
-              : '',
-      customRole:
-        member.role && member.role !== 'Developer' && member.role !== 'Reviewer' ? member.role : '',
-      providerId: member.providerId,
-      model: member.model,
-      effort: member.effort,
-    }))
-  ),
-  createMemberDraft: vi.fn((member) => member),
-  filterEditableMemberInputs: vi.fn((members) => members),
-  validateMemberNameInline: vi.fn(() => null),
+// ── Store mock ────────────────────────────────────────────────
+const mockFetchTeams = vi.fn(async () => {});
+const mockSelectTeam = vi.fn(async () => {});
+
+const mockStoreState: Record<string, unknown> = {
+  selectedTeamName: 'test-team',
+  selectedTeamData: {
+    teamName: 'test-team',
+    config: {
+      name: 'Test Team',
+      description: 'A test team',
+      color: 'blue',
+      agentType: 'claude',
+      projectPath: '/tmp/project',
+      permissionMode: 'default',
+      language: 'zh',
+      showContextIndicator: true,
+      replyFooter: true,
+      injectSender: false,
+      managedSources: '*',
+      disabledCommands: [],
+      platformAllowFrom: {},
+    },
+    settings: {},
+    providerRefs: [],
+    globalProviders: [],
+    isAlive: true,
+    tasks: [],
+  },
+  provisioningProgressByTeam: {},
+};
+
+vi.mock('@renderer/store', () => ({
+  useStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector(mockStoreState),
 }));
 
-vi.mock('@renderer/components/team/members/MemberDraftRow', () => ({
-  MemberDraftRow: ({
-    member,
-    lockedRoleLabel,
-  }: {
-    member: { name: string };
-    lockedRoleLabel?: string;
-  }) =>
-    React.createElement(
-      'div',
-      null,
-      member.name,
-      lockedRoleLabel ? ` ${lockedRoleLabel}` : '',
-    ),
+vi.mock('@renderer/store/slices/teamSlice', () => ({
+  isTeamProvisioningActive: () => false,
+  selectResolvedMembersForTeamName: () => [],
+  getCurrentProvisioningProgressForTeam: () => null,
 }));
 
+// ── UI component mocks ────────────────────────────────────────
 vi.mock('@renderer/components/ui/button', () => ({
   Button: ({
     children,
     onClick,
-    type,
     disabled,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
-    type?: 'button' | 'submit' | 'reset';
     disabled?: boolean;
-  }) => React.createElement('button', { type: type ?? 'button', onClick, disabled }, children),
+  }) => React.createElement('button', { onClick, disabled }, children),
 }));
 
 vi.mock('@renderer/components/ui/dialog', () => ({
@@ -278,17 +90,32 @@ vi.mock('@renderer/components/ui/dialog', () => ({
     React.createElement('div', null, children),
 }));
 
-vi.mock('@renderer/hooks/useTheme', () => ({
-  useTheme: () => ({ isLight: false }),
+vi.mock('@renderer/components/ui/checkbox', () => ({
+  Checkbox: () => React.createElement('input', { type: 'checkbox' }),
 }));
 
-vi.mock('@renderer/hooks/useFileListCacheWarmer', () => ({
-  useFileListCacheWarmer: () => {},
+vi.mock('@renderer/components/team/HarnessCards', () => ({
+  AGENT_TYPE_LABELS: { claude: 'Claude', cursor: 'Cursor' },
 }));
 
-vi.mock('@renderer/constants/teamColors', () => ({
-  getTeamColorSet: () => ({ border: '#22c55e' }),
-  getThemedBadge: () => '#0f172a',
+vi.mock('@renderer/components/team/HarnessSelect', () => ({
+  HarnessSelect: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+  }) =>
+    React.createElement(
+      'select',
+      {
+        value,
+        onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value),
+        'data-testid': 'harness-select',
+      },
+      React.createElement('option', { value: 'claude' }, 'Claude'),
+      React.createElement('option', { value: 'cursor' }, 'Cursor')
+    ),
 }));
 
 import { EditTeamDialog } from '@renderer/components/team/dialogs/EditTeamDialog';
@@ -299,64 +126,117 @@ describe('EditTeamDialog', () => {
     document.body.innerHTML = '';
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    // Reset mock store state
+    mockStoreState.selectedTeamName = 'test-team';
+    mockStoreState.selectedTeamData = {
+      teamName: 'test-team',
+      config: {
+        name: 'Test Team',
+        description: 'A test team',
+        color: 'blue',
+        agentType: 'claude',
+        projectPath: '/tmp/project',
+        permissionMode: 'default',
+        language: 'zh',
+        showContextIndicator: true,
+        replyFooter: true,
+        injectSender: false,
+        managedSources: '*',
+        disabledCommands: [],
+        platformAllowFrom: {},
+      },
+      settings: {},
+      providerRefs: [],
+      globalProviders: [],
+      isAlive: true,
+      tasks: [],
+    };
+    mockStoreState.provisioningProgressByTeam = {};
   });
 
-  it('does not reset unsaved edits when live team props refresh while the dialog stays open', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  function mountDialog(props?: {
+    onDeleteTeam?: () => void;
+    teamName?: string;
+  }): { host: HTMLDivElement; root: ReturnType<typeof createRoot> } {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
 
-    const renderDialog = (currentMembers: Array<{ name: string; role?: string }>) =>
-      React.createElement(EditTeamDialog, {
-        open: true,
-        teamName: 'live-team',
-        currentName: 'Current Team',
-        currentDescription: 'desc',
-        currentColor: 'blue',
-        currentMembers: currentMembers as any,
-        isTeamAlive: true,
-        projectPath: '/tmp/project',
-        onClose: vi.fn(),
-        onSaved: vi.fn(),
-      });
-
-    await act(async () => {
-      root.render(renderDialog([{ name: 'alice', role: 'Reviewer' }]));
-      await Promise.resolve();
+    act(() => {
+      root.render(
+        React.createElement(EditTeamDialog, {
+          open: true,
+          teamName: props?.teamName ?? 'test-team',
+          onClose: vi.fn(),
+          onDeleteTeam: props?.onDeleteTeam,
+        })
+      );
     });
+
+    return { host, root };
+  }
+
+  it('renders with team name and description from store', () => {
+    const { host, root } = mountDialog();
 
     const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement | null;
     expect(nameInput).not.toBeNull();
-    if (!nameInput) {
-      throw new Error('Expected team name input to exist');
-    }
+    expect(nameInput?.value).toBe('Test Team');
 
-    await act(async () => {
+    const descTextarea = host.querySelector('#edit-team-description') as HTMLTextAreaElement | null;
+    expect(descTextarea).not.toBeNull();
+    expect(descTextarea?.value).toBe('A test team');
+
+    act(() => root.unmount());
+  });
+
+  it('allows editing the team name', () => {
+    const { host, root } = mountDialog();
+
+    const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement;
+    act(() => {
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setValue?.call(nameInput, 'Unsaved Team Name');
+      setValue?.call(nameInput, 'New Team Name');
       nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await Promise.resolve();
     });
 
-    expect(nameInput.value).toBe('Unsaved Team Name');
+    expect(nameInput.value).toBe('New Team Name');
 
-    await act(async () => {
-      root.render(renderDialog([{ name: 'alice', role: 'Developer' }]));
-      await Promise.resolve();
-    });
-
-    const updatedNameInput = host.querySelector('#edit-team-name') as HTMLInputElement | null;
-    expect(updatedNameInput?.value).toBe('Unsaved Team Name');
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
+    act(() => root.unmount());
   });
 
-  it('shows the team lead in the members section as read-only context', async () => {
+  it('preserves unsaved edits when store data refreshes while open', () => {
+    const { host, root } = mountDialog();
+
+    const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement;
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(nameInput, 'Unsaved Name');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // Simulate store data refresh (name stays same, but config object changes)
+    act(() => {
+      root.render(
+        React.createElement(EditTeamDialog, {
+          open: true,
+          teamName: 'test-team',
+          onClose: vi.fn(),
+        })
+      );
+    });
+
+    // Name should remain the unsaved value (not reset)
+    const updatedInput = host.querySelector('#edit-team-name') as HTMLInputElement;
+    expect(updatedInput.value).toBe('Unsaved Name');
+
+    act(() => root.unmount());
+  });
+
+  it('calls updateConfig and restart on save', async () => {
+    const onClose = vi.fn();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -365,88 +245,28 @@ describe('EditTeamDialog', () => {
       root.render(
         React.createElement(EditTeamDialog, {
           open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          leadMember: {
-            name: 'lead',
-            role: 'Team Lead',
-            providerId: 'codex',
-            model: 'gpt-5.4',
-            effort: 'medium',
-          } as any,
-          resolvedMemberColorMap: new Map([
-            ['lead', 'forest'],
-            ['alice', 'blue'],
-          ]),
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
+          teamName: 'test-team',
+          onClose,
         })
       );
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('lead');
-    expect(host.textContent).toBeTruthy();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('blocks saving live roster edits that rename existing teammates', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [
-            { name: 'alice', role: 'Reviewer' },
-            { name: 'bob', role: 'Developer' },
-          ] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const renameButton = host.querySelector('[data-testid=\"rename-existing-member\"]');
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
+      (btn) => btn.textContent === '保存并重启'
     );
-
-    expect(renameButton).not.toBeNull();
     expect(saveButton).not.toBeNull();
-
-    await act(async () => {
-      renameButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
 
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
 
-    expect(api.teams.updateConfig).not.toHaveBeenCalled();
-    expect(host.textContent).toBeTruthy();
-    expect(host.textContent!.length).toBeGreaterThan(0);
+    expect(api.teams.updateConfig).toHaveBeenCalledWith(
+      'test-team',
+      expect.objectContaining({ name: 'Test Team' })
+    );
+    expect(api.ccSettings.restart).toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();
@@ -454,64 +274,7 @@ describe('EditTeamDialog', () => {
     });
   });
 
-  it('removes existing live teammates through the dedicated removeMember path during save', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.removeMember).mockResolvedValue(undefined);
-    vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [
-            { name: 'alice', role: 'Reviewer' },
-            { name: 'bob', role: 'Developer' },
-          ] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      host
-        .querySelector('[data-testid="remove-existing-member"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      Array.from(host.querySelectorAll('button'))
-        .find((button) => button.textContent === '保存')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
-    expect(api.teams.removeMember).toHaveBeenCalledWith('live-team', 'alice');
-    expect(api.teams.replaceMembers).toHaveBeenCalledWith('live-team', {
-      members: [{ name: 'bob', role: 'Developer', providerId: undefined, model: undefined, effort: undefined }],
-    });
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('blocks adding a new teammate from Edit Team while the team is live', async () => {
+  it('blocks saving when team name is empty', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -521,73 +284,23 @@ describe('EditTeamDialog', () => {
       root.render(
         React.createElement(EditTeamDialog, {
           open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
+          teamName: 'test-team',
           onClose: vi.fn(),
-          onSaved: vi.fn(),
         })
       );
       await Promise.resolve();
     });
 
-    const addButton = host.querySelector('[data-testid="add-new-member"]');
-    const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
-
+    const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement;
     await act(async () => {
-      addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(nameInput, '');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
       await Promise.resolve();
     });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.teams.updateConfig).not.toHaveBeenCalled();
-    expect(host.textContent).toBeTruthy();
-    expect(host.textContent!.length).toBeGreaterThan(0);
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('blocks saving while team provisioning is still in progress', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          isTeamAlive: false,
-          isTeamProvisioning: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toBeTruthy();
 
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
+      (btn) => btn.textContent === '保存并重启'
     ) as HTMLButtonElement | undefined;
     expect(saveButton?.disabled).toBe(true);
 
@@ -597,11 +310,9 @@ describe('EditTeamDialog', () => {
     });
   });
 
-  it('restarts an existing live teammate when role changes', async () => {
+  it('shows error when save fails', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-    vi.mocked(api.teams.restartMember).mockResolvedValue(undefined);
+    vi.mocked(api.teams.updateConfig).mockRejectedValueOnce(new Error('network error'));
 
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -611,29 +322,15 @@ describe('EditTeamDialog', () => {
       root.render(
         React.createElement(EditTeamDialog, {
           open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
+          teamName: 'test-team',
           onClose: vi.fn(),
-          onSaved: vi.fn(),
         })
       );
       await Promise.resolve();
     });
 
-    await act(async () => {
-      host
-        .querySelector('[data-testid="change-member-role"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
+      (btn) => btn.textContent === '保存并重启'
     );
 
     await act(async () => {
@@ -641,11 +338,7 @@ describe('EditTeamDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
-    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
-    // Restart is no longer called directly by handleSave; it shows a save outcome hint instead
-    expect(api.teams.restartMember).not.toHaveBeenCalled();
-    expect(host.textContent).toContain('alice');
+    expect(host.textContent).toContain('network error');
 
     await act(async () => {
       root.unmount();
@@ -653,502 +346,35 @@ describe('EditTeamDialog', () => {
     });
   });
 
-  it('blocks saving when member names are duplicated', async () => {
+  it('calls onDeleteTeam when delete button is clicked', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
+    const onDeleteTeam = vi.fn();
+    const { host, root } = mountDialog({ onDeleteTeam });
 
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [
-            { name: 'alice', role: 'Reviewer' },
-            { name: 'bob', role: 'Developer' },
-          ] as any,
-          isTeamAlive: false,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const duplicateButton = host.querySelector('[data-testid=\"duplicate-member-name\"]');
-    const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
+    const deleteButton = Array.from(host.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('删除项目')
     );
+    expect(deleteButton).not.toBeNull();
 
     await act(async () => {
-      duplicateButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
+      deleteButton?.click();
+      // Flush the setTimeout(0) used for delete
+      await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect((saveButton as HTMLButtonElement | undefined)?.disabled).toBe(true);
-    expect(api.teams.updateConfig).not.toHaveBeenCalled();
+    expect(onDeleteTeam).toHaveBeenCalled();
 
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
+    act(() => root.unmount());
   });
 
-  it('clears stale validation feedback after the user edits the form', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
+  it('does not show delete button for default team', () => {
+    const { host, root } = mountDialog({ teamName: 'default' });
 
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const addButton = host.querySelector('[data-testid="add-new-member"]');
-    const removeButton = host.querySelector('[data-testid="remove-new-member"]');
-    const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
-
-    await act(async () => {
-      addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toBeTruthy();
-
-    await act(async () => {
-      removeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).not.toBeNull();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('surfaces partial-save feedback when team settings save but member changes fail', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.replaceMembers).mockRejectedValueOnce(new Error('disk write failed'));
-    const onSaved = vi.fn();
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved,
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
+    const deleteButton = Array.from(host.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('删除项目')
     );
+    expect(deleteButton).toBeUndefined();
 
-    await act(async () => {
-      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('disk write failed');
-    expect(onSaved).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('allows retrying save after config-only partial save once refreshed settings props catch up', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.replaceMembers)
-      .mockRejectedValueOnce(new Error('disk write failed'))
-      .mockResolvedValueOnce(undefined);
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    const renderDialog = (currentName: string) =>
-      React.createElement(EditTeamDialog, {
-        open: true,
-        teamName: 'live-team',
-        currentName,
-        currentDescription: 'desc',
-        currentColor: 'blue',
-        currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-        isTeamAlive: true,
-        projectPath: '/tmp/project',
-        onClose: vi.fn(),
-        onSaved: vi.fn(),
-      });
-
-    await act(async () => {
-      root.render(renderDialog('Current Team'));
-      await Promise.resolve();
-    });
-
-    const nameInput = host.querySelector('#edit-team-name') as HTMLInputElement | null;
-    const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
-
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setValue?.call(nameInput, 'Renamed Team');
-      nameInput?.dispatchEvent(new Event('input', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('disk write failed');
-
-    await act(async () => {
-      root.render(renderDialog('Renamed Team'));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('blocks saving when a teammate name is reserved', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [
-            { name: 'alice', role: 'Reviewer' },
-            { name: 'bob', role: 'Developer' },
-          ] as any,
-          isTeamAlive: false,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const invalidButton = host.querySelector('[data-testid=\"invalid-member-name\"]');
-    const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
-    );
-
-    await act(async () => {
-      invalidButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect((saveButton as HTMLButtonElement | undefined)?.disabled).toBe(true);
-    expect(host.querySelector('[data-testid="members-field-error"]')?.textContent).toContain(
-      'lead'
-    );
-    expect(api.teams.updateConfig).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('blocks saving when editable team source data changed while the dialog stayed open', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    const renderDialog = (role: string) =>
-      React.createElement(EditTeamDialog, {
-        open: true,
-        teamName: 'live-team',
-        currentName: 'Current Team',
-        currentDescription: 'desc',
-        currentColor: 'blue',
-        currentMembers: [{ name: 'alice', role }] as any,
-        isTeamAlive: true,
-        projectPath: '/tmp/project',
-        onClose: vi.fn(),
-        onSaved: vi.fn(),
-      });
-
-    await act(async () => {
-      root.render(renderDialog('Reviewer'));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      root.render(renderDialog('Developer'));
-      await Promise.resolve();
-    });
-
-    const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存'
-    );
-
-    await act(async () => {
-      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.teams.updateConfig).not.toHaveBeenCalled();
-    expect(host.textContent).toBeTruthy();
-    expect(host.textContent!.length).toBeGreaterThan(0);
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('allows retrying save after restart failures before props catch up to the committed state', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    const onSaved = vi.fn();
-
-    const renderDialog = (role: string) =>
-      React.createElement(EditTeamDialog, {
-        open: true,
-        teamName: 'live-team',
-        currentName: 'Current Team',
-        currentDescription: 'desc',
-        currentColor: 'blue',
-        currentMembers: [{ name: 'alice', role, providerId: 'codex', model: 'gpt-5.2' }] as any,
-        isTeamAlive: true,
-        projectPath: '/tmp/project',
-        onClose: vi.fn(),
-        onSaved,
-      });
-
-    await act(async () => {
-      root.render(renderDialog('Reviewer'));
-      await Promise.resolve();
-    });
-
-    const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
-
-    await act(async () => {
-      host
-        .querySelector('[data-testid="change-member-runtime"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    // handleSave no longer calls restartMember directly; it shows a save outcome hint
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
-    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
-    expect(api.teams.restartMember).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer', providerId: 'codex', model: 'gpt-5.4' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved,
-        })
-      );
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('drops pending restart retry when the member runtime is changed away from the failed target', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.teams.updateConfig).mockResolvedValue({} as any);
-    vi.mocked(api.teams.replaceMembers).mockResolvedValue(undefined);
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'live-team',
-          currentName: 'Current Team',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer', providerId: 'codex', model: 'gpt-5.2' }] as any,
-          isTeamAlive: true,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    const saveButton = () =>
-      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === '保存');
-
-    await act(async () => {
-      host
-        .querySelector('[data-testid="change-member-runtime"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    // handleSave no longer calls restartMember directly
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(1);
-    expect(api.teams.replaceMembers).toHaveBeenCalledTimes(1);
-    expect(api.teams.restartMember).not.toHaveBeenCalled();
-
-    await act(async () => {
-      host
-        .querySelector('[data-testid="revert-member-runtime"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      saveButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    // Second save succeeds with reverted runtime, still no restartMember calls
-    expect(api.teams.updateConfig).toHaveBeenCalledTimes(2);
-    expect(api.teams.restartMember).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
-  });
-
-  it('shows the lead member row with editable runtime in the members section', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    await act(async () => {
-      root.render(
-        React.createElement(EditTeamDialog, {
-          open: true,
-          teamName: 'team-alpha',
-          currentName: 'Team Alpha',
-          currentDescription: 'desc',
-          currentColor: 'blue',
-          currentMembers: [{ name: 'alice', role: 'Reviewer' }] as any,
-          leadMember: {
-            name: 'lead',
-            role: 'Team Lead',
-            providerId: 'codex',
-            model: 'gpt-5.4',
-            effort: 'medium',
-          } as any,
-          projectPath: '/tmp/project',
-          onClose: vi.fn(),
-          onSaved: vi.fn(),
-        })
-      );
-      await Promise.resolve();
-    });
-
-    expect(host.textContent).toContain('lead');
-    expect(host.textContent).toContain('团队负责人');
-
-    await act(async () => {
-      root.unmount();
-      await Promise.resolve();
-    });
+    act(() => root.unmount());
   });
 });

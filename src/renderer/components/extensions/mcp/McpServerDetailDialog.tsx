@@ -15,6 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import {
@@ -26,6 +32,7 @@ import {
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
 import {
+  getExtensionActionDisableReason,
   getMcpInstallationSummaryLabel,
   getMcpOperationKey,
   getPreferredMcpInstallationEntry,
@@ -37,7 +44,7 @@ import {
   isProjectScopedMcpScope,
   isSharedMcpScope,
 } from '@shared/utils/mcpScopes';
-import { ExternalLink, Lock, Plus, Star, Trash2, Wrench } from 'lucide-react';
+import { Check, ExternalLink, Loader2, Lock, Plus, Star, Trash2, Wrench } from 'lucide-react';
 
 import { InstallButton } from '../common/InstallButton';
 import { HarnessSelector } from '../common/HarnessSelector';
@@ -256,6 +263,18 @@ export const McpServerDetailDialog = ({
     missingRequiredEnvVars ||
     missingRequiredHeaders ||
     scopeRequiresProjectPath;
+  const installCliDisableReason = getExtensionActionDisableReason({
+    isInstalled: false,
+    cliStatus,
+    cliStatusLoading: cliStatusLoading ?? false,
+    section: 'mcp',
+  });
+  const uninstallCliDisableReason = getExtensionActionDisableReason({
+    isInstalled: true,
+    cliStatus,
+    cliStatusLoading: cliStatusLoading ?? false,
+    section: 'mcp',
+  });
   const diagnosticBadgeClass =
     diagnostic?.status === 'connected'
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
@@ -599,20 +618,86 @@ export const McpServerDetailDialog = ({
               </div>
             )}
 
-            {/* Install/Uninstall button */}
-            <div className="flex justify-end pt-1">
-              <InstallButton
-                state={installProgress}
-                isInstalled={isInstalledForScope}
-                section="mcp"
-                cliStatus={cliStatus}
-                cliStatusLoading={cliStatusLoading}
-                onInstall={handleInstall}
-                onUninstall={handleUninstall}
-                disabled={installDisabled}
-                size="default"
-                errorMessage={installError}
-              />
+            {/* Install / Save & Restart / Uninstall */}
+            <div className="flex items-center justify-end gap-2 pt-1">
+              {isInstalledForScope ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                    data-testid="uninstall-button"
+                    onClick={handleUninstall}
+                    disabled={Boolean(uninstallCliDisableReason)}
+                  >
+                    <Trash2 className="size-3.5" />
+                    <span className="ml-1.5">卸载</span>
+                  </Button>
+                  {installProgress === 'pending' ? (
+                    <Button size="default" disabled>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span className="ml-1.5">保存并重启中...</span>
+                    </Button>
+                  ) : installProgress === 'success' ? (
+                    <Button size="default" disabled className="text-green-400">
+                      <Check className="size-3.5" />
+                      <span className="ml-1.5">完成</span>
+                    </Button>
+                  ) : installProgress === 'error' ? (
+                    <div className="flex max-w-64 flex-col items-end gap-1">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span tabIndex={0}>
+                              <Button
+                                size="default"
+                                variant="outline"
+                                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                onClick={handleInstall}
+                                disabled={installDisabled || Boolean(installCliDisableReason)}
+                              >
+                                保存并重启
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          {installError && (
+                            <TooltipContent className="max-w-64 text-red-300">
+                              {installError}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      </TooltipProvider>
+                      {installError && (
+                        <p className="text-right text-[11px] leading-4 text-red-300">
+                          {installError}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <Button
+                      size="default"
+                      data-testid="save-restart-button"
+                      onClick={handleInstall}
+                      disabled={installDisabled || Boolean(installCliDisableReason)}
+                    >
+                      保存并重启
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <InstallButton
+                  state={installProgress}
+                  isInstalled={false}
+                  section="mcp"
+                  cliStatus={cliStatus}
+                  cliStatusLoading={cliStatusLoading}
+                  onInstall={handleInstall}
+                  onUninstall={handleUninstall}
+                  disabled={installDisabled}
+                  size="default"
+                  errorMessage={installError}
+                />
+              )}
             </div>
           </div>
         )}
