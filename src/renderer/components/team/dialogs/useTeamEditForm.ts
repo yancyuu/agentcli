@@ -230,9 +230,6 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
         setSavePhase('restarting');
         await api.ccSettings.restart();
 
-        // Small grace period so the user sees "restarting" feedback
-        await new Promise((r) => setTimeout(r, 800));
-
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
         setSavePhase('done');
       } catch (err) {
