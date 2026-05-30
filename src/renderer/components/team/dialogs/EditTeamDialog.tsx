@@ -86,7 +86,7 @@ export const EditTeamDialog = ({
 
   return (
     <Dialog
-      open={open}
+      open={form.saving ? true : open}
       onOpenChange={(nextOpen) => {
         if (form.saving) return;
         if (!nextOpen) onClose();
