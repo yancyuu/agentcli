@@ -230,6 +230,8 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
         setSavePhase('restarting');
         await api.ccSettings.restart();
 
+        // Wait for cc-connect to restore platforms before fetching team status
+        await new Promise((r) => setTimeout(r, 2000));
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
         setSavePhase('done');
       } catch (err) {
