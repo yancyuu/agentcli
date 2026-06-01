@@ -31,9 +31,9 @@ export const TeamEmptyState = ({
   return (
     <div className="flex size-full flex-col items-center justify-center gap-6 px-6">
       <div className="text-center">
-        <p className="text-lg font-medium text-[var(--color-text)]">没有找到团队</p>
+        <p className="text-lg font-medium text-[var(--color-text)]">还没有数字员工</p>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-          选择一种 Agent 类型开始，或创建自定义团队。
+          选择一种 Agent 类型开始，或创建自定义数字员工。
         </p>
       </div>
 
@@ -71,11 +71,11 @@ export const TeamEmptyState = ({
       </div>
 
       <Button size="sm" disabled={!canCreate} onClick={onCreateTeam}>
-        创建自定义团队
+        创建自定义数字员工
       </Button>
 
       {!canCreate && (
-        <p className="text-xs text-[var(--color-text-muted)]">只有本地桌面模式支持创建团队。</p>
+        <p className="text-xs text-[var(--color-text-muted)]">只有本地桌面模式支持创建数字员工。</p>
       )}
     </div>
   );

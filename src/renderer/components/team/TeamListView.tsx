@@ -31,7 +31,7 @@ import {
   getProjectSelectionResetState,
   getWorktreeNavigationState,
 } from '@renderer/store/utils/stateResetHelpers';
-import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { agentAvatarUrl, buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { getBaseName } from '@renderer/utils/pathUtils';
@@ -516,7 +516,7 @@ export const TeamListView = (): React.JSX.Element => {
         if (isDraft) {
           const confirmed = await confirm({
             title: '删除草稿',
-            message: `确定删除草稿团队“${teamDisplayName}”吗？此操作无法撤销。`,
+            message: `确定删除草稿数字员工“${teamDisplayName}”吗？此操作无法撤销。`,
             confirmLabel: '删除',
             cancelLabel: '取消',
             variant: 'danger',
@@ -527,8 +527,8 @@ export const TeamListView = (): React.JSX.Element => {
           return;
         }
         const confirmed = await confirm({
-          title: '删除团队',
-          message: `确定删除团队”${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地团队数据。`,
+          title: '删除数字员工',
+          message: `确定删除数字员工”${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地数据。`,
           confirmLabel: '删除并重启',
           cancelLabel: '取消',
           variant: 'danger',
@@ -847,7 +847,7 @@ export const TeamListView = (): React.JSX.Element => {
     <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle className="text-sm">从团队模板创建</DialogTitle>
+          <DialogTitle className="text-sm">从模板创建数字员工</DialogTitle>
           <DialogDescription className="text-xs">
             从团队模板仓库读取可复用团队。默认源为 Hermit 官方团队模板
             https://github.com/yancyuu/HermitTeams.git，仓库根目录下含有 hermit-team.json
@@ -986,7 +986,7 @@ export const TeamListView = (): React.JSX.Element => {
   const renderHeader = (): React.JSX.Element => (
     <div className="mb-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-[var(--color-text)]">选择团队</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text)]">选择数字员工</h2>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" disabled={!canCreate} onClick={openTemplateDialog}>
             从模板创建
@@ -997,7 +997,7 @@ export const TeamListView = (): React.JSX.Element => {
             disabled={!canCreate}
             onClick={() => setShowCreateDialog(true)}
           >
-            创建团队
+            创建数字员工
           </Button>
         </div>
       </div>
@@ -1011,7 +1011,7 @@ export const TeamListView = (): React.JSX.Element => {
             />
             <Input
               type="text"
-              placeholder="搜索团队..."
+              placeholder="搜索数字员工..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-8 pl-8 text-xs"
@@ -1043,7 +1043,7 @@ export const TeamListView = (): React.JSX.Element => {
       return (
         <div className="flex size-full items-center justify-center p-6">
           <div className="text-center">
-            <p className="text-sm font-medium text-red-400">团队加载失败</p>
+            <p className="text-sm font-medium text-red-400">数字员工加载失败</p>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">{teamsError}</p>
             <Button
               variant="outline"
@@ -1074,7 +1074,7 @@ export const TeamListView = (): React.JSX.Element => {
     if (filteredTeams.length === 0 && (searchQuery.trim() || hasActiveFilters)) {
       return (
         <div className="flex items-center justify-center py-12 text-sm text-[var(--color-text-muted)]">
-          没有匹配当前筛选条件的团队
+          没有匹配当前筛选条件的数字员工
         </div>
       );
     }
@@ -1125,12 +1125,28 @@ export const TeamListView = (): React.JSX.Element => {
                 )}
                 <div className="flex flex-1 flex-col">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
-                        {team.displayName}
-                      </h3>
-                      <StatusBadge status={status} />
-                      {team.pendingDelete || team.restartRequired ? <PendingDeleteBadge /> : null}
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <img
+                        src={agentAvatarUrl(team.teamName)}
+                        alt={team.displayName}
+                        className="size-9 shrink-0 rounded-lg border bg-[var(--color-surface-raised)] object-cover"
+                        style={teamColorSet ? { borderColor: teamColorSet.border } : undefined}
+                        draggable={false}
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
+                            {team.displayName}
+                          </h3>
+                          <StatusBadge status={status} />
+                          {team.pendingDelete || team.restartRequired ? (
+                            <PendingDeleteBadge />
+                          ) : null}
+                        </div>
+                        <span className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                          工号 {team.teamName}
+                        </span>
+                      </div>
                       {team.projectPath &&
                         (() => {
                           const branch = branchByPath[normalizePath(team.projectPath)];
@@ -1158,7 +1174,7 @@ export const TeamListView = (): React.JSX.Element => {
                               <Copy size={14} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="bottom">复制团队</TooltipContent>
+                          <TooltipContent side="bottom">复制数字员工</TooltipContent>
                         </Tooltip>
                       )}
                       {team.teamName !== 'default' && team.teamName !== 'my-project' && (
@@ -1174,7 +1190,7 @@ export const TeamListView = (): React.JSX.Element => {
                               <Trash2 size={14} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="bottom">删除团队</TooltipContent>
+                          <TooltipContent side="bottom">删除数字员工</TooltipContent>
                         </Tooltip>
                       )}
                     </div>
@@ -1189,7 +1205,7 @@ export const TeamListView = (): React.JSX.Element => {
                       renderMemberChips(team.members, isLight)
                     ) : team.memberCount === 0 ? (
                       <Badge variant="secondary" className="text-[10px] font-normal">
-                        单人团队
+                        单人
                       </Badge>
                     ) : (
                       <Badge variant="secondary" className="text-[10px] font-normal">
