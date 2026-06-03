@@ -4,7 +4,7 @@
  * Global catalog data comes from Zustand store.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 // Stubs for removed codex-account feature
 function useCodexAccountSnapshot(_opts: { enabled: boolean; includeRateLimits?: boolean }) {
@@ -41,10 +41,9 @@ import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
 import { getCliProviderExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 import {
   AlertTriangle,
-  BookOpen,
+  FileText,
   Info,
   Loader2,
-  Plus,
   Puzzle,
   RefreshCw,
   Server,
@@ -52,11 +51,10 @@ import {
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { CustomMcpServerDialog } from './mcp/CustomMcpServerDialog';
 import { EnvVarPanel } from './env/EnvVarPanel';
-import { McpServersPanel } from './mcp/McpServersPanel';
+import { McpLibraryPanel } from './mcp/McpLibraryPanel';
 import { PluginsPanel } from './plugins/PluginsPanel';
-import { SkillsPanel } from './skills/SkillsPanel';
+import { SkillsLibraryPanel } from './skills/SkillsLibraryPanel';
 import { StoreExtensionToast } from './common/ExtensionToast';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
@@ -87,7 +85,7 @@ const ProviderCapabilityCardSkeleton = ({
       </Badge>
     </div>
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {Array.from({ length: 3 }, (_, index) => (
+      {Array.from({ length: 4 }, (_, index) => (
         <span
           key={index}
           className="h-7 w-28 animate-pulse rounded-md border border-border bg-surface"
@@ -126,15 +124,15 @@ const EXTENSION_SUB_TABS = [
   },
   {
     value: 'mcp-servers' as const,
-    label: 'MCP 服务器',
+    label: 'MCP',
     icon: Server,
-    description: '连接外部工具和应用，让运行时可以读取数据或执行本应用之外的操作。',
+    description: '管理可复用的全局 MCP 服务器定义，再按需启用到团队项目。',
   },
   {
     value: 'skills' as const,
-    label: '技能',
-    icon: BookOpen,
-    description: '面向常见任务的可复用指令，帮助运行时更稳定地处理重复工作。',
+    label: 'Skills',
+    icon: FileText,
+    description: '管理全局用户 Skill，供不同团队和项目复用。',
   },
   {
     value: 'env-vars' as const,
@@ -145,16 +143,10 @@ const EXTENSION_SUB_TABS = [
 ] as const;
 
 export const ExtensionStoreView = (): React.JSX.Element => {
-  const tabId = useTabIdOptional();
   const {
     bootstrapCliStatus,
     fetchCliStatus,
     fetchPluginCatalog,
-    fetchSkillsCatalog,
-    mcpBrowse,
-    mcpFetchInstalled,
-    mcpBrowseLoading,
-    skillsLoading,
     cliStatus,
     cliStatusLoading,
     cliProviderStatusLoading,
@@ -168,12 +160,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
       bootstrapCliStatus: s.bootstrapCliStatus,
       fetchCliStatus: s.fetchCliStatus,
       fetchPluginCatalog: s.fetchPluginCatalog,
-      fetchSkillsCatalog: s.fetchSkillsCatalog,
       pluginCatalog: s.pluginCatalog,
-      mcpBrowse: s.mcpBrowse,
-      mcpFetchInstalled: s.mcpFetchInstalled,
-      mcpBrowseLoading: s.mcpBrowseLoading,
-      skillsLoading: s.skillsLoading,
       cliStatus: s.cliStatus,
       cliStatusLoading: s.cliStatusLoading,
       cliProviderStatusLoading: s.cliProviderStatusLoading,
@@ -229,6 +216,9 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   const runtimeDisplayName = getRuntimeDisplayName(effectiveCliStatus, multimodelEnabled);
   const cliInstalled = effectiveCliStatus?.installed ?? true;
   const hasOngoingSessions = sessions.some((sess) => sess.isOngoing);
+
+  const tabState = useExtensionsTabState();
+  const tabId = useTabIdOptional();
   const extensionsTabProjectId = useStore((s) =>
     tabId
       ? (s.paneLayout.panes.flatMap((pane) => pane.tabs).find((tab) => tab.id === tabId)
@@ -236,8 +226,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
       : null
   );
 
-  const tabState = useExtensionsTabState();
-  const [customMcpDialogOpen, setCustomMcpDialogOpen] = useState(false);
   const resolvedProject = useMemo(
     () => resolveProjectPathById(extensionsTabProjectId, projects, repositoryGroups),
     [extensionsTabProjectId, projects, repositoryGroups]
@@ -254,42 +242,21 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     });
   }, [bootstrapCliStatus, fetchCliStatus, multimodelEnabled]);
 
-  // Fetch MCP installed state on mount
-  useEffect(() => {
-    void mcpFetchInstalled(projectPath ?? undefined);
-  }, [mcpFetchInstalled, projectPath]);
-
   // Fetch Plugin catalog on mount / project change
   useEffect(() => {
     void fetchPluginCatalog(projectPath ?? undefined);
   }, [fetchPluginCatalog, projectPath]);
 
-  // Fetch Skills catalog on mount / project change
-  useEffect(() => {
-    void fetchSkillsCatalog(projectPath ?? undefined);
-  }, [fetchSkillsCatalog, projectPath]);
-
-  // Refresh all data (MCP + skills + runtime status)
+  // Refresh all data
   const handleRefresh = useCallback(() => {
     void refreshCliStatusForCurrentMode({
       multimodelEnabled,
       bootstrapCliStatus,
       fetchCliStatus,
     });
-    void mcpBrowse(); // re-fetch first page
-    void mcpFetchInstalled(projectPath ?? undefined);
-    void fetchSkillsCatalog(projectPath ?? undefined);
-  }, [
-    bootstrapCliStatus,
-    fetchCliStatus,
-    fetchSkillsCatalog,
-    multimodelEnabled,
-    mcpBrowse,
-    mcpFetchInstalled,
-    projectPath,
-  ]);
+  }, [bootstrapCliStatus, fetchCliStatus, multimodelEnabled]);
 
-  const isRefreshing = effectiveCliStatusLoading || mcpBrowseLoading || skillsLoading;
+  const isRefreshing = effectiveCliStatusLoading;
   const cliStatusBanner = useMemo(() => {
     const providers = effectiveCliStatus?.providers ?? [];
     const visibleProviders = filterExtensionStoreProviders(
@@ -374,7 +341,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-text">多模型运行时能力</p>
               <p className="mt-0.5 text-xs text-text-muted">
-                不同区域支持的提供商可能不同。只有运行时明确声明支持时，MCP 与技能能力才会显示。
+                不同区域支持的提供商可能不同。插件、MCP、技能与 API keys 会按运行时声明的能力显示。
               </p>
             </div>
           </div>
@@ -431,10 +398,19 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                       <Badge variant="secondary">
+                        插件：
+                        {formatCliExtensionCapabilityStatus(extensionCapabilities.plugins.status)}
+                      </Badge>
+                      <Badge variant="secondary">
                         MCP: {formatCliExtensionCapabilityStatus(extensionCapabilities.mcp.status)}
                       </Badge>
                       <Badge variant="secondary">
-                        技能：{extensionCapabilities.skills.ownership}
+                        技能：
+                        {formatCliExtensionCapabilityStatus(extensionCapabilities.skills.status)}
+                      </Badge>
+                      <Badge variant="secondary">
+                        API keys:{' '}
+                        {formatCliExtensionCapabilityStatus(extensionCapabilities.apiKeys.status)}
                       </Badge>
                     </div>
                   </div>
@@ -535,17 +511,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                     />
                   ))}
                 </TabsList>
-                {tabState.activeSubTab === 'mcp-servers' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCustomMcpDialogOpen(true)}
-                    className="mb-1 whitespace-nowrap"
-                  >
-                    <Plus className="mr-1 size-3.5" />
-                    添加自定义
-                  </Button>
-                )}
               </div>
 
               <TabsContent value="plugins" className="mt-0 pt-4">
@@ -568,43 +533,17 @@ export const ExtensionStoreView = (): React.JSX.Element => {
               </TabsContent>
 
               <TabsContent value="mcp-servers" className="mt-0 pt-4">
-                <McpServersPanel
-                  projectPath={projectPath}
-                  mcpSearchQuery={tabState.mcpSearchQuery}
-                  mcpSearch={tabState.mcpSearch}
-                  mcpSearchResults={tabState.mcpSearchResults}
-                  mcpSearchLoading={tabState.mcpSearchLoading}
-                  mcpSearchWarnings={tabState.mcpSearchWarnings}
-                  selectedMcpServerId={tabState.selectedMcpServerId}
-                  setSelectedMcpServerId={tabState.setSelectedMcpServerId}
-                  cliStatus={effectiveCliStatus}
-                  cliStatusLoading={effectiveCliStatusLoading}
-                />
+                <McpLibraryPanel projectPath={projectPath} />
               </TabsContent>
 
               <TabsContent value="skills" className="mt-0 pt-4">
-                <SkillsPanel
-                  projectPath={projectPath}
-                  projectLabel={projectLabel}
-                  skillsSearchQuery={tabState.skillsSearchQuery}
-                  setSkillsSearchQuery={tabState.setSkillsSearchQuery}
-                  skillsSort={tabState.skillsSort}
-                  setSkillsSort={tabState.setSkillsSort}
-                  selectedSkillId={tabState.selectedSkillId}
-                  setSelectedSkillId={tabState.setSelectedSkillId}
-                />
+                <SkillsLibraryPanel projectPath={projectPath} projectLabel={projectLabel} />
               </TabsContent>
 
               <TabsContent value="env-vars" className="mt-0 pt-4">
                 <EnvVarPanel projectPath={projectPath} />
               </TabsContent>
             </Tabs>
-
-            {/* Custom MCP server dialog (lifted to store view level) */}
-            <CustomMcpServerDialog
-              open={customMcpDialogOpen}
-              onClose={() => setCustomMcpDialogOpen(false)}
-            />
           </div>
         </div>
       </div>

@@ -10,6 +10,7 @@ import {
   getPluginOperationKey,
   hasInstallationInScope,
   inferCapabilities,
+  isEssentialPlugin,
   normalizeCategory,
 } from '@shared/utils/extensionNormalizers';
 import { Tag } from 'lucide-react';
@@ -70,9 +71,16 @@ export const PluginCard = ({
         plugin.isInstalled ? 'border-l-2 border-border border-l-emerald-500/35' : 'border-border'
       }`}
     >
-      {plugin.source === 'official' && (
+      {isEssentialPlugin(plugin) && (
         <div className="pointer-events-none absolute -left-px -top-px size-16 overflow-hidden">
-          <div className="absolute left-[-24px] top-[4px] w-[80px] -rotate-45 bg-blue-500/90 text-center text-[9px] font-semibold leading-[18px] text-white shadow-sm">
+          <div className="absolute left-[-24px] top-[4px] w-[80px] -rotate-45 bg-amber-500/90 text-center text-[9px] font-semibold leading-[18px] text-white shadow-sm">
+            ⭐ 必装
+          </div>
+        </div>
+      )}
+      {plugin.source === 'official' && (
+        <div className="pointer-events-none absolute -right-px -top-px size-16 overflow-hidden">
+          <div className="absolute right-[-24px] top-[4px] w-[80px] rotate-45 bg-blue-500/90 text-center text-[9px] font-semibold leading-[18px] text-white shadow-sm">
             Official
           </div>
         </div>

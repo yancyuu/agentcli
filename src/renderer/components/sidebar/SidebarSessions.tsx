@@ -25,7 +25,7 @@ import {
   X,
 } from 'lucide-react';
 
-import type { CcSession, CcSessionDetail, TeamSummary } from '@shared/types';
+import type { CcSession, CcSessionDetail, TeamChangeEvent, TeamSummary } from '@shared/types';
 
 const PAGE_SIZE = 8;
 const REFRESH_INTERVAL_MS = 2000;
@@ -159,6 +159,20 @@ export const SidebarSessions = (): React.JSX.Element => {
   useEffect(() => {
     const unsubscribe = api.teams.onTeamChange?.((_event, change) => {
       if (scopedTeamName && change.teamName !== scopedTeamName) {
+        return;
+      }
+      // Only refresh the session list on events that may change session state.
+      // Skip high-frequency events like lead-context, tool-activity, lead-activity
+      // that don't affect the session list.
+      const sessionRelevantTypes: ReadonlySet<string> = new Set([
+        'inbox',
+        'lead-message',
+        'task',
+        'config',
+        'process',
+        'member-spawn',
+      ]);
+      if (!sessionRelevantTypes.has(change.type)) {
         return;
       }
       // Incremental refresh for the changed team — lightweight, no blocking
@@ -424,6 +438,56 @@ const SessionRow = ({
     }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, [isExpanded, session.live, session.teamName, session.id, historyLimit]);
+
+  // SSE-driven immediate refresh: when inbox or lead-message events arrive for
+  // this session's team, refresh the detail right away instead of waiting for
+  // the next polling cycle. This makes agent replies appear in <100ms.
+  useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+    const unsubscribe = api.teams.onTeamChange?.((_event, change: TeamChangeEvent) => {
+      if (change.teamName !== session.teamName) {
+        return;
+      }
+      if (change.type !== 'inbox' && change.type !== 'lead-message') {
+        return;
+      }
+      void (async () => {
+        try {
+          const d = await api.teams.getSessionDetail(session.teamName, session.id, historyLimit);
+          setDetail(d);
+        } catch {
+          // silent
+        }
+      })();
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, [isExpanded, session.teamName, session.id, historyLimit]);
+
+  // Final refresh when session transitions from live → non-live.
+  // The polling useEffect above stops when live becomes false, which can miss
+  // the last few messages. This effect ensures we capture the complete
+  // conversation when the agent finishes.
+  const prevLiveRef = useRef(session.live);
+  useEffect(() => {
+    const wasLive = prevLiveRef.current;
+    prevLiveRef.current = session.live;
+    if (wasLive && !session.live && isExpanded) {
+      void (async () => {
+        try {
+          const d = await api.teams.getSessionDetail(session.teamName, session.id, historyLimit);
+          setDetail(d);
+        } catch {
+          // silent
+        }
+      })();
+    }
+  }, [session.live, isExpanded, session.teamName, session.id, historyLimit]);
 
   const handleLoadMoreHistory = useCallback(() => {
     if (loadingDetail || loadingMoreHistory || !hasMoreHistory) {

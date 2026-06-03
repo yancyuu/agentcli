@@ -79,6 +79,7 @@ export class TaskDispatchService {
     this.stopHeartbeat();
     this.stopConsumers();
     this.stopResponseConsumers();
+    this.collabBoard.setRedis(null);
     this.redis?.disconnect();
     this.redisSub?.disconnect();
     this.redis = null;
@@ -757,27 +758,50 @@ export class TaskDispatchService {
 
   private async connectRedis(): Promise<void> {
     if (!this.config?.redis) return;
+    let redis: Redis | null = null;
+    let redisSub: Redis | null = null;
     try {
       const ioredis = await import('ioredis');
       const { host, port, password, db } = this.config.redis;
-      const opts = { host, port, password: password || undefined, db: db ?? 0 };
+      const opts = {
+        host,
+        port,
+        password: password || undefined,
+        db: db ?? 0,
+        lazyConnect: true,
+        maxRetriesPerRequest: 0,
+        retryStrategy: () => null,
+      };
 
-      this.redis = new ioredis.default(opts);
-      this.redisSub = new ioredis.default(opts);
+      redis = new ioredis.default(opts);
+      redisSub = new ioredis.default(opts);
 
-      this.redis.on('error', (err: Error) => {
-        console.error('[TaskDispatchService] Redis error:', err.message);
+      redis.on('error', () => {
+        /* handled by task bus connection status */
+      });
+      redisSub.on('error', () => {
+        /* handled by task bus connection status */
       });
 
-      await this.redis.ping();
+      await redis.connect();
+      await redisSub.connect();
+      await redis.ping();
 
+      this.redis = redis;
+      this.redisSub = redisSub;
+      redis = null;
+      redisSub = null;
       this.collabBoard.setRedis(this.redis);
       this.startHeartbeat();
       this.startConsumers();
       this.startResponseConsumers();
       this.subscribeStatus();
-    } catch (err) {
-      console.error('[TaskDispatchService] Redis connect failed:', err);
+    } catch {
+      this.collabBoard.setRedis(null);
+      redis?.disconnect();
+      redisSub?.disconnect();
+      this.redis?.disconnect();
+      this.redisSub?.disconnect();
       this.redis = null;
       this.redisSub = null;
     }

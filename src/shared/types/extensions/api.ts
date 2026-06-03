@@ -15,6 +15,10 @@ import type {
   McpCatalogItem,
   McpCustomInstallRequest,
   McpInstallRequest,
+  McpLibraryEntry,
+  McpLibraryImportRequest,
+  McpLibraryImportResult,
+  McpLibraryUpsertRequest,
   McpSearchResult,
   McpServerDiagnostic,
 } from './mcp';
@@ -59,6 +63,11 @@ export interface McpCatalogAPI {
   installCustom: (request: McpCustomInstallRequest) => Promise<OperationResult>;
   uninstall: (name: string, scope?: string, projectPath?: string) => Promise<OperationResult>;
   githubStars: (repositoryUrls: string[]) => Promise<Record<string, number>>;
+  // ── Library (cc-switch style global library of server definitions) ──
+  libraryList: () => Promise<McpLibraryEntry[]>;
+  libraryUpsert: (request: McpLibraryUpsertRequest) => Promise<McpLibraryEntry>;
+  libraryDelete: (id: string) => Promise<void>;
+  libraryImport: (request: McpLibraryImportRequest) => Promise<McpLibraryImportResult>;
 }
 
 // ── Skills API ─────────────────────────────────────────────────────────────

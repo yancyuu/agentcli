@@ -205,7 +205,7 @@ interface CreateTeamDialogProps {
   defaultProjectPath?: string | null;
   onClose: () => void;
   onCreate: (request: TeamCreateRequest) => Promise<void>;
-  onOpenTeam: (teamName: string, projectPath?: string) => void;
+  onOpenTeam: (teamName: string, projectPath?: string, options?: { displayName?: string }) => void;
 }
 
 /** Sanitize team name: non-alphanumeric → `-`, then lowercase. */
@@ -467,7 +467,7 @@ export const CreateTeamDialog = ({
         providerRefs: selectedProviderRef ? [selectedProviderRef] : undefined,
       };
       await onCreate(request);
-      onOpenTeam(request.teamName, effectiveCwd || undefined);
+      onOpenTeam(request.teamName, effectiveCwd || undefined, { displayName: request.displayName });
       clearDraft();
       resetState();
       onClose();
@@ -533,7 +533,7 @@ export const CreateTeamDialog = ({
         {step === 'name' && (
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="team-name">团队名称</Label>
+              <Label htmlFor="team-name">团队显示名称</Label>
               <Input
                 id="team-name"
                 className={cn(
@@ -542,7 +542,7 @@ export const CreateTeamDialog = ({
                 )}
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
-                placeholder="my-team"
+                placeholder="例如：产品团队 / 前端小组"
                 autoFocus
               />
               {isNameTaken && (
@@ -788,7 +788,9 @@ export const CreateTeamDialog = ({
                 <Button
                   size="sm"
                   onClick={() => {
-                    onOpenTeam(sanitizedTeamName, effectiveCwd);
+                    onOpenTeam(sanitizedTeamName, effectiveCwd, {
+                      displayName: teamName.trim() || undefined,
+                    });
                     clearDraft();
                     resetState();
                     onClose();

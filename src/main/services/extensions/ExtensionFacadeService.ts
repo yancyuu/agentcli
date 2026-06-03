@@ -1,34 +1,24 @@
 /**
- * Facade service that combines plugin catalog + MCP catalog + installation state
+ * Facade service that combines plugin catalog + installation state
  * into enriched data ready for the renderer.
  *
  * Also provides install target resolution for the security model
- * (main-side re-resolution: renderer sends pluginId/registryId, main resolves from catalog).
+ * (main-side re-resolution: renderer sends pluginId, main resolves from catalog).
  */
 
 import { createLogger } from '@shared/utils/logger';
 
-import { type McpCatalogAggregator } from './catalog/McpCatalogAggregator';
 import { type PluginCatalogService } from './catalog/PluginCatalogService';
-import { type McpInstallationStateService } from './state/McpInstallationStateService';
 import { type PluginInstallationStateService } from './state/PluginInstallationStateService';
 
-import type {
-  EnrichedPlugin,
-  InstalledMcpEntry,
-  McpCatalogItem,
-  McpSearchResult,
-  PluginCatalogItem,
-} from '@shared/types/extensions';
+import type { EnrichedPlugin, PluginCatalogItem } from '@shared/types/extensions';
 
 const logger = createLogger('Extensions:Facade');
 
 export class ExtensionFacadeService {
   constructor(
     private readonly pluginCatalog: PluginCatalogService,
-    private readonly pluginState: PluginInstallationStateService,
-    private readonly mcpAggregator: McpCatalogAggregator | null = null,
-    private readonly mcpState: McpInstallationStateService | null = null
+    private readonly pluginState: PluginInstallationStateService
   ) {}
 
   // ── Plugin methods ───────────────────────────────────────────────────
@@ -85,51 +75,9 @@ export class ExtensionFacadeService {
     return { qualifiedName: plugin.qualifiedName, plugin };
   }
 
-  // ── MCP methods ──────────────────────────────────────────────────────
-
-  /**
-   * Search MCP servers across both registries.
-   */
-  async searchMcp(query: string, limit?: number): Promise<McpSearchResult> {
-    if (!this.mcpAggregator) {
-      return { servers: [], warnings: ['MCP catalog not configured'] };
-    }
-    return this.mcpAggregator.search(query, limit);
-  }
-
-  /**
-   * Browse MCP catalog with pagination.
-   */
-  async browseMcp(
-    cursor?: string,
-    limit?: number
-  ): Promise<{ servers: McpCatalogItem[]; nextCursor?: string }> {
-    if (!this.mcpAggregator) {
-      return { servers: [] };
-    }
-    return this.mcpAggregator.browse(cursor, limit);
-  }
-
-  /**
-   * Get a single MCP server by registry ID (for install flow).
-   */
-  async getMcpById(registryId: string): Promise<McpCatalogItem | null> {
-    if (!this.mcpAggregator) return null;
-    return this.mcpAggregator.getById(registryId);
-  }
-
-  /**
-   * Get installed MCP servers.
-   */
-  async getInstalledMcp(projectPath?: string): Promise<InstalledMcpEntry[]> {
-    if (!this.mcpState) return [];
-    return this.mcpState.getInstalled(projectPath);
-  }
-
   // ── Cache invalidation ───────────────────────────────────────────────
 
   invalidateInstalledCache(): void {
     this.pluginState.invalidateCache();
-    this.mcpState?.invalidateCache();
   }
 }

@@ -5,6 +5,7 @@ import type { MemberDetailTab } from './memberDetailTypes';
 interface MemberDetailStatsProps {
   totalTasks: number;
   inProgressTasks: number;
+  activityCount?: number;
   totalTokens: number | null;
   statsLoading?: boolean;
   statsComputedAt?: string;
@@ -48,6 +49,7 @@ const StatBlock = ({
 export const MemberDetailStats = ({
   totalTasks,
   inProgressTasks,
+  activityCount = 0,
   totalTokens,
   statsLoading,
   statsComputedAt,
@@ -72,7 +74,7 @@ export const MemberDetailStats = ({
       <StatBlock
         label="Tokens"
         value={tokensValue}
-        sub={tokensSub}
+        sub={activityCount > 0 ? `Activity ${activityCount}` : tokensSub}
         onClick={onTabChange ? () => onTabChange('stats') : undefined}
       />
     </div>

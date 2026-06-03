@@ -58,12 +58,12 @@ export function createLegacyRuntimeFallbackCliExtensionCapabilities(
 export function getCliProviderExtensionCapabilities(
   provider: Pick<CliProviderStatus, 'capabilities'> | null | undefined
 ): CliExtensionCapabilities {
-  const fallback = createDefaultCliExtensionCapabilities();
   const extensions = provider?.capabilities?.extensions;
   if (!extensions) {
-    return fallback;
+    return createLegacyRuntimeFallbackCliExtensionCapabilities();
   }
 
+  const fallback = createDefaultCliExtensionCapabilities();
   return {
     plugins: extensions.plugins ?? fallback.plugins,
     mcp: extensions.mcp ?? fallback.mcp,

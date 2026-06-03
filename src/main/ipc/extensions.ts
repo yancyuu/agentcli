@@ -7,8 +7,9 @@
 
 import type { CcAgentType } from '@shared/types/ccConnect';
 import type {
-  McpInstallRequest,
   McpCustomInstallRequest,
+  McpLibraryImportRequest,
+  McpLibraryUpsertRequest,
   OperationResult,
   PluginInstallRequest,
   SkillDeleteRequest,
@@ -18,12 +19,9 @@ import type {
 } from '@shared/types/extensions';
 
 import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
-import { McpCatalogAggregator } from '@main/services/extensions/catalog/McpCatalogAggregator';
-import { OfficialMcpRegistryService } from '@main/services/extensions/catalog/OfficialMcpRegistryService';
-import { GlamaMcpEnrichmentService } from '@main/services/extensions/catalog/GlamaMcpEnrichmentService';
 import { ExtensionFacadeService } from '@main/services/extensions/ExtensionFacadeService';
+import { McpLibraryService } from '@main/services/extensions/library/McpLibraryService';
 import { PluginInstallationStateService } from '@main/services/extensions/state/PluginInstallationStateService';
-import { McpInstallationStateService } from '@main/services/extensions/state/McpInstallationStateService';
 import { SkillsCatalogService } from '@main/services/extensions/skills/SkillsCatalogService';
 import { SkillsMutationService } from '@main/services/extensions/skills/SkillsMutationService';
 import { SkillsWatcherService } from '@main/services/extensions/skills/SkillsWatcherService';
@@ -53,6 +51,7 @@ function wrapHandler<T>(handler: () => Promise<T>): Promise<IpcResult<T>> {
 // ── Service instances (singleton) ──
 
 let facade: ExtensionFacadeService | null = null;
+let mcpLibrary: McpLibraryService | null = null;
 let skillsCatalog: SkillsCatalogService | null = null;
 let skillsMutation: SkillsMutationService | null = null;
 let skillsWatcher: SkillsWatcherService | null = null;
@@ -62,13 +61,14 @@ function getFacade(): ExtensionFacadeService {
   if (!facade) {
     const pluginCatalog = new PluginCatalogService();
     const pluginState = new PluginInstallationStateService();
-    const mcpOfficial = new OfficialMcpRegistryService();
-    const mcpGlama = new GlamaMcpEnrichmentService();
-    const mcpAggregator = new McpCatalogAggregator(mcpOfficial, mcpGlama);
-    const mcpState = new McpInstallationStateService();
-    facade = new ExtensionFacadeService(pluginCatalog, pluginState, mcpAggregator, mcpState);
+    facade = new ExtensionFacadeService(pluginCatalog, pluginState);
   }
   return facade;
+}
+
+function getMcpLibrary(): McpLibraryService {
+  if (!mcpLibrary) mcpLibrary = new McpLibraryService();
+  return mcpLibrary;
 }
 
 function getSkillsCatalog(): SkillsCatalogService {
@@ -186,48 +186,12 @@ export const extensionHandlers = {
 
   // ── MCP ──
 
-  mcpSearch: (query: string, limit?: number) =>
-    wrapHandler(() => getFacade().searchMcp(query, limit)),
-
-  mcpBrowse: (cursor?: string, limit?: number) =>
-    wrapHandler(() => getFacade().browseMcp(cursor, limit)),
-
-  mcpGetById: (registryId: string) => wrapHandler(() => getFacade().getMcpById(registryId)),
-
   mcpGetInstalled: (projectPath?: string) =>
-    wrapHandler(() => getFacade().getInstalledMcp(projectPath)),
-
-  mcpInstall: (request: McpInstallRequest) =>
     wrapHandler(async () => {
-      const harnessType = (request.harnessType ?? 'claudecode') as CcAgentType;
-      const adapter = getAdapter(harnessType);
-      if (!adapter || !adapter.supportsMcp) {
-        return { state: 'error' as const, error: `MCP not supported by ${harnessType}` };
-      }
-
-      // Re-fetch server from registry (security: don't trust renderer)
-      const server = await getFacade().getMcpById(request.registryId);
-      if (!server?.installSpec) {
-        return {
-          state: 'error' as const,
-          error: `Server "${request.registryId}" not found or no install spec`,
-        };
-      }
-
-      const result = await adapter.installMcp(
-        request.serverName,
-        server.installSpec,
-        request.envValues,
-        request.headers,
-        { scope: request.scope ?? 'user', projectPath: request.projectPath }
-      );
-
-      if (result.state === 'success') {
-        getFacade().invalidateInstalledCache();
-        // Save credentials for auto-fill next time
-        await getCredentials().saveMcpCredentials(request.serverName, request.envValues);
-      }
-      return result;
+      const { createExtensionsRuntimeAdapter } =
+        await import('@main/services/extensions/runtime/ExtensionsRuntimeAdapter');
+      const adapter = createExtensionsRuntimeAdapter();
+      return adapter.getInstalledMcp(projectPath);
     }),
 
   mcpInstallCustom: (request: McpCustomInstallRequest) =>
@@ -268,6 +232,22 @@ export const extensionHandlers = {
       }
       return result;
     }),
+
+  // ── MCP Library (cc-switch style global library) ──
+
+  mcpLibraryList: () => wrapHandler(async () => getMcpLibrary().list()),
+
+  mcpLibraryUpsert: (request: McpLibraryUpsertRequest) =>
+    wrapHandler(async () => getMcpLibrary().upsert(request)),
+
+  mcpLibraryDelete: (id: string) =>
+    wrapHandler(async () => {
+      getMcpLibrary().remove(id);
+      return { ok: true };
+    }),
+
+  mcpLibraryImport: (request: McpLibraryImportRequest) =>
+    wrapHandler(() => getMcpLibrary().importFromLive(request)),
 
   // ── Skills ──
 

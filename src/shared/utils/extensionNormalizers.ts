@@ -107,6 +107,35 @@ export function buildPluginId(pluginName: string, marketplaceName: string): stri
 }
 
 /**
+ * Substrings that mark a plugin as "essential" (必装) — recommended/required for
+ * the workbench. Matched against both the pluginId and homepage so it works
+ * regardless of the marketplace name a plugin is published under.
+ */
+export const ESSENTIAL_PLUGIN_PATTERNS = ['oh-my-claudecode'] as const;
+
+/**
+ * Marketplace plugins that should not be shown in Hermit's plugin store.
+ */
+export const HIDDEN_PLUGIN_PATTERNS = ['codex@openai-codex', 'codex-plugin-cc'] as const;
+
+/**
+ * Whether a plugin is one of the essential plugins surfaced with a 必装 badge and
+ * the recommendation banner.
+ */
+export function isEssentialPlugin(plugin: { pluginId: string; homepage?: string }): boolean {
+  const haystack = `${plugin.pluginId} ${plugin.homepage ?? ''}`.toLowerCase();
+  return ESSENTIAL_PLUGIN_PATTERNS.some((pattern) => haystack.includes(pattern));
+}
+
+/**
+ * Whether a plugin should be hidden from the plugin store catalog.
+ */
+export function isHiddenPluginFromStore(plugin: { pluginId: string; homepage?: string }): boolean {
+  const haystack = `${plugin.pluginId} ${plugin.homepage ?? ''}`.toLowerCase();
+  return HIDDEN_PLUGIN_PATTERNS.some((pattern) => haystack.includes(pattern));
+}
+
+/**
  * Namespaced operation-state key for plugin install/uninstall UI state.
  */
 export function getPluginOperationKey(

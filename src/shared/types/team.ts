@@ -36,6 +36,8 @@ export interface TeamConfig {
   managedSources?: string;
   disabledCommands?: string[];
   platformAllowFrom?: Record<string, string>;
+  /** 群聊允许的 chat ID（按平台），* 表示所有群聊 */
+  platformAllowChat?: Record<string, string>;
   members?: TeamMember[];
   projectPath?: string;
   projectPathHistory?: string[];
@@ -61,6 +63,8 @@ export interface TeamUpdateConfigRequest {
   managedSources?: string;
   disabledCommands?: string[];
   platformAllowFrom?: Record<string, string>;
+  /** 群聊允许的 chat ID（按平台），* 表示所有群聊 */
+  platformAllowChat?: Record<string, string>;
   executionTarget?: ExecutionTarget;
   leadProviderId?: TeamProviderId;
   leadModel?: string;

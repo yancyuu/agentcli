@@ -17,6 +17,8 @@ interface OpenCodeRuntimeDeliveryDiagnostics {
   debugDetails: OpenCodeRuntimeDeliveryDebugDetails | null;
 }
 
+const FAILED_WARNING =
+  'OpenCode runtime delivery failed. Message was saved to inbox, but live delivery did not complete.';
 const PENDING_WARNING =
   'OpenCode runtime delivery is still being checked. Message was saved and will be retried if needed.';
 
@@ -33,7 +35,7 @@ export function buildOpenCodeRuntimeDeliveryDiagnostics(
   const isFailed = runtimeDelivery.delivered === false;
   if (isFailed) {
     return {
-      warning: null,
+      warning: FAILED_WARNING,
       debugDetails: {
         messageId: result.messageId,
         providerId: runtimeDelivery.providerId,
@@ -64,7 +66,7 @@ export function buildOpenCodeRuntimeDeliveryDiagnostics(
     debugDetails: {
       messageId: result.messageId,
       providerId: runtimeDelivery.providerId,
-      delivered: null,
+      delivered: typeof runtimeDelivery.delivered === 'boolean' ? runtimeDelivery.delivered : null,
       responsePending: true,
       responseState: runtimeDelivery.responseState ?? null,
       ledgerStatus: runtimeDelivery.ledgerStatus ?? null,

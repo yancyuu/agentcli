@@ -14,9 +14,11 @@ function resolveAnthropicFastMode(_opts: {
   providerFastModeDefault: boolean;
 }) {
   return {
-    showFastModeControl: false,
-    resolvedFastMode: false,
-    selectable: false,
+    showFastModeControl: true,
+    resolvedFastMode:
+      _opts.selectedFastMode === 'on' ||
+      (_opts.selectedFastMode === 'inherit' && _opts.providerFastModeDefault),
+    selectable: true,
     disabledReason: null,
   };
 }
@@ -179,7 +181,7 @@ function alignProvisioningChecks(
   );
 }
 
-const WORKSPACE_SCOPED_TEAM_MODE = true;
+const WORKSPACE_SCOPED_TEAM_MODE = false;
 
 // =============================================================================
 // Props — discriminated union

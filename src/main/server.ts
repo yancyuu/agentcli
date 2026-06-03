@@ -928,6 +928,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
   let managedSources = '*';
   let disabledCommands: string[] = [];
   let platformAllowFrom: Record<string, string> = {};
+  let platformAllowChat: Record<string, string> = {};
   try {
     const meta = await svc.readTeamManifest(name);
     if (meta.displayName) displayName = meta.displayName;
@@ -953,6 +954,9 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
     }
     if (meta.platformAllowFrom) {
       platformAllowFrom = normalizePlatformAllowFrom(meta.platformAllowFrom);
+    }
+    if (meta.platformAllowChat) {
+      platformAllowChat = normalizePlatformAllowFrom(meta.platformAllowChat);
     }
   } catch {
     /* no local manifest */
@@ -998,6 +1002,15 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       }
       return platformAllowFrom;
     })();
+    const resolvedPlatformAllowChat = (() => {
+      const normalized = normalizePlatformAllowFrom(
+        (projectSettings as Record<string, unknown>).platform_allow_chat
+      );
+      if (Object.keys(normalized).length > 0) {
+        return normalized;
+      }
+      return platformAllowChat;
+    })();
     const resolvedPermissionMode =
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
@@ -1022,6 +1035,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         managedSources: resolvedManagedSources,
         disabledCommands: resolvedDisabledCommands,
         platformAllowFrom: resolvedPlatformAllowFrom,
+        platformAllowChat: resolvedPlatformAllowChat,
         projectPath: p.work_dir ?? workDir,
         members: [{ name: displayName, role: 'lead' }],
       },
@@ -1057,6 +1071,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         reply_footer: resolvedReplyFooter,
         inject_sender: resolvedInjectSender,
         platform_allow_from: resolvedPlatformAllowFrom,
+        platform_allow_chat: resolvedPlatformAllowChat,
       },
       heartbeat: p.heartbeat,
       activeSessions: p.active_session_keys ?? [],
@@ -3628,6 +3643,9 @@ async function applyTeamConfigUpdate(
   const platformAllowFrom = body.platformAllowFrom
     ? normalizePlatformAllowFrom(body.platformAllowFrom)
     : undefined;
+  const platformAllowChat = body.platformAllowChat
+    ? normalizePlatformAllowFrom(body.platformAllowChat)
+    : undefined;
 
   const localPatch: Record<string, unknown> = {};
   if (name) localPatch.displayName = name;
@@ -3640,6 +3658,7 @@ async function applyTeamConfigUpdate(
   if (managedSources) localPatch.managedSources = managedSources;
   if (disabledCommands) localPatch.disabledCommands = disabledCommands;
   if (platformAllowFrom !== undefined) localPatch.platformAllowFrom = platformAllowFrom;
+  if (platformAllowChat !== undefined) localPatch.platformAllowChat = platformAllowChat;
   if (showContextIndicator !== undefined) localPatch.showContextIndicator = showContextIndicator;
   if (replyFooter !== undefined) localPatch.replyFooter = replyFooter;
   if (injectSender !== undefined) localPatch.injectSender = injectSender;
@@ -3671,6 +3690,7 @@ async function applyTeamConfigUpdate(
   if (managedSources) ccPatch.admin_from = managedSources;
   if (disabledCommands) ccPatch.disabled_commands = disabledCommands;
   if (platformAllowFrom !== undefined) ccPatch.platform_allow_from = platformAllowFrom;
+  if (platformAllowChat !== undefined) ccPatch.platform_allow_chat = platformAllowChat;
   if (showContextIndicator !== undefined) ccPatch.show_context_indicator = showContextIndicator;
   if (replyFooter !== undefined) ccPatch.reply_footer = replyFooter;
   if (injectSender !== undefined) ccPatch.inject_sender = injectSender;
@@ -3732,6 +3752,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
     let injectSender = false;
     let permissionMode = 'default';
     let platformAllowFrom: Record<string, string> = {};
+    let platformAllowChat: Record<string, string> = {};
     try {
       const meta = await svc.readTeamManifest(name);
       color = meta.color ?? color;
@@ -3744,6 +3765,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       injectSender = meta.injectSender ?? injectSender;
       permissionMode = meta.permissionMode ?? permissionMode;
       platformAllowFrom = normalizePlatformAllowFrom(meta.platformAllowFrom);
+      platformAllowChat = normalizePlatformAllowFrom(meta.platformAllowChat);
     } catch {
       /* ok */
     }
@@ -3780,6 +3802,15 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       }
       return platformAllowFrom;
     })();
+    const resolvedPlatformAllowChat = (() => {
+      const normalized = normalizePlatformAllowFrom(
+        (projectSettings as Record<string, unknown>).platform_allow_chat
+      );
+      if (Object.keys(normalized).length > 0) {
+        return normalized;
+      }
+      return platformAllowChat;
+    })();
     const resolvedPermissionMode =
       typeof p.agent_mode === 'string' && p.agent_mode.trim().length > 0
         ? p.agent_mode.trim()
@@ -3803,6 +3834,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       injectSender: resolvedInjectSender,
       permissionMode: resolvedPermissionMode,
       platformAllowFrom: resolvedPlatformAllowFrom,
+      platformAllowChat: resolvedPlatformAllowChat,
       providerRefs,
       globalProviders,
       settings: {
@@ -4768,35 +4800,9 @@ app.post('/api/extensions/plugins/uninstall', async (request) => {
   return result;
 });
 
-app.get('/api/extensions/mcp/search', async (request) => {
-  const query = (request.query as Record<string, string>).q ?? '';
-  const limit = Number((request.query as Record<string, string>).limit) || 20;
-  const result = await ext.mcpSearch(query, limit);
-  return result;
-});
-
-app.get('/api/extensions/mcp/browse', async (request) => {
-  const cursor = (request.query as Record<string, string>).cursor;
-  const limit = Number((request.query as Record<string, string>).limit) || 20;
-  const result = await ext.mcpBrowse(cursor || undefined, limit);
-  return result;
-});
-
 app.get('/api/extensions/mcp/installed', async (request) => {
   const projectPath = (request.query as Record<string, string>).projectPath;
   const result = await ext.mcpGetInstalled(projectPath);
-  return result;
-});
-
-app.get('/api/extensions/mcp/:registryId', async (request) => {
-  const { registryId } = request.params as { registryId: string };
-  const result = await ext.mcpGetById(registryId);
-  return result;
-});
-
-app.post('/api/extensions/mcp/install', async (request) => {
-  const body = request.body as Record<string, unknown>;
-  const result = await ext.mcpInstall(body as any);
   return result;
 });
 
@@ -4815,6 +4821,23 @@ app.post('/api/extensions/mcp/uninstall', async (request) => {
     body.harnessType as CcAgentType | undefined
   );
   return result;
+});
+
+app.get('/api/extensions/mcp/library', async () => {
+  return ext.mcpLibraryList();
+});
+
+app.post('/api/extensions/mcp/library', async (request) => {
+  return ext.mcpLibraryUpsert(request.body as any);
+});
+
+app.delete('/api/extensions/mcp/library/:id', async (request) => {
+  const { id } = request.params as { id: string };
+  return ext.mcpLibraryDelete(id);
+});
+
+app.post('/api/extensions/mcp/library/import', async (request) => {
+  return ext.mcpLibraryImport((request.body ?? {}) as any);
 });
 
 app.get('/api/extensions/skills', async (request) => {

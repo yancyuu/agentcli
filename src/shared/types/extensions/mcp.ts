@@ -132,3 +132,44 @@ export interface McpSearchResult {
   servers: McpCatalogItem[];
   warnings: string[]; // e.g. "Official registry unavailable"
 }
+
+// ── MCP Library (cc-switch style: a reusable global library of server defs) ──
+//
+// A saved server definition lives once in the library and can be enabled for
+// any worker (= installed into that worker's project config) without re-typing
+// the command / URL / env each time.
+
+export interface McpLibraryEntry {
+  id: string; // stable uuid
+  name: string; // server name used when installing (`claude mcp add <name>`)
+  description?: string;
+  installSpec: McpInstallSpec;
+  envValues?: Record<string, string>; // saved non-secret defaults
+  headers?: McpHeaderDef[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Create (omit id) or update (provide id) a library entry. */
+export interface McpLibraryUpsertRequest {
+  id?: string;
+  name: string;
+  description?: string;
+  installSpec: McpInstallSpec;
+  envValues?: Record<string, string>;
+  headers?: McpHeaderDef[];
+}
+
+/**
+ * Import existing MCP servers from live config into the library.
+ * Pulls user-scope servers plus, when a projectPath is given, that worker's
+ * project-scope servers. Existing library entries (matched by name) are skipped.
+ */
+export interface McpLibraryImportRequest {
+  projectPath?: string;
+}
+
+export interface McpLibraryImportResult {
+  imported: string[];
+  skipped: string[];
+}

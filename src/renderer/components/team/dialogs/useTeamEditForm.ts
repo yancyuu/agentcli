@@ -29,6 +29,8 @@ export interface UseTeamEditFormReturn {
   setManagedSources: (v: string) => void;
   feishuAllowFrom: string;
   setFeishuAllowFrom: (v: string) => void;
+  feishuAllowChat: string;
+  setFeishuAllowChat: (v: string) => void;
   disabledCommandsInput: string;
   setDisabledCommandsInput: (v: string) => void;
   providerRef: string;
@@ -106,6 +108,13 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
         !Array.isArray(rawSettings.platform_allow_from)
           ? (rawSettings.platform_allow_from as Record<string, string>)
           : {}),
+      platformAllowChat:
+        cfg?.platformAllowChat ??
+        (typeof (rawSettings as Record<string, unknown>).platform_allow_chat === 'object' &&
+        (rawSettings as Record<string, unknown>).platform_allow_chat !== null &&
+        !Array.isArray((rawSettings as Record<string, unknown>).platform_allow_chat)
+          ? ((rawSettings as Record<string, unknown>).platform_allow_chat as Record<string, string>)
+          : {}),
       providerRefs: data?.providerRefs ?? [],
       globalProviders: data?.globalProviders ?? [],
       showContextIndicator:
@@ -134,6 +143,7 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
     defaults.disabledCommands.join(', ')
   );
   const [feishuAllowFrom, setFeishuAllowFrom] = useState(defaults.platformAllowFrom.feishu ?? '*');
+  const [feishuAllowChat, setFeishuAllowChat] = useState(defaults.platformAllowChat.feishu ?? '*');
   const [providerRef, setProviderRef] = useState(defaults.providerRefs[0] ?? '');
   const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
   const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
@@ -170,6 +180,7 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
     setManagedSources(d.managedSources);
     setDisabledCommandsInput(d.disabledCommands.join(', '));
     setFeishuAllowFrom(d.platformAllowFrom.feishu ?? '*');
+    setFeishuAllowChat(d.platformAllowChat.feishu ?? '*');
     setProviderRef(d.providerRefs[0] ?? '');
     setShowContextIndicator(d.showContextIndicator);
     setReplyFooter(d.replyFooter);
@@ -204,6 +215,7 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
       .map((e) => e.trim())
       .filter((e) => e.length > 0);
     const feishu = feishuAllowFrom.trim();
+    const feishuChat = feishuAllowChat.trim();
 
     setSavePhase('saving');
     setError(null);
@@ -224,6 +236,7 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
           managedSources: managedSources.trim() || undefined,
           disabledCommands,
           platformAllowFrom: feishu ? { feishu } : {},
+          platformAllowChat: feishuChat ? { feishu: feishuChat } : {},
           providerRefs: providerRef ? [providerRef] : [],
         });
 
@@ -258,6 +271,8 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
     setManagedSources,
     feishuAllowFrom,
     setFeishuAllowFrom,
+    feishuAllowChat,
+    setFeishuAllowChat,
     disabledCommandsInput,
     setDisabledCommandsInput,
     providerRef,

@@ -41,4 +41,27 @@ describe('providerExtensionCapabilities', () => {
     expect(capabilities.skills.status).toBe('supported');
     expect(capabilities.apiKeys.status).toBe('supported');
   });
+
+  it('merges partial extension metadata with default capabilities', () => {
+    const capabilities = getCliProviderExtensionCapabilities(
+      makeProvider({
+        capabilities: {
+          teamLaunch: true,
+          oneShot: true,
+          extensions: {
+            plugins: { status: 'unsupported', ownership: 'provider-scoped', reason: 'Not ready' },
+          },
+        } as CliProviderStatus['capabilities'],
+      })
+    );
+
+    expect(capabilities.plugins).toEqual({
+      status: 'unsupported',
+      ownership: 'provider-scoped',
+      reason: 'Not ready',
+    });
+    expect(capabilities.mcp.status).toBe('supported');
+    expect(capabilities.skills.status).toBe('supported');
+    expect(capabilities.apiKeys.status).toBe('supported');
+  });
 });

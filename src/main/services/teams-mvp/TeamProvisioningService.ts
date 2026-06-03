@@ -45,6 +45,35 @@ function removeManagedTeamInstructions(content: string): string {
   return next.replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
+async function injectHermitTasksMcpConfig(workDir: string): Promise<void> {
+  const settingsPath = path.join(workDir, '.claude', 'settings.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.promises.readFile(settingsPath, 'utf8');
+    settings = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
+
+  const existingMcpServers =
+    settings.mcpServers && typeof settings.mcpServers === 'object'
+      ? (settings.mcpServers as Record<string, unknown>)
+      : {};
+  const port = process.env.PORT ?? '5680';
+  settings.mcpServers = {
+    ...existingMcpServers,
+    'hermit-tasks': {
+      type: 'sse',
+      url: `http://127.0.0.1:${port}/mcp`,
+    },
+  };
+
+  await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+}
+
 export class TeamProvisioningService {
   private readonly workspace: TeamWorkspaceService;
 
@@ -73,6 +102,10 @@ export class TeamProvisioningService {
     const { createCcProject = true, ...workspaceInput } = input;
 
     const { slug, manifest } = await this.workspace.createTeam(workspaceInput);
+
+    if (manifest.harness === 'claudecode') {
+      await injectHermitTasksMcpConfig(manifest.workDir);
+    }
 
     if (createCcProject) {
       try {
@@ -130,7 +163,10 @@ export class TeamProvisioningService {
         | 'injectSender'
         | 'managedSources'
         | 'disabledCommands'
+        | 'platform'
+        | 'platformOptions'
         | 'platformAllowFrom'
+        | 'platformAllowChat'
       >
     >
   ): Promise<TeamManifest> {

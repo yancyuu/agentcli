@@ -14,7 +14,7 @@ import https from 'node:https';
 import path from 'node:path';
 
 import { getClaudeBasePath } from '@main/utils/pathDecoder';
-import { buildPluginId } from '@shared/utils/extensionNormalizers';
+import { buildPluginId, isHiddenPluginFromStore } from '@shared/utils/extensionNormalizers';
 import { createLogger } from '@shared/utils/logger';
 
 import type { PluginCatalogItem } from '@shared/types/extensions';
@@ -174,7 +174,9 @@ export class PluginCatalogService {
 
     // Official wins on pluginId collisions; append local plugins not already present.
     const seen = new Set(official.map((p) => p.pluginId));
-    return [...official, ...local.filter((p) => !seen.has(p.pluginId))];
+    return [...official, ...local.filter((p) => !seen.has(p.pluginId))].filter(
+      (plugin) => !isHiddenPluginFromStore(plugin)
+    );
   }
 
   /**

@@ -153,15 +153,15 @@ vi.mock('@renderer/components/extensions/plugins/PluginsPanel', () => ({
   },
 }));
 
-vi.mock('@renderer/components/extensions/mcp/McpServersPanel', () => ({
-  McpServersPanel: (props: unknown) => {
+vi.mock('@renderer/components/extensions/mcp/McpLibraryPanel', () => ({
+  McpLibraryPanel: (props: unknown) => {
     mcpServersPanelSpy(props);
     return React.createElement('div', null, 'mcp-panel');
   },
 }));
 
-vi.mock('@renderer/components/extensions/skills/SkillsPanel', () => ({
-  SkillsPanel: () => React.createElement('div', null, 'skills-panel'),
+vi.mock('@renderer/components/extensions/skills/SkillsLibraryPanel', () => ({
+  SkillsLibraryPanel: () => React.createElement('div', null, 'skills-panel'),
 }));
 
 vi.mock('@renderer/components/extensions/apikeys/ApiKeysPanel', () => ({
@@ -184,6 +184,7 @@ vi.mock('lucide-react', () => {
     CheckCircle2: Icon,
     Eye: Icon,
     EyeOff: Icon,
+    FileText: Icon,
     Info: Icon,
     Key: Icon,
     Loader2: Icon,

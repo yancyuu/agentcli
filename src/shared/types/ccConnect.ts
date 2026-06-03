@@ -93,6 +93,8 @@ export interface CcProjectSettingsUpdate {
   reply_footer?: boolean;
   inject_sender?: boolean;
   platform_allow_from?: Record<string, string>;
+  /** 群聊允许的 chat ID，* 表示所有群聊 */
+  platform_allow_chat?: Record<string, string>;
 }
 
 export interface CcAddPlatformRequest {

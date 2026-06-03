@@ -16,7 +16,12 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
-import { inferCapabilities, normalizeCategory } from '@shared/utils/extensionNormalizers';
+import {
+  inferCapabilities,
+  isEssentialPlugin,
+  isHiddenPluginFromStore,
+  normalizeCategory,
+} from '@shared/utils/extensionNormalizers';
 import { getCliProviderExtensionCapability } from '@shared/utils/providerExtensionCapabilities';
 import { ArrowUpDown, Filter, Puzzle, Search } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -69,7 +74,7 @@ function selectFilteredPlugins(
   filters: PluginFilters,
   sort: { field: PluginSortField; order: 'asc' | 'desc' }
 ): EnrichedPlugin[] {
-  let result = catalog;
+  let result = catalog.filter((plugin) => !isHiddenPluginFromStore(plugin));
 
   // Search
   if (filters.search) {
@@ -100,9 +105,15 @@ function selectFilteredPlugins(
     result = result.filter((p) => p.isInstalled);
   }
 
-  // Sort
+  // Sort. Essential plugins (oh-my-claudecode, codex) are pinned to the top of
+  // the grid — installed or not — so the recommendation lives inside the store
+  // list itself (rather than a separate banner). Within each group the chosen
+  // sort field still applies.
   const direction = sort.order === 'asc' ? 1 : -1;
+  const recommendRank = (p: EnrichedPlugin): number => (isEssentialPlugin(p) ? 0 : 1);
   result = [...result].sort((a, b) => {
+    const rankDelta = recommendRank(a) - recommendRank(b);
+    if (rankDelta !== 0) return rankDelta;
     switch (sort.field) {
       case 'popularity':
         return (a.installCount - b.installCount) * direction;
@@ -191,27 +202,34 @@ export const PluginsPanel = ({
     }
     return counts.size;
   }, [catalog]);
+  const unsupportedPluginProviders = useMemo(() => {
+    if (cliStatus?.flavor !== 'agent_teams_orchestrator') {
+      return [];
+    }
+
+    return cliStatus.providers
+      .map((provider) => ({
+        provider,
+        capability: getCliProviderExtensionCapability(provider, 'plugins'),
+      }))
+      .filter(({ capability }) => capability.status !== 'supported');
+  }, [cliStatus]);
+
   return (
     <div className="flex flex-col gap-4">
-      {cliStatus?.flavor === 'agent_teams_orchestrator' &&
-        (() => {
-          const codexProvider = cliStatus.providers.find(
-            (provider) => provider.providerId === 'codex'
-          );
-          if (!codexProvider) return null;
-          const capability = getCliProviderExtensionCapability(codexProvider, 'plugins');
-          if (capability.status === 'supported') {
-            return null;
-          }
-
-          return (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
-              在多模型运行时中，目前插件仅保证用于 Anthropic
-              会话。我们正在为所有智能体构建更广泛的插件支持，包括通用插件和智能体专用插件。
-              {capability.reason ? ` ${capability.reason}` : ''}
-            </div>
-          );
-        })()}
+      {unsupportedPluginProviders.length > 0 && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
+          多模型运行时中，部分提供商暂不支持插件管理：
+          {unsupportedPluginProviders
+            .map(({ provider, capability }) =>
+              capability.reason
+                ? `${provider.displayName}（${capability.reason}）`
+                : provider.displayName
+            )
+            .join('、')}
+          。
+        </div>
+      )}
       {/* Search + Sort + Installed only row */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex-1">

@@ -73,6 +73,7 @@ import {
   MoreHorizontal,
   Shield,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -106,6 +107,7 @@ import {
 } from './sidebar/teamSidebarUiState';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { ProcessesSection } from './ProcessesSection';
+import { ToolsSection } from './tools/ToolsSection';
 import { getLaunchJoinMilestonesFromMembers, getLaunchJoinState } from './provisioningSteps';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
 import {
@@ -2276,6 +2278,19 @@ export const TeamDetailView = ({
                   onSendMessage={handleSendMessageToMember}
                   onRestartMember={handleRestartMember}
                   onSkipMemberForLaunch={handleSkipMemberForLaunch}
+                />
+              </CollapsibleTeamSection>
+
+              <CollapsibleTeamSection
+                sectionId="tools"
+                title="能力"
+                icon={<Wrench size={14} />}
+                defaultOpen={false}
+              >
+                <ToolsSection
+                  teamName={teamName}
+                  projectPath={data.config.projectPath ?? null}
+                  harnessType={data.harness}
                 />
               </CollapsibleTeamSection>
 

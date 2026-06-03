@@ -191,6 +191,7 @@ export const MemberDetailDialog = ({
           <MemberDetailStats
             totalTasks={0}
             inProgressTasks={0}
+            activityCount={memberActivityCount}
             totalTokens={totalTokens}
             statsLoading={statsLoading}
             statsComputedAt={memberStats?.computedAt}

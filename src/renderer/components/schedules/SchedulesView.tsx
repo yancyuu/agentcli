@@ -30,7 +30,34 @@ import { ScheduleRunLogDialog } from '../team/schedule/ScheduleRunLogDialog';
 import { ScheduleRunRow } from '../team/schedule/ScheduleRunRow';
 import { ScheduleStatusBadge } from '../team/schedule/ScheduleStatusBadge';
 
-import type { Schedule, ScheduleRun } from '@shared/types';
+import type { Schedule, ScheduleRun, ScheduleStatus } from '@shared/types';
+
+const MS_PER_HOUR = 60 * 60 * 1000;
+const DAY_RANGE_MS = 24 * MS_PER_HOUR;
+const WEEK_RANGE_MS = 7 * 24 * MS_PER_HOUR;
+
+type ScheduleStatusFilter = 'all' | ScheduleStatus;
+type TimelineRange = 'day' | 'week';
+
+const STATUS_FILTER_OPTIONS: { value: ScheduleStatusFilter; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'active', label: '运行中' },
+  { value: 'paused', label: '已暂停' },
+  { value: 'disabled', label: '已禁用' },
+];
+
+function formatTimelineTick(date: Date, range: TimelineRange): string {
+  if (range === 'day') {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+function getScheduleTimestamp(schedule: Schedule): number | null {
+  if (!schedule.nextRunAt) return null;
+  const timestamp = new Date(schedule.nextRunAt).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
 
 // =============================================================================
 // ScheduleListItem
@@ -225,6 +252,196 @@ const ScheduleListItem = ({
 };
 
 // =============================================================================
+// Timeline board
+// =============================================================================
+
+interface ScheduleTimelineBoardProps {
+  schedules: Schedule[];
+  range: TimelineRange;
+  onRangeChange: (range: TimelineRange) => void;
+  onEdit: (schedule: Schedule) => void;
+  onTeamClick: (teamName: string) => void;
+  getTeamColor: (teamName: string) => string;
+  getTeamDisplayName: (teamName: string) => string;
+}
+
+const ScheduleTimelineBoard = ({
+  schedules,
+  range,
+  onRangeChange,
+  onEdit,
+  onTeamClick,
+  getTeamColor,
+  getTeamDisplayName,
+}: ScheduleTimelineBoardProps): React.JSX.Element => {
+  const now = Date.now();
+  const rangeMs = range === 'day' ? DAY_RANGE_MS : WEEK_RANGE_MS;
+  const end = now + rangeMs;
+  const tickCount = range === 'day' ? 5 : 8;
+  const ticks = Array.from({ length: tickCount }, (_, index) => {
+    const ratio = index / (tickCount - 1);
+    return new Date(now + rangeMs * ratio);
+  });
+
+  const groupedSchedules = useMemo(() => {
+    const groups = new Map<string, Schedule[]>();
+    for (const schedule of schedules) {
+      const list = groups.get(schedule.teamName) ?? [];
+      list.push(schedule);
+      groups.set(schedule.teamName, list);
+    }
+    return [...groups.entries()]
+      .map(([teamName, items]) => ({
+        teamName,
+        items: [...items].sort((a, b) => {
+          const left = getScheduleTimestamp(a) ?? Number.POSITIVE_INFINITY;
+          const right = getScheduleTimestamp(b) ?? Number.POSITIVE_INFINITY;
+          return left - right;
+        }),
+      }))
+      .sort((a, b) => getTeamDisplayName(a.teamName).localeCompare(getTeamDisplayName(b.teamName)));
+  }, [getTeamDisplayName, schedules]);
+
+  const getPosition = (schedule: Schedule): number | null => {
+    const timestamp = getScheduleTimestamp(schedule);
+    if (timestamp == null || timestamp < now || timestamp > end) return null;
+    return ((timestamp - now) / rangeMs) * 100;
+  };
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[var(--color-border-subtle)] bg-white/[0.025] shadow-[0_18px_42px_rgba(0,0,0,0.14)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+        <div>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">团队日历视图</h2>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+            按团队分泳道查看下次运行时间，适合大量定时任务快速扫视。
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-white/10 bg-black/20 p-0.5">
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-xs ${
+              range === 'day'
+                ? 'bg-white/10 text-[var(--color-text)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            }`}
+            onClick={() => onRangeChange('day')}
+          >
+            24 小时
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-xs ${
+              range === 'week'
+                ? 'bg-white/10 text-[var(--color-text)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            }`}
+            onClick={() => onRangeChange('week')}
+          >
+            7 天
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[860px]">
+          <div className="grid grid-cols-[180px_1fr] border-b border-white/[0.06] bg-black/10 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            <div className="px-4 py-2">团队</div>
+            <div className="relative px-4 py-2">
+              <div className="flex justify-between">
+                {ticks.map((tick) => (
+                  <span key={tick.toISOString()}>{formatTimelineTick(tick, range)}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {groupedSchedules.map(({ teamName, items }) => {
+            const inRange = items
+              .map((schedule) => ({ schedule, position: getPosition(schedule) }))
+              .filter(
+                (item): item is { schedule: Schedule; position: number } => item.position != null
+              );
+            const outOfRangeCount = items.length - inRange.length;
+            const laneCount = Math.max(1, Math.min(4, inRange.length));
+            const rowHeight = 56 + (laneCount - 1) * 30;
+
+            return (
+              <div
+                key={teamName}
+                className="grid grid-cols-[180px_1fr] border-b border-white/[0.05] last:border-b-0"
+              >
+                <button
+                  type="button"
+                  className="flex min-w-0 items-start gap-2 px-4 py-3 text-left hover:bg-white/[0.03]"
+                  onClick={() => onTeamClick(teamName)}
+                >
+                  <span
+                    className="mt-1 size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: getTeamColor(teamName) }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-[var(--color-text)]">
+                      {getTeamDisplayName(teamName)}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-[var(--color-text-muted)]">
+                      {items.length} 个计划
+                      {outOfRangeCount > 0 ? ` · ${outOfRangeCount} 个不在当前范围` : ''}
+                    </span>
+                  </span>
+                </button>
+
+                <div className="relative px-4 py-3" style={{ minHeight: rowHeight }}>
+                  {ticks.map((tick, index) => (
+                    <span
+                      key={`${teamName}-${tick.toISOString()}`}
+                      className="pointer-events-none absolute bottom-0 top-0 w-px bg-white/[0.055]"
+                      style={{ left: `${(index / (tickCount - 1)) * 100}%` }}
+                    />
+                  ))}
+                  {inRange.length === 0 ? (
+                    <div className="flex h-10 items-center rounded-lg border border-dashed border-white/10 px-3 text-xs text-[var(--color-text-muted)]">
+                      当前时间范围内暂无运行点
+                    </div>
+                  ) : (
+                    inRange.map(({ schedule, position }, index) => {
+                      const top = 8 + (index % 4) * 30;
+                      const statusClass =
+                        schedule.status === 'active'
+                          ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+                          : schedule.status === 'paused'
+                            ? 'border-yellow-400/30 bg-yellow-400/10 text-yellow-200'
+                            : 'border-white/10 bg-white/[0.05] text-[var(--color-text-secondary)]';
+                      return (
+                        <button
+                          key={schedule.id}
+                          type="button"
+                          className={`absolute z-10 max-w-[210px] -translate-x-1/2 rounded-lg border px-2.5 py-1 text-left shadow-lg backdrop-blur transition hover:scale-[1.02] ${statusClass}`}
+                          style={{ left: `${position}%`, top }}
+                          onClick={() => onEdit(schedule)}
+                          title={`${schedule.label || getCronDescription(schedule.cronExpression)}\n${schedule.nextRunAt ? new Date(schedule.nextRunAt).toLocaleString() : ''}`}
+                        >
+                          <span className="block truncate text-[11px] font-medium">
+                            {schedule.label || getCronDescription(schedule.cronExpression)}
+                          </span>
+                          <span className="block truncate text-[10px] opacity-75">
+                            {formatNextRun(schedule.nextRunAt)}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// =============================================================================
 // SchedulesView
 // =============================================================================
 
@@ -268,6 +485,8 @@ export const SchedulesView = (): React.JSX.Element => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>('all');
+  const [timelineRange, setTimelineRange] = useState<TimelineRange>('day');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
@@ -294,6 +513,11 @@ export const SchedulesView = (): React.JSX.Element => {
     // Filter by team
     if (teamFilter) {
       result = result.filter((s) => s.teamName === teamFilter);
+    }
+
+    // Filter by status
+    if (statusFilter !== 'all') {
+      result = result.filter((s) => s.status === statusFilter);
     }
 
     // Filter by search query
@@ -326,7 +550,7 @@ export const SchedulesView = (): React.JSX.Element => {
       if (b.nextRunAt) return 1;
       return 0;
     });
-  }, [getTeamDisplayName, schedules, teamFilter, searchQuery]);
+  }, [getTeamDisplayName, schedules, teamFilter, statusFilter, searchQuery]);
 
   const scheduleStats = useMemo(
     () => ({
@@ -377,7 +601,7 @@ export const SchedulesView = (): React.JSX.Element => {
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-surface)]">
-      <div className="mx-auto w-full max-w-6xl px-6 py-8">
+      <div className="mx-auto w-full max-w-7xl px-6 py-8">
         {/* Header */}
         <div className="mb-5 rounded-2xl border border-[var(--color-border-subtle)] bg-white/[0.025] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.12)]">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -482,6 +706,24 @@ export const SchedulesView = (): React.JSX.Element => {
                   </PopoverContent>
                 </Popover>
               )}
+
+              {/* Status filter */}
+              <div className="inline-flex rounded-lg border border-white/10 bg-black/20 p-0.5">
+                {STATUS_FILTER_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`rounded-md px-2.5 py-1 text-xs ${
+                      statusFilter === option.value
+                        ? 'bg-white/10 text-[var(--color-text)]'
+                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                    }`}
+                    onClick={() => setStatusFilter(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -527,27 +769,39 @@ export const SchedulesView = (): React.JSX.Element => {
               onClick={() => {
                 setSearchQuery('');
                 setTeamFilter(null);
+                setStatusFilter('all');
               }}
             >
               清除筛选
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            {filteredSchedules.map((schedule) => (
-              <ScheduleListItem
-                key={schedule.id}
-                schedule={schedule}
-                onEdit={handleEdit}
-                onDelete={(id) => void handleDelete(id)}
-                onPause={(id) => void pauseSchedule(id)}
-                onResume={(id) => void resumeSchedule(id)}
-                onTeamClick={handleTeamClick}
-                teamColor={getTeamColor(schedule.teamName)}
-                teamDisplayName={getTeamDisplayName(schedule.teamName)}
-                deleting={deletingScheduleId === schedule.id}
-              />
-            ))}
+          <div className="space-y-4">
+            <ScheduleTimelineBoard
+              schedules={filteredSchedules}
+              range={timelineRange}
+              onRangeChange={setTimelineRange}
+              onEdit={handleEdit}
+              onTeamClick={handleTeamClick}
+              getTeamColor={getTeamColor}
+              getTeamDisplayName={getTeamDisplayName}
+            />
+            <div className="space-y-2">
+              {filteredSchedules.map((schedule) => (
+                <ScheduleListItem
+                  key={schedule.id}
+                  schedule={schedule}
+                  onEdit={handleEdit}
+                  onDelete={(id) => void handleDelete(id)}
+                  onPause={(id) => void pauseSchedule(id)}
+                  onResume={(id) => void resumeSchedule(id)}
+                  onTeamClick={handleTeamClick}
+                  teamColor={getTeamColor(schedule.teamName)}
+                  teamDisplayName={getTeamDisplayName(schedule.teamName)}
+                  deleting={deletingScheduleId === schedule.id}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>

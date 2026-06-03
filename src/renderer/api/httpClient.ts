@@ -6,6 +6,8 @@
  * to run in a regular browser connected to an HTTP server.
  */
 
+import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
+
 import type { DashboardRecentProjectsPayload } from '@features/recent-projects/contracts';
 import type {
   AddMemberRequest,
@@ -17,10 +19,13 @@ import type {
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
   BoardTaskLogStreamSummary,
+  CcSession,
+  CcSessionDetail,
   ClaudeMdFileInfo,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
   CliInstallerAPI,
+  CollabTask,
   ConfigAPI,
   ContextInfo,
   ConversationGroup,
@@ -39,6 +44,7 @@ import type {
   MachineRuntimeProcess,
   MemberFullStats,
   MemberLogSummary,
+  MemberSpawnStatusesSnapshot,
   NotificationsAPI,
   NotificationTrigger,
   PaginatedSessionsResult,
@@ -65,6 +71,7 @@ import type {
   SshLastConnection,
   SubagentDetail,
   TaskComment,
+  TeamAgentRuntimeSnapshot,
   TeamChangeEvent,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
@@ -95,26 +102,9 @@ import type {
   UpdateSchedulePatch,
   WaterfallData,
   WslClaudeRootCandidate,
-  MemberSpawnStatusesSnapshot,
-  TeamAgentRuntimeSnapshot,
-  CcSession,
-  CcSessionDetail,
-  CollabTask,
 } from '@shared/types';
-
-import type {
-  AgentChangeSet,
-  ApplyReviewResult,
-  ChangeStats,
-  ConflictCheckResult,
-  FileChangeWithContent,
-  HunkDecision,
-  RejectResult,
-  TaskChangeSetV2,
-} from '@shared/types/review';
-import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { AgentConfig } from '@shared/types/api';
-import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
+import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { EditorAPI, ProjectAPI, WorkspaceListResponse } from '@shared/types/editor';
 import type {
   EnrichedPlugin,
@@ -122,6 +112,10 @@ import type {
   McpCatalogItem,
   McpCustomInstallRequest,
   McpInstallRequest,
+  McpLibraryEntry,
+  McpLibraryImportRequest,
+  McpLibraryImportResult,
+  McpLibraryUpsertRequest,
   McpSearchResult,
   McpServerDiagnostic,
   OperationResult,
@@ -136,8 +130,19 @@ import type {
   SkillUpsertRequest,
   SkillWatcherEvent,
 } from '@shared/types/extensions';
+import type {
+  AgentChangeSet,
+  ApplyReviewResult,
+  ChangeStats,
+  ConflictCheckResult,
+  FileChangeWithContent,
+  HunkDecision,
+  RejectResult,
+  TaskChangeSetV2,
+} from '@shared/types/review';
 import type { ApplyReviewRequest } from '@shared/types/review';
 import type { TerminalAPI } from '@shared/types/terminal';
+import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 
 export class HttpAPIClient implements ElectronAPI {
   private baseUrl: string;
@@ -166,7 +171,6 @@ export class HttpAPIClient implements ElectronAPI {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callbacks have varying signatures
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callbacks have varying signatures
   private addEventListener(channel: string, callback: (...args: any[]) => void): () => void {
     this.initEventSource();
@@ -1445,14 +1449,27 @@ export class HttpAPIClient implements ElectronAPI {
       return this.get(`/api/teams/${encodeURIComponent(teamName)}/lead-context`);
     },
     getMemberSpawnStatuses: async (teamName: string) => {
-      return this.get<MemberSpawnStatusesSnapshot>(
-        `/api/teams/${encodeURIComponent(teamName)}/member-spawn-statuses`
-      );
+      try {
+        return await this.get<MemberSpawnStatusesSnapshot>(
+          `/api/teams/${encodeURIComponent(teamName)}/member-spawn-statuses`
+        );
+      } catch {
+        return { statuses: {}, runId: null };
+      }
     },
     getTeamAgentRuntime: async (teamName: string) => {
-      return this.get<TeamAgentRuntimeSnapshot>(
-        `/api/teams/${encodeURIComponent(teamName)}/agent-runtime`
-      );
+      try {
+        return await this.get<TeamAgentRuntimeSnapshot>(
+          `/api/teams/${encodeURIComponent(teamName)}/agent-runtime`
+        );
+      } catch {
+        return {
+          teamName,
+          updatedAt: new Date().toISOString(),
+          runId: null,
+          members: {},
+        };
+      }
     },
     restartMember: async (teamName: string, memberName: string): Promise<void> => {
       await this.post(
@@ -1873,7 +1890,41 @@ export class HttpAPIClient implements ElectronAPI {
             }
           })
         );
-        const providers = providerResults.filter((p): p is NonNullable<typeof p> => p !== null);
+        // The cc-connect sidecar backend does not implement per-provider status
+        // endpoints (they return an empty array), so drop any malformed entries
+        // and only keep real provider objects.
+        const validProviders = providerResults.filter(
+          (p): p is CliProviderStatus =>
+            p != null &&
+            typeof p === 'object' &&
+            !Array.isArray(p) &&
+            typeof p.providerId === 'string'
+        );
+
+        // When the backend reports no provider capability data, fall back to a
+        // sane Anthropic provider so extension management (plugins/MCP/skills)
+        // is not falsely gated off. The backend remains the source of truth and
+        // will reject an install if the runtime genuinely cannot perform it.
+        const providers =
+          validProviders.length > 0
+            ? validProviders
+            : [
+                {
+                  providerId: 'anthropic',
+                  displayName: 'Anthropic',
+                  supported: true,
+                  authenticated: true,
+                  authMethod: null,
+                  verificationState: 'verified',
+                  models: [],
+                  canLoginFromUi: true,
+                  capabilities: {
+                    teamLaunch: true,
+                    oneShot: true,
+                    extensions: createDefaultCliExtensionCapabilities(),
+                  },
+                } satisfies CliProviderStatus,
+              ];
 
         return {
           flavor: 'agent_teams_orchestrator',
@@ -1887,7 +1938,7 @@ export class HttpAPIClient implements ElectronAPI {
           launchError: null,
           latestVersion: null,
           updateAvailable: false,
-          authLoggedIn: result.authenticated,
+          authLoggedIn: result.authenticated ?? true,
           authStatusChecking: true,
           authMethod: null,
           providers,
@@ -1914,7 +1965,21 @@ export class HttpAPIClient implements ElectronAPI {
     },
     getProviderStatus: async (providerId: string): Promise<CliProviderStatus | null> => {
       try {
-        return await this.get(`/api/cli/provider/${encodeURIComponent(providerId)}/status`);
+        const result = await this.get<unknown>(
+          `/api/cli/provider/${encodeURIComponent(providerId)}/status`
+        );
+        // The cc-connect sidecar returns an empty array for unimplemented
+        // provider endpoints. Treat any malformed payload as "no data" (null)
+        // so it does not overwrite the synthesized provider in getStatus().
+        if (
+          result == null ||
+          typeof result !== 'object' ||
+          Array.isArray(result) ||
+          typeof (result as CliProviderStatus).providerId !== 'string'
+        ) {
+          return null;
+        }
+        return result as CliProviderStatus;
       } catch {
         return null;
       }
@@ -2073,6 +2138,39 @@ export class HttpAPIClient implements ElectronAPI {
       }>('/api/extensions/mcp/github-stars', { repositoryUrls });
       if (!result.success) return {};
       return result.data ?? {};
+    },
+    libraryList: async () => {
+      const result = await this.get<{
+        success: boolean;
+        data?: McpLibraryEntry[];
+        error?: string;
+      }>('/api/extensions/mcp/library');
+      if (!result.success) return [];
+      return result.data ?? [];
+    },
+    libraryUpsert: async (request: McpLibraryUpsertRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: McpLibraryEntry;
+        error?: string;
+      }>('/api/extensions/mcp/library', request);
+      if (!result.success || !result.data) throw new Error(result.error ?? 'Save failed');
+      return result.data;
+    },
+    libraryDelete: async (id: string) => {
+      const result = await this.delete<{ success: boolean; error?: string }>(
+        `/api/extensions/mcp/library/${encodeURIComponent(id)}`
+      );
+      if (!result.success) throw new Error(result.error ?? 'Delete failed');
+    },
+    libraryImport: async (request: McpLibraryImportRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: McpLibraryImportResult;
+        error?: string;
+      }>('/api/extensions/mcp/library/import', request);
+      if (!result.success) throw new Error(result.error ?? 'Import failed');
+      return result.data ?? { imported: [], skipped: [] };
     },
   };
 

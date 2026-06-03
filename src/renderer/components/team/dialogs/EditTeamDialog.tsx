@@ -219,7 +219,7 @@ export const EditTeamDialog = ({
               </div>
             </div>
             <div>
-              <label className={labelCls}>平台访问控制（Feishu 允许的用户）</label>
+              <label className={labelCls}>私聊权限（Feishu 允许私聊的用户 ID）</label>
               <input
                 type="text"
                 value={form.feishuAllowFrom}
@@ -228,8 +228,27 @@ export const EditTeamDialog = ({
                   form.setFeishuAllowFrom(e.target.value);
                 }}
                 className={inputCls}
-                placeholder="*"
+                placeholder="ou_xxxx,ou_yyyy 或 * (所有人)"
               />
+              <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                控制哪些用户可以私聊机器人，* 表示允许所有人
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>群聊权限（Feishu 允许的群聊 ID）</label>
+              <input
+                type="text"
+                value={form.feishuAllowChat}
+                onChange={(e) => {
+                  form.clearError();
+                  form.setFeishuAllowChat(e.target.value);
+                }}
+                className={inputCls}
+                placeholder="oc_xxxx,oc_yyyy 或 * (所有群聊)"
+              />
+              <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                控制哪些群聊可以 @机器人，* 表示允许所有群聊
+              </p>
             </div>
           </FormSection>
 

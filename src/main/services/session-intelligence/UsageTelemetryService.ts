@@ -26,6 +26,8 @@ function redisConfig(cfg: TaskBusConfig) {
     password: cfg.redis.password,
     db: cfg.redis.db,
     lazyConnect: true,
+    maxRetriesPerRequest: 0,
+    retryStrategy: () => null,
   };
 }
 
@@ -39,6 +41,9 @@ async function getRedis(cfg: TaskBusConfig): Promise<Redis | null> {
   }
 
   const r = new Redis(redisConfig(cfg));
+  r.on('error', () => {
+    /* handled by connect/ping fallback */
+  });
   try {
     await r.connect();
     await r.ping();
@@ -107,7 +112,7 @@ async function doScan(cfg: TaskBusConfig): Promise<ParseResult | null> {
   const result = await scanSessions();
   lastLocalScan = statusFromParseResult(result, false);
 
-  if (!cfg.telemetry.uploadEnabled) {
+  if (!cfg.enabled || !cfg.telemetry.uploadEnabled) {
     return result;
   }
 
@@ -212,10 +217,18 @@ export async function getTelemetryStatus(
 
   const cfg = { redis: redisCfg };
   const client = new Redis(redisConfig(cfg as TaskBusConfig));
+  client.on('error', () => {
+    /* handled by connect/ping fallback */
+  });
   try {
     await client.connect();
     await client.ping();
   } catch {
+    try {
+      client.disconnect();
+    } catch {
+      /* ignore */
+    }
     return lastLocalScan;
   }
 

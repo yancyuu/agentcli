@@ -45,6 +45,8 @@ export interface TeamManifest {
   managedSources?: string;
   disabledCommands?: string[];
   platformAllowFrom?: Record<string, string>;
+  /** 群聊允许的 chat ID（按平台） */
+  platformAllowChat?: Record<string, string>;
   pendingDelete?: boolean;
   restartRequired?: boolean;
   /**
@@ -185,6 +187,17 @@ export class TeamWorkspaceService {
     return match?.slug ?? teamSlug;
   }
 
+  private async createUniqueStorageSlug(displayName: string): Promise<string> {
+    const baseSlug = toSlug(displayName);
+    let slug = baseSlug;
+    let suffix = 2;
+    while (await pathExists(path.join(teamRoot(slug), 'team.json'))) {
+      slug = `${baseSlug}-${suffix}`;
+      suffix += 1;
+    }
+    return slug;
+  }
+
   async createTeam(
     input: CreateTeamInput
   ): Promise<{ slug: string; root: string; manifest: TeamManifest }> {
@@ -192,7 +205,7 @@ export class TeamWorkspaceService {
     if (!input.bindProject) throw new Error('bindProject is required');
     if (!input.workDir) throw new Error('workDir is required');
 
-    const slug = toSlug(input.bindProject);
+    const slug = await this.createUniqueStorageSlug(input.displayName);
     const root = teamRoot(slug);
 
     await fs.promises.mkdir(root, { recursive: true });
@@ -290,7 +303,10 @@ export class TeamWorkspaceService {
         | 'injectSender'
         | 'managedSources'
         | 'disabledCommands'
+        | 'platform'
+        | 'platformOptions'
         | 'platformAllowFrom'
+        | 'platformAllowChat'
         | 'pendingDelete'
         | 'restartRequired'
       >

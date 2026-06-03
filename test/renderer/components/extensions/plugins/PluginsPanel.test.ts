@@ -224,7 +224,7 @@ describe('PluginsPanel effective runtime status', () => {
     });
   });
 
-  it('explains that broader plugin support for all agents is actively being built when Codex plugins are not supported yet', async () => {
+  it('lists providers and reasons when multimodel plugin support is unavailable', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -256,13 +256,9 @@ describe('PluginsPanel effective runtime status', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain(
-      '插件仅保证用于 Anthropic'
-    );
-    expect(host.textContent).toContain(
-      '正在为所有智能体构建更广泛的插件支持'
-    );
-    expect(host.textContent).toBeTruthy();
+    expect(host.textContent).toContain('部分提供商暂不支持插件管理');
+    expect(host.textContent).toContain('Codex');
+    expect(host.textContent).toContain('Codex bootstrap placeholder');
 
     await act(async () => {
       root.unmount();

@@ -402,7 +402,19 @@ export function isTeamModelAvailableForUi(
     return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';
   }
 
-  return true;
+  if (!providerStatus) {
+    return true;
+  }
+
+  const hasRuntimeModelTruth =
+    providerStatus.models.length > 0 ||
+    (providerStatus.modelCatalog?.models.length ?? 0) > 0 ||
+    (providerStatus.modelAvailability?.length ?? 0) > 0;
+  if (!hasRuntimeModelTruth) {
+    return true;
+  }
+
+  return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';
 }
 
 export function normalizeExplicitTeamModelForUi(
@@ -437,7 +449,11 @@ export function normalizeTeamModelForUi(
     return isTeamModelAvailableForUi(providerId, trimmed, providerStatus) ? normalized : '';
   }
 
-  return normalized;
+  if (providerId === 'codex' && trimmed === 'gpt-5.4-mini') {
+    return '';
+  }
+
+  return isTeamModelAvailableForUi(providerId, trimmed, providerStatus) ? normalized : '';
 }
 
 export function getTeamModelSelectionError(

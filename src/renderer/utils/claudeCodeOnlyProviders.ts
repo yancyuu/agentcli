@@ -12,9 +12,7 @@ export function filterMainScreenCliProviders<
     providerId: CliProviderId;
   },
 >(providers: readonly T[]): T[] {
-  return providers.filter((provider) =>
-    ['anthropic', 'codex', 'gemini', 'opencode'].includes(provider.providerId)
-  );
+  return providers.filter((provider) => ['anthropic', 'codex'].includes(provider.providerId));
 }
 
 function createClaudeCodeProviderFromCliStatus(status: CliInstallationStatus): CliProviderStatus {
@@ -110,17 +108,12 @@ export function normalizeCreateLaunchProviderForUi(
   providerId: TeamProviderId | undefined,
   _multimodelEnabled: boolean
 ): TeamProviderId {
-  return providerId === 'anthropic' ||
-    providerId === 'codex' ||
-    providerId === 'gemini' ||
-    providerId === 'opencode'
-    ? providerId
-    : 'anthropic';
+  return providerId === 'anthropic' || providerId === 'codex' ? providerId : 'anthropic';
 }
 
 export function isCreateLaunchProviderDisabled(
   providerId: TeamProviderId,
   _multimodelEnabled: boolean
 ): boolean {
-  return !['anthropic', 'codex', 'gemini', 'opencode'].includes(providerId);
+  return !['anthropic', 'codex'].includes(providerId);
 }

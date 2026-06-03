@@ -2020,7 +2020,11 @@ export interface TeamSlice {
   fetchTeams: () => Promise<void>;
   fetchAllTasks: () => Promise<void>;
   openTeamsTab: () => void;
-  openTeamTab: (teamName: string, projectPath?: string, taskId?: string) => void;
+  openTeamTab: (
+    teamName: string,
+    projectPath?: string,
+    options?: { taskId?: string; displayName?: string }
+  ) => void;
   clearKanbanFilter: () => void;
   ensureTeamGraphSlotAssignments: (
     teamName: string,
@@ -2726,7 +2730,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     });
   },
 
-  openTeamTab: (teamName: string, projectPath?: string, _taskId?: string) => {
+  openTeamTab: (
+    teamName: string,
+    projectPath?: string,
+    options?: { taskId?: string; displayName?: string }
+  ) => {
     if (!teamName.trim()) {
       return;
     }
@@ -2749,7 +2757,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     const teamSummary = state.teamByName[teamName];
     const selectedTeamDisplayName =
       state.selectedTeamName === teamName ? state.selectedTeamData?.config.name : undefined;
-    const displayName = teamSummary?.displayName || selectedTeamDisplayName || teamName;
+    const displayName =
+      options?.displayName || teamSummary?.displayName || selectedTeamDisplayName || teamName;
 
     const allTabs = state.getAllPaneTabs();
     const existing = allTabs.find((tab) => tab.type === 'team' && tab.teamName === teamName);
@@ -3674,12 +3683,10 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             page.messages
           );
           const preserveLoadedOlderTail =
-            current.olderHydrated &&
-            Array.isArray(retainedOlderTail) &&
-            retainedOlderTail.length > 0;
+            Array.isArray(retainedOlderTail) && retainedOlderTail.length > 0;
           const nextCanonical = headChanged
             ? preserveLoadedOlderTail
-              ? mergeTeamMessages(retainedOlderTail, page.messages)
+              ? mergeTeamMessages(page.messages, retainedOlderTail)
               : page.messages
             : current.canonicalMessages;
           const nextOptimistic = pruneOptimisticMessages(current.optimisticMessages, nextCanonical);
@@ -4368,6 +4375,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     clearTeamScopedTransientState(teamName);
     set((state) => ({
       ...collectTeamScopedStateRemovals(state, teamName),
+      ...buildTeamScopedProgressTombstones(state, teamName, nowIso()),
       teams: state.teams.filter((team) => team.teamName !== teamName),
       selectedTeamName: state.selectedTeamName === teamName ? null : state.selectedTeamName,
       selectedTeamData: state.selectedTeamName === teamName ? null : state.selectedTeamData,

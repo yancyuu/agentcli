@@ -103,7 +103,7 @@ export const GlobalTaskDetailDialog = (): React.JSX.Element | null => {
 
   const handleOpenTeam = useCallback((): void => {
     closeGlobalTaskDetail();
-    openTeamTab(teamName, undefined, taskId);
+    openTeamTab(teamName, undefined, { taskId });
   }, [closeGlobalTaskDetail, openTeamTab, teamName, taskId]);
 
   const handleViewChanges = useCallback(
