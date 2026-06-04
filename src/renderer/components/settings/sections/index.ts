@@ -5,4 +5,3 @@
 export { AdvancedSection } from './AdvancedSection';
 export { GeneralSection } from './GeneralSection';
 export { HarnessSection } from './HarnessSection';
-export { PlatformsSection } from './PlatformsSection';

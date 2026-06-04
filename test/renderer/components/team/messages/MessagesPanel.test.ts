@@ -104,6 +104,10 @@ vi.mock('@renderer/components/ui/tooltip', () => ({
     React.createElement('div', null, children),
 }));
 
+vi.mock('@renderer/components/team/MemberBadge', () => ({
+  MemberBadge: ({ name }: { name: string }) => React.createElement('span', null, name),
+}));
+
 vi.mock('@renderer/components/team/messages/MessageComposer', () => ({
   MessageComposer: () => React.createElement('div', null, 'composer'),
 }));
@@ -502,6 +506,88 @@ describe('MessagesPanel idle summary invariants', () => {
     });
 
     expect(host.querySelector('input[placeholder="搜索..."]')).not.toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('filters the timeline by message sender when a participant chip is clicked', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      storeState.teamMessagesByName['atlas-hq'] = {
+        canonicalMessages: [
+          makeMessage({
+            messageId: 'alice-message',
+            from: 'alice',
+            to: 'user',
+            text: 'alice visible after chip click',
+            session: {
+              key: 'default',
+              userName: 'ou_82906a790206a1e6698714b2bae9e070',
+              chatName: 'oc_efa2fbf5d5bd75da117eaebb6bbc730d',
+            },
+          }),
+          makeMessage({
+            messageId: 'bob-message',
+            from: 'bob',
+            to: 'user',
+            text: 'bob hidden after alice chip click',
+            timestamp: '2026-04-08T12:01:00.000Z',
+            session: {
+              key: 'default',
+              userName: 'ou_82906a790206a1e6698714b2bae9e070',
+              chatName: 'oc_efa2fbf5d5bd75da117eaebb6bbc730d',
+            },
+          }),
+        ],
+        optimisticMessages: [],
+        feedRevision: 'rev-1',
+        nextCursor: null,
+        hasMore: false,
+        lastFetchedAt: Date.now(),
+        loadingHead: false,
+        loadingOlder: false,
+        headHydrated: true,
+      };
+      root.render(
+        React.createElement(MessagesPanel, {
+          teamName: 'atlas-hq',
+          position: 'sidebar',
+          onPositionChange: vi.fn(),
+          members: [],
+          tasks: [],
+          timeWindow: null,
+          pendingRepliesByMember: {},
+          onPendingReplyChange: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('alice-message');
+    expect(host.textContent).toContain('bob-message');
+    expect(host.textContent).not.toContain('oc_efa2fbf5d5bd75da117eaebb6bbc730d');
+    expect(host.textContent).not.toContain('ou_82906a790206a1e6698714b2bae9e070');
+    expect(host.textContent).not.toContain('default');
+
+    const aliceChip = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'alice'
+    );
+    expect(aliceChip).toBeTruthy();
+
+    await act(async () => {
+      aliceChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('alice-message');
+    expect(host.textContent).not.toContain('bob-message');
 
     await act(async () => {
       root.unmount();

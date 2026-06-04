@@ -70,7 +70,20 @@ export function filterTeamMessages(
       const summary = getSanitizedInboxMessageSummary(m).toLowerCase();
       const from = (m.from ?? '').toLowerCase();
       const to = (m.to ?? '').toLowerCase();
-      return text.includes(q) || summary.includes(q) || from.includes(q) || to.includes(q);
+      const sessionTitle = (m.session?.title ?? '').toLowerCase();
+      const sessionUserName = (m.session?.userName ?? '').toLowerCase();
+      const sessionChatName = (m.session?.chatName ?? '').toLowerCase();
+      const sessionKey = (m.session?.key ?? '').toLowerCase();
+      return (
+        text.includes(q) ||
+        summary.includes(q) ||
+        from.includes(q) ||
+        to.includes(q) ||
+        sessionTitle.includes(q) ||
+        sessionUserName.includes(q) ||
+        sessionChatName.includes(q) ||
+        sessionKey.includes(q)
+      );
     });
   }
 

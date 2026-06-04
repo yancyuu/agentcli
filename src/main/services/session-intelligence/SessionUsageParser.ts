@@ -10,7 +10,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { getProjectsBasePath } from '@main/utils/pathDecoder';
 
 export interface SessionEntry {
   relPath: string;
@@ -79,7 +79,6 @@ export interface ParseResult {
   aggregate: UsageAggregate;
 }
 
-const PROJECTS_ROOT = path.join(os.homedir(), '.claude', 'projects');
 const SEG_GAP_MS = 10 * 60 * 1000; // 10 minutes gap threshold
 const RECENT_DAYS = 7;
 
@@ -349,8 +348,9 @@ export async function scanSessions(): Promise<ParseResult> {
   const activeDaySet = new Set<string>();
   const allEvents: EventEntry[] = [];
   const projectMap: Record<string, ProjectMetricsEntry> = {};
+  const projectsRoot = getProjectsBasePath();
 
-  for await (const filePath of walkJsonl(PROJECTS_ROOT)) {
+  for await (const filePath of walkJsonl(projectsRoot)) {
     let fileStat;
     try {
       fileStat = await stat(filePath);
@@ -361,7 +361,7 @@ export async function scanSessions(): Promise<ParseResult> {
     const parsed = await parseJsonl(filePath);
     if (!parsed) continue;
 
-    const relPath = path.relative(PROJECTS_ROOT, filePath);
+    const relPath = path.relative(projectsRoot, filePath);
     sessions.push({
       relPath,
       projectPath: parsed.projectPath,

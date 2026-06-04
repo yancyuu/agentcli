@@ -240,6 +240,7 @@ export function initializeNotificationListeners(): () => void {
   const SESSION_REFRESH_DEBOUNCE_MS = 150;
   const PROJECT_REFRESH_DEBOUNCE_MS = 300;
   const TEAM_REFRESH_THROTTLE_MS = 800;
+  const TEAM_MESSAGE_REFRESH_THROTTLE_MS = 150;
   const TEAM_PRESENCE_REFRESH_THROTTLE_MS = 400;
   const TEAM_MEMBER_SPAWN_REFRESH_THROTTLE_MS = 500;
   const TEAM_LIST_REFRESH_THROTTLE_MS = 2000;
@@ -297,7 +298,7 @@ export function initializeNotificationListeners(): () => void {
     const timer = setTimeout(() => {
       teamMessageRefreshTimers.delete(teamName);
       void refreshTrackedTeamMessages(teamName);
-    }, TEAM_REFRESH_THROTTLE_MS);
+    }, TEAM_MESSAGE_REFRESH_THROTTLE_MS);
     teamMessageRefreshTimers.set(teamName, timer);
   };
   const buildToolActivityTimerKey = (

@@ -17,6 +17,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  Download,
   Loader2,
   MessageSquare,
   Radio,
@@ -25,7 +26,14 @@ import {
   X,
 } from 'lucide-react';
 
-import type { CcSession, CcSessionDetail, TeamChangeEvent, TeamSummary } from '@shared/types';
+import type {
+  CcSession,
+  CcSessionDetail,
+  ConversationTelemetryResponse,
+  ConversationTelemetryRow,
+  TeamChangeEvent,
+  TeamSummary,
+} from '@shared/types';
 
 const PAGE_SIZE = 8;
 const REFRESH_INTERVAL_MS = 2000;
@@ -48,6 +56,9 @@ export const SidebarSessions = (): React.JSX.Element => {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [searchQuery, setSearchQuery] = useState('');
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [telemetryRows, setTelemetryRows] = useState<ConversationTelemetryRow[]>([]);
+  const [loadingTelemetry, setLoadingTelemetry] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
   const needsRefreshRef = useRef(false);
@@ -144,6 +155,35 @@ export const SidebarSessions = (): React.JSX.Element => {
   }, [fetchAll]);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadingTelemetry(true);
+    const params = new URLSearchParams({
+      includeContent: 'summary',
+      includeToolResults: 'false',
+      includeSystemMessages: 'false',
+      limit: '100000',
+    });
+    void fetch(`/api/telemetry/conversations?${params.toString()}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as ConversationTelemetryResponse;
+      })
+      .then((data) => {
+        if (!cancelled) setTelemetryRows(data.rows);
+      })
+      .catch((err) => {
+        console.error('Failed to load conversation telemetry:', err);
+        if (!cancelled) setTelemetryRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTelemetry(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setVisibleCount(PAGE_SIZE);
     setExpandedId(null);
   }, [scopedTeamName]);
@@ -209,14 +249,78 @@ export const SidebarSessions = (): React.JSX.Element => {
     setExpandedId((prev) => (prev === sessionId ? null : sessionId));
   }, []);
 
+  const handleExportAllSessions = useCallback(async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        format: 'csv',
+        includeContent: 'summary',
+        includeToolResults: 'false',
+        includeSystemMessages: 'false',
+      });
+      if (scopedTeamName) {
+        params.set('teamName', scopedTeamName);
+      }
+      const res = await fetch(`/api/telemetry/conversations/export?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = (await res.json()) as { filename: string; mimeType: string; content: string };
+      const blob = new Blob([`﻿${payload.content}`], {
+        type: payload.mimeType || 'text/csv;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = payload.filename || 'conversation-telemetry.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export conversation telemetry:', err);
+      setError(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  }, [scopedTeamName]);
+
+  const telemetryBySession = useMemo(() => {
+    const map = new Map<string, ConversationTelemetryRow>();
+    for (const row of telemetryRows) {
+      map.set(row.session.ccSessionId, row);
+      map.set(row.session.sessionKey, row);
+    }
+    return map;
+  }, [telemetryRows]);
+
   // Filter + sort
   const filtered = allSessions.filter((s) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
+    const telemetry = telemetryBySession.get(s.id) ?? telemetryBySession.get(s.sessionKey);
     const title = (s.title || '').toLowerCase();
     const team = s.teamDisplayName.toLowerCase();
-    const lastMsg = (s.lastMessage?.content || '').toLowerCase();
-    return title.includes(q) || team.includes(q) || lastMsg.includes(q);
+    const sessionKey = s.sessionKey.toLowerCase();
+    const platform = s.platform.toLowerCase();
+    const userName = (s.userName || telemetry?.identity.userName || '').toLowerCase();
+    const chatName = (s.chatName || telemetry?.identity.chatName || '').toLowerCase();
+    const firstQuestion = (telemetry?.content.firstUserMessage || '').toLowerCase();
+    const lastQuestion = (telemetry?.content.lastUserMessage || '').toLowerCase();
+    const lastMsg = (
+      s.lastMessage?.content ||
+      telemetry?.content.lastMessageContent ||
+      ''
+    ).toLowerCase();
+    return [
+      title,
+      team,
+      sessionKey,
+      platform,
+      userName,
+      chatName,
+      firstQuestion,
+      lastQuestion,
+      lastMsg,
+    ].some((value) => value.includes(q));
   });
 
   const allSorted = [...filtered].sort(
@@ -275,7 +379,7 @@ export const SidebarSessions = (): React.JSX.Element => {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Search */}
+      {/* Search / export */}
       <div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
         <Search size={12} className="shrink-0 text-[var(--color-text-muted)]" />
         <input
@@ -297,6 +401,16 @@ export const SidebarSessions = (): React.JSX.Element => {
             <X size={12} />
           </button>
         )}
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => void handleExportAllSessions()}
+          disabled={exporting}
+          title="导出所有会话为 CSV 表格"
+        >
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          导出表格
+        </button>
       </div>
 
       {/* Session list */}

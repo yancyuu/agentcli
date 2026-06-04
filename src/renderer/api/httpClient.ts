@@ -408,7 +408,7 @@ export class HttpAPIClient implements ElectronAPI {
       await this.patch('/api/cc-settings', patch);
     },
     restart: async (): Promise<void> => {
-      await this.post('/api/cc-restart', {});
+      await this.postLong('/api/cc-restart', {});
     },
     reload: async (): Promise<void> => {
       await this.post('/api/cc-reload', {});

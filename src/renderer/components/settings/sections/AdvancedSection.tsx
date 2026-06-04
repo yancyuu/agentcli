@@ -240,7 +240,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
             Version {version || '...'}
           </p>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-            渠道与模型供应商由后端服务统一管理；团队内部任务由 harness 自主管理。
+            模型供应商由后端服务统一管理；团队内部任务由 harness 自主管理。
           </p>
         </div>
       </div>

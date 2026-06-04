@@ -99,6 +99,7 @@ const ProjectEditorOverlay = lazy(() =>
 );
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
+import { CcSessionsSection } from './CcSessionsSection';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
 import { ProjectEnvPanel } from '../extensions/env/ProjectEnvPanel';
 import {
@@ -121,6 +122,7 @@ import type { ContextInjection } from '@renderer/types/contextInjection';
 import type { Session } from '@renderer/types/data';
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type {
+  CcSession,
   EffortLevel,
   GlobalProvider,
   MemberSpawnStatusEntry,
@@ -1088,6 +1090,9 @@ export const TeamDetailView = ({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [ccSessions, setCcSessions] = useState<CcSession[]>([]);
+  const [ccSessionsLoading, setCcSessionsLoading] = useState(false);
+  const [ccSessionsError, setCcSessionsError] = useState<string | null>(null);
   const [kanbanFilter, setKanbanFilter] = useState<KanbanFilterState>({
     sessionId: null,
     selectedOwners: new Set(),
@@ -1353,6 +1358,38 @@ export const TeamDetailView = ({
     syncTeamPendingReplyRefresh,
     teamName,
   ]);
+
+  useEffect(() => {
+    if (!teamName) return;
+    let cancelled = false;
+    setCcSessions([]);
+
+    const loadCcSessions = async (showLoading: boolean): Promise<void> => {
+      if (showLoading) setCcSessionsLoading(true);
+      setCcSessionsError(null);
+      try {
+        const result = await api.teams.getTeamSessions(teamName);
+        if (!cancelled) setCcSessions(result);
+      } catch (e) {
+        if (!cancelled) {
+          setCcSessions([]);
+          setCcSessionsError(e instanceof Error ? e.message : '加载运行会话失败');
+        }
+      } finally {
+        if (!cancelled && showLoading) setCcSessionsLoading(false);
+      }
+    };
+
+    void loadCcSessions(true);
+    const interval = window.setInterval(() => {
+      void loadCcSessions(false);
+    }, 3_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [teamName, data?.isAlive]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1906,7 +1943,7 @@ export const TeamDetailView = ({
       tasks: data?.tasks ?? [],
       isTeamAlive: data?.isAlive,
       timeWindow,
-      teamSessionIds,
+      sessions: ccSessions,
       currentLeadSessionId: data?.config.leadSessionId,
       pendingRepliesByMember,
       onPendingReplyChange: setPendingRepliesByMember,
@@ -1921,12 +1958,12 @@ export const TeamDetailView = ({
       data?.config.leadSessionId,
       data?.isAlive,
       data?.tasks,
+      ccSessions,
       handleReplyToMessage,
       handleRestartTeam,
       handleSelectMember,
       pendingRepliesByMember,
       teamName,
-      teamSessionIds,
       timeWindow,
       keepMessagesInline,
     ]
@@ -2485,6 +2522,21 @@ export const TeamDetailView = ({
                     onOpenTrash={() => setTrashOpen(true)}
                   />
                 </div>
+              </CollapsibleTeamSection>
+
+              <CollapsibleTeamSection
+                sectionId="team-sessions"
+                title="会话"
+                icon={<MessageSquare size={14} />}
+                badge={ccSessions.length}
+                defaultOpen={ccSessions.length > 0}
+              >
+                <CcSessionsSection
+                  teamName={teamName}
+                  sessions={ccSessions}
+                  loading={ccSessionsLoading}
+                  error={ccSessionsError}
+                />
               </CollapsibleTeamSection>
 
               <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />

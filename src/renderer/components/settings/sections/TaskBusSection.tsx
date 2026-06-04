@@ -229,24 +229,17 @@ export function TaskBusSection(): React.JSX.Element {
       .catch(() => {})
       .finally(() => setLoading(false));
 
-    // Restore telemetry status + Redis connection state on mount
-    fetch('/api/settings/task-bus')
+    // Restore telemetry status on mount. Local data collection does not depend on Redis/task bus.
+    fetch('/api/telemetry/status')
       .then((r) => r.json())
-      .then((busConfig: TaskBusConfig) => {
-        if (busConfig.enabled) {
-          fetch('/api/telemetry/status')
-            .then((r) => r.json())
-            .then((s: TelemetryStatus) => {
-              if (s.connected) setConnected(true);
-              if ('sessions' in s && s.sessions > 0) setTelemetryStatus(s);
-            })
-            .catch(() => {});
-        }
+      .then((s: TelemetryStatus) => {
+        setTelemetryStatus(s);
+        setConnected(s.connected === true);
       })
       .catch(() => {});
 
     const poll = setInterval(() => {
-      if (enabled && collectionEnabled) {
+      if (collectionEnabled) {
         fetch('/api/telemetry/status')
           .then((r) => r.json())
           .then((s: TelemetryStatus) => {
@@ -440,34 +433,34 @@ export function TaskBusSection(): React.JSX.Element {
         </div>
       </SettingRow>
 
-      {collectionEnabled && (
-        <>
-          <div
-            className="flex items-center gap-3 border-b py-3"
-            style={{ borderColor: 'var(--color-border-subtle)' }}
-          >
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={triggerScan}
-              disabled={scanning}
-              className="gap-1.5"
-            >
-              {scanning ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
-              {scanning ? '采集中...' : '立即采集'}
-            </Button>
-            <span className="text-[10px] text-[var(--color-text-muted)]">
-              本地扫描，不依赖团队总线或 Redis。
-            </span>
-          </div>
+      <div
+        className="flex items-center gap-3 border-b py-3"
+        style={{ borderColor: 'var(--color-border-subtle)' }}
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={triggerScan}
+          disabled={scanning || !collectionEnabled}
+          className="gap-1.5"
+        >
+          {scanning ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
+          {scanning ? '采集中...' : '立即采集'}
+        </Button>
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          本地扫描，不依赖团队总线或 Redis。{!collectionEnabled ? '开启数据采集后可手动刷新。' : ''}
+        </span>
+      </div>
 
-          {telemetryStatus && (
-            <div className="py-3">
-              <UsageDashboard status={telemetryStatus} />
-            </div>
-          )}
-        </>
-      )}
+      <div className="py-3">
+        {telemetryStatus ? (
+          <UsageDashboard status={telemetryStatus} />
+        ) : (
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4 text-xs text-[var(--color-text-muted)]">
+            使用指标概览加载中；开启数据采集后会扫描本机 Claude Code 会话文件。
+          </div>
+        )}
+      </div>
 
       <SettingsSectionHeader title="团队总线" icon={<Radio size={12} />} />
 

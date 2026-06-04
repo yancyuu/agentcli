@@ -2,8 +2,8 @@
  * Sidebar - Navigation with task list and session list.
  *
  * Structure:
- * - Tab bar: Collapse button + Tasks | Sessions
- * - Scrollable Body: Task list or date-grouped session list
+ * - Tab bar: Collapse button + Workspace
+ * - Scrollable Body: workspace browser
  * - Resizable: Drag right edge to resize
  * - Collapsible: Cmd+B to toggle (Notion-style)
  */
@@ -15,11 +15,9 @@ import { formatShortcut } from '@renderer/utils/stringUtils';
 import { PanelLeft } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { DateGroupedSessions } from '../sidebar/DateGroupedSessions';
-import { SidebarSessions } from '../sidebar/SidebarSessions';
 import { WorkspaceBrowser } from '../sidebar/WorkspaceBrowser';
 
-type SidebarTab = 'workspace' | 'sessions';
+type SidebarTab = 'workspace';
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 500;
@@ -34,7 +32,7 @@ export const Sidebar = (): React.JSX.Element => {
   );
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('workspace');
+  const [sidebarTab] = useState<SidebarTab>('workspace');
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -123,54 +121,22 @@ export const Sidebar = (): React.JSX.Element => {
             <button
               type="button"
               role="tab"
-              aria-selected={sidebarTab === 'workspace'}
+              aria-selected
               aria-controls="sidebar-workspace-panel"
               id="sidebar-tab-workspace"
-              className={`relative px-3 py-1.5 text-[11px] font-medium transition-colors ${
-                sidebarTab === 'workspace'
-                  ? 'text-text'
-                  : 'text-text-muted hover:text-text-secondary'
-              }`}
-              style={
-                sidebarTab === 'workspace'
-                  ? {
-                      borderBottom: '2px solid var(--color-text)',
-                      marginBottom: '-1px',
-                    }
-                  : undefined
-              }
-              onClick={() => setSidebarTab('workspace')}
+              className="relative px-3 py-1.5 text-[11px] font-medium text-text transition-colors"
+              style={{
+                borderBottom: '2px solid var(--color-text)',
+                marginBottom: '-1px',
+              }}
             >
               工作空间
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarTab === 'sessions'}
-              aria-controls="sidebar-sessions-panel"
-              id="sidebar-tab-sessions"
-              className={`relative px-3 py-1.5 text-[11px] font-medium transition-colors ${
-                sidebarTab === 'sessions'
-                  ? 'text-text'
-                  : 'text-text-muted hover:text-text-secondary'
-              }`}
-              style={
-                sidebarTab === 'sessions'
-                  ? {
-                      borderBottom: '2px solid var(--color-text)',
-                      marginBottom: '-1px',
-                    }
-                  : undefined
-              }
-              onClick={() => setSidebarTab('sessions')}
-            >
-              会话
             </button>
           </div>
           <div className="flex-1" />
         </div>
 
-        {/* Content: Workspace or Sessions list */}
+        {/* Content: Workspace browser */}
         <div
           id="sidebar-workspace-panel"
           role="tabpanel"
@@ -179,15 +145,6 @@ export const Sidebar = (): React.JSX.Element => {
           className="min-w-0 flex-1 overflow-hidden"
         >
           <WorkspaceBrowser />
-        </div>
-        <div
-          id="sidebar-sessions-panel"
-          role="tabpanel"
-          aria-labelledby="sidebar-tab-sessions"
-          hidden={sidebarTab !== 'sessions'}
-          className="min-w-0 flex-1 overflow-hidden"
-        >
-          <SidebarSessions />
         </div>
       </div>
 

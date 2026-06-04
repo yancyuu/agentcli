@@ -10,9 +10,9 @@ import {
 } from 'react';
 import { Sheet, type SheetRef } from 'react-modal-sheet';
 
-import { api } from '@renderer/api';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
@@ -20,6 +20,7 @@ import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
 import { selectTeamMessages } from '@renderer/store/slices/teamSlice';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
+import { cn } from '@renderer/lib/utils';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { shouldExcludeInboxTextFromReplyCandidates } from '@shared/utils/idleNotificationSemantics';
 import {
@@ -56,7 +57,6 @@ import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMod
 import type {
   AgentActionMode,
   CcSession,
-  CcSessionDetail,
   InboxMessage,
   ResolvedTeamMember,
   TaskRef,
@@ -93,6 +93,8 @@ interface MessagesPanelProps {
   timeWindow: TimeWindow | null;
   /** Current lead session ID. */
   currentLeadSessionId?: string;
+  /** cc-connect sessions owned by the parent team detail view. */
+  sessions?: CcSession[];
   /** Pending replies tracker (shared with parent for MemberList). */
   pendingRepliesByMember: Record<string, number>;
   /** Update pending replies tracker. */
@@ -186,6 +188,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   leadContextUpdatedAt,
   timeWindow,
   currentLeadSessionId,
+  sessions = [],
   pendingRepliesByMember,
   onPendingReplyChange,
   onMemberClick,
@@ -334,10 +337,8 @@ export const MessagesPanel = memo(function MessagesPanel({
   const [expandedItemKey, setExpandedItemKey] = useState<string | null>(
     initialSidebarStateRef.current.expandedItemKey
   );
-  const [teamSessions, setTeamSessions] = useState<CcSession[]>([]);
-  const [selectedSessionDetail, setSelectedSessionDetail] = useState<CcSessionDetail | null>(null);
-  const [selectedSessionDetailLoading, setSelectedSessionDetailLoading] = useState(false);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
+  const [quickParticipantFilter, setQuickParticipantFilter] = useState<string | null>(null);
   const [messagesScrollTop, setMessagesScrollTop] = useState(
     initialSidebarStateRef.current.messagesScrollTop
   );
@@ -355,70 +356,25 @@ export const MessagesPanel = memo(function MessagesPanel({
     setMessagesCollapsed(initialSidebarStateRef.current.messagesCollapsed);
     setMessagesSearchBarVisible(initialSidebarStateRef.current.messagesSearchBarVisible);
     setExpandedItemKey(initialSidebarStateRef.current.expandedItemKey);
+    setSelectedSessionKey(null);
+    setQuickParticipantFilter(null);
     setMessagesScrollTop(initialSidebarStateRef.current.messagesScrollTop);
     setBottomSheetSnapIndex(initialSidebarStateRef.current.bottomSheetSnapIndex);
   }, [teamName]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void api.teams
-      .getTeamSessions(teamName)
-      .then((sessions) => {
-        if (cancelled) return;
-        const sortedSessions = [...sessions].sort(
-          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        );
-        setTeamSessions(sortedSessions);
-        setSelectedSessionKey((current) => {
-          if (current && sortedSessions.some((session) => session.sessionKey === current))
-            return current;
-          return sortedSessions[0]?.sessionKey ?? null;
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTeamSessions([]);
-          setSelectedSessionKey(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-    // Refetch when the lead session id changes (e.g. a new session is spawned)
-    // so the session list/selector reflects the updated id without a remount.
-  }, [teamName, currentLeadSessionId]);
-
-  const selectedSession = useMemo(
-    () => teamSessions.find((session) => session.sessionKey === selectedSessionKey) ?? null,
-    [selectedSessionKey, teamSessions]
+  const teamSessions = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      ),
+    [sessions]
   );
-  const selectedIsHermitLocalSession =
-    selectedSession?.platform === 'hermit' ||
-    selectedSession?.sessionKey === `hermit:${teamName}:session`;
 
   useEffect(() => {
-    if (!selectedSession || selectedIsHermitLocalSession) {
-      setSelectedSessionDetail(null);
-      setSelectedSessionDetailLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setSelectedSessionDetailLoading(true);
-    void api.teams
-      .getSessionDetail(teamName, selectedSession.id, 200)
-      .then((detail) => {
-        if (!cancelled) setSelectedSessionDetail(detail);
-      })
-      .catch(() => {
-        if (!cancelled) setSelectedSessionDetail(null);
-      })
-      .finally(() => {
-        if (!cancelled) setSelectedSessionDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedIsHermitLocalSession, selectedSession, teamName]);
+    setSelectedSessionKey((current) =>
+      current && teamSessions.some((session) => session.sessionKey === current) ? current : null
+    );
+  }, [teamSessions]);
 
   useEffect(() => {
     setTeamMessagesSidebarUiState(teamName, {
@@ -541,64 +497,127 @@ export const MessagesPanel = memo(function MessagesPanel({
     const newestFirst = (items: InboxMessage[]) =>
       [...items].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
     if (!selectedSessionKey) return newestFirst(effectiveMessages);
-    if (selectedSession && !selectedIsHermitLocalSession) {
-      if (!selectedSessionDetail) {
-        return [];
-      }
-      return [...selectedSessionDetail.history].reverse().map(
-        (entry, index): InboxMessage => ({
-          messageId: `${selectedSessionDetail.id}:${index}:${entry.timestamp}`,
-          from: entry.role === 'user' ? 'user' : selectedSessionDetail.name || teamName,
-          to: entry.role === 'user' ? selectedSessionDetail.name || teamName : 'user',
-          text: entry.content,
-          timestamp: entry.timestamp,
-          read: true,
-          source: entry.role === 'user' ? 'user_sent' : 'inbox',
-          session: {
-            id: selectedSessionDetail.id,
-            key: selectedSessionDetail.sessionKey,
-            platform: selectedSessionDetail.platform,
-            title:
-              selectedSession.title ||
-              selectedSession.chatName ||
-              selectedSession.userName ||
-              selectedSession.sessionKey,
-            chatName: selectedSession.chatName,
-            userName: selectedSession.userName,
-          },
-        })
-      );
-    }
     return newestFirst(
-      effectiveMessages.filter((message) => {
-        return message.session?.key === selectedSessionKey;
-      })
+      effectiveMessages.filter((message) => message.session?.key === selectedSessionKey)
     );
-  }, [
-    effectiveMessages,
-    selectedIsHermitLocalSession,
-    selectedSession,
-    selectedSessionDetail,
-    selectedSessionKey,
-    teamName,
-  ]);
+  }, [effectiveMessages, selectedSessionKey]);
+
+  const participantOptions = useMemo(() => {
+    const senderNames = new Set<string>();
+    for (const message of sessionScopedMessages) {
+      const sender = message.from?.trim();
+      if (sender) senderNames.add(sender);
+    }
+
+    const seen = new Set<string>();
+    const orderedSenders: string[] = [];
+    const addSender = (value: string | null | undefined) => {
+      const trimmed = value?.trim();
+      if (!trimmed || seen.has(trimmed) || !senderNames.has(trimmed)) return;
+      seen.add(trimmed);
+      orderedSenders.push(trimmed);
+    };
+
+    addSender('user');
+    for (const member of members) addSender(member.name);
+    for (const message of sessionScopedMessages) addSender(message.from);
+
+    return orderedSenders.slice(0, 24);
+  }, [members, sessionScopedMessages]);
+
+  useEffect(() => {
+    if (quickParticipantFilter && !participantOptions.includes(quickParticipantFilter)) {
+      setQuickParticipantFilter(null);
+    }
+  }, [participantOptions, quickParticipantFilter]);
+
+  const matchesParticipant = useCallback((message: InboxMessage, participant: string): boolean => {
+    return message.from?.trim() === participant;
+  }, []);
 
   const filteredMessages = useMemo(() => {
-    return filterTeamMessages(sessionScopedMessages, {
+    const participantFiltered = quickParticipantFilter
+      ? sessionScopedMessages.filter((message) =>
+          matchesParticipant(message, quickParticipantFilter)
+        )
+      : sessionScopedMessages;
+    return filterTeamMessages(participantFiltered, {
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-  }, [messagesFilter, messagesSearchQuery, sessionScopedMessages, timeWindow]);
+  }, [
+    matchesParticipant,
+    messagesFilter,
+    messagesSearchQuery,
+    quickParticipantFilter,
+    sessionScopedMessages,
+    timeWindow,
+  ]);
+
+  const setParticipantFilter = useCallback((name: string | null) => {
+    setQuickParticipantFilter(name);
+  }, []);
+
+  const participantFilterBar = (
+    <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[11px]">
+      <button
+        type="button"
+        className={cn(
+          'shrink-0 rounded-full border px-2 py-0.5 transition-colors',
+          quickParticipantFilter === null
+            ? 'border-blue-500/40 bg-blue-500/10 text-blue-500'
+            : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+        )}
+        onClick={() => setParticipantFilter(null)}
+      >
+        全部成员
+      </button>
+      {participantOptions.map((participant) => (
+        <button
+          key={participant}
+          type="button"
+          className={cn(
+            'shrink-0 rounded-full border px-2 py-0.5 transition-colors',
+            quickParticipantFilter === participant
+              ? 'border-blue-500/40 bg-blue-500/10 text-blue-500'
+              : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+          )}
+          onClick={() =>
+            setParticipantFilter(quickParticipantFilter === participant ? null : participant)
+          }
+        >
+          <MemberBadge
+            name={participant === 'user' ? '用户' : participant}
+            size="sm"
+            hideAvatar
+            disableHoverCard
+          />
+        </button>
+      ))}
+    </div>
+  );
 
   const activityTimelineMessages = useMemo(() => {
-    return filterTeamMessages(sessionScopedMessages, {
+    const participantFiltered = quickParticipantFilter
+      ? sessionScopedMessages.filter((message) =>
+          matchesParticipant(message, quickParticipantFilter)
+        )
+      : sessionScopedMessages;
+    return filterTeamMessages(participantFiltered, {
       includePassiveIdlePeerSummariesWhenNoiseHidden: true,
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-  }, [messagesFilter, messagesSearchQuery, sessionScopedMessages, timeWindow]);
+  }, [
+    matchesParticipant,
+    messagesFilter,
+    messagesSearchQuery,
+    quickParticipantFilter,
+    sessionScopedMessages,
+    timeWindow,
+  ]);
 
   const replyCandidateMessages = useMemo(
     () =>
@@ -773,6 +792,10 @@ export const MessagesPanel = memo(function MessagesPanel({
           toTeam,
           text: description,
           messageId: optimisticMessageId,
+          sessionKey:
+            selectedSessionKey && selectedSessionKey !== '__unassigned__'
+              ? selectedSessionKey
+              : undefined,
         });
       } catch (error) {
         const rawMessage = error instanceof Error ? error.message : '跨团队任务派发失败';
@@ -935,13 +958,11 @@ export const MessagesPanel = memo(function MessagesPanel({
         sendWarning={sendMessageWarning}
         sendDebugDetails={sendMessageDebugDetails}
         lastResult={lastSendMessageResult}
-        sessions={teamSessions}
-        selectedSessionKey={selectedSessionKey}
-        onSessionChange={setSelectedSessionKey}
         textareaRef={composerTextareaRef}
         onSend={handleSend}
         onDispatchTask={handleDispatchTaskToTeam}
       />
+      {participantFilterBar}
       <StatusBlock
         members={members}
         tasks={tasks}
@@ -1132,13 +1153,11 @@ export const MessagesPanel = memo(function MessagesPanel({
               sendWarning={sendMessageWarning}
               sendDebugDetails={sendMessageDebugDetails}
               lastResult={lastSendMessageResult}
-              sessions={teamSessions}
-              selectedSessionKey={selectedSessionKey}
-              onSessionChange={setSelectedSessionKey}
               textareaRef={composerTextareaRef}
               onSend={handleSend}
               onDispatchTask={handleDispatchTaskToTeam}
             />
+            {participantFilterBar}
             <StatusBlock
               members={members}
               tasks={tasks}
@@ -1420,13 +1439,11 @@ export const MessagesPanel = memo(function MessagesPanel({
                     sendWarning={sendMessageWarning}
                     sendDebugDetails={sendMessageDebugDetails}
                     lastResult={lastSendMessageResult}
-                    sessions={teamSessions}
-                    selectedSessionKey={selectedSessionKey}
-                    onSessionChange={setSelectedSessionKey}
                     textareaRef={composerTextareaRef}
                     onSend={handleSend}
                     onDispatchTask={handleDispatchTaskToTeam}
                   />
+                  {participantFilterBar}
                 </div>
               </div>
               <div className="shrink-0 px-3 pt-2">

@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
-import { AdvancedSection, GeneralSection, HarnessSection, PlatformsSection } from './sections';
+import { AdvancedSection, GeneralSection, HarnessSection } from './sections';
 import { TaskBusSection } from './sections/TaskBusSection';
 import { type SettingsSection, SettingsTabs } from './SettingsTabs';
 
@@ -27,7 +27,6 @@ export const SettingsView = (): React.JSX.Element | null => {
   useEffect(() => {
     if (pendingSettingsSection) {
       const nextSection: SettingsSection =
-        pendingSettingsSection === 'channels' ||
         pendingSettingsSection === 'harness' ||
         pendingSettingsSection === 'task-bus' ||
         pendingSettingsSection === 'advanced'
@@ -134,8 +133,6 @@ export const SettingsView = (): React.JSX.Element | null => {
               onLanguageChange={handlers.handleLanguageChange}
             />
           )}
-
-          {activeSection === 'channels' && <PlatformsSection />}
 
           {activeSection === 'harness' && <HarnessSection />}
 

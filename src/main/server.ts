@@ -63,6 +63,10 @@ import {
   triggerScan,
   getTelemetryStatus,
 } from './services/session-intelligence/UsageTelemetryService';
+import {
+  ConversationTelemetryService,
+  shouldIncludeContent,
+} from './services/session-intelligence/ConversationTelemetryService';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
@@ -72,6 +76,24 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number.parseInt(process.env.PORT ?? '5680', 10);
 const STATIC_DIR = process.env.STATIC_DIR ?? path.resolve(REPO_ROOT, 'dist-renderer');
 const HARNESS_BRIDGE_CONNECT_TIMEOUT_MS = 10_000;
+const CC_AGENT_TYPES: readonly CcAgentType[] = [
+  'claudecode',
+  'codex',
+  'cursor',
+  'gemini',
+  'iflow',
+  'kimi',
+  'devin',
+  'opencode',
+  'qoder',
+  'pi',
+  'acp',
+  'tmux',
+];
+
+function toCcAgentType(value: string | undefined): CcAgentType {
+  return CC_AGENT_TYPES.includes(value as CcAgentType) ? (value as CcAgentType) : 'claudecode';
+}
 
 // ===========================================================================
 // Hermit runtime config — ~/.hermit/config.json
@@ -198,6 +220,11 @@ const bridge = new CcConnectBridge({
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
 const svc = new TeamProvisioningService(cc, bridge);
+const conversationTelemetry = new ConversationTelemetryService({
+  cc,
+  listTeams: () => svc.listTeams(),
+  readTeamManifest: (teamName) => svc.readTeamManifest(teamName),
+});
 const collabBoard = new CollaborationBoardService();
 const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
@@ -789,7 +816,12 @@ app.post('/api/cc-reload', async () => {
 // GET /api/teams → 从 cc-connect 读取 project 列表，合并本地元数据（displayName 等）
 app.get('/api/teams', async () => {
   try {
-    const projects = await cc.listProjects();
+    const [projects, localTeams] = await Promise.all([
+      cc.listProjects().catch(() => []),
+      svc.listTeams().catch(() => []),
+    ]);
+    const localByProject = new Map(localTeams.map((team) => [team.bindProject, team]));
+    const seenLocalSlugs = new Set<string>();
     const summaries = await Promise.all(
       projects.map(async (p) => {
         // platforms 从 listProjects 返回的是 string[]，有 platform 即认为在线
@@ -803,7 +835,8 @@ app.get('/api/teams', async () => {
         let pendingDelete = false;
         let restartRequired = false;
         try {
-          const meta = await svc.readTeamManifest(p.name);
+          const meta = localByProject.get(p.name) ?? (await svc.readTeamManifest(p.name));
+          seenLocalSlugs.add(meta.slug);
           if (meta.displayName) displayName = meta.displayName;
           if (meta.color) color = meta.color;
           if (meta.description) description = meta.description;
@@ -849,6 +882,39 @@ app.get('/api/teams', async () => {
         };
       })
     );
+
+    for (const meta of localTeams) {
+      if (seenLocalSlugs.has(meta.slug)) continue;
+      const workDir = (meta.workDir ?? '').trim();
+      const harness = toCcAgentType(meta.harness);
+      summaries.push({
+        teamName: meta.slug,
+        displayName: meta.displayName || meta.slug,
+        description: meta.description || '未绑定外部平台',
+        color: meta.color || 'blue',
+        memberCount: 1,
+        members: [
+          {
+            name: meta.displayName || meta.slug,
+            role: 'agent',
+            agentId: harness,
+            color: meta.color || 'blue',
+          },
+        ],
+        taskCount: 0,
+        lastActivity: null,
+        isAlive: false,
+        harness,
+        bindProject: meta.bindProject,
+        workDir,
+        projectPath: workDir || undefined,
+        sessionsCount: 0,
+        heartbeatEnabled: false,
+        pendingDelete: meta.pendingDelete === true,
+        restartRequired: meta.restartRequired === true,
+      });
+    }
+
     return summaries.filter(
       (team) => team.pendingDelete !== true && team.teamName !== 'my-project'
     );
@@ -875,35 +941,18 @@ app.post('/api/teams/create', async (request, reply) => {
       workDir = path.join(os.homedir(), workDir.slice(1));
     }
 
-    // 直接调用 cc-connect add-platform（project 自动创建）
-    const platformType = (body.platform as string) ?? 'feishu';
-    const result = await cc.createProject(name, harness, workDir, platformType, {});
-    try {
-      await svc.createTeam({
-        displayName,
-        bindProject: name,
-        harness,
-        workDir,
-        color: typeof body.color === 'string' ? body.color : undefined,
-        description: typeof body.description === 'string' ? body.description : undefined,
-        platform: platformType,
-        createCcProject: false,
-      });
-    } catch (err) {
-      request.log.warn({ err, teamName: name }, 'failed to persist local team metadata');
-    }
+    // 本地创建只落 Hermit 团队目录；飞书/微信等外部平台在团队内按需绑定。
+    await svc.createTeam({
+      displayName,
+      bindProject: name,
+      harness,
+      workDir,
+      color: typeof body.color === 'string' ? body.color : undefined,
+      description: typeof body.description === 'string' ? body.description : undefined,
+      createCcProject: false,
+    });
 
-    // Bind provider refs if specified
-    const providerRefs = Array.isArray(body.providerRefs) ? (body.providerRefs as string[]) : [];
-    if (providerRefs.length > 0) {
-      try {
-        await cc.setProviderRefs(name, providerRefs);
-      } catch (err) {
-        request.log.warn({ err, teamName: name, providerRefs }, 'failed to set provider refs');
-      }
-    }
-
-    return { ok: true, teamName: name, runId: null };
+    return { runId: `local:${name}:${Date.now()}` };
   } catch (err) {
     return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -1434,21 +1483,6 @@ app.patch<{
 // Harness 列表 — 从 cc-connect projects 提取已用 agent_type，合并固定枚举
 // GET /api/harnesses
 // ===========================================================================
-
-const CC_AGENT_TYPES = [
-  'claudecode',
-  'codex',
-  'cursor',
-  'gemini',
-  'iflow',
-  'kimi',
-  'devin',
-  'opencode',
-  'qoder',
-  'pi',
-  'acp',
-  'tmux',
-] as const;
 
 app.get('/api/harnesses', async () => {
   try {
@@ -4637,6 +4671,100 @@ app.post('/api/telemetry/scan', async (request, reply) => {
       projects: result.aggregate.projects,
       workSecondsByDay: result.aggregate.workSecondsByDay,
     };
+  } catch (err) {
+    return reply.code(500).send({ error: String(err) });
+  }
+});
+
+// GET /api/telemetry/conversations → local Feishu/Lark conversation telemetry
+app.get<{
+  Querystring: {
+    teamName?: string;
+    platform?: string;
+    from?: string;
+    to?: string;
+    identityType?: 'person' | 'group' | 'unknown';
+    identityId?: string;
+    includeContent?: 'none' | 'summary' | 'full' | string;
+    includeToolResults?: string;
+    includeSystemMessages?: string;
+    limit?: string;
+    offset?: string;
+  };
+}>('/api/telemetry/conversations', async (request, reply) => {
+  try {
+    const result = await conversationTelemetry.getConversations({
+      teamName: request.query.teamName,
+      platform: request.query.platform,
+      from: request.query.from,
+      to: request.query.to,
+      identityType: request.query.identityType,
+      identityId: request.query.identityId,
+      includeContent: shouldIncludeContent(request.query.includeContent),
+      includeToolResults: request.query.includeToolResults !== 'false',
+      includeSystemMessages: request.query.includeSystemMessages !== 'false',
+      limit: request.query.limit ? Number(request.query.limit) : undefined,
+      offset: request.query.offset ? Number(request.query.offset) : undefined,
+    });
+    return result;
+  } catch (err) {
+    return reply.code(500).send({ error: String(err) });
+  }
+});
+
+// GET /api/telemetry/conversations/export → export local conversation telemetry
+app.get<{
+  Querystring: {
+    format?: 'csv' | 'json' | 'markdown' | 'plaintext' | string;
+    teamName?: string;
+    platform?: string;
+    from?: string;
+    to?: string;
+    identityType?: 'person' | 'group' | 'unknown';
+    identityId?: string;
+    includeContent?: 'none' | 'summary' | 'full' | string;
+    includeToolResults?: string;
+    includeSystemMessages?: string;
+  };
+}>('/api/telemetry/conversations/export', async (request, reply) => {
+  try {
+    const requestedFormat = request.query.format;
+    const format =
+      requestedFormat === 'json' ||
+      requestedFormat === 'markdown' ||
+      requestedFormat === 'plaintext' ||
+      requestedFormat === 'csv'
+        ? requestedFormat
+        : 'csv';
+    const result = await conversationTelemetry.exportConversations(format, {
+      teamName: request.query.teamName,
+      platform: request.query.platform,
+      from: request.query.from,
+      to: request.query.to,
+      identityType: request.query.identityType,
+      identityId: request.query.identityId,
+      includeContent: shouldIncludeContent(request.query.includeContent),
+      includeToolResults: request.query.includeToolResults !== 'false',
+      includeSystemMessages: request.query.includeSystemMessages !== 'false',
+    });
+    return result;
+  } catch (err) {
+    return reply.code(500).send({ error: String(err) });
+  }
+});
+
+// GET /api/telemetry/conversations/:sessionId → local conversation telemetry detail
+app.get<{
+  Params: { sessionId: string };
+  Querystring: { teamName?: string; platform?: string };
+}>('/api/telemetry/conversations/:sessionId', async (request, reply) => {
+  try {
+    const result = await conversationTelemetry.getConversationDetail(request.params.sessionId, {
+      ...request.query,
+      includeContent: 'full',
+    });
+    if (!result) return reply.code(404).send({ error: 'Conversation not found' });
+    return result;
   } catch (err) {
     return reply.code(500).send({ error: String(err) });
   }

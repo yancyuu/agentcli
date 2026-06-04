@@ -40,7 +40,6 @@ import type { OpenCodeRuntimeDeliveryDebugDetails } from '@renderer/utils/openCo
 import type {
   AgentActionMode,
   AttachmentPayload,
-  CcSession,
   ResolvedTeamMember,
   SendMessageResult,
   TaskRef,
@@ -56,9 +55,6 @@ interface MessageComposerProps {
   sendWarning?: string | null;
   sendDebugDetails?: OpenCodeRuntimeDeliveryDebugDetails | null;
   lastResult?: SendMessageResult | null;
-  sessions?: CcSession[];
-  selectedSessionKey?: string | null;
-  onSessionChange?: (sessionKey: string | null) => void;
   /** Ref to the underlying textarea element for external focus management. */
   textareaRef?: React.Ref<HTMLTextAreaElement>;
   onSend: (
@@ -86,9 +82,6 @@ export const MessageComposer = ({
   sendWarning,
   sendDebugDetails,
   lastResult,
-  sessions = [],
-  selectedSessionKey = null,
-  onSessionChange,
   textareaRef: externalTextareaRef,
   onSend,
   onDispatchTask,
@@ -118,7 +111,6 @@ export const MessageComposer = ({
   const [fileRestrictionError, setFileRestrictionError] = useState<string | null>(null);
   const fileRestrictionTimerRef = useRef(0);
   const dismissMentionsRef = useRef<(() => void) | null>(null);
-  const [teamSelectorOpen, setTeamSelectorOpen] = useState(false);
 
   // Members load async with team data; keep recipient stable if valid, otherwise default to lead/first.
   useEffect(() => {
@@ -146,17 +138,6 @@ export const MessageComposer = ({
   });
   const isProvisioning = useStore((s) => isTeamProvisioningActive(s, teamName));
   const draft = useComposerDraft(teamName);
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.sessionKey === selectedSessionKey) ?? null,
-    [selectedSessionKey, sessions]
-  );
-  const selectedSessionLabel =
-    selectedSession?.chatName ||
-    selectedSession?.title ||
-    selectedSession?.userName ||
-    selectedSession?.sessionKey ||
-    '选择会话';
-
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
@@ -473,84 +454,6 @@ export const MessageComposer = ({
                 'border-[var(--color-border)]'
               )}
             >
-              <Popover open={teamSelectorOpen} onOpenChange={setTeamSelectorOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex items-center gap-1.5 border-r border-r-[var(--color-border)] px-2.5 py-1 text-xs transition-colors',
-                      shouldDockRecipientSelector
-                        ? 'rounded-bl-none rounded-tl-[1.35rem]'
-                        : 'rounded-l-full',
-                      'hover:bg-[var(--color-surface-raised)]'
-                    )}
-                  >
-                    {currentTeamColor ? (
-                      <span
-                        className="inline-block size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: currentTeamColor }}
-                      />
-                    ) : null}
-                    <span className="max-w-[120px] truncate text-[var(--color-text-secondary)]">
-                      {selectedSessionLabel}
-                    </span>
-                    <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-56 p-1.5">
-                  <div className="max-h-48 space-y-0.5 overflow-y-auto">
-                    {sessions.length > 0 && (
-                      <>
-                        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                          会话
-                        </div>
-                        {sessions.map((session) => {
-                          const isSelected = selectedSessionKey === session.sessionKey;
-                          const label =
-                            session.chatName ||
-                            session.title ||
-                            session.userName ||
-                            session.sessionKey;
-                          return (
-                            <button
-                              key={session.sessionKey}
-                              type="button"
-                              className={cn(
-                                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
-                                isSelected && 'bg-[var(--color-surface-raised)]'
-                              )}
-                              onClick={() => {
-                                onSessionChange?.(session.sessionKey);
-                                setTeamSelectorOpen(false);
-                              }}
-                            >
-                              <span
-                                className={cn(
-                                  'inline-block size-2 shrink-0 rounded-full',
-                                  session.live && 'animate-pulse'
-                                )}
-                                style={{
-                                  backgroundColor: session.live ? '#22c55e' : currentTeamColor,
-                                }}
-                              />
-                              <span className="min-w-0 flex-1 truncate text-[var(--color-text)]">
-                                {label}
-                              </span>
-                              <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                                {session.platform}
-                              </span>
-                              {isSelected ? (
-                                <Check size={12} className="ml-auto shrink-0 text-blue-400" />
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
-
               <Popover open={recipientOpen} onOpenChange={setRecipientOpen}>
                 <PopoverTrigger asChild>
                   <button

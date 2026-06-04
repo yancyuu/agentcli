@@ -491,8 +491,8 @@ export interface CcSession {
   projectId: string;
   sessionKey: string;
   platform: string;
-  userName: string;
-  chatName: string;
+  userName: string | null;
+  chatName: string | null;
   active: boolean;
   live: boolean;
   historyCount: number;
@@ -520,6 +520,119 @@ export interface CcSessionDetail {
   updatedAt: string;
   platform: string;
   history: CcSessionMessage[];
+}
+
+export type ConversationTelemetryExportFormat = 'csv' | 'json' | 'markdown' | 'plaintext';
+
+export type ConversationTelemetryIncludeContent = 'none' | 'summary' | 'full';
+
+export interface ConversationTelemetryQuery {
+  teamName?: string;
+  platform?: string;
+  from?: string;
+  to?: string;
+  identityType?: 'person' | 'group' | 'unknown';
+  identityId?: string;
+  includeContent?: ConversationTelemetryIncludeContent;
+  includeToolResults?: boolean;
+  includeSystemMessages?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ConversationTelemetryMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'unknown';
+  timestamp?: string;
+  content: string;
+  uuid?: string;
+  parentUuid?: string | null;
+  model?: string;
+  requestId?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    totalTokens: number;
+  };
+  isMeta?: boolean;
+}
+
+export interface ConversationTelemetryRow {
+  teamName: string;
+  teamDisplayName: string;
+  projectName: string;
+  session: {
+    ccSessionId: string;
+    sessionKey: string;
+    agentSessionId?: string;
+    claudeSessionId?: string;
+    projectPath?: string;
+    jsonlRelPath?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    startTime?: string;
+    endTime?: string;
+    active?: boolean;
+    live?: boolean;
+    matchStatus: 'matched' | 'missing-agent-session-id' | 'jsonl-not-found' | 'ambiguous';
+  };
+  identity: {
+    platform: string;
+    type: 'person' | 'group' | 'unknown';
+    id?: string;
+    userId?: string;
+    chatId?: string;
+    displayName: string;
+    userName?: string;
+    chatName?: string;
+    confidence: 'exact-id' | 'name-only' | 'allowlist-fallback' | 'session-key-only' | 'missing-id';
+  };
+  content: {
+    messageCount: number;
+    userMessageCount: number;
+    assistantMessageCount: number;
+    toolResultCount: number;
+    firstUserMessage?: string;
+    firstUserMessageAt?: string;
+    lastUserMessage?: string;
+    lastUserMessageAt?: string;
+    lastMessageRole?: ConversationTelemetryMessage['role'];
+    lastMessageContent?: string;
+    lastMessageAt?: string;
+    text?: string;
+    messages?: ConversationTelemetryMessage[];
+  };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    totalTokens: number;
+    assistantTurnsWithUsage: number;
+    models: Record<string, number>;
+    toolCalls: Record<string, number>;
+    usageSource: 'claude-jsonl' | 'missing';
+  };
+}
+
+export interface ConversationTelemetryResponse {
+  rows: ConversationTelemetryRow[];
+  nextOffset?: number;
+  computedAt: string;
+  summary: {
+    conversations: number;
+    runningConversations: number;
+    missingIdentityIds: number;
+    unmatchedSessions: number;
+    totalTokens: number;
+  };
+}
+
+export interface ConversationTelemetryExportResponse {
+  filename: string;
+  mimeType: string;
+  content: string;
 }
 
 export interface TeamsAPI {

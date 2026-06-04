@@ -6,11 +6,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { Bot, Info, PlugZap, Settings, Share2, Wrench } from 'lucide-react';
+import { Bot, Info, Settings, Share2, Wrench } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
 
-export type SettingsSection = 'general' | 'channels' | 'harness' | 'task-bus' | 'advanced';
+export type SettingsSection = 'general' | 'harness' | 'task-bus' | 'advanced';
 
 interface SettingsTabsProps {
   activeSection: SettingsSection;
@@ -30,13 +30,6 @@ const tabs: TabConfig[] = [
     label: '通用',
     icon: Settings,
     description: '主题、语言、显示密度和启动行为等核心应用偏好。',
-  },
-  {
-    id: 'channels',
-    label: '渠道',
-    icon: PlugZap,
-    description:
-      '管理飞书、微信、Telegram 等消息平台的接入配置。每个 cc-connect 项目可绑定一个或多个渠道。',
   },
   {
     id: 'harness',
