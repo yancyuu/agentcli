@@ -53,8 +53,17 @@ import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
 import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
+import { resolveCcProjectName } from './utils/teamProjectResolution';
 import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
-import type { TaskBusConfig, TeamLaunchRequest } from '@shared/types/team';
+import { SystemManagerConfigService } from './services/system-manager/SystemManagerConfigService';
+import { SystemManagerPtyService } from './services/system-manager/SystemManagerPtyService';
+import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
+import {
+  SYSTEM_MANAGER_BIND_PROJECT,
+  SYSTEM_MANAGER_DISPLAY_NAME,
+  SYSTEM_MANAGER_TEAM_NAME,
+} from '@shared/types/team';
+import type { SystemManagerSummary, TaskBusConfig, TeamLaunchRequest } from '@shared/types/team';
 import type { TeamManifest } from './services/teams-mvp/TeamWorkspaceService';
 import { UpdateService } from './services/UpdateService';
 import {
@@ -90,9 +99,19 @@ const CC_AGENT_TYPES: readonly CcAgentType[] = [
   'acp',
   'tmux',
 ];
+const SYSTEM_MANAGER_DESCRIPTION =
+  '项目级 Claude Code 控制台，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
 
 function toCcAgentType(value: string | undefined): CcAgentType {
   return CC_AGENT_TYPES.includes(value as CcAgentType) ? (value as CcAgentType) : 'claudecode';
+}
+
+function isReservedSystemTeamName(teamName: string): boolean {
+  return (
+    teamName === 'default' ||
+    teamName === SYSTEM_MANAGER_BIND_PROJECT ||
+    teamName === SYSTEM_MANAGER_TEAM_NAME
+  );
 }
 
 // ===========================================================================
@@ -220,11 +239,105 @@ const bridge = new CcConnectBridge({
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
 const svc = new TeamProvisioningService(cc, bridge);
+const systemManagerConfig = new SystemManagerConfigService(REPO_ROOT);
+const systemManagerPty = new SystemManagerPtyService();
+const workflowPromptService = new WorkflowPromptService();
+
+systemManagerPty.on('data', (event) => broadcastSse('terminal:data', event));
+systemManagerPty.on('exit', (event) => broadcastSse('terminal:exit', event));
+
+async function getSystemManagerWorkDir(): Promise<string> {
+  try {
+    const project = await cc.getProject(SYSTEM_MANAGER_BIND_PROJECT);
+    if (typeof project.work_dir === 'string' && project.work_dir.trim()) {
+      const workDir = project.work_dir.trim();
+      if (workDir !== '/path/to/your/project') {
+        return workDir;
+      }
+    }
+  } catch {
+    // cc-connect default project may not exist yet; keep the manager locally usable.
+  }
+  return REPO_ROOT;
+}
+
+let systemManagerEnsurePromise: Promise<SystemManagerSummary> | null = null;
+
+async function ensureSystemManagerUncached(): Promise<SystemManagerSummary> {
+  const workDir = await getSystemManagerWorkDir();
+  let ccConnectProjectStatus: SystemManagerSummary['ccConnectProjectStatus'] = 'bound';
+  try {
+    await cc.getProject(SYSTEM_MANAGER_BIND_PROJECT);
+  } catch {
+    ccConnectProjectStatus = 'missing';
+  }
+
+  let manifest: TeamManifest;
+  try {
+    manifest = await svc.readTeamManifest(SYSTEM_MANAGER_TEAM_NAME);
+  } catch {
+    const created = await svc.createTeam({
+      displayName: SYSTEM_MANAGER_TEAM_NAME,
+      bindProject: SYSTEM_MANAGER_BIND_PROJECT,
+      harness: 'claudecode',
+      workDir,
+      color: 'slate',
+      description: SYSTEM_MANAGER_DESCRIPTION,
+      collaboration: false,
+      createCcProject: false,
+      injectInstructions: false,
+    });
+    manifest = created.manifest;
+  }
+
+  if (
+    manifest.displayName !== SYSTEM_MANAGER_DISPLAY_NAME ||
+    manifest.bindProject !== SYSTEM_MANAGER_BIND_PROJECT ||
+    manifest.description !== SYSTEM_MANAGER_DESCRIPTION ||
+    manifest.color !== 'slate' ||
+    manifest.collaboration !== false ||
+    manifest.workDir !== workDir
+  ) {
+    manifest = await svc.updateTeam(manifest.slug, {
+      displayName: SYSTEM_MANAGER_DISPLAY_NAME,
+      bindProject: SYSTEM_MANAGER_BIND_PROJECT,
+      color: 'slate',
+      description: SYSTEM_MANAGER_DESCRIPTION,
+      collaboration: false,
+      workDir,
+    });
+  }
+
+  return {
+    teamName: SYSTEM_MANAGER_TEAM_NAME,
+    displayName: SYSTEM_MANAGER_DISPLAY_NAME,
+    bindProject: SYSTEM_MANAGER_BIND_PROJECT,
+    workDir: manifest.workDir || workDir,
+    projectPath: manifest.workDir || workDir,
+    description: manifest.description || SYSTEM_MANAGER_DESCRIPTION,
+    localStatus: 'ready',
+    ccConnectProjectStatus,
+    feishuStatus: 'unbound',
+  };
+}
+
+async function ensureSystemManager(): Promise<SystemManagerSummary> {
+  systemManagerEnsurePromise ??= ensureSystemManagerUncached().finally(() => {
+    systemManagerEnsurePromise = null;
+  });
+  return systemManagerEnsurePromise;
+}
+
 const conversationTelemetry = new ConversationTelemetryService({
   cc,
   listTeams: () => svc.listTeams(),
   readTeamManifest: (teamName) => svc.readTeamManifest(teamName),
 });
+
+async function resolveRouteCcProjectName(teamName: string): Promise<string> {
+  return resolveCcProjectName(teamName, (name) => svc.readTeamManifest(name));
+}
+
 const collabBoard = new CollaborationBoardService();
 const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
@@ -414,9 +527,37 @@ const app = Fastify({
 // Plugins
 // ===========================================================================
 
+const configuredCorsOrigins = process.env.CORS_ORIGIN?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const defaultWebPort = process.env.WEB_PORT?.trim() || '5174';
+const allowedCorsOrigins = configuredCorsOrigins?.length
+  ? configuredCorsOrigins
+  : [
+      `http://127.0.0.1:${PORT}`,
+      `http://localhost:${PORT}`,
+      `http://127.0.0.1:${defaultWebPort}`,
+      `http://localhost:${defaultWebPort}`,
+    ];
+const allowedOriginSet = new Set(allowedCorsOrigins);
+
+function isTrustedBrowserOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  return allowedOriginSet.has(origin);
+}
+
+function assertTrustedBrowserOrigin(request: import('fastify').FastifyRequest): void {
+  const origin = Array.isArray(request.headers.origin)
+    ? request.headers.origin[0]
+    : request.headers.origin;
+  if (!isTrustedBrowserOrigin(origin)) {
+    throw new Error(`Forbidden origin: ${origin}`);
+  }
+}
+
 await app.register(cors, {
-  origin: process.env.CORS_ORIGIN?.split(',') ?? true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  origin: allowedCorsOrigins,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
 
 // ===========================================================================
@@ -813,111 +954,237 @@ app.post('/api/cc-reload', async () => {
 // Teams — cc-connect projects 即团队，本地 ~/.hermit/teams/ 仅存 tasks + 额外元数据
 // ===========================================================================
 
-// GET /api/teams → 从 cc-connect 读取 project 列表，合并本地元数据（displayName 等）
+// POST /api/system-manager/ensure → 确保项目级控制台存在
+app.post('/api/system-manager/ensure', async (_request, reply) => {
+  try {
+    return await ensureSystemManager();
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/system-manager/status', async (_request, reply) => {
+  try {
+    return await systemManagerConfig.getStatus();
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/system-manager/config', async (_request, reply) => {
+  try {
+    return await systemManagerConfig.getConfig();
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.put<{ Body: { selectedWorkDir?: string; workflowFolder?: string | null } }>(
+  '/api/system-manager/config',
+  async (request, reply) => {
+    try {
+      return await systemManagerConfig.updateConfig(request.body ?? {});
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
+
+app.post<{ Body: { folder?: string } }>(
+  '/api/system-manager/workflows/list',
+  async (request, reply) => {
+    try {
+      assertTrustedBrowserOrigin(request);
+      const config = await systemManagerConfig.getConfig();
+      const folder =
+        typeof request.body?.folder === 'string' ? request.body.folder : config.workflowFolder;
+      if (!folder) return { folder: '', prompts: [], warnings: [] };
+      const result = await workflowPromptService.list(folder);
+      await systemManagerConfig.updateConfig({ workflowFolder: result.folder });
+      return result;
+    } catch {
+      return { folder: '', prompts: [], warnings: [] };
+    }
+  }
+);
+
+app.post<{ Body: { id?: string } }>(
+  '/api/system-manager/workflows/read',
+  async (request, reply) => {
+    try {
+      assertTrustedBrowserOrigin(request);
+      const config = await systemManagerConfig.getConfig();
+      if (!config.workflowFolder)
+        return reply.code(400).send({ error: 'workflowFolder is not configured' });
+      const id = typeof request.body?.id === 'string' ? request.body.id : '';
+      return await workflowPromptService.read(config.workflowFolder, id);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
+
+app.post<{ Body: { cwd?: string; cols?: number; rows?: number } }>(
+  '/api/terminal/spawn',
+  async (request, reply) => {
+    try {
+      assertTrustedBrowserOrigin(request);
+      const config = await systemManagerConfig.updateConfig(
+        typeof request.body?.cwd === 'string' ? { selectedWorkDir: request.body.cwd } : {}
+      );
+      const ptyId = await systemManagerPty.spawn({
+        command: 'claude',
+        args: [],
+        cwd: config.selectedWorkDir,
+        cols: request.body?.cols,
+        rows: request.body?.rows,
+      });
+      return { ptyId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply
+        .code(message.startsWith('Forbidden origin:') ? 403 : 500)
+        .send({ error: message });
+    }
+  }
+);
+
+app.post<{ Params: { ptyId: string }; Body: { data?: string } }>(
+  '/api/terminal/:ptyId/write',
+  async (request, reply) => {
+    try {
+      assertTrustedBrowserOrigin(request);
+      systemManagerPty.write(request.params.ptyId, request.body?.data ?? '');
+      return { ok: true };
+    } catch (err) {
+      return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
+
+app.post<{ Params: { ptyId: string }; Body: { cols?: number; rows?: number } }>(
+  '/api/terminal/:ptyId/resize',
+  async (request, reply) => {
+    try {
+      assertTrustedBrowserOrigin(request);
+      systemManagerPty.resize(
+        request.params.ptyId,
+        request.body?.cols ?? 120,
+        request.body?.rows ?? 34
+      );
+      return { ok: true };
+    } catch (err) {
+      return reply.code(403).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
+
+app.delete<{ Params: { ptyId: string } }>('/api/terminal/:ptyId', async (request, reply) => {
+  try {
+    assertTrustedBrowserOrigin(request);
+    systemManagerPty.kill(request.params.ptyId);
+    return { ok: true };
+  } catch (err) {
+    return reply.code(403).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// GET /api/teams → Hermit 本地团队优先，裸 cc-connect project 作为历史兼容显示；过滤飞书/系统项目
 app.get('/api/teams', async () => {
   try {
     const [projects, localTeams] = await Promise.all([
       cc.listProjects().catch(() => []),
       svc.listTeams().catch(() => []),
     ]);
-    const localByProject = new Map(localTeams.map((team) => [team.bindProject, team]));
-    const seenLocalSlugs = new Set<string>();
+    const projectByName = new Map(projects.map((project) => [project.name, project]));
+    const seenProjectNames = new Set<string>();
+    const shouldHideProject = (name: string): boolean =>
+      isReservedSystemTeamName(name) || name.startsWith('feishu:');
+
     const summaries = await Promise.all(
-      projects.map(async (p) => {
-        // platforms 从 listProjects 返回的是 string[]，有 platform 即认为在线
-        const isOnline = Array.isArray(p.platforms) && p.platforms.length > 0;
-
-        // 尝试从本地元数据读取 displayName 等信息
-        let displayName = p.name;
-        let color = 'blue';
-        let description = `${p.agent_type} · ${p.platforms?.join(', ') ?? ''}`;
-        let workDir = '';
-        let pendingDelete = false;
-        let restartRequired = false;
-        try {
-          const meta = localByProject.get(p.name) ?? (await svc.readTeamManifest(p.name));
-          seenLocalSlugs.add(meta.slug);
-          if (meta.displayName) displayName = meta.displayName;
-          if (meta.color) color = meta.color;
-          if (meta.description) description = meta.description;
-          pendingDelete = meta.pendingDelete === true;
-          restartRequired = meta.restartRequired === true;
-          if (typeof meta.workDir === 'string') {
-            workDir = meta.workDir.trim();
-          }
-        } catch {
-          /* no local manifest, use defaults */
-        }
-
-        // 兼容仅存在于 cc-connect 的团队：回退读取 project 详情拿 work_dir。
-        if (!workDir) {
-          try {
-            const detail = await cc.getProject(p.name);
-            if (typeof detail.work_dir === 'string') {
-              workDir = detail.work_dir.trim();
+      localTeams
+        .filter((meta) => {
+          const bindProject = meta.bindProject || meta.slug;
+          return (
+            meta.pendingDelete !== true &&
+            !isReservedSystemTeamName(meta.slug) &&
+            !shouldHideProject(bindProject) &&
+            !meta.slug.startsWith('feishu:')
+          );
+        })
+        .map(async (meta) => {
+          const bindProject = meta.bindProject || meta.slug;
+          seenProjectNames.add(bindProject);
+          const project = projectByName.get(bindProject);
+          const isOnline = Array.isArray(project?.platforms) && project.platforms.length > 0;
+          let workDir = (meta.workDir || '').trim();
+          if (project) {
+            try {
+              const detail = await cc.getProject(bindProject);
+              workDir = typeof detail.work_dir === 'string' ? detail.work_dir.trim() : workDir;
+            } catch {
+              // ignore detail read failure, keep manifest/default path
             }
-          } catch {
-            // ignore detail read failure, keep empty path
           }
-        }
+          const harness = toCcAgentType(project?.agent_type || meta.harness);
+          const color = meta.color || 'blue';
+          const displayName = meta.displayName || meta.slug;
 
-        return {
-          teamName: p.name,
-          displayName,
-          description,
-          color,
-          memberCount: 1,
-          members: [{ name: p.name, role: 'agent', agentId: p.agent_type, color }],
-          taskCount: 0,
-          lastActivity: null,
-          isAlive: isOnline,
-          harness: p.agent_type,
-          bindProject: p.name,
-          workDir,
-          projectPath: workDir || undefined,
-          sessionsCount: p.sessions_count,
-          heartbeatEnabled: p.heartbeat_enabled,
-          pendingDelete,
-          restartRequired,
-        };
-      })
+          return {
+            teamName: meta.slug,
+            displayName,
+            description: meta.description || '本地数字员工',
+            color,
+            memberCount: 1,
+            members: [{ name: displayName, role: 'agent', agentId: harness, color }],
+            taskCount: 0,
+            lastActivity: null,
+            isAlive: isOnline,
+            harness,
+            bindProject,
+            workDir,
+            projectPath: workDir || undefined,
+            sessionsCount: project?.sessions_count ?? 0,
+            heartbeatEnabled: project?.heartbeat_enabled ?? false,
+            pendingDelete: meta.pendingDelete === true,
+            restartRequired: meta.restartRequired === true,
+          };
+        })
     );
 
-    for (const meta of localTeams) {
-      if (seenLocalSlugs.has(meta.slug)) continue;
-      const workDir = (meta.workDir ?? '').trim();
-      const harness = toCcAgentType(meta.harness);
+    for (const project of projects) {
+      if (seenProjectNames.has(project.name) || shouldHideProject(project.name)) continue;
+      const isOnline = Array.isArray(project.platforms) && project.platforms.length > 0;
+      let workDir = '';
+      try {
+        const detail = await cc.getProject(project.name);
+        workDir = typeof detail.work_dir === 'string' ? detail.work_dir.trim() : '';
+      } catch {
+        // ignore detail read failure, keep empty path
+      }
+      const harness = toCcAgentType(project.agent_type);
       summaries.push({
-        teamName: meta.slug,
-        displayName: meta.displayName || meta.slug,
-        description: meta.description || '未绑定外部平台',
-        color: meta.color || 'blue',
+        teamName: project.name,
+        displayName: project.name,
+        description: 'cc-connect 历史项目（未导入 Hermit）',
+        color: 'blue',
         memberCount: 1,
-        members: [
-          {
-            name: meta.displayName || meta.slug,
-            role: 'agent',
-            agentId: harness,
-            color: meta.color || 'blue',
-          },
-        ],
+        members: [{ name: project.name, role: 'agent', agentId: harness, color: 'blue' }],
         taskCount: 0,
         lastActivity: null,
-        isAlive: false,
+        isAlive: isOnline,
         harness,
-        bindProject: meta.bindProject,
+        bindProject: project.name,
         workDir,
         projectPath: workDir || undefined,
-        sessionsCount: 0,
-        heartbeatEnabled: false,
-        pendingDelete: meta.pendingDelete === true,
-        restartRequired: meta.restartRequired === true,
+        sessionsCount: project.sessions_count ?? 0,
+        heartbeatEnabled: project.heartbeat_enabled ?? false,
+        pendingDelete: false,
+        restartRequired: false,
       });
     }
 
-    return summaries.filter(
-      (team) => team.pendingDelete !== true && team.teamName !== 'my-project'
-    );
+    return summaries;
   } catch {
     return [];
   }
@@ -978,11 +1245,13 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
   let disabledCommands: string[] = [];
   let platformAllowFrom: Record<string, string> = {};
   let platformAllowChat: Record<string, string> = {};
+  let bindProject = name;
   try {
     const meta = await svc.readTeamManifest(name);
     if (meta.displayName) displayName = meta.displayName;
     if (meta.color) color = meta.color;
     if (meta.description) description = meta.description;
+    bindProject = meta.bindProject || name;
     collaboration = meta.collaboration ?? true;
     if (meta.workDir) workDir = meta.workDir;
     if (meta.harness) harness = meta.harness;
@@ -1016,7 +1285,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
   const teamTasks = rawTasks.map(toTeamTask);
 
   try {
-    const p = await cc.getProject(name);
+    bindProject = await resolveRouteCcProjectName(name);
+    const p = await cc.getProject(bindProject);
     const isOnline = Array.isArray(p.platforms) && p.platforms.some((pl) => pl.connected);
     const projectSettings = (p.settings ?? {}) as Record<string, unknown>;
     const resolvedLanguage =
@@ -1065,7 +1335,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         ? p.agent_mode.trim()
         : permissionMode;
     const [providerRefs, globalProviders] = await Promise.all([
-      cc.getProviderRefs(name).catch(() => []),
+      cc.getProviderRefs(bindProject).catch(() => []),
       cc.listProviders().catch(() => []),
     ]);
 
@@ -1104,7 +1374,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       processes: [],
       isAlive: isOnline,
       harness: p.agent_type,
-      bindProject: name,
+      bindProject,
       collaboration,
       description,
       workDir: p.work_dir ?? workDir,
@@ -1161,7 +1431,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       processes: [],
       isAlive: false,
       harness,
-      bindProject: name,
+      bindProject,
       collaboration,
       description,
       workDir,
@@ -1201,8 +1471,8 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   '/api/teams/:name',
   async (request, reply) => {
     const teamName = request.params.name;
-    if (teamName === 'default' || teamName === 'my-project') {
-      return reply.code(403).send({ error: '该团队不可删除' });
+    if (isReservedSystemTeamName(teamName)) {
+      return reply.code(403).send({ error: '控制台不可删除' });
     }
     try {
       let restartRequired = false;
@@ -1411,7 +1681,8 @@ app.patch<{ Params: { name: string }; Body: { collaboration: boolean } }>(
 
 app.get<{ Params: { name: string } }>('/api/teams/:name/heartbeat', async (request, reply) => {
   try {
-    const data = await cc.getHeartbeat(request.params.name);
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    const data = await cc.getHeartbeat(bindProject);
     return { ok: true, data };
   } catch (err) {
     return reply.code(404).send(reply500(err));
@@ -1422,7 +1693,8 @@ app.post<{ Params: { name: string } }>(
   '/api/teams/:name/heartbeat/enable',
   async (request, reply) => {
     try {
-      await cc.resumeHeartbeat(request.params.name);
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      await cc.resumeHeartbeat(bindProject);
       return { ok: true };
     } catch (err) {
       return reply.code(500).send(reply500(err));
@@ -1434,7 +1706,8 @@ app.post<{ Params: { name: string } }>(
   '/api/teams/:name/heartbeat/disable',
   async (request, reply) => {
     try {
-      await cc.pauseHeartbeat(request.params.name);
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      await cc.pauseHeartbeat(bindProject);
       return { ok: true };
     } catch (err) {
       return reply.code(500).send(reply500(err));
@@ -1446,7 +1719,8 @@ app.post<{ Params: { name: string } }>(
   '/api/teams/:name/heartbeat/pause',
   async (request, reply) => {
     try {
-      await cc.pauseHeartbeat(request.params.name);
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      await cc.pauseHeartbeat(bindProject);
       return { ok: true };
     } catch (err) {
       return reply.code(500).send(reply500(err));
@@ -1458,7 +1732,8 @@ app.post<{ Params: { name: string } }>(
   '/api/teams/:name/heartbeat/resume',
   async (request, reply) => {
     try {
-      await cc.resumeHeartbeat(request.params.name);
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      await cc.resumeHeartbeat(bindProject);
       return { ok: true };
     } catch (err) {
       return reply.code(500).send(reply500(err));
@@ -1471,8 +1746,9 @@ app.patch<{
   Body: { interval_mins?: number; only_when_idle?: boolean; silent?: boolean };
 }>('/api/teams/:name/heartbeat', async (request, reply) => {
   try {
-    await cc.updateProject(request.params.name, request.body as Record<string, unknown>);
-    const data = await cc.getHeartbeat(request.params.name);
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    await cc.updateProject(bindProject, request.body as Record<string, unknown>);
+    const data = await cc.getHeartbeat(bindProject);
     return { ok: true, data };
   } catch (err) {
     return reply.code(500).send(reply500(err));
@@ -1565,8 +1841,9 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
 
 app.post<{ Params: { name: string } }>('/api/teams/:name/stop', async (request) => {
   const name = request.params.name;
+  const bindProject = await resolveRouteCcProjectName(name);
   // Stop = delete project from cc-connect (this is the only way to stop agents)
-  await cc.stopProject(name);
+  await cc.stopProject(bindProject);
   // Keep local team metadata intact by not deleting it
   // The team will show as offline (isAlive: false) on next data fetch
   return { ok: true };
@@ -3194,8 +3471,9 @@ app.get<{ Params: { name: string }; Querystring: { cursor?: string; limit?: stri
     );
     try {
       // Keep a bounded history snapshot in memory for pagination safety.
+      const bindProject = await resolveRouteCcProjectName(name);
       const msgs = await svc.readMessages(name, { limit: 5000 });
-      const sessions = await cc.listSessions(name).catch(() => []);
+      const sessions = await cc.listSessions(bindProject).catch(() => []);
       const sessionByKey = new Map(sessions.map((session) => [session.session_key, session]));
       const newestFirstMessages = [...msgs].reverse();
       const pageSlice = newestFirstMessages.slice(offset, offset + limit);
@@ -3313,7 +3591,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/lead-context', async () 
 // sessions — 从 cc-connect project sessions 获取，转换为前端 Session 格式
 app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (request) => {
   try {
-    const sessions = await cc.listSessions(request.params.name);
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    const sessions = await cc.listSessions(bindProject);
     const sessionsByKey = new Map<string, (typeof sessions)[number]>();
     const sessionScore = (session: (typeof sessions)[number]): number => {
       const updatedAt = Date.parse(session.updated_at);
@@ -3365,7 +3644,8 @@ app.get<{ Params: { name: string; sessionId: string }; Querystring: { history_li
     const historyLimit = request.query.history_limit
       ? parseInt(request.query.history_limit, 10)
       : 500;
-    const detail = await cc.getSession(request.params.name, request.params.sessionId, historyLimit);
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    const detail = await cc.getSession(bindProject, request.params.sessionId, historyLimit);
     return mapCcSessionDetail(detail);
   }
 );
@@ -3375,9 +3655,10 @@ app.delete<{ Params: { name: string; sessionId: string } }>(
   '/api/teams/:name/sessions/:sessionId',
   async (request, reply) => {
     try {
-      const detail = await cc.getSession(request.params.name, request.params.sessionId, 1);
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      const detail = await cc.getSession(bindProject, request.params.sessionId, 1);
       await sendHarnessMessageViaBridge({
-        teamName: request.params.name,
+        teamName: bindProject,
         sessionKey: detail.session_key,
         text: '/stop',
         msgId: `hermit-stop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -3394,7 +3675,11 @@ app.delete<{ Params: { name: string; sessionId: string } }>(
 // runtime/alive — 从 cc-connect 获取真实在线状态
 app.get('/api/teams/runtime/alive', async () => {
   try {
-    const projects = await cc.listProjects();
+    const [projects, localTeams] = await Promise.all([
+      cc.listProjects(),
+      svc.listTeams().catch(() => []),
+    ]);
+    const localByProject = new Map(localTeams.map((team) => [team.bindProject, team]));
     return await Promise.all(
       projects.map(async (p) => {
         let isAlive = false;
@@ -3404,7 +3689,7 @@ app.get('/api/teams/runtime/alive', async () => {
         } catch {
           /* degraded */
         }
-        return { teamName: p.name, isAlive, runId: p.name };
+        return { teamName: localByProject.get(p.name)?.slug ?? p.name, isAlive, runId: p.name };
       })
     );
   } catch {
@@ -3415,7 +3700,8 @@ app.get('/api/teams/runtime/alive', async () => {
 // process-alive — 查询 cc-connect project 在线状态
 app.get<{ Params: { name: string } }>('/api/teams/:name/process-alive', async (request) => {
   try {
-    const p = await cc.getProject(request.params.name);
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    const p = await cc.getProject(bindProject);
     return Array.isArray(p.platforms) && p.platforms.some((pl) => pl.connected);
   } catch {
     return false;
@@ -3429,8 +3715,15 @@ app.post<{ Params: { name: string }; Body: { text?: string; message?: string } }
     try {
       const text = request.body?.text ?? request.body?.message ?? '';
       if (text) {
+        let targetProject = request.params.name;
+        try {
+          const manifest = await svc.readTeamManifest(request.params.name);
+          targetProject = manifest.bindProject || request.params.name;
+        } catch {
+          // request.params.name may already be a cc-connect project name.
+        }
         await sendHarnessMessageViaBridge({
-          teamName: request.params.name,
+          teamName: targetProject,
           text,
         });
       }
@@ -3774,7 +4067,8 @@ async function applyTeamConfigUpdate(
 app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request, reply) => {
   try {
     const name = request.params.name;
-    const p = await cc.getProject(name);
+    let bindProject = await resolveRouteCcProjectName(name);
+    const p = await cc.getProject(bindProject);
     // local metadata overlay
     let color = 'blue';
     let description = '';
@@ -3850,7 +4144,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
         ? p.agent_mode.trim()
         : permissionMode;
     const [providerRefs, globalProviders] = await Promise.all([
-      cc.getProviderRefs(name).catch(() => []),
+      cc.getProviderRefs(bindProject).catch(() => []),
       cc.listProviders().catch(() => []),
     ]);
     return {
@@ -4857,6 +5151,13 @@ app.get('/api/teams/review/git-file-log', async () => ({ log: [] }));
 // ===========================================================================
 
 app.get('/api/events', (request, reply) => {
+  try {
+    assertTrustedBrowserOrigin(request);
+  } catch (err) {
+    reply.code(403).send({ error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+
   reply.raw.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',

@@ -31,30 +31,16 @@ import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import {
   filterExtensionStoreProviders,
-  formatCliExtensionCapabilityStatus,
   getVisibleMultimodelProviders,
   isMultimodelRuntimeStatus,
 } from '@renderer/utils/multimodelProviderVisibility';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
-import { getCliProviderExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
-import {
-  AlertTriangle,
-  FileText,
-  Info,
-  Loader2,
-  Puzzle,
-  RefreshCw,
-  Server,
-  Sliders,
-} from 'lucide-react';
+import { AlertTriangle, Info, Loader2, Puzzle, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { EnvVarPanel } from './env/EnvVarPanel';
-import { McpLibraryPanel } from './mcp/McpLibraryPanel';
 import { PluginsPanel } from './plugins/PluginsPanel';
-import { SkillsLibraryPanel } from './skills/SkillsLibraryPanel';
 import { StoreExtensionToast } from './common/ExtensionToast';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
@@ -121,24 +107,6 @@ const EXTENSION_SUB_TABS = [
     label: '插件',
     icon: Puzzle,
     description: 'Claude Code 私有扩展，增强运行时的能力与集成。',
-  },
-  {
-    value: 'mcp-servers' as const,
-    label: 'MCP',
-    icon: Server,
-    description: '管理可复用的全局 MCP 服务器定义，再按需启用到团队项目。',
-  },
-  {
-    value: 'skills' as const,
-    label: 'Skills',
-    icon: FileText,
-    description: '管理全局用户 Skill，供不同团队和项目复用。',
-  },
-  {
-    value: 'env-vars' as const,
-    label: '环境变量',
-    icon: Sliders,
-    description: '管理运行时环境变量，启动 agent 时自动注入。',
   },
 ] as const;
 
@@ -231,7 +199,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
     [extensionsTabProjectId, projects, repositoryGroups]
   );
   const projectPath = resolvedProject?.path ?? null;
-  const projectLabel = resolvedProject?.name ?? null;
   const subTabs = EXTENSION_SUB_TABS;
 
   useEffect(() => {
@@ -276,7 +243,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
           <div>
             <p className="text-sm font-medium text-text">正在检查扩展运行时可用性</p>
             <p className="mt-0.5 text-xs text-text-muted">
-              扩展需要配置好的运行时来管理 MCP 服务器、技能和提供商连接。
+              扩展需要配置好的运行时来管理插件和提供商连接。
             </p>
           </div>
         </div>
@@ -341,7 +308,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-text">多模型运行时能力</p>
               <p className="mt-0.5 text-xs text-text-muted">
-                不同区域支持的提供商可能不同。插件、MCP、技能与 API keys 会按运行时声明的能力显示。
+                不同区域支持的提供商可能不同。插件会按运行时声明的能力显示。
               </p>
             </div>
           </div>
@@ -372,8 +339,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   : provider.supported
                     ? '需要设置'
                     : '不支持';
-                const extensionCapabilities = getCliProviderExtensionCapabilities(provider);
-
                 return (
                   <div
                     key={provider.providerId}
@@ -396,23 +361,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                         {statusLabel}
                       </Badge>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                      <Badge variant="secondary">
-                        插件：
-                        {formatCliExtensionCapabilityStatus(extensionCapabilities.plugins.status)}
-                      </Badge>
-                      <Badge variant="secondary">
-                        MCP: {formatCliExtensionCapabilityStatus(extensionCapabilities.mcp.status)}
-                      </Badge>
-                      <Badge variant="secondary">
-                        技能：
-                        {formatCliExtensionCapabilityStatus(extensionCapabilities.skills.status)}
-                      </Badge>
-                      <Badge variant="secondary">
-                        API keys:{' '}
-                        {formatCliExtensionCapabilityStatus(extensionCapabilities.apiKeys.status)}
-                      </Badge>
-                    </div>
                   </div>
                 );
               })}
@@ -428,7 +376,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         <div>
           <p className="text-sm font-medium text-emerald-300">{runtimeDisplayName} 已就绪</p>
           <p className="mt-0.5 text-xs text-text-muted">
-            可以从此页面管理 MCP 服务器与技能
+            可以从此页面管理插件
             {effectiveCliStatus.installedVersion
               ? `，使用 ${runtimeDisplayName} ${effectiveCliStatus.installedVersion}`
               : ''}
@@ -446,7 +394,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   ]);
 
   // Browser mode guard
-  if (!api.plugins && !api.mcpRegistry && !api.skills) {
+  if (!api.plugins) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
@@ -530,18 +478,6 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   cliStatus={effectiveCliStatus}
                   cliStatusLoading={effectiveCliStatusLoading}
                 />
-              </TabsContent>
-
-              <TabsContent value="mcp-servers" className="mt-0 pt-4">
-                <McpLibraryPanel projectPath={projectPath} />
-              </TabsContent>
-
-              <TabsContent value="skills" className="mt-0 pt-4">
-                <SkillsLibraryPanel projectPath={projectPath} projectLabel={projectLabel} />
-              </TabsContent>
-
-              <TabsContent value="env-vars" className="mt-0 pt-4">
-                <EnvVarPanel projectPath={projectPath} />
               </TabsContent>
             </Tabs>
           </div>

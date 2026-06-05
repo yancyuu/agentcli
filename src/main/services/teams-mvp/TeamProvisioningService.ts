@@ -97,13 +97,13 @@ export class TeamProvisioningService {
    * 4. 触发 cc-connect restart 激活 project
    */
   async createTeam(
-    input: CreateTeamInput & { createCcProject?: boolean }
+    input: CreateTeamInput & { createCcProject?: boolean; injectInstructions?: boolean }
   ): Promise<{ slug: string; manifest: TeamManifest }> {
-    const { createCcProject = true, ...workspaceInput } = input;
+    const { createCcProject = true, injectInstructions = true, ...workspaceInput } = input;
 
     const { slug, manifest } = await this.workspace.createTeam(workspaceInput);
 
-    if (manifest.harness === 'claudecode') {
+    if (injectInstructions && manifest.harness === 'claudecode') {
       await injectHermitTasksMcpConfig(manifest.workDir);
     }
 
@@ -151,6 +151,7 @@ export class TeamProvisioningService {
       Pick<
         TeamManifest,
         | 'displayName'
+        | 'bindProject'
         | 'color'
         | 'description'
         | 'collaboration'

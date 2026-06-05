@@ -82,6 +82,7 @@ import type {
   TeamLaunchRequest,
   TeamLaunchResponse,
   TeamMemberActivityMeta,
+  SystemManagerSummary,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -141,6 +142,7 @@ import type {
   TaskChangeSetV2,
 } from '@shared/types/review';
 import type { ApplyReviewRequest } from '@shared/types/review';
+import type { SystemManagerAPI } from '@shared/types/systemManager';
 import type { TerminalAPI } from '@shared/types/terminal';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 
@@ -1092,6 +1094,8 @@ export class HttpAPIClient implements ElectronAPI {
 
   teams: TeamsAPI = {
     list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams'),
+    ensureSystemManager: async (): Promise<SystemManagerSummary> =>
+      this.post<SystemManagerSummary>('/api/system-manager/ensure'),
     getData: async (teamName: string): Promise<TeamViewSnapshot> =>
       this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`),
     getTaskChangePresence: async (): Promise<
@@ -2293,18 +2297,49 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   // ---------------------------------------------------------------------------
-  // Terminal (not available in browser mode)
+  // System Manager / Control Console
+  // ---------------------------------------------------------------------------
+
+  systemManager: SystemManagerAPI = {
+    getStatus: () => this.get('/api/system-manager/status'),
+    getConfig: () => this.get('/api/system-manager/config'),
+    updateConfig: (patch) => this.put('/api/system-manager/config', patch),
+    listWorkflowPrompts: (folder) => this.post('/api/system-manager/workflows/list', { folder }),
+    readWorkflowPrompt: (_folder, id) => this.post('/api/system-manager/workflows/read', { id }),
+  };
+
+  // ---------------------------------------------------------------------------
+  // Terminal (HTTP/SSE-backed browser mode)
   // ---------------------------------------------------------------------------
 
   terminal: TerminalAPI = {
-    spawn: async (): Promise<string> => {
-      throw new Error('Terminal not available in browser mode');
+    spawn: async (options = {}): Promise<string> => {
+      const result = await this.post<{ ptyId: string }>('/api/terminal/spawn', options);
+      return result.ptyId;
     },
-    write: () => {},
-    resize: () => {},
-    kill: () => {},
-    onData: (): (() => void) => () => {},
-    onExit: (): (() => void) => () => {},
+    write: (ptyId: string, data: string): void => {
+      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/write`, { data });
+    },
+    resize: (ptyId: string, cols: number, rows: number): void => {
+      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/resize`, { cols, rows });
+    },
+    kill: (ptyId: string): void => {
+      void this.del(`/api/terminal/${encodeURIComponent(ptyId)}`);
+    },
+    onData: (callback): (() => void) =>
+      this.addEventListener('terminal:data', (data: unknown) => {
+        const event = data as { ptyId?: string; data?: string };
+        if (event.ptyId && typeof event.data === 'string') {
+          callback(null, event.ptyId, event.data);
+        }
+      }),
+    onExit: (callback): (() => void) =>
+      this.addEventListener('terminal:exit', (data: unknown) => {
+        const event = data as { ptyId?: string; exitCode?: number };
+        if (event.ptyId && typeof event.exitCode === 'number') {
+          callback(null, event.ptyId, event.exitCode);
+        }
+      }),
   };
 
   // ---------------------------------------------------------------------------

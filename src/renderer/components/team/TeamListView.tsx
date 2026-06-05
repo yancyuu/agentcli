@@ -51,6 +51,8 @@ import {
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
+
 import { CreateTeamDialog } from './dialogs/CreateTeamDialog';
 import { LaunchTeamDialog } from './dialogs/LaunchTeamDialog';
 import { TeamEmptyState } from './TeamEmptyState';
@@ -61,8 +63,6 @@ import {
   teamMatchesProjectSelection,
 } from './teamProjectSelection';
 
-import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
-import type { TeamListFilterState } from './TeamListFilterPopover';
 import type {
   ResolvedTeamMember,
   TeamCreateRequest,
@@ -73,6 +73,8 @@ import type {
   TeamTemplateSource,
   TeamTemplateSummary,
 } from '@shared/types';
+import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
+import type { TeamListFilterState } from './TeamListFilterPopover';
 
 function generateUniqueName(sourceName: string, existingNames: string[]): string {
   const base = sourceName.replace(/-\d+$/, '');
@@ -279,6 +281,7 @@ export const TeamListView = (): React.JSX.Element => {
     teamsError,
     fetchTeams,
     openTeamTab,
+    openSystemManager,
     deleteTeam,
     restoreTeam,
     permanentlyDeleteTeam,
@@ -298,6 +301,7 @@ export const TeamListView = (): React.JSX.Element => {
       teamsError: s.teamsError,
       fetchTeams: s.fetchTeams,
       openTeamTab: s.openTeamTab,
+      openSystemManager: s.openSystemManager,
       deleteTeam: s.deleteTeam,
       restoreTeam: s.restoreTeam,
       permanentlyDeleteTeam: s.permanentlyDeleteTeam,
@@ -442,6 +446,11 @@ export const TeamListView = (): React.JSX.Element => {
       : null;
 
     result = [...result].sort((a, b) => {
+      // 0. Project-level system manager is a namespace node, not a regular worker team.
+      const managerA = a.teamName === SYSTEM_MANAGER_TEAM_NAME ? 0 : 1;
+      const managerB = b.teamName === SYSTEM_MANAGER_TEAM_NAME ? 0 : 1;
+      if (managerA !== managerB) return managerA - managerB;
+
       // 1. Alive (running) teams first
       const aliveA = aliveSet.has(a.teamName) ? 0 : 1;
       const aliveB = aliveSet.has(b.teamName) ? 0 : 1;
@@ -988,6 +997,14 @@ export const TeamListView = (): React.JSX.Element => {
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold text-[var(--color-text)]">选择数字员工</h2>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10"
+            onClick={() => void openSystemManager()}
+          >
+            控制台
+          </Button>
           <Button variant="outline" size="sm" disabled={!canCreate} onClick={openTemplateDialog}>
             从模板创建
           </Button>
@@ -1100,6 +1117,7 @@ export const TeamListView = (): React.JSX.Element => {
               ? teamMatchesProjectSelection(team, currentProjectPath)
               : false;
             const isDeleting = deletingTeamName === team.teamName;
+            const isSystemManager = team.teamName === SYSTEM_MANAGER_TEAM_NAME;
             return (
               <div
                 key={team.teamName}
@@ -1138,6 +1156,11 @@ export const TeamListView = (): React.JSX.Element => {
                           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
                             {team.displayName}
                           </h3>
+                          {isSystemManager ? (
+                            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
+                              系统
+                            </span>
+                          ) : null}
                           <StatusBadge status={status} />
                           {team.pendingDelete || team.restartRequired ? (
                             <PendingDeleteBadge />
@@ -1163,7 +1186,7 @@ export const TeamListView = (): React.JSX.Element => {
                         })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
-                      {!team.pendingCreate && (
+                      {!team.pendingCreate && !isSystemManager && (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
@@ -1177,22 +1200,24 @@ export const TeamListView = (): React.JSX.Element => {
                           <TooltipContent side="bottom">复制数字员工</TooltipContent>
                         </Tooltip>
                       )}
-                      {team.teamName !== 'default' && team.teamName !== 'my-project' && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                              onClick={(e) =>
-                                handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
-                              }
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">删除数字员工</TooltipContent>
-                        </Tooltip>
-                      )}
+                      {team.teamName !== 'default' &&
+                        team.teamName !== 'my-project' &&
+                        !isSystemManager && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                                onClick={(e) =>
+                                  handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
+                                }
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">删除数字员工</TooltipContent>
+                          </Tooltip>
+                        )}
                     </div>
                   </div>
                   <div className="mt-2 flex min-h-10 items-start gap-2">

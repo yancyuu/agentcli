@@ -15,6 +15,7 @@ import {
 
 const hoisted = vi.hoisted(() => ({
   list: vi.fn(),
+  ensureSystemManager: vi.fn(),
   getData: vi.fn(),
   getMessagesPage: vi.fn(),
   getMemberActivityMeta: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@renderer/api', () => ({
   api: {
     teams: {
       list: hoisted.list,
+      ensureSystemManager: hoisted.ensureSystemManager,
       getData: hoisted.getData,
       getMessagesPage: hoisted.getMessagesPage,
       getMemberActivityMeta: hoisted.getMemberActivityMeta,
@@ -100,6 +102,9 @@ function createSliceStore() {
     getAllPaneTabs: vi.fn(() => []),
     warmTaskChangeSummaries: vi.fn(async () => undefined),
     invalidateTaskChangePresence: vi.fn(),
+    projects: [],
+    selectedProjectId: null,
+    selectProject: vi.fn(),
     fetchTeams: vi.fn(async () => undefined),
     fetchAllTasks: vi.fn(async () => undefined),
   }));
@@ -199,6 +204,17 @@ describe('teamSlice actions', () => {
     vi.clearAllMocks();
     __resetTeamSliceModuleStateForTests();
     hoisted.list.mockResolvedValue([]);
+    hoisted.ensureSystemManager.mockResolvedValue({
+      teamName: 'system-manager',
+      displayName: '控制台',
+      bindProject: 'my-project',
+      workDir: '/workspace/hermit',
+      projectPath: '/workspace/hermit',
+      description: '项目级 Claude Code 控制台',
+      localStatus: 'ready',
+      ccConnectProjectStatus: 'bound',
+      feishuStatus: 'unbound',
+    });
     hoisted.getData.mockResolvedValue(createTeamSnapshot());
     hoisted.getMessagesPage.mockResolvedValue({
       messages: [],
@@ -236,6 +252,20 @@ describe('teamSlice actions', () => {
     hoisted.permanentlyDeleteTeam.mockResolvedValue(undefined);
     hoisted.restartMember.mockResolvedValue(undefined);
     hoisted.skipMemberForLaunch.mockResolvedValue(undefined);
+  });
+
+  it('ensures and opens the project-level system manager', async () => {
+    const store = createSliceStore();
+
+    await store.getState().openSystemManager();
+
+    expect(hoisted.ensureSystemManager).toHaveBeenCalledTimes(1);
+    expect(store.getState().fetchTeams).toHaveBeenCalledTimes(1);
+    expect(store.getState().openTab).toHaveBeenCalledWith({
+      type: 'team',
+      label: '控制台',
+      teamName: 'system-manager',
+    });
   });
 
   it('maps inbox verify failure to user-friendly text', async () => {

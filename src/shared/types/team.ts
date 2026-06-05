@@ -1,6 +1,22 @@
 import type { ExecutionTarget } from './api';
 import type { EnhancedChunk } from '@main/types';
 
+export const SYSTEM_MANAGER_TEAM_NAME = 'system-manager';
+export const SYSTEM_MANAGER_DISPLAY_NAME = '控制台';
+export const SYSTEM_MANAGER_BIND_PROJECT = 'my-project';
+
+export interface SystemManagerSummary {
+  teamName: typeof SYSTEM_MANAGER_TEAM_NAME;
+  displayName: typeof SYSTEM_MANAGER_DISPLAY_NAME;
+  bindProject: typeof SYSTEM_MANAGER_BIND_PROJECT;
+  workDir: string;
+  projectPath?: string;
+  description: string;
+  localStatus: 'ready';
+  ccConnectProjectStatus: 'bound' | 'missing';
+  feishuStatus: 'unbound' | 'connected' | 'error' | 'unknown';
+}
+
 export interface TeamMember {
   name: string;
   agentId?: string;

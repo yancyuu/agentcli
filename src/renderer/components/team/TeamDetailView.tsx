@@ -71,9 +71,7 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
-  Shield,
   Users,
-  Wrench,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -101,14 +99,12 @@ import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
 import { CcSessionsSection } from './CcSessionsSection';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
-import { ProjectEnvPanel } from '../extensions/env/ProjectEnvPanel';
 import {
   getTeamPendingRepliesState,
   setTeamPendingRepliesState,
 } from './sidebar/teamSidebarUiState';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { ProcessesSection } from './ProcessesSection';
-import { ToolsSection } from './tools/ToolsSection';
 import { getLaunchJoinMilestonesFromMembers, getLaunchJoinState } from './provisioningSteps';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
 import {
@@ -136,6 +132,7 @@ import type {
   TeamTaskWithKanban,
   TeamViewSnapshot,
 } from '@shared/types';
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import type { EditorSelectionAction } from '@shared/types/editor';
 import type { ContextUsageLike } from '@shared/utils/contextMetrics';
 
@@ -888,7 +885,6 @@ export const TeamDetailView = ({
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
@@ -2183,32 +2179,21 @@ export const TeamDetailView = ({
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent align="end" className="w-44 p-1">
-                        {data.config.projectPath && (
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
-                            onClick={() => {
-                              setHeaderMenuOpen(false);
-                              setEnvDialogOpen(true);
-                            }}
-                          >
-                            <Shield size={13} />
-                            环境变量
-                          </button>
-                        )}
-                        {teamName !== 'default' && teamName !== 'my-project' && (
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
-                            onClick={() => {
-                              setHeaderMenuOpen(false);
-                              handleDeleteTeam();
-                            }}
-                          >
-                            <Trash2 size={13} />
-                            删除团队
-                          </button>
-                        )}
+                        {teamName !== 'default' &&
+                          teamName !== 'my-project' &&
+                          teamName !== SYSTEM_MANAGER_TEAM_NAME && (
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
+                              onClick={() => {
+                                setHeaderMenuOpen(false);
+                                handleDeleteTeam();
+                              }}
+                            >
+                              <Trash2 size={13} />
+                              删除团队
+                            </button>
+                          )}
                       </PopoverContent>
                     </Popover>
                   </div>
@@ -2315,19 +2300,6 @@ export const TeamDetailView = ({
                   onSendMessage={handleSendMessageToMember}
                   onRestartMember={handleRestartMember}
                   onSkipMemberForLaunch={handleSkipMemberForLaunch}
-                />
-              </CollapsibleTeamSection>
-
-              <CollapsibleTeamSection
-                sectionId="tools"
-                title="能力"
-                icon={<Wrench size={14} />}
-                defaultOpen={false}
-              >
-                <ToolsSection
-                  teamName={teamName}
-                  projectPath={data.config.projectPath ?? null}
-                  harnessType={data.harness}
                 />
               </CollapsibleTeamSection>
 
@@ -2646,18 +2618,6 @@ export const TeamDetailView = ({
                   });
                 }}
               />
-
-              <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
-                <DialogContent className="max-h-[80vh] max-w-lg overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>项目环境变量</DialogTitle>
-                    <DialogDescription>
-                      管理当前项目所需的环境变量，供 MCP 和 Skills 使用。
-                    </DialogDescription>
-                  </DialogHeader>
-                  <ProjectEnvPanel projectPath={data.config.projectPath ?? null} />
-                </DialogContent>
-              </Dialog>
 
               <Dialog
                 open={removeMemberConfirm !== null}

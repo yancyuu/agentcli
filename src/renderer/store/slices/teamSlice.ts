@@ -2020,6 +2020,7 @@ export interface TeamSlice {
   fetchTeams: () => Promise<void>;
   fetchAllTasks: () => Promise<void>;
   openTeamsTab: () => void;
+  openSystemManager: () => Promise<void>;
   openTeamTab: (
     teamName: string,
     projectPath?: string,
@@ -2727,6 +2728,16 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     state.openTab({
       type: 'teams',
       label: '团队',
+    });
+  },
+
+  openSystemManager: async () => {
+    const manager = await unwrapIpc('team:ensureSystemManager', () =>
+      api.teams.ensureSystemManager()
+    );
+    await get().fetchTeams();
+    get().openTeamTab(manager.teamName, manager.projectPath || manager.workDir, {
+      displayName: manager.displayName,
     });
   },
 

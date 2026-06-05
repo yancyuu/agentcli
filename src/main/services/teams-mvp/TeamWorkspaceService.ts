@@ -291,6 +291,7 @@ export class TeamWorkspaceService {
       Pick<
         TeamManifest,
         | 'displayName'
+        | 'bindProject'
         | 'color'
         | 'description'
         | 'collaboration'

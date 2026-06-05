@@ -33,7 +33,6 @@ import {
   normalizeOptionalTeamProviderId,
 } from '@shared/utils/teamProvider';
 import { AlertCircle, Check, ChevronDown, Mic, Paperclip, Search, Send } from 'lucide-react';
-import { useShallow } from 'zustand/react/shallow';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type { OpenCodeRuntimeDeliveryDebugDetails } from '@renderer/utils/openCodeRuntimeDeliveryDiagnostics';
@@ -127,6 +126,9 @@ export const MessageComposer = ({
   const projectPath = useStore((s) =>
     s.selectedTeamName === teamName ? (s.selectedTeamData?.config.projectPath ?? null) : null
   );
+  const skillsUserCatalog = useStore((s) => s.skillsUserCatalog);
+  const skillsProjectCatalogByProjectPath = useStore((s) => s.skillsProjectCatalogByProjectPath);
+  const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
   const currentTeamColor = useStore((s) => {
     if (s.selectedTeamName !== teamName) {
       return nameColorSet(teamName).border;
@@ -157,29 +159,22 @@ export const MessageComposer = ({
     );
   }, [members]);
 
-  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
-  const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
-  // Project skills as slash command suggestions
-  const projectSkills = useStore(
-    useShallow((s) => (projectPath ? (s.skillsProjectCatalogByProjectPath[projectPath] ?? []) : []))
-  );
-  const userSkills = useStore(useShallow((s) => s.skillsUserCatalog));
-  const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
-
-  // Fetch skills catalog for the team's project on mount / project change
   useEffect(() => {
     void fetchSkillsCatalog(projectPath ?? undefined);
   }, [fetchSkillsCatalog, projectPath]);
 
+  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
+  const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
+  const projectSkills = projectPath ? (skillsProjectCatalogByProjectPath[projectPath] ?? []) : [];
   const slashCommandSuggestions = useMemo<MentionSuggestion[]>(
     () =>
       buildSlashCommandSuggestions(
         getSuggestedSlashCommandsForProvider(leadProviderId),
         projectSkills,
-        userSkills,
+        skillsUserCatalog,
         leadProviderId
       ),
-    [leadProviderId, projectSkills, userSkills]
+    [leadProviderId, projectSkills, skillsUserCatalog]
   );
 
   const trimmed = stripEncodedTaskReferenceMetadata(draft.text).trim();

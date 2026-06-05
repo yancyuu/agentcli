@@ -11,6 +11,10 @@ import type {
   ProviderPresetsResponse,
 } from '@shared/types/providers';
 
+function stringifyProviderPatch(patch: Partial<GlobalProvider>): string {
+  return JSON.stringify(patch, (_key, value: unknown) => (value === undefined ? null : value));
+}
+
 function getBaseUrl(): string {
   const params = new URLSearchParams(window.location.search);
   const explicitPort = params.get('port');
@@ -54,7 +58,7 @@ export const providersApi = {
   update(name: string, patch: Partial<GlobalProvider>): Promise<{ message: string }> {
     return request(`/providers/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      body: JSON.stringify(patch),
+      body: stringifyProviderPatch(patch),
     });
   },
   remove(name: string): Promise<{ message: string }> {

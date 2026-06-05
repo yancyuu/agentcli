@@ -41,6 +41,7 @@ function buildPathForTab(activeTab: Tab | null): string {
   }
   switch (activeTab.type) {
     case 'team':
+      if (activeTab.teamName === 'system-manager') return '/system-manager';
       return activeTab.teamName
         ? `/team/${encodeURIComponent(activeTab.teamName)}`
         : DEFAULT_APP_PATH;
@@ -141,6 +142,9 @@ function useTabPathPersistence() {
         break;
       case 'teams':
         state.openTeamsTab();
+        break;
+      case 'system-manager':
+        void state.openSystemManager();
         break;
       case 'settings':
         state.openSettingsTab();

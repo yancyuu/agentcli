@@ -81,6 +81,7 @@ import type {
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
+  SystemManagerSummary,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
@@ -93,6 +94,7 @@ import type {
   ToolApprovalSettings,
   UpdateKanbanPatch,
 } from './team';
+import type { SystemManagerAPI } from './systemManager';
 import type { TerminalAPI } from './terminal';
 import type { WaterfallData } from './visualization';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
@@ -637,6 +639,7 @@ export interface ConversationTelemetryExportResponse {
 
 export interface TeamsAPI {
   list: () => Promise<TeamSummary[]>;
+  ensureSystemManager: () => Promise<SystemManagerSummary>;
   getData: (teamName: string) => Promise<TeamViewSnapshot>;
   getTaskChangePresence: (teamName: string) => Promise<Record<string, TaskChangePresenceState>>;
   setChangePresenceTracking: (teamName: string, enabled: boolean) => Promise<void>;
@@ -1208,6 +1211,9 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // CLI Installer API
   cliInstaller: CliInstallerAPI;
+
+  // System Manager / Control Console API
+  systemManager: SystemManagerAPI;
 
   // Embedded Terminal API (xterm.js + node-pty)
   terminal: TerminalAPI;
