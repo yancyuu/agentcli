@@ -27,7 +27,7 @@ export const SettingsToggle = ({
       aria-checked={enabled}
       disabled={disabled}
       onClick={handleClick}
-      className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-[#141416]"
+      className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-text)]/20 focus:ring-offset-2 focus:ring-offset-[var(--color-surface)]"
       style={{
         backgroundColor: enabled ? '#6366f1' : '#3f3f46',
         opacity: disabled ? 0.5 : 1,

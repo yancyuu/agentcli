@@ -121,7 +121,7 @@ export const NewFileDialog = ({
           onKeyDown={handleKeyDown}
           onBlur={() => requestAnimationFrame(() => inputRef.current?.focus())}
           placeholder={type === 'file' ? '文件名...' : '文件夹名...'}
-          className="min-w-0 flex-1 rounded border border-border-emphasis bg-surface px-1.5 py-0.5 text-xs text-text outline-none focus:border-blue-500"
+          className="min-w-0 flex-1 rounded border border-border-emphasis bg-surface px-1.5 py-0.5 text-xs text-text outline-none focus:border-indigo-500"
           aria-label={type === 'file' ? '新文件名' : '新文件夹名'}
         />
       </div>

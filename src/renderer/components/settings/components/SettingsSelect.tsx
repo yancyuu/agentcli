@@ -57,7 +57,7 @@ export const SettingsSelect = <T extends string | number>({
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={`flex h-8 items-center justify-between gap-2 rounded-md border bg-transparent px-2 text-sm transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-zinc-700 ${fullWidth ? 'w-full' : 'min-w-[140px]'} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${isOpen ? 'ring-1 ring-zinc-700' : ''} `}
+        className={`flex h-8 items-center justify-between gap-2 rounded-md border bg-transparent px-2 text-sm transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-[var(--color-border-emphasis)] ${fullWidth ? 'w-full' : 'min-w-[140px]'} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${isOpen ? 'ring-1 ring-[var(--color-border-emphasis)]' : ''} `}
         style={{
           color: 'var(--color-text-secondary)',
           borderColor: isOpen ? 'var(--color-border)' : 'var(--color-border-subtle)',
@@ -85,7 +85,9 @@ export const SettingsSelect = <T extends string | number>({
               type="button"
               onClick={() => handleSelect(option.value)}
               className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors duration-100 ${
-                value === option.value ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-white/5'
+                value === option.value
+                  ? 'bg-indigo-500/10 text-indigo-300'
+                  : 'hover:bg-white/5'
               } `}
               style={value !== option.value ? { color: 'var(--color-text-secondary)' } : undefined}
             >

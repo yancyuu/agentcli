@@ -45,7 +45,7 @@ export const ClaudeMdItem = ({
             type="button"
             className="cursor-pointer text-xs transition-opacity hover:opacity-80"
             style={{
-              color: '#93c5fd',
+              color: '#a5b4fc',
               textDecoration: 'underline',
               textDecorationStyle: 'dotted' as const,
               textUnderlineOffset: '2px',

@@ -18,8 +18,8 @@ import type { TeamTaskWithKanban } from '@shared/types';
  * Matches the kanban column palette from KanbanBoard.tsx.
  */
 const STATUS_COLORS: Record<string, { text: string; bg: string }> = {
-  pending: { text: '#60a5fa', bg: 'rgba(59, 130, 246, 0.15)' }, // blue
-  todo: { text: '#60a5fa', bg: 'rgba(59, 130, 246, 0.15)' },
+  pending: { text: '#818cf8', bg: 'rgba(99, 102, 241, 0.15)' }, // blue
+  todo: { text: '#818cf8', bg: 'rgba(99, 102, 241, 0.15)' },
   in_progress: { text: '#facc15', bg: 'rgba(234, 179, 8, 0.15)' }, // yellow
   completed: { text: '#4ade80', bg: 'rgba(34, 197, 94, 0.15)' }, // green
   done: { text: '#4ade80', bg: 'rgba(34, 197, 94, 0.15)' },

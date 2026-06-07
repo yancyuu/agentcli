@@ -565,7 +565,7 @@ export interface ConversationTelemetryRow {
   teamDisplayName: string;
   projectName: string;
   session: {
-    ccSessionId: string;
+    ccSessionId?: string;
     sessionKey: string;
     agentSessionId?: string;
     claudeSessionId?: string;
@@ -577,7 +577,7 @@ export interface ConversationTelemetryRow {
     endTime?: string;
     active?: boolean;
     live?: boolean;
-    matchStatus: 'matched' | 'missing-agent-session-id' | 'jsonl-not-found' | 'ambiguous';
+    matchStatus: 'matched' | 'missing-agent-session-id' | 'jsonl-not-found' | 'ambiguous' | 'local-only';
   };
   identity: {
     platform: string;

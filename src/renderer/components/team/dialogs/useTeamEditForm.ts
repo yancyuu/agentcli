@@ -8,7 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { GlobalProvider } from '@shared/types';
 import type { CcAgentType } from '@shared/types/ccConnect';
 
-type SavePhase = 'idle' | 'saving' | 'restarting' | 'done';
+type SavePhase = 'idle' | 'saving' | 'done';
 
 export interface UseTeamEditFormReturn {
   loading: boolean;
@@ -152,7 +152,7 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
   // ── Single async lifecycle state ─────────────────────────────
   const [savePhase, setSavePhase] = useState<SavePhase>('idle');
   const [error, setError] = useState<string | null>(null);
-  const saving = savePhase === 'saving' || savePhase === 'restarting';
+  const saving = savePhase === 'saving';
 
   // ── Refs ─────────────────────────────────────────────────────
   const defaultsRef = useRef(defaults);
@@ -239,9 +239,6 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
           platformAllowChat: feishuChat ? { feishu: feishuChat } : {},
           providerRefs: providerRef ? [providerRef] : [],
         });
-
-        setSavePhase('restarting');
-        await api.ccSettings.restart();
 
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
         setSavePhase('done');

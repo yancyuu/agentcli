@@ -223,7 +223,7 @@ export const TaskCommentsSection = ({
                     comment.type === 'review_approved'
                       ? 'border-y border-emerald-500/20 bg-emerald-500/5'
                       : comment.type === 'review_request'
-                        ? 'border-y border-blue-500/20 bg-blue-500/5'
+                        ? 'border-y border-indigo-500/20 bg-indigo-500/5'
                         : '',
                   ].join(' ')}
                   style={
@@ -244,7 +244,7 @@ export const TaskCommentsSection = ({
                 >
                   <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
                     {unreadCommentIds?.has(comment.id) ? (
-                      <span className="size-2 shrink-0 rounded-full bg-blue-500" />
+                      <span className="size-2 shrink-0 rounded-full bg-indigo-500" />
                     ) : null}
                     <MemberBadge
                       name={comment.author}
@@ -257,7 +257,7 @@ export const TaskCommentsSection = ({
                         已批准
                       </span>
                     ) : comment.type === 'review_request' ? (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:text-indigo-400">
                         <Eye size={10} />
                         已请求审查
                       </span>
@@ -440,7 +440,7 @@ export const TaskCommentsSection = ({
               cornerAction={
                 <button
                   type="button"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!canSubmit}
                   onClick={() => void handleSubmit()}
                 >

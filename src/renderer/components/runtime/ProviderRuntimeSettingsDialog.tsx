@@ -650,7 +650,7 @@ export const ProviderRuntimeSettingsDialog = ({
                 </div>
                 {ccSwitchAvailable === false ? (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                    没有检测到可导入的 cc-switch Provider，或 cc-connect 未返回导入数据。
+                    没有检测到可导入的 Provider，或服务未返回导入数据。
                   </div>
                 ) : null}
                 <div className="space-y-2">

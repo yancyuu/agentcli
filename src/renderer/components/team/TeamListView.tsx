@@ -36,6 +36,7 @@ import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormal
 import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
+import { formatRelativeTime, formatTokensCompact } from '@renderer/utils/formatters';
 import {
   CheckCircle,
   Clock,
@@ -48,6 +49,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -226,6 +228,17 @@ function resolveTeamStatus(
     return 'provisioning';
   }
   return null;
+}
+
+function formatDurationShort(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  if (hours < 24) return `${hours}h ${remainMin}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
 }
 
 const StatusBadge = ({ status }: { status: TeamStatus | null }): React.JSX.Element | null => {
@@ -537,8 +550,8 @@ export const TeamListView = (): React.JSX.Element => {
         }
         const confirmed = await confirm({
           title: '删除数字员工',
-          message: `确定删除数字员工”${teamDisplayName}”吗？此操作会同步删除 cc-connect 项目并移除本地数据。`,
-          confirmLabel: '删除并重启',
+          message: `确定删除数字员工”${teamDisplayName}”吗？此操作会移除本地配置数据。`,
+          confirmLabel: '删除',
           cancelLabel: '取消',
           variant: 'danger',
         });
@@ -827,6 +840,7 @@ export const TeamListView = (): React.JSX.Element => {
       provisioningErrorsByTeam={provisioningErrorByTeam}
       clearProvisioningError={clearProvisioningError}
       existingTeamNames={teams.map((t) => t.teamName)}
+      existingBindProjects={teams.map((t) => t.bindProject).filter(Boolean) as string[]}
       provisioningTeamNames={provisioningTeamNames}
       activeTeams={activeTeams}
       initialData={copyData ?? undefined}
@@ -961,7 +975,7 @@ export const TeamListView = (): React.JSX.Element => {
                     {template.members.map((member) => (
                       <span
                         key={member.name}
-                        className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-300"
+                        className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300"
                       >
                         {member.name}
                         {member.role ? ` · ${formatTeamRoleLabel(member.role)}` : ''}
@@ -1004,9 +1018,6 @@ export const TeamListView = (): React.JSX.Element => {
             onClick={() => void openSystemManager()}
           >
             控制台
-          </Button>
-          <Button variant="outline" size="sm" disabled={!canCreate} onClick={openTemplateDialog}>
-            从模板创建
           </Button>
           <Button
             variant="outline"
@@ -1123,8 +1134,7 @@ export const TeamListView = (): React.JSX.Element => {
                 key={team.teamName}
                 role="button"
                 tabIndex={0}
-                className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-l-[3px] border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
-                style={teamColorSet ? { borderLeftColor: teamColorSet.border } : undefined}
+                className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)]"
                 onClick={
                   isDeleting ? undefined : () => openTeamTab(team.teamName, team.projectPath)
                 }
@@ -1142,59 +1152,53 @@ export const TeamListView = (): React.JSX.Element => {
                   </div>
                 )}
                 <div className="flex flex-1 flex-col">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                      <img
-                        src={agentAvatarUrl(team.teamName)}
-                        alt={team.displayName}
-                        className="size-9 shrink-0 rounded-lg border bg-[var(--color-surface-raised)] object-cover"
-                        style={teamColorSet ? { borderColor: teamColorSet.border } : undefined}
-                        draggable={false}
-                      />
-                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
-                            {team.displayName}
-                          </h3>
-                          {isSystemManager ? (
-                            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-medium text-cyan-300">
-                              系统
-                            </span>
-                          ) : null}
-                          <StatusBadge status={status} />
-                          {team.pendingDelete || team.restartRequired ? (
-                            <PendingDeleteBadge />
-                          ) : null}
-                        </div>
-                        <span className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
-                          工号 {team.teamName}
+                  {/* Row 1: Avatar + Name + Status + Actions */}
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={agentAvatarUrl(team.teamName)}
+                      alt={team.displayName}
+                      className="size-8 shrink-0 rounded-md border border-transparent"
+                      style={teamColorSet ? { borderColor: teamColorSet.border + '60' } : undefined}
+                      draggable={false}
+                    />
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <h3 className="min-w-0 truncate text-[13px] font-medium text-[var(--color-text)]">
+                        {team.displayName}
+                      </h3>
+                      {isSystemManager ? (
+                        <span className="shrink-0 rounded bg-cyan-500/15 px-1.5 py-px text-[9px] font-medium text-cyan-400">
+                          SYS
                         </span>
-                      </div>
+                      ) : null}
+                      <StatusBadge status={status} />
+                      {team.pendingDelete || team.restartRequired ? (
+                        <PendingDeleteBadge />
+                      ) : null}
                       {team.projectPath &&
                         (() => {
                           const branch = branchByPath[normalizePath(team.projectPath)];
                           if (!branch) return null;
                           return (
                             <span
-                              className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                              className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--color-text-muted)] opacity-60"
                               title={branch}
                             >
-                              <GitBranch size={10} />
-                              <span className="max-w-24 truncate">{branch}</span>
+                              <GitBranch size={9} />
+                              <span className="max-w-20 truncate">{branch}</span>
                             </span>
                           );
                         })()}
                     </div>
-                    <div className="flex shrink-0 gap-1">
+                    <div className="flex shrink-0 gap-0.5">
                       {!team.pendingCreate && !isSystemManager && (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
-                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-blue-500/10 hover:text-blue-300 group-hover:opacity-100"
+                              className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-60 hover:!opacity-100"
                               onClick={(e) => handleCopyTeam(team.teamName, e)}
                             >
-                              <Copy size={14} />
+                              <Copy size={13} />
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="bottom">复制数字员工</TooltipContent>
@@ -1207,12 +1211,12 @@ export const TeamListView = (): React.JSX.Element => {
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                                className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-60 hover:!opacity-100"
                                 onClick={(e) =>
                                   handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
                                 }
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={13} />
                               </button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom">删除数字员工</TooltipContent>
@@ -1220,78 +1224,35 @@ export const TeamListView = (): React.JSX.Element => {
                         )}
                     </div>
                   </div>
-                  <div className="mt-2 flex min-h-10 items-start gap-2">
-                    <p className="line-clamp-2 min-w-0 flex-1 text-xs text-[var(--color-text-muted)]">
-                      {team.description || '暂无描述'}
-                    </p>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    {team.members && team.members.length > 0 ? (
-                      renderMemberChips(team.members, isLight)
-                    ) : team.memberCount === 0 ? (
-                      <Badge variant="secondary" className="text-[10px] font-normal">
-                        单人
-                      </Badge>
+
+                  {/* Row 2: Description */}
+                  <p className="mt-1.5 line-clamp-1 min-w-0 pl-[42px] text-[11px] leading-snug text-[var(--color-text-muted)]">
+                    {team.description || '暂无描述'}
+                  </p>
+
+                  {/* Row 3: Stats bar */}
+                  <div className="mt-2 flex items-center gap-1.5 pl-[42px] text-[10px] tabular-nums">
+                    {team.stats && team.stats.sessions > 0 ? (
+                      <>
+                        <span className="text-indigo-400">{team.stats.sessions} sessions</span>
+                        <span className="text-[var(--color-text-muted)] opacity-30">·</span>
+                        <span className="text-emerald-400">{formatTokensCompact(team.stats.tokens)}</span>
+                        {team.stats.durationMs > 0 && (
+                          <>
+                            <span className="text-[var(--color-text-muted)] opacity-30">·</span>
+                            <span className="text-amber-400">{formatDurationShort(team.stats.durationMs)}</span>
+                          </>
+                        )}
+                      </>
                     ) : (
-                      <Badge variant="secondary" className="text-[10px] font-normal">
-                        成员：{team.memberCount}
-                      </Badge>
+                      <span className="text-[var(--color-text-muted)] opacity-50">no activity</span>
                     )}
-                  </div>
-                  <div className="mt-auto">
-                    {(() => {
-                      const tc = taskCountsByTeam.get(team.teamName);
-                      const pending = tc?.pending ?? 0;
-                      const inProgress = tc?.inProgress ?? 0;
-                      const completed = tc?.completed ?? 0;
-                      const totalTasks = pending + inProgress + completed;
-                      const completedRatio = totalTasks > 0 ? completed / totalTasks : 0;
-                      return (
-                        <div className="mt-2 w-full space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-surface-raised)]"
-                              role="progressbar"
-                              aria-valuenow={completed}
-                              aria-valuemin={0}
-                              aria-valuemax={totalTasks}
-                              aria-label={`任务 ${completed}/${totalTasks} 已完成`}
-                            >
-                              <div
-                                className="h-full rounded-full bg-emerald-500 transition-all duration-200"
-                                style={{ width: `${Math.round(completedRatio * 100)}%` }}
-                              />
-                            </div>
-                            <span className="shrink-0 text-[10px] font-medium tracking-tight text-[var(--color-text-muted)]">
-                              {completed}/{totalTasks}
-                            </span>
-                          </div>
-                          {totalTasks > 0 && (
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[var(--color-text-muted)]">
-                              {inProgress > 0 && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Play size={10} className="shrink-0 text-blue-400" />
-                                  {inProgress} 进行中
-                                </span>
-                              )}
-                              {pending > 0 && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Clock size={10} className="shrink-0 text-amber-400" />
-                                  {pending} 待办
-                                </span>
-                              )}
-                              {completed > 0 && (
-                                <span className="inline-flex items-center gap-1">
-                                  <CheckCircle size={10} className="shrink-0 text-emerald-400" />
-                                  {completed} 已完成
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {renderTeamRecentPaths(team, status, matchesCurrentProject, isLight)}
+                    {team.lastActivity && (
+                      <>
+                        <span className="text-[var(--color-text-muted)] opacity-30">·</span>
+                        <span className="text-[var(--color-text-muted)]">{formatRelativeTime(team.lastActivity)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

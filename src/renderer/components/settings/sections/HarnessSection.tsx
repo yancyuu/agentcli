@@ -13,7 +13,6 @@ import type { CcAgentType } from '@renderer/components/team/HarnessCards';
 import { HarnessIcon } from '@renderer/components/team/HarnessSelect';
 import { cn } from '@renderer/lib/utils';
 import { OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
-import { CheckCircle2 } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components/SettingsSectionHeader';
 import { CliStatusSection } from './CliStatusSection';
@@ -110,13 +109,16 @@ export const HarnessSection = (): React.JSX.Element => {
             return (
               <div
                 key={type}
-                className="flex items-center gap-2 rounded-lg border px-3 py-2.5"
+                className="flex h-14 items-center gap-2.5 rounded-lg border px-3"
                 style={{
-                  borderColor: 'var(--color-border)',
-                  background: 'var(--color-surface-raised)',
+                  borderLeftWidth: covered ? '2px' : '1px',
+                  borderLeftColor: covered ? 'var(--color-accent)' : 'var(--color-border-subtle)',
+                  borderColor: covered ? 'var(--color-border)' : 'var(--color-border-subtle)',
+                  backgroundColor: 'var(--color-surface-raised)',
+                  opacity: covered ? 1 : 0.5,
                 }}
               >
-                <HarnessIcon type={type} className="size-5 shrink-0" />
+                <HarnessIcon type={type} className="size-4 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p
                     className="truncate text-xs font-medium"
@@ -124,16 +126,18 @@ export const HarnessSection = (): React.JSX.Element => {
                   >
                     {AGENT_TYPE_LABELS[type]}
                   </p>
-                  {covered && (
-                    <p
-                      className="truncate text-[10px]"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      {covering.join(', ')}
-                    </p>
-                  )}
                 </div>
-                {covered && <CheckCircle2 size={12} className="shrink-0 text-green-500" />}
+                {covered && (
+                  <span
+                    className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                    style={{
+                      backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                      color: 'var(--color-accent)',
+                    }}
+                  >
+                    {covering.length}
+                  </span>
+                )}
               </div>
             );
           })}

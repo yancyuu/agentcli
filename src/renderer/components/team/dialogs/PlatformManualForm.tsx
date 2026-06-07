@@ -29,6 +29,7 @@ export default function PlatformManualForm({
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState('');
 
   const basicFields = meta.fields.filter((f) => f.group !== 'advanced');
@@ -57,11 +58,17 @@ export default function PlatformManualForm({
         work_dir: workDir,
         agent_type: agentType,
       });
+      // Restart CC Connect to activate the new platform binding
+      setRestarting(true);
+      try {
+        await api.ccSettings.restart();
+      } catch { /* best effort */ }
       onComplete();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+      setRestarting(false);
     }
   };
 
@@ -141,7 +148,7 @@ function FieldInput({
           type="checkbox"
           checked={!!value}
           onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600"
         />
         <span className="text-sm text-gray-700 dark:text-gray-300">{field.label}</span>
         {field.hint && <span className="text-[11px] text-gray-400">({field.hint})</span>}

@@ -37,19 +37,19 @@ const COLUMN_ACCENTS: Record<
   { headerBg: string; bodyBg: string; icon: React.ReactNode }
 > = {
   todo: {
-    headerBg: 'rgba(59, 130, 246, 0.22)',
-    bodyBg: 'rgba(59, 130, 246, 0.05)',
-    icon: <ClipboardList size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(148, 163, 184, 0.08)',
+    bodyBg: 'rgba(148, 163, 184, 0.02)',
+    icon: <ClipboardList size={13} className="shrink-0 text-[var(--color-text-muted)]" />,
   },
   in_progress: {
-    headerBg: 'rgba(234, 179, 8, 0.24)',
-    bodyBg: 'rgba(234, 179, 8, 0.06)',
-    icon: <PlayCircle size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(6, 182, 212, 0.08)',
+    bodyBg: 'rgba(6, 182, 212, 0.02)',
+    icon: <PlayCircle size={13} className="shrink-0 text-cyan-400/60" />,
   },
   done: {
-    headerBg: 'rgba(34, 197, 94, 0.22)',
-    bodyBg: 'rgba(34, 197, 94, 0.05)',
-    icon: <CheckCircle2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
+    headerBg: 'rgba(34, 197, 94, 0.08)',
+    bodyBg: 'rgba(34, 197, 94, 0.02)',
+    icon: <CheckCircle2 size={13} className="shrink-0 text-green-400/60" />,
   },
 };
 

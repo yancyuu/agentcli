@@ -425,112 +425,67 @@ export const CliStatusSection = ({
                     {effectiveCliStatus.binaryPath}
                   </p>
                 )}
-                <div className="ml-6 mt-3 space-y-2">
+                <div className="mt-3 grid gap-2">
                   {ALL_AGENT_TYPES.map((agentType) => {
                     const provider = cliProviderStatusByAgentType.get(agentType) ?? null;
                     const harnessProviders = globalProvidersByAgentType.get(agentType) ?? [];
-                    if (!provider) {
-                      return (
-                        <div
-                          key={agentType}
-                          className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
-                          style={{
-                            borderColor: 'var(--color-border-subtle)',
-                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                          }}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-xs">
-                              <Terminal
-                                className="size-4 shrink-0"
-                                style={{ color: 'var(--color-text-muted)' }}
-                              />
-                              <span
-                                className="font-medium"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                              >
-                                {AGENT_TYPE_LABELS[agentType]}
-                              </span>
-                              <span style={{ color: 'var(--color-text-muted)' }}>
-                                {harnessProviders.length > 0
-                                  ? `${harnessProviders.length} 个 Provider`
-                                  : '未配置 Provider'}
-                              </span>
-                            </div>
-                            <div
-                              className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
-                              style={{ color: 'var(--color-text-muted)' }}
-                            >
-                              <span>Agent 类型：{agentType}</span>
-                              <span>Provider：{harnessProviders.length}</span>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-start gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleHarnessManage(agentType)}
-                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5"
-                              style={{
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                              }}
-                            >
-                              <SlidersHorizontal className="size-3" />
-                              配置
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
+                    const hasProviders = harnessProviders.length > 0;
+
                     return (
                       <div
                         key={agentType}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
+                        className="flex items-center gap-3 rounded-lg border px-3.5 py-2.5 transition-colors"
                         style={{
-                          borderColor: 'var(--color-border-subtle)',
-                          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                          borderColor: hasProviders ? 'var(--color-border-emphasis)' : 'var(--color-border-subtle)',
+                          backgroundColor: 'var(--color-surface-raised)',
+                          borderLeftWidth: hasProviders ? '2px' : '1px',
+                          borderLeftColor: hasProviders ? 'var(--color-accent)' : 'var(--color-border-subtle)',
+                          opacity: hasProviders ? 1 : 0.5,
                         }}
                       >
-                        <div className="col-span-2 flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 text-xs">
-                              <span className="flex items-center gap-2">
-                                <ProviderBrandLogo
-                                  providerId={provider.providerId}
-                                  className="size-4 shrink-0"
-                                />
-                                <span
-                                  className="font-medium"
-                                  style={{ color: 'var(--color-text-secondary)' }}
-                                >
-                                  {provider.displayName}
-                                </span>
-                                {provider.providerId === 'codex' ? <ProviderBetaBadge /> : null}
-                              </span>
-                            </div>
-                            <div
-                              className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
-                              style={{ color: 'var(--color-text-muted)' }}
+                        {provider ? (
+                          <ProviderBrandLogo
+                            providerId={provider.providerId}
+                            className="size-4 shrink-0"
+                          />
+                        ) : (
+                          <Terminal
+                            className="size-4 shrink-0"
+                            style={{ color: 'var(--color-text-muted)' }}
+                          />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="truncate text-xs font-medium"
+                              style={{ color: 'var(--color-text)' }}
                             >
-                              <span>Agent 类型：{agentType}</span>
-                              <span>Provider：{harnessProviders.length}</span>
-                            </div>
+                              {provider?.displayName ?? AGENT_TYPE_LABELS[agentType]}
+                            </span>
+                            {provider?.providerId === 'codex' ? <ProviderBetaBadge /> : null}
                           </div>
-                          <div className="flex shrink-0 items-start gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleProviderManage(provider.providerId)}
-                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                              style={{
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                              }}
-                            >
-                              <SlidersHorizontal className="size-3" />
-                              配置
-                            </button>
-                          </div>
+                          {hasProviders && (
+                            <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                              {harnessProviders.length} provider
+                            </span>
+                          )}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            provider
+                              ? handleProviderManage(provider.providerId)
+                              : handleHarnessManage(agentType)
+                          }
+                          className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/5"
+                          style={{
+                            borderColor: 'var(--color-border-subtle)',
+                            color: 'var(--color-text-muted)',
+                          }}
+                        >
+                          <SlidersHorizontal className="size-3" />
+                          配置
+                        </button>
                       </div>
                     );
                   })}
@@ -597,13 +552,13 @@ export const CliStatusSection = ({
                   className="h-full rounded-full transition-all duration-300"
                   style={{
                     width: `${downloadProgress}%`,
-                    backgroundColor: '#3b82f6',
+                    backgroundColor: '#6366f1',
                   }}
                 />
               ) : (
                 <div
                   className="h-full w-1/3 animate-pulse rounded-full"
-                  style={{ backgroundColor: '#3b82f6' }}
+                  style={{ backgroundColor: '#6366f1' }}
                 />
               )}
             </div>
@@ -888,30 +843,34 @@ const GenericHarnessProviderDialog = ({
                 return (
                   <div
                     key={provider.name}
-                    className="rounded-lg border px-3 py-2"
+                    className="rounded-lg border px-3.5 py-2.5"
                     style={{
-                      borderColor: 'var(--color-border-subtle)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                      borderColor: provider.api_key ? 'var(--color-border)' : 'var(--color-border-subtle)',
+                      backgroundColor: 'var(--color-surface-raised)',
+                      borderLeftWidth: provider.api_key ? '2px' : '1px',
+                      borderLeftColor: provider.api_key ? 'var(--color-accent)' : 'var(--color-border-subtle)',
                     }}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-                        {provider.name}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="size-1.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: provider.api_key ? 'var(--color-accent)' : '#fbbf24',
+                          }}
+                        />
+                        <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                          {provider.name}
+                        </span>
                       </div>
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[11px]"
-                        style={{
-                          color: provider.api_key ? '#86efac' : '#fbbf24',
-                          backgroundColor: provider.api_key
-                            ? 'rgba(74, 222, 128, 0.14)'
-                            : 'rgba(245, 158, 11, 0.12)',
-                        }}
-                      >
-                        {provider.api_key ? 'API Key 已配置' : '未配置 Key'}
+                      <span className="text-[10px]" style={{
+                        color: provider.api_key ? 'var(--color-accent)' : '#fbbf24',
+                      }}>
+                        {provider.api_key ? 'Key 已配置' : '未配置'}
                       </span>
                     </div>
                     <div
-                      className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
+                      className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px]"
                       style={{ color: 'var(--color-text-muted)' }}
                     >
                       <span>端点：{endpoint}</span>

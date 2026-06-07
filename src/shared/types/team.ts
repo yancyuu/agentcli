@@ -99,6 +99,8 @@ export interface TeamSummaryMember {
 export interface TeamSummary {
   teamName: string;
   displayName: string;
+  /** cc-connect project name — ASCII, unique identifier for routing */
+  bindProject?: string;
   description: string;
   color?: string;
   memberCount: number;
@@ -142,6 +144,13 @@ export interface TeamSummary {
   runtimeCandidatePendingCount?: number;
   noRuntimePendingCount?: number;
   permissionPendingCount?: number;
+  /** Aggregated session stats from local JSONL files */
+  stats?: {
+    sessions: number;
+    messages: number;
+    tokens: number;
+    durationMs: number;
+  };
 }
 
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
@@ -1112,6 +1121,8 @@ export interface TeamViewSnapshot {
   processes: TeamProcess[];
   warnings?: string[];
   isAlive?: boolean;
+  /** Bound external platforms (feishu, telegram, etc.) from cc-connect */
+  platforms?: import('./ccConnect').CcProjectPlatform[];
   /** cc-connect project name this team is bound to */
   bindProject?: string;
   /** 团队协作开关：false = 独立作战，true = 可跨团队调度 */
@@ -1491,6 +1502,8 @@ export interface TeamProvisioningMemberInput {
 
 export interface TeamCreateRequest {
   teamName: string;
+  /** cc-connect project name — ASCII, unique. Auto-generated if not provided. */
+  bindProject?: string;
   displayName?: string;
   description?: string;
   color?: string;

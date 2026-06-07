@@ -81,7 +81,7 @@ const CompactNum = ({
     }}
     className={cn(
       'h-8 w-24 rounded-md border bg-transparent px-2 text-right text-xs tabular-nums',
-      'focus:outline-none focus:ring-1 focus:ring-zinc-700',
+      'focus:outline-none focus:ring-1 focus:ring-[var(--color-border-emphasis)]',
       className
     )}
     style={{ borderColor: 'var(--color-border-subtle)', color: 'var(--color-text)' }}
@@ -439,9 +439,17 @@ export const GeneralSection = ({
               className={cn(
                 'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50',
                 safeConfig.general.theme === opt.value
-                  ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                  ? 'shadow-sm'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
               )}
+              style={
+                safeConfig.general.theme === opt.value
+                  ? {
+                      backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                      color: '#818cf8',
+                    }
+                  : undefined
+              }
               onClick={() => onThemeChange(opt.value)}
             >
               {opt.label}
@@ -526,7 +534,7 @@ export const GeneralSection = ({
               min={0}
             />
           </SettingRow>
-          <SettingRow label="日志等级" description="cc-connect 日志输出级别">
+          <SettingRow label="日志等级" description="运行时日志输出级别">
             <SettingsSelect
               value={ccSettings.log_level}
               options={CC_LOG_LEVEL_OPTIONS}

@@ -307,7 +307,7 @@ export const ToolsSection = ({
       ) : null}
 
       {applyNotice ? (
-        <div className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1.5 text-xs text-blue-300">
+        <div className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1.5 text-xs text-indigo-300">
           {applyNotice}
         </div>
       ) : null}

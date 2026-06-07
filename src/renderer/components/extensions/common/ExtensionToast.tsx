@@ -44,10 +44,10 @@ const TOAST_STYLES: Record<
     iconColor: 'text-amber-400',
   },
   info: {
-    bg: 'bg-blue-500/10',
-    border: 'border-blue-500/30',
+    bg: 'bg-indigo-500/10',
+    border: 'border-indigo-500/30',
     icon: Info,
-    iconColor: 'text-blue-400',
+    iconColor: 'text-indigo-400',
   },
 };
 

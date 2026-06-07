@@ -53,7 +53,7 @@ export const TaskRow = ({ task }: TaskRowProps): React.JSX.Element => {
       </td>
       <td className="px-3 py-2 text-xs">
         {blocksIds.length > 0 ? (
-          <span className="text-blue-600 dark:text-blue-400">
+          <span className="text-indigo-600 dark:text-indigo-400">
             {blocksIds.map((id) => `#${deriveTaskDisplayId(id)}`).join(', ')}
           </span>
         ) : (

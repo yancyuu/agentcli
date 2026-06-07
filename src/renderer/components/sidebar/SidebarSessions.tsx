@@ -286,7 +286,7 @@ export const SidebarSessions = (): React.JSX.Element => {
   const telemetryBySession = useMemo(() => {
     const map = new Map<string, ConversationTelemetryRow>();
     for (const row of telemetryRows) {
-      map.set(row.session.ccSessionId, row);
+      if (row.session.ccSessionId) map.set(row.session.ccSessionId, row);
       map.set(row.session.sessionKey, row);
     }
     return map;
@@ -657,7 +657,7 @@ const SessionRow = ({
               <span
                 className={
                   session.lastMessage.role === 'user'
-                    ? 'text-blue-400'
+                    ? 'text-indigo-400'
                     : 'text-[var(--color-text-muted)]'
                 }
               >
@@ -714,7 +714,7 @@ const SessionRow = ({
                           <span
                             className={`shrink-0 text-[10px] font-medium ${
                               msg.role === 'user'
-                                ? 'text-blue-400'
+                                ? 'text-indigo-400'
                                 : 'text-[var(--color-text-muted)]'
                             }`}
                           >

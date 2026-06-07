@@ -27,9 +27,9 @@ function ensureMermaidInit(): void {
     themeVariables: {
       darkMode: true,
       background: 'transparent',
-      primaryColor: '#3b82f6',
+      primaryColor: '#6366f1',
       primaryTextColor: '#fafafa',
-      primaryBorderColor: '#3b82f6',
+      primaryBorderColor: '#6366f1',
       lineColor: '#71717a',
       secondaryColor: '#27272a',
       tertiaryColor: '#1f1f23',

@@ -223,8 +223,8 @@ const SessionSourceBadge = ({ message }: { message: InboxMessage }): React.JSX.E
       className="inline-flex max-w-[180px] items-center truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium"
       title={`${platform}${label}${session?.key ? ` (${session.key})` : ''}`}
       style={{
-        backgroundColor: 'rgba(59, 130, 246, 0.12)',
-        color: '#93c5fd',
+        backgroundColor: 'rgba(99, 102, 241, 0.12)',
+        color: '#a5b4fc',
       }}
     >
       {platform}
@@ -578,7 +578,7 @@ function linkifyTaskIds(text: string, onClick: (taskId: string) => void): React.
       <TaskTooltip key={i} taskId={taskId}>
         <button
           type="button"
-          className="inline cursor-pointer font-medium text-blue-600 hover:underline dark:text-blue-400"
+          className="inline cursor-pointer font-medium text-indigo-600 hover:underline dark:text-indigo-400"
           onClick={(e) => {
             e.stopPropagation();
             onClick(taskId);
@@ -636,7 +636,7 @@ const TaskRecipientBadge = ({
       className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
       style={{
         backgroundColor: 'rgba(96, 165, 250, 0.14)',
-        color: '#60a5fa',
+        color: '#818cf8',
         border: '1px solid rgba(96, 165, 250, 0.3)',
       }}
     >
@@ -1209,7 +1209,7 @@ export const ActivityItem = memo(
                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                   {isUnread ? (
                     <span
-                      className="size-2 shrink-0 rounded-full bg-blue-500"
+                      className="size-2 shrink-0 rounded-full bg-indigo-500"
                       title="未读"
                       aria-hidden
                     />
@@ -1239,7 +1239,7 @@ export const ActivityItem = memo(
                     <button
                       type="button"
                       aria-label="展开消息"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1279,7 +1279,7 @@ export const ActivityItem = memo(
               <div className="flex min-w-0 items-center gap-2">
                 {isUnread ? (
                   <span
-                    className="size-2 shrink-0 rounded-full bg-blue-500"
+                    className="size-2 shrink-0 rounded-full bg-indigo-500"
                     title="未读"
                     aria-hidden
                   />
@@ -1322,7 +1322,7 @@ export const ActivityItem = memo(
                     <button
                       type="button"
                       aria-label="展开消息"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1361,7 +1361,7 @@ export const ActivityItem = memo(
             <>
               {isUnread ? (
                 <span
-                  className="size-2 shrink-0 rounded-full bg-blue-500"
+                  className="size-2 shrink-0 rounded-full bg-indigo-500"
                   title="未读"
                   aria-hidden
                 />
@@ -1406,7 +1406,7 @@ export const ActivityItem = memo(
                   <button
                     type="button"
                     aria-label="展开消息"
-                    className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                     style={{ color: CARD_ICON_MUTED }}
                     onClick={(e) => {
                       e.stopPropagation();

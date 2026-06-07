@@ -107,7 +107,7 @@ export const MarkdownSplitView = React.memo(function MarkdownSplitView({
         // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- resize handle
         <div
           className={`shrink-0 cursor-col-resize border-x border-border transition-colors ${
-            isResizing ? 'bg-blue-500/50' : 'hover:bg-blue-500/30'
+            isResizing ? 'bg-indigo-500/50' : 'hover:bg-indigo-500/30'
           }`}
           style={{ width: HANDLE_WIDTH }}
           onMouseDown={handleMouseDown}

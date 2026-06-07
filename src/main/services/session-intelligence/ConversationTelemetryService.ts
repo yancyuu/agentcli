@@ -227,6 +227,9 @@ export class ConversationTelemetryService {
     const identities = await this.readIdentities();
     const rows: ConversationTelemetryRow[] = [];
 
+    // Track which claude session IDs were already matched by cc-connect
+    const matchedClaudeSessionIds = new Set<string>();
+
     for (const team of projects) {
       const projectName = team.bindProject || team.slug;
       let sessions;
@@ -259,6 +262,23 @@ export class ConversationTelemetryService {
         });
 
         const row = await this.buildRow(team, projectName, session, identities, claudeIndex, {
+          includeContent,
+          includeToolResults: query.includeToolResults !== false,
+          includeSystemMessages: query.includeSystemMessages !== false,
+        });
+        if (row.session.claudeSessionId) {
+          matchedClaudeSessionIds.add(row.session.claudeSessionId);
+        }
+        if (!this.matchesQuery(row, query)) continue;
+        rows.push(row);
+      }
+    }
+
+    // Include local-only JSONL sessions not tracked by cc-connect
+    for (const [sessionId, summaries] of claudeIndex) {
+      if (matchedClaudeSessionIds.has(sessionId)) continue;
+      for (const summary of summaries) {
+        const row = this.buildLocalRow(sessionId, summary, {
           includeContent,
           includeToolResults: query.includeToolResults !== false,
           includeSystemMessages: query.includeSystemMessages !== false,
@@ -576,6 +596,90 @@ export class ConversationTelemetryService {
         models: matched?.models ?? {},
         toolCalls: matched?.toolCalls ?? {},
         usageSource: matched ? 'claude-jsonl' : 'missing',
+      },
+    };
+  }
+
+  /** Build a row from local JSONL data only — no cc-connect session. */
+  private buildLocalRow(
+    sessionId: string,
+    summary: ClaudeSessionSummary,
+    options: {
+      includeContent: 'none' | 'summary' | 'full';
+      includeToolResults: boolean;
+      includeSystemMessages: boolean;
+    },
+  ): ConversationTelemetryRow {
+    const messages = this.filterMessages(summary.messages, options);
+    const userMessages = messages.filter(
+      (message) => message.role === 'user' && message.content.trim(),
+    );
+    const firstUserMessage = userMessages[0];
+    const lastUserMessage = userMessages[userMessages.length - 1];
+    const lastMessage = [...messages].reverse().find((message) => message.content.trim());
+    const totalTokens =
+      summary.inputTokens +
+      summary.outputTokens +
+      summary.cacheReadTokens +
+      summary.cacheCreationTokens;
+
+    return {
+      teamName: '',
+      teamDisplayName: '本地会话',
+      projectName: '',
+      session: {
+        ccSessionId: undefined,
+        sessionKey: sessionId,
+        agentSessionId: undefined,
+        claudeSessionId: sessionId,
+        projectPath: summary.projectPath,
+        jsonlRelPath: summary.relPath,
+        createdAt: summary.startTime,
+        updatedAt: summary.endTime,
+        startTime: summary.startTime,
+        endTime: summary.endTime,
+        active: false,
+        live: false,
+        matchStatus: 'local-only',
+      },
+      identity: {
+        platform: 'local',
+        type: 'person',
+        id: undefined,
+        userId: undefined,
+        chatId: undefined,
+        displayName: summary.projectPath
+          ? path.basename(summary.projectPath)
+          : sessionId.slice(0, 12),
+        userName: undefined,
+        chatName: undefined,
+        confidence: 'session-key-only',
+      },
+      content: {
+        messageCount: summary.messageCount,
+        userMessageCount: summary.userMessageCount,
+        assistantMessageCount: summary.assistantMessageCount,
+        toolResultCount: summary.toolResultCount,
+        firstUserMessage: firstUserMessage?.content,
+        firstUserMessageAt: firstUserMessage?.timestamp,
+        lastUserMessage: lastUserMessage?.content,
+        lastUserMessageAt: lastUserMessage?.timestamp,
+        lastMessageRole: lastMessage?.role,
+        lastMessageContent: lastMessage?.content,
+        lastMessageAt: lastMessage?.timestamp,
+        text: options.includeContent === 'none' ? undefined : this.summarizeMessages(messages),
+        messages: options.includeContent === 'full' ? messages : undefined,
+      },
+      usage: {
+        inputTokens: summary.inputTokens,
+        outputTokens: summary.outputTokens,
+        cacheReadTokens: summary.cacheReadTokens,
+        cacheCreationTokens: summary.cacheCreationTokens,
+        totalTokens,
+        assistantTurnsWithUsage: summary.assistantTurnsWithUsage,
+        models: summary.models,
+        toolCalls: summary.toolCalls,
+        usageSource: 'claude-jsonl',
       },
     };
   }

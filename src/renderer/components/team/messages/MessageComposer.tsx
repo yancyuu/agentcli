@@ -550,7 +550,7 @@ export const MessageComposer = ({
                               </span>
                             ) : null}
                             {isSelected ? (
-                              <Check size={12} className="ml-auto shrink-0 text-blue-400" />
+                              <Check size={12} className="ml-auto shrink-0 text-indigo-400" />
                             ) : null}
                           </button>
                         );
@@ -640,7 +640,7 @@ export const MessageComposer = ({
                   <span className="inline-flex">
                     <button
                       type="button"
-                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={!canSend}
                       onClick={handleSend}
                     >

@@ -82,9 +82,9 @@ export const baseEditorTheme = EditorView.theme({
     backgroundColor: 'rgba(245, 158, 11, 0.08)',
   },
   '.cm-diagnostic-info': {
-    borderLeftColor: '#3b82f6',
-    color: '#93c5fd',
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    borderLeftColor: '#6366f1',
+    color: '#a5b4fc',
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
   },
   '.cm-lintRange-error': {
     backgroundImage: 'none',

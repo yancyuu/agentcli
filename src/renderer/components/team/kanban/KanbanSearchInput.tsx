@@ -228,7 +228,7 @@ const TaskSuggestionItem = React.memo(function TaskSuggestionItem({
       case 'pending':
         return 'bg-zinc-500/15 text-zinc-400';
       case 'in_progress':
-        return 'bg-blue-500/15 text-blue-400';
+        return 'bg-indigo-500/15 text-indigo-400';
       case 'completed':
         return 'bg-emerald-500/15 text-emerald-400';
       case 'deleted':

@@ -34,15 +34,15 @@ export const ReplyQuoteBlock = ({
   return (
     <div className="space-y-2">
       {/* Quote block — styled like SendMessageDialog */}
-      <div className="relative overflow-hidden rounded-md border border-blue-400/20 bg-blue-100/40 py-2 pl-3 pr-2 dark:border-blue-500/20 dark:bg-blue-950/20">
+      <div className="relative overflow-hidden rounded-md border border-indigo-400/20 bg-blue-100/40 py-2 pl-3 pr-2 dark:border-indigo-500/20 dark:bg-blue-950/20">
         {/* Decorative quotation mark */}
-        <span className="pointer-events-none absolute -right-1 top-1/2 -translate-y-1/2 select-none font-serif text-[48px] leading-none text-blue-600/[0.08] dark:text-blue-400/[0.08]">
+        <span className="pointer-events-none absolute -right-1 top-1/2 -translate-y-1/2 select-none font-serif text-[48px] leading-none text-indigo-600/[0.08] dark:text-indigo-400/[0.08]">
           &ldquo;
         </span>
 
         {/* "Replying to" + MemberBadge */}
         <div className="mb-1 flex items-center gap-1.5">
-          <span className="text-[10px] text-blue-600/60 dark:text-blue-300/60">Replying to</span>
+          <span className="text-[10px] text-indigo-600/60 dark:text-indigo-300/60">Replying to</span>
           <MemberBadge name={reply.agentName} color={memberColor} size="sm" />
         </div>
 
@@ -59,7 +59,7 @@ export const ReplyQuoteBlock = ({
         {isLong ? (
           <button
             type="button"
-            className="mt-0.5 text-[10px] text-blue-600/60 hover:text-blue-700 dark:text-blue-400/60 dark:hover:text-blue-300"
+            className="mt-0.5 text-[10px] text-indigo-600/60 hover:text-blue-700 dark:text-indigo-400/60 dark:hover:text-indigo-300"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? 'less' : 'more'}

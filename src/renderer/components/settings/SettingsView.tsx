@@ -1,6 +1,6 @@
 /**
- * SettingsView - Main settings panel with all app configuration options.
- * Provides UI for managing runtime, channels, and advanced options.
+ * SettingsView - Main settings panel.
+ * Terminal-style layout matching the control console aesthetic.
  */
 
 import { useEffect, useState } from 'react';
@@ -23,7 +23,6 @@ export const SettingsView = (): React.JSX.Element | null => {
     }))
   );
 
-  // Consume pending section (avoid setState during render)
   useEffect(() => {
     if (pendingSettingsSection) {
       const nextSection: SettingsSection =
@@ -32,7 +31,7 @@ export const SettingsView = (): React.JSX.Element | null => {
         pendingSettingsSection === 'advanced'
           ? pendingSettingsSection
           : 'general';
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync on prop change
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveSection(nextSection);
       clearPendingSettingsSection();
     }
@@ -60,39 +59,37 @@ export const SettingsView = (): React.JSX.Element | null => {
     updateConfig,
   });
 
-  // Loading state
   if (loading) {
     return (
       <div
-        className="flex flex-1 items-center justify-center"
+        className="flex flex-1 items-center justify-center font-mono"
         style={{ backgroundColor: 'var(--color-surface)' }}
       >
         <div className="flex items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
-          <Loader2 className="size-5 animate-spin" />
-          <span>正在加载设置...</span>
+          <Loader2 className="size-4 animate-spin" />
+          <span className="text-xs">loading settings...</span>
         </div>
       </div>
     );
   }
 
-  // Error state
   if (error && !config) {
     return (
       <div
-        className="flex flex-1 items-center justify-center"
+        className="flex flex-1 items-center justify-center font-mono"
         style={{ backgroundColor: 'var(--color-surface)' }}
       >
         <div className="text-center">
-          <p className="mb-4 text-red-400">{error}</p>
+          <p className="mb-4 text-xs text-red-400">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="rounded-md px-4 py-2 transition-colors"
+            className="rounded border px-3 py-1.5 text-xs transition-colors"
             style={{
-              backgroundColor: 'var(--color-surface-raised)',
-              color: 'var(--color-text-secondary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-muted)',
             }}
           >
-            重试
+            retry
           </button>
         </div>
       </div>
@@ -103,27 +100,28 @@ export const SettingsView = (): React.JSX.Element | null => {
 
   return (
     <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--color-surface)' }}>
-      <div className="mx-auto max-w-2xl px-6 py-8">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-lg font-medium" style={{ color: 'var(--color-text)' }}>
-            设置
-          </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            管理应用偏好设置
-          </p>
+      {/* Clean container */}
+      <div
+        className="mx-auto flex min-h-full max-w-3xl flex-col"
+        style={{
+          backgroundColor: 'var(--color-surface)',
+        }}
+      >
+        {/* Tabs area */}
+        <div
+          className="border-b"
+          style={{
+            borderColor: 'var(--color-border-subtle)',
+          }}
+        >
+          <SettingsTabs activeSection={activeSection} onSectionChange={setActiveSection} />
           {error && (
-            <div className="mt-4 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2">
-              <p className="text-sm text-red-400">{error}</p>
-            </div>
+            <div className="px-4 pb-2 text-[10px] text-red-400">{error}</div>
           )}
         </div>
 
-        {/* Tabs */}
-        <SettingsTabs activeSection={activeSection} onSectionChange={setActiveSection} />
-
         {/* Content */}
-        <div className="mt-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           {activeSection === 'general' && (
             <GeneralSection
               safeConfig={safeConfig}

@@ -240,8 +240,8 @@ export class HttpAPIClient implements ElectronAPI {
     return JSON.parse(text, (key, value) => HttpAPIClient.reviveDates(key, value)) as T;
   }
 
-  private async get<T>(path: string): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async get<T>(path: string, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
       return this.parseJson<T>(res);
@@ -250,8 +250,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async post<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
@@ -280,8 +280,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async del<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async del<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'DELETE',
@@ -295,8 +295,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async put<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async put<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PUT',
@@ -310,8 +310,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async patch<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async patch<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PATCH',
@@ -325,8 +325,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async delete<T>(path: string): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async delete<T>(path: string, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'DELETE',
@@ -1093,11 +1093,11 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   teams: TeamsAPI = {
-    list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams'),
+    list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams', 30_000),
     ensureSystemManager: async (): Promise<SystemManagerSummary> =>
       this.post<SystemManagerSummary>('/api/system-manager/ensure'),
     getData: async (teamName: string): Promise<TeamViewSnapshot> =>
-      this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`),
+      this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`, 30_000),
     getTaskChangePresence: async (): Promise<
       Record<string, 'has_changes' | 'no_changes' | 'unknown'>
     > => {
@@ -1477,7 +1477,9 @@ export class HttpAPIClient implements ElectronAPI {
     },
     restartMember: async (teamName: string, memberName: string): Promise<void> => {
       await this.post(
-        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/restart`
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/restart`,
+        undefined,
+        30_000
       );
     },
     skipMemberForLaunch: async (teamName: string, memberName: string): Promise<void> => {
@@ -2323,8 +2325,11 @@ export class HttpAPIClient implements ElectronAPI {
     resize: (ptyId: string, cols: number, rows: number): void => {
       void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/resize`, { cols, rows });
     },
-    kill: (ptyId: string): void => {
-      void this.del(`/api/terminal/${encodeURIComponent(ptyId)}`);
+    kill: async (ptyId: string): Promise<void> => {
+      await this.del(`/api/terminal/${encodeURIComponent(ptyId)}`);
+    },
+    openExternal: async (options: { command: string; args?: string[]; cwd?: string }): Promise<void> => {
+      await this.post('/api/terminal/open-external', options);
     },
     onData: (callback): (() => void) =>
       this.addEventListener('terminal:data', (data: unknown) => {

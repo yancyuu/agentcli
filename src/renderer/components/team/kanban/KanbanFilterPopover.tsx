@@ -91,7 +91,7 @@ export const KanbanFilterPopover = ({
             >
               <Filter size={14} />
               {activeCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-medium text-white">
                   {activeCount}
                 </span>
               )}
@@ -111,7 +111,7 @@ export const KanbanFilterPopover = ({
               type="button"
               className={`w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
                 filter.sessionId === null
-                  ? 'bg-blue-500/15 text-blue-300'
+                  ? 'bg-indigo-500/15 text-indigo-300'
                   : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
               }`}
               onClick={() => handleSessionSelect(null)}
@@ -128,12 +128,12 @@ export const KanbanFilterPopover = ({
                   type="button"
                   className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
                     isSelected
-                      ? 'bg-blue-500/15 text-blue-300'
+                      ? 'bg-indigo-500/15 text-indigo-300'
                       : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
                   }`}
                   onClick={() => handleSessionSelect(isSelected ? null : session.id)}
                 >
-                  {isLead && <Crown size={11} className="shrink-0 text-blue-400" />}
+                  {isLead && <Crown size={11} className="shrink-0 text-indigo-400" />}
                   <span className="truncate">{label}</span>
                 </button>
               );

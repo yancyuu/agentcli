@@ -848,7 +848,7 @@ const LeadThoughtsGroupRowComponent = ({
                     <button
                       type="button"
                       aria-label="Expand thoughts"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -933,7 +933,7 @@ const LeadThoughtsGroupRowComponent = ({
                     <button
                       type="button"
                       aria-label="Expand thoughts"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1032,7 +1032,7 @@ const LeadThoughtsGroupRowComponent = ({
                   <button
                     type="button"
                     aria-label="Expand thoughts"
-                    className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                     style={{ color: CARD_ICON_MUTED }}
                     onClick={(e) => {
                       e.stopPropagation();

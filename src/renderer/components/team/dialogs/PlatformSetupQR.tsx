@@ -146,7 +146,7 @@ export default function PlatformSetupQR({
     try {
       const res = await api.ccSetup.weixinBegin();
       if (!res.qr_url) {
-        setError('微信未返回二维码 URL，请检查 cc-connect 配置');
+        setError('微信未返回二维码 URL，请检查服务配置');
         setPhase('error');
         return;
       }
@@ -224,7 +224,7 @@ export default function PlatformSetupQR({
 
       {phase === 'loading' && (
         <div className="flex flex-col items-center gap-3 py-8">
-          <Loader2 size={32} className="animate-spin text-blue-500" />
+          <Loader2 size={32} className="animate-spin text-indigo-500" />
           <p className="text-sm text-gray-500">正在生成二维码...</p>
         </div>
       )}
@@ -247,12 +247,12 @@ export default function PlatformSetupQR({
             </div>
           )}
           {phase === 'scanned' && (
-            <div className="flex items-center gap-2 text-xs text-blue-500">
+            <div className="flex items-center gap-2 text-xs text-indigo-500">
               <Loader2 size={12} className="animate-spin" /> 等待确认...
             </div>
           )}
           {phase === 'saving' && (
-            <div className="flex items-center gap-2 text-xs text-blue-500">
+            <div className="flex items-center gap-2 text-xs text-indigo-500">
               <Loader2 size={12} className="animate-spin" /> 正在保存配置...
             </div>
           )}
@@ -286,7 +286,7 @@ export default function PlatformSetupQR({
 
       {phase === 'restarting' && (
         <div className="flex flex-col items-center gap-3 py-4">
-          <Loader2 size={32} className="animate-spin text-blue-500" />
+          <Loader2 size={32} className="animate-spin text-indigo-500" />
           <p className="text-sm text-gray-600 dark:text-gray-400">正在重启服务...</p>
         </div>
       )}

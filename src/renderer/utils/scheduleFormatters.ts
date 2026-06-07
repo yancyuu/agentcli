@@ -8,8 +8,10 @@ export function formatNextRun(isoString?: string): string {
   if (!isoString) return '暂无';
   try {
     const date = new Date(isoString);
+    const ts = date.getTime();
+    if (!Number.isFinite(ts)) return isoString;
     const now = Date.now();
-    const diffMs = date.getTime() - now;
+    const diffMs = ts - now;
 
     if (diffMs < 0) return '已逾期';
 

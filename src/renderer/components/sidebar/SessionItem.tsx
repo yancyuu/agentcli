@@ -292,18 +292,18 @@ export const SessionItem = ({
                     checked={isSelected ?? false}
                     onChange={() => onToggleSelect?.()}
                     onClick={(e) => e.stopPropagation()}
-                    className="size-3.5 shrink-0 accent-blue-500"
+                    className="size-3.5 shrink-0 accent-indigo-500"
                   />
                 )}
                 {session.isOngoing && <OngoingIndicator />}
-                {isPinned && <Pin className="size-2.5 shrink-0 text-blue-400" />}
+                {isPinned && <Pin className="size-2.5 shrink-0 text-indigo-400" />}
                 {isHidden && <EyeOff className="size-2.5 shrink-0 text-zinc-500" />}
                 {isTeam ? (
                   <span
                     className="flex items-center gap-1.5 truncate text-[13px] font-medium leading-tight"
                     style={{ color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)' }}
                   >
-                    <Users className="size-3 shrink-0 text-blue-400" />
+                    <Users className="size-3 shrink-0 text-indigo-400" />
                     <span className="truncate">{parsed.displayText}</span>
                   </span>
                 ) : (

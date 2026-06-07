@@ -76,8 +76,11 @@ interface ManagedProcess {
   createdAt: string;
   write(data: string): void;
   resize(cols: number, rows: number): void;
-  kill(): void;
+  kill(signal?: NodeJS.Signals): void;
 }
+
+const TERMINAL_KILL_TIMEOUT_MS = 1_500;
+const TERMINAL_FORCE_KILL_TIMEOUT_MS = 1_500;
 
 export type TerminalDataEvent = { ptyId: string; data: string };
 export type TerminalExitEvent = { ptyId: string; exitCode: number };
@@ -120,14 +123,14 @@ export class SystemManagerPtyService extends EventEmitter {
         createdAt: new Date().toISOString(),
         write: (data) => proc.write(data),
         resize: (cols, rows) => proc.resize(Math.max(20, cols), Math.max(5, rows)),
-        kill: () => proc.kill(),
+        kill: (signal) => proc.kill(signal),
       });
 
       proc.onData((data) => {
         this.emit('data', { ptyId: id, data } satisfies TerminalDataEvent);
       });
       proc.onExit(({ exitCode }) => {
-        this.sessions.delete(id);
+        if (!this.sessions.delete(id)) return;
         this.emit('exit', { ptyId: id, exitCode } satisfies TerminalExitEvent);
       });
     } catch (err) {
@@ -145,7 +148,7 @@ export class SystemManagerPtyService extends EventEmitter {
         createdAt: new Date().toISOString(),
         write: (data) => child.stdin.write(data),
         resize: () => {},
-        kill: () => child.kill(),
+        kill: (signal) => child.kill(signal),
       });
       this.emit('data', {
         ptyId: id,
@@ -158,7 +161,7 @@ export class SystemManagerPtyService extends EventEmitter {
         this.emit('data', { ptyId: id, data: data.toString() } satisfies TerminalDataEvent);
       });
       child.on('error', (error) => {
-        this.sessions.delete(id);
+        if (!this.sessions.delete(id)) return;
         this.emit('data', {
           ptyId: id,
           data: `[31m[Hermit] failed to start process: ${error.message}[0m\r\n`,
@@ -166,7 +169,7 @@ export class SystemManagerPtyService extends EventEmitter {
         this.emit('exit', { ptyId: id, exitCode: 1 } satisfies TerminalExitEvent);
       });
       child.on('exit', (exitCode) => {
-        this.sessions.delete(id);
+        if (!this.sessions.delete(id)) return;
         this.emit('exit', { ptyId: id, exitCode: exitCode ?? 0 } satisfies TerminalExitEvent);
       });
     }
@@ -186,16 +189,45 @@ export class SystemManagerPtyService extends EventEmitter {
     session.resize(cols, rows);
   }
 
-  kill(ptyId: string): void {
+  async kill(ptyId: string): Promise<void> {
     const session = this.sessions.get(ptyId);
     if (!session) return;
-    session.kill();
-    this.sessions.delete(ptyId);
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let forceTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (forceTimer) clearTimeout(forceTimer);
+        this.off('exit', onExit);
+        resolve();
+      };
+      const onExit = (event: TerminalExitEvent): void => {
+        if (event.ptyId === ptyId) finish();
+      };
+
+      this.on('exit', onExit);
+      session.kill();
+      forceTimer = setTimeout(() => {
+        if (!this.sessions.has(ptyId)) {
+          finish();
+          return;
+        }
+        session.kill('SIGKILL');
+      }, TERMINAL_KILL_TIMEOUT_MS);
+      setTimeout(() => {
+        if (this.sessions.delete(ptyId)) {
+          this.emit('exit', { ptyId, exitCode: 0 } satisfies TerminalExitEvent);
+        }
+        finish();
+      }, TERMINAL_KILL_TIMEOUT_MS + TERMINAL_FORCE_KILL_TIMEOUT_MS);
+    });
   }
 
   killAll(): void {
     for (const id of [...this.sessions.keys()]) {
-      this.kill(id);
+      void this.kill(id);
     }
   }
 }

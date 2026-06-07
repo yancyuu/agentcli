@@ -1,20 +1,15 @@
 /**
- * CreateTeamDialog — simplified to match cc-connect project creation flow.
+ * CreateTeamDialog — create a new digital worker (数字员工).
  *
  * Wizard steps:
  *   1. Name + Agent type + Work directory
- *   2. Platform selection grid
- *   3a. QR code setup (feishu/weixin)
- *   3b. Manual credential form (telegram/slack/etc.)
- *   3c. Bridge (no setup needed)
- *
- * Uses Hermit's existing UI components (Dialog, Button, Input, etc.)
- * but with cc-connect's parameters and flow.
+ *   2. Done (success confirmation)
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
+import { providersApi } from '@renderer/api/providers';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -26,33 +21,16 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
-import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
-import { useStore } from '@renderer/store';
-import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { normalizePath } from '@renderer/utils/pathNormalize';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  FolderKanban,
-  Info,
-  Loader2,
-  Settings2,
-  Smartphone,
-  X,
-} from 'lucide-react';
+import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
+import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 import { AGENT_TYPE_LABELS } from '../HarnessCards';
 import { HarnessSelect } from '../HarnessSelect';
 import { ProjectPathSelector } from './ProjectPathSelector';
-import { OptionalSettingsSection } from './OptionalSettingsSection';
-import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
-import { platformMeta, isQRPlatform } from './platformMeta';
-import PlatformSetupQR from './PlatformSetupQR';
-import PlatformManualForm from './PlatformManualForm';
-
 import type {
   EffortLevel,
   Project,
@@ -62,8 +40,6 @@ import type {
 } from '@shared/types';
 import type { CcAgentType } from '@shared/types/ccConnect';
 import type { GlobalProvider } from '@shared/types/providers';
-
-import { providersApi } from '@renderer/api/providers';
 
 export interface ActiveTeamRef {
   teamName: string;
@@ -86,108 +62,51 @@ export interface TeamCopyData {
   templateDirectoryId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Platform selection grid data
-// ---------------------------------------------------------------------------
-
-interface PlatformOption {
-  key: string;
-  label: string;
-  color: string;
-  icon: 'qr' | 'settings';
+/**
+ * Sanitize team name: keep Unicode letters and digits (Chinese, Latin, etc.),
+ * replace other sequences with `-`, then lowercase Latin chars.
+ */
+function sanitizeTeamName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  let result = trimmed
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  return result;
 }
 
-const PLATFORM_OPTIONS: PlatformOption[] = [
-  {
-    key: 'feishu',
-    label: '飞书 / Lark',
-    color: 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
-    icon: 'qr',
-  },
-  {
-    key: 'weixin',
-    label: '微信',
-    color: 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400',
-    icon: 'qr',
-  },
-  {
-    key: 'telegram',
-    label: 'Telegram',
-    color: 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400',
-    icon: 'settings',
-  },
-  {
-    key: 'discord',
-    label: 'Discord',
-    color: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
-    icon: 'settings',
-  },
-  {
-    key: 'slack',
-    label: 'Slack',
-    color: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
-    icon: 'settings',
-  },
-  {
-    key: 'dingtalk',
-    label: '钉钉',
-    color: 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
-    icon: 'settings',
-  },
-  {
-    key: 'wecom',
-    label: '企业微信',
-    color: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400',
-    icon: 'settings',
-  },
-  {
-    key: 'qq',
-    label: 'QQ (OneBot)',
-    color: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
-    icon: 'settings',
-  },
-  {
-    key: 'qqbot',
-    label: 'QQ Bot (官方)',
-    color: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
-    icon: 'settings',
-  },
-  {
-    key: 'line',
-    label: 'LINE',
-    color: 'bg-lime-50 dark:bg-lime-900/30 text-lime-600 dark:text-lime-400',
-    icon: 'settings',
-  },
-  {
-    key: 'weibo',
-    label: '微博',
-    color: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-    icon: 'settings',
-  },
-  {
-    key: 'bridge',
-    label: 'Bridge (默认)',
-    color: 'bg-gray-50 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400',
-    icon: 'settings',
-  },
-];
+/**
+ * Generate a unique ASCII project identifier from a display name.
+ * For Chinese names: produces "team-xxxx" (4-char random suffix).
+ * For ASCII names: produces a slugified version.
+ */
+function generateBindProject(displayName: string): string {
+  const trimmed = displayName.trim();
+  if (!trimmed) return '';
+  // Try to extract ASCII parts from the name
+  const asciiParts = trimmed
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const base = asciiParts || 'team';
+  const suffix = Math.random().toString(36).slice(2, 6);
+  return `${base}-${suffix}`;
+}
 
-const TEAM_COLOR_NAMES = [
-  'blue',
-  'green',
-  'red',
-  'yellow',
-  'purple',
-  'cyan',
-  'orange',
-  'pink',
-] as const;
+/** Validate bindProject: ASCII lowercase alphanumeric, hyphens, underscores. */
+function isValidBindProject(value: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]{1,}$/.test(value);
+}
 
 // ---------------------------------------------------------------------------
 // Wizard step types
 // ---------------------------------------------------------------------------
 
-type WizardStep = 'name' | 'platform' | 'qr' | 'form' | 'done';
+type WizardStep = 'name' | 'done';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -199,6 +118,7 @@ interface CreateTeamDialogProps {
   provisioningErrorsByTeam: Record<string, string | null>;
   clearProvisioningError?: (teamName?: string) => void;
   existingTeamNames: string[];
+  existingBindProjects?: string[];
   provisioningTeamNames?: string[];
   activeTeams?: ActiveTeamRef[];
   initialData?: unknown;
@@ -208,32 +128,13 @@ interface CreateTeamDialogProps {
   onOpenTeam: (teamName: string, projectPath?: string, options?: { displayName?: string }) => void;
 }
 
-/** Sanitize team name: non-alphanumeric → `-`, then lowercase. */
-function sanitizeTeamName(name: string): string {
-  const trimmed = name.trim();
-  let result = name
-    .replace(/[^a-zA-Z0-9]/g, '-')
-    .replace(/-{2,}/g, '-')
-    .toLowerCase();
-  while (result.startsWith('-')) result = result.slice(1);
-  while (result.endsWith('-')) result = result.slice(0, -1);
-  if (!result && trimmed) {
-    let hash = 2166136261;
-    for (const ch of name) {
-      hash ^= ch.codePointAt(0) ?? 0;
-      hash = Math.imul(hash, 16777619);
-    }
-    result = `team-${(hash >>> 0).toString(36)}`;
-  }
-  return result;
-}
-
 export const CreateTeamDialog = ({
   open,
   canCreate,
   provisioningErrorsByTeam,
   clearProvisioningError,
   existingTeamNames,
+  existingBindProjects = [],
   provisioningTeamNames = [],
   activeTeams,
   defaultProjectPath,
@@ -262,8 +163,18 @@ export const CreateTeamDialog = ({
   // ── Wizard state ─────────────────────────────────────────────────────
   const [step, setStep] = useState<WizardStep>('name');
   const [selectedHarness, setSelectedHarness] = useState<CcAgentType>('claudecode');
-  const [selectedPlatform, setSelectedPlatform] = useState('');
   const [description, setDescription] = useState('');
+
+  // ── bindProject (ASCII unique identifier) ────────────────────────────
+  const [bindProject, setBindProject] = useState('');
+  const [bindProjectManuallyEdited, setBindProjectManuallyEdited] = useState(false);
+
+  // Auto-generate bindProject from displayName when not manually edited
+  useEffect(() => {
+    if (bindProjectManuallyEdited) return;
+    const auto = generateBindProject(teamName);
+    setBindProject(auto);
+  }, [teamName, bindProjectManuallyEdited]);
 
   // ── Projects (for path selector) ─────────────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);
@@ -279,14 +190,9 @@ export const CreateTeamDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ teamName?: string; cwd?: string }>({});
 
-  // ── Conflict detection ───────────────────────────────────────────────
-  const allTakenTeamNames = useMemo(
-    () => [...new Set([...existingTeamNames, ...provisioningTeamNames])],
-    [existingTeamNames, provisioningTeamNames]
-  );
-  const sanitizedTeamName = sanitizeTeamName(teamName.trim());
-  const isNameTaken = existingTeamNames.includes(sanitizedTeamName);
-  const isNameProvisioning = provisioningTeamNames.includes(sanitizedTeamName) && !isNameTaken;
+  // ── Name conflict detection ──────────────────────────────────────────
+  const isBindProjectTaken = existingBindProjects.includes(bindProject);
+  const isNameProvisioning = provisioningTeamNames.includes(bindProject) && !isBindProjectTaken;
 
   const effectiveCwd =
     cwdMode === 'project'
@@ -389,8 +295,8 @@ export const CreateTeamDialog = ({
 
   // ── Clear provisioning error on open ─────────────────────────────────
   useEffect(() => {
-    if (open && sanitizedTeamName) clearProvisioningError?.(sanitizedTeamName);
-  }, [open, clearProvisioningError, sanitizedTeamName]);
+    if (open && bindProject) clearProvisioningError?.(bindProject);
+  }, [open, clearProvisioningError, bindProject]);
 
   // ── Reset state on close ─────────────────────────────────────────────
   const resetState = () => {
@@ -399,83 +305,73 @@ export const CreateTeamDialog = ({
     setIsSubmitting(false);
     setConflictDismissed(false);
     setSelectedProviderRef(null);
+    setBindProject('');
+    setBindProjectManuallyEdited(false);
+    setStep('name');
   };
 
-  // ── Platform selection ───────────────────────────────────────────────
-  const handlePlatformSelect = (key: string) => {
-    setSelectedPlatform(key);
-    if (isQRPlatform(key)) {
-      setStep('qr');
-    } else if (platformMeta[key]) {
-      setStep('form');
-    } else {
-      // bridge or unknown — skip to done
-      setStep('done');
+  const buildCreateRequest = (): TeamCreateRequest => ({
+    teamName: bindProject,
+    bindProject,
+    displayName: teamName.trim() || undefined,
+    description: description.trim() || undefined,
+    color: teamColor || undefined,
+    members: [],
+    cwd: effectiveCwd,
+    executionTarget: { type: 'local', cwd: effectiveCwd || undefined },
+    harness: selectedHarness,
+    platform: 'bridge',
+    platformOptions: {},
+    providerRefs: selectedProviderRef ? [selectedProviderRef] : undefined,
+  });
+
+  const validateCreateFields = (): boolean => {
+    if (!teamName.trim()) {
+      setLocalError('请输入数字员工名称');
+      return false;
     }
-  };
-
-  // ── Completion handlers ──────────────────────────────────────────────
-  const handleQRComplete = () => {
-    // QR setup already created the project via cc-connect
-    clearDraft();
-    resetState();
-    setStep('done');
-  };
-
-  const handleManualComplete = () => {
-    // Manual form already created the project via cc-connect
-    clearDraft();
-    resetState();
-    setStep('done');
-  };
-
-  const handleBridgeDone = () => {
-    setStep('done');
-  };
-
-  // ── Final submission (for bridge or non-QR platforms that need server call) ──
-  const handleCreate = async () => {
-    if (allTakenTeamNames.includes(sanitizedTeamName)) {
-      setLocalError(isNameProvisioning ? '团队正在启动中' : '团队名称已存在');
-      return;
+    if (!bindProject) {
+      setLocalError('请输入项目标识');
+      return false;
     }
-    if (!sanitizedTeamName) {
-      setLocalError('请输入团队名称');
-      return;
+    if (!isValidBindProject(bindProject)) {
+      setLocalError('项目标识只能包含小写英文字母、数字、连字符和下划线（至少2个字符，以字母或数字开头）');
+      return false;
+    }
+    if (isBindProjectTaken) {
+      setLocalError(isNameProvisioning ? '数字员工正在启动中' : `项目标识"${bindProject}"已存在，请换一个`);
+      return false;
     }
     if (!effectiveCwd) {
       setLocalError('请选择工作目录');
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const createLocalTeam = async (): Promise<TeamCreateRequest | null> => {
+    if (!validateCreateFields()) return null;
 
     setFieldErrors({});
     setLocalError(null);
     setIsSubmitting(true);
 
     try {
-      const request: TeamCreateRequest = {
-        teamName: sanitizedTeamName,
-        displayName: teamName.trim() || undefined,
-        description: description.trim() || undefined,
-        color: teamColor || undefined,
-        members: [],
-        cwd: effectiveCwd,
-        executionTarget: { type: 'local', cwd: effectiveCwd || undefined },
-        harness: selectedHarness,
-        platform: selectedPlatform || 'bridge',
-        platformOptions: {},
-        providerRefs: selectedProviderRef ? [selectedProviderRef] : undefined,
-      };
+      const request = buildCreateRequest();
       await onCreate(request);
-      onOpenTeam(request.teamName, effectiveCwd || undefined, { displayName: request.displayName });
-      clearDraft();
-      resetState();
-      onClose();
+      return request;
     } catch {
       // error shown via provisioningErrorsByTeam
+      return null;
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCreate = async () => {
+    const request = await createLocalTeam();
+    if (!request) return;
+    setStep('done');
   };
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -491,13 +387,10 @@ export const CreateTeamDialog = ({
     >
       <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl sm:w-[40rem]">
         <DialogHeader>
-          <DialogTitle className="text-sm">创建团队</DialogTitle>
+          <DialogTitle className="text-sm">创建数字员工</DialogTitle>
           <DialogDescription className="text-xs">
-            {step === 'name' && '设置团队名称、Agent 类型和工作目录'}
-            {step === 'platform' && '选择要绑定的平台渠道'}
-            {step === 'qr' && '扫描二维码绑定平台'}
-            {step === 'form' && '填写平台凭证信息'}
-            {step === 'done' && '团队创建完成'}
+            {step === 'name' && '设置数字员工名称、Agent 类型和工作目录'}
+            {step === 'done' && '数字员工创建完成'}
           </DialogDescription>
         </DialogHeader>
 
@@ -514,9 +407,9 @@ export const CreateTeamDialog = ({
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="font-medium">
-                  该工作目录下已有团队"{conflictingTeam.displayName}"正在运行
+                  该工作目录下已有数字员工"{conflictingTeam.displayName}"正在运行
                 </p>
-                <p className="opacity-80">在同一目录同时运行两个团队存在风险。</p>
+                <p className="opacity-80">在同一目录同时运行两个数字员工存在风险。</p>
               </div>
               <button
                 type="button"
@@ -533,7 +426,7 @@ export const CreateTeamDialog = ({
         {step === 'name' && (
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="team-name">团队显示名称</Label>
+              <Label htmlFor="team-name">数字员工名称</Label>
               <Input
                 id="team-name"
                 className={cn(
@@ -542,24 +435,39 @@ export const CreateTeamDialog = ({
                 )}
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
-                placeholder="例如：产品团队 / 前端小组"
+                placeholder="例如：产品助手 / 前端工程师"
                 autoFocus
               />
-              {isNameTaken && (
-                <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
-                  团队名称已存在
-                </p>
-              )}
               {isNameProvisioning && (
                 <p className="text-[11px]" style={{ color: 'var(--warning-text)' }}>
-                  同名团队正在启动中
+                  同名数字员工正在启动中
                 </p>
               )}
-              {sanitizedTeamName && sanitizedTeamName !== teamName.trim() && (
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  内部标识：<span className="font-mono">{sanitizedTeamName}</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="team-bind-project">项目标识</Label>
+              <Input
+                id="team-bind-project"
+                className={cn(
+                  'h-8 text-xs font-mono',
+                  isBindProjectTaken && 'border-[var(--field-error-border)]'
+                )}
+                value={bindProject}
+                onChange={(e) => {
+                  setBindProject(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+                  setBindProjectManuallyEdited(true);
+                }}
+                placeholder="auto-generated-id"
+              />
+              {isBindProjectTaken && (
+                <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
+                  该项目标识已存在
                 </p>
               )}
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                用于 URL 路由和 cc-connect 项目绑定，仅限小写英文/数字/连字符
+              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -662,81 +570,16 @@ export const CreateTeamDialog = ({
           </div>
         )}
 
-        {/* ── Step 2: Platform selection ── */}
-        {step === 'platform' && (
-          <div className="space-y-3 py-2">
-            <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">选择要绑定的平台渠道：</p>
-            <div className="grid max-h-80 grid-cols-2 gap-2 overflow-y-auto">
-              {PLATFORM_OPTIONS.map(({ key, label, color, icon }) => (
-                <button
-                  key={key}
-                  onClick={() => handlePlatformSelect(key)}
-                  className="flex items-center gap-2.5 rounded-xl border border-gray-200 p-3 text-left transition-all hover:border-blue-500/50 hover:bg-blue-500/5 dark:border-gray-700"
-                >
-                  <div
-                    className={`h-9 w-9 rounded-lg ${color} flex shrink-0 items-center justify-center`}
-                  >
-                    {icon === 'qr' ? <Smartphone size={16} /> : <Settings2 size={16} />}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                      {label}
-                    </div>
-                    <div className="text-[11px] text-gray-400">
-                      {icon === 'qr' ? '扫码绑定' : '手动配置'}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-start pt-2">
-              <Button variant="outline" size="sm" onClick={() => setStep('name')}>
-                返回
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 3a: QR setup (feishu/weixin) ── */}
-        {step === 'qr' &&
-          (selectedPlatform === 'feishu' ||
-            selectedPlatform === 'lark' ||
-            selectedPlatform === 'weixin') && (
-            <PlatformSetupQR
-              platformType={selectedPlatform as 'feishu' | 'lark' | 'weixin'}
-              projectName={sanitizedTeamName}
-              workDir={effectiveCwd}
-              agentType={selectedHarness}
-              onComplete={handleQRComplete}
-              onCancel={() => setStep('platform')}
-            />
-          )}
-
-        {/* ── Step 3b: Manual form (telegram/slack/etc.) ── */}
-        {step === 'form' && platformMeta[selectedPlatform] && (
-          <PlatformManualForm
-            platformType={selectedPlatform}
-            platformMeta={platformMeta[selectedPlatform]}
-            projectName={sanitizedTeamName}
-            workDir={effectiveCwd}
-            agentType={selectedHarness}
-            onComplete={handleManualComplete}
-            onCancel={() => setStep('platform')}
-          />
-        )}
-
-        {/* ── Step 3c: Bridge (no setup) ── */}
+        {/* ── Step 2: Done ── */}
         {step === 'done' && (
           <div className="space-y-4 py-4">
             <div className="flex flex-col items-center gap-3 py-4">
               <CheckCircle2 size={48} className="text-green-500" />
               <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                团队已创建成功！
+                数字员工已创建成功！
               </p>
               <p className="text-center text-xs text-gray-500">
-                {selectedPlatform && selectedPlatform !== 'bridge'
-                  ? '平台绑定完成，重启服务使配置生效'
-                  : 'Bridge 模式已启用，无需额外配置'}
+                已在本机创建。外部渠道绑定可稍后在详情页完成。
               </p>
             </div>
           </div>
@@ -757,7 +600,7 @@ export const CreateTeamDialog = ({
                 {localError}
               </p>
             )}
-            {provisioningErrorsByTeam[sanitizedTeamName] && (
+            {provisioningErrorsByTeam[bindProject] && (
               <p
                 className="mt-1 rounded border p-2 text-xs"
                 style={{
@@ -766,7 +609,7 @@ export const CreateTeamDialog = ({
                   backgroundColor: 'var(--field-error-bg)',
                 }}
               >
-                {provisioningErrorsByTeam[sanitizedTeamName]}
+                {provisioningErrorsByTeam[bindProject]}
               </p>
             )}
           </div>
@@ -788,7 +631,7 @@ export const CreateTeamDialog = ({
                 <Button
                   size="sm"
                   onClick={() => {
-                    onOpenTeam(sanitizedTeamName, effectiveCwd, {
+                    onOpenTeam(bindProject, effectiveCwd || undefined, {
                       displayName: teamName.trim() || undefined,
                     });
                     clearDraft();
@@ -796,27 +639,19 @@ export const CreateTeamDialog = ({
                     onClose();
                   }}
                 >
-                  打开团队
+                  打开数字员工
                 </Button>
               </>
-            ) : step === 'name' ? (
+            ) : (
               <>
                 <Button variant="outline" size="sm" onClick={onClose}>
                   取消
                 </Button>
-                <Button
-                  size="sm"
-                  disabled={!sanitizedTeamName || !effectiveCwd}
-                  onClick={() => setStep('platform')}
-                >
-                  下一步
+                <Button size="sm" disabled={!teamName.trim() || !bindProject || !effectiveCwd || isSubmitting} onClick={handleCreate}>
+                  {isSubmitting ? '创建中...' : '创建数字员工'}
                 </Button>
               </>
-            ) : step === 'platform' ? (
-              <Button variant="outline" size="sm" onClick={() => setStep('name')}>
-                返回
-              </Button>
-            ) : null}
+            )}
           </div>
         </DialogFooter>
       </DialogContent>

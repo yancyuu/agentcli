@@ -17,7 +17,7 @@ export const SkillChip = ({ skill, onRemove }: SkillChipProps): React.JSX.Elemen
     <div className="group inline-flex items-center gap-1.5 rounded-full bg-[var(--color-bg-secondary)] px-2.5 py-1 text-xs transition-colors hover:bg-[var(--color-bg-secondary-hover)]">
       <span className="max-w-[120px] truncate text-[var(--color-text)]">{skill.name}</span>
       {skill.scope && (
-        <span className="rounded bg-blue-500/20 px-1 py-0.5 text-[10px] text-blue-400">
+        <span className="rounded bg-indigo-500/20 px-1 py-0.5 text-[10px] text-indigo-400">
           {skill.scope === 'project' ? '项目' : '用户'}
         </span>
       )}

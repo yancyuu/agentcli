@@ -453,11 +453,11 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    expect(host.textContent).toContain('重新启动团队');
+    expect(host.textContent).toContain('重新启动数字员工');
     expect(host.textContent).toContain('的当前运行，并使用现有配置重新启动');
     expect(
       Array.from(host.querySelectorAll('button')).some(
-        (button) => button.textContent === '重新启动团队'
+        (button) => button.textContent === '重新启动数字员工'
       )
     ).toBe(true);
 
@@ -502,7 +502,7 @@ describe('LaunchTeamDialog', () => {
     });
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '重新启动团队'
+      (button) => button.textContent === '重新启动数字员工'
     );
     expect(submitButton).toBeTruthy();
 
@@ -609,7 +609,7 @@ describe('LaunchTeamDialog', () => {
     expect(opencodePrepareCalls).toHaveLength(0);
 
     const submitButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '启动团队'
+      (button) => button.textContent === '启动数字员工'
     );
     expect(submitButton).toBeTruthy();
 

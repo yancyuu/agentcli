@@ -188,7 +188,7 @@ const ToolUsageBars = ({
             </span>
             <div className="h-3.5 flex-1 overflow-hidden rounded-sm bg-[var(--color-surface-raised)]">
               <div
-                className="h-full rounded-sm bg-blue-500/40"
+                className="h-full rounded-sm bg-indigo-500/40"
                 style={{ width: `${(count / maxCount) * 100}%` }}
               />
             </div>
@@ -241,7 +241,7 @@ const FilesTouchedSection = ({
           Files Touched ({validFiles.length})
         </p>
         {onShowAll && (
-          <button className="text-[10px] text-blue-400 hover:text-blue-300" onClick={onShowAll}>
+          <button className="text-[10px] text-indigo-400 hover:text-indigo-300" onClick={onShowAll}>
             View All Changes
           </button>
         )}

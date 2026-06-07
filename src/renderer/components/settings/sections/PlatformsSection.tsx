@@ -501,8 +501,8 @@ function AddPlatformDialog({
       onAdded(projectName);
       if (result.restartRequired) {
         const shouldRestart = await confirm({
-          title: '重启 cc-connect',
-          message: '渠道已添加。需要重启 cc-connect 才会生效。',
+          title: '重启服务',
+          message: '渠道已添加。需要重启服务才会生效。',
           confirmLabel: '立即重启',
           cancelLabel: '稍后重启',
         });
@@ -585,7 +585,7 @@ function AddPlatformDialog({
           {error && <p className="text-sm text-red-400">{error}</p>}
 
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            添加后需要重启 cc-connect 才能生效。
+            添加后需要重启服务才能生效。
           </p>
         </div>
 

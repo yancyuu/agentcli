@@ -1843,7 +1843,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           openTeamTab(effectiveTeamName, relaunchProjectPath || defaultProjectPath);
           closeDialog();
         } catch (err) {
-          const message = err instanceof Error ? err.message : '重新启动团队失败';
+          const message = err instanceof Error ? err.message : '重新启动数字员工失败';
           setLocalError(message);
           console.error('Failed to relaunch team from dialog:', err);
         } finally {
@@ -1999,8 +1999,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             : isSchedule
               ? '保存计划失败'
               : isRelaunch
-                ? '重新启动团队失败'
-                : '启动团队失败';
+                ? '重新启动数字员工失败'
+                : '启动数字员工失败';
         setLocalError(message);
         if (isLaunchMode) {
           console.error(
@@ -2038,8 +2038,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
   const dialogTitle = isLaunchMode
     ? isRelaunch
-      ? '重新启动团队'
-      : '启动团队'
+      ? '重新启动数字员工'
+      : '启动数字员工'
     : isEditing
       ? '编辑计划'
       : '创建计划';
@@ -2052,7 +2052,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       </>
     ) : (
       <>
-        通过 Agent CLI 启动团队 <span className="font-mono font-medium">{effectiveTeamName}</span>。
+        通过 Agent CLI 启动数字员工 <span className="font-mono font-medium">{effectiveTeamName}</span>。
       </>
     )
   ) : isEditing ? (
@@ -2065,8 +2065,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
   const submitLabel = isLaunchMode
     ? isRelaunch
-      ? '重新启动团队'
-      : '启动团队'
+      ? '重新启动数字员工'
+      : '启动数字员工'
     : isEditing
       ? '保存更改'
       : '创建计划';
@@ -2117,9 +2117,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="font-medium">重新启动会重置当前团队运行实例</p>
+                  <p className="font-medium">重新启动会重置当前数字员工运行实例</p>
                   <p className="opacity-80">
-                    系统会停止当前团队进程，并使用以下运行时配置重新启动。
+                    系统会停止当前数字员工进程，并使用以下运行时配置重新启动。
                     如需修改成员或工作流，请先在团队编辑面板中修改。
                     默认使用全新会话，避免恢复大上下文时触发 API 频率限制。
                   </p>
@@ -2419,7 +2419,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                 title={isRelaunch ? '重新启动设置' : '可选启动设置'}
                 description={
                   isRelaunch
-                    ? '重新启动团队前，请确认成员名单和团队负责人运行时。'
+                    ? '重新启动数字员工前，请确认成员名单和负责人运行时。'
                     : '默认只需关注项目路径；需要更多控制时再展开这里。'
                 }
                 summary={launchOptionalSummary}
@@ -2819,7 +2819,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     ) ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-blue-500"
+                        className="shrink-0 rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-indigo-500"
                         onClick={() => {
                           closeDialog();
                           openDashboard();

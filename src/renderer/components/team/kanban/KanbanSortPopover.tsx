@@ -66,7 +66,7 @@ export const KanbanSortPopover = ({
             >
               <ArrowUpDown size={14} />
               {isNonDefault && (
-                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-medium text-white">
                   1
                 </span>
               )}
@@ -90,7 +90,7 @@ export const KanbanSortPopover = ({
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                     isSelected
-                      ? 'bg-blue-500/15 text-blue-300'
+                      ? 'bg-indigo-500/15 text-indigo-300'
                       : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
                   )}
                   onClick={() => onSortChange({ field: option.field })}
@@ -98,7 +98,7 @@ export const KanbanSortPopover = ({
                   <span
                     className={cn(
                       'shrink-0',
-                      isSelected ? 'text-blue-400' : 'text-[var(--color-text-muted)]'
+                      isSelected ? 'text-indigo-400' : 'text-[var(--color-text-muted)]'
                     )}
                   >
                     {option.icon}
@@ -108,14 +108,14 @@ export const KanbanSortPopover = ({
                     <div
                       className={cn(
                         'text-[10px]',
-                        isSelected ? 'text-blue-300/70' : 'text-[var(--color-text-muted)]'
+                        isSelected ? 'text-indigo-300/70' : 'text-[var(--color-text-muted)]'
                       )}
                     >
                       {option.description}
                     </div>
                   </div>
                   {isSelected && (
-                    <ArrowDownUp size={12} className="ml-auto shrink-0 text-blue-400" />
+                    <ArrowDownUp size={12} className="ml-auto shrink-0 text-indigo-400" />
                   )}
                 </button>
               );

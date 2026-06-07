@@ -130,7 +130,7 @@ export const ProcessesSection = memo(function ProcessesSection({
                 {proc.url && (
                   <button
                     type="button"
-                    className="text-[var(--color-text-secondary)] underline decoration-dotted underline-offset-2 transition-colors hover:text-blue-400"
+                    className="text-[var(--color-text-secondary)] underline decoration-dotted underline-offset-2 transition-colors hover:text-indigo-400"
                     onClick={() => void api.openExternal(proc.url!)}
                     title={proc.url}
                   >
@@ -156,7 +156,7 @@ export const ProcessesSection = memo(function ProcessesSection({
               {alive && proc.url && (
                 <button
                   type="button"
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-blue-400 transition-colors hover:bg-blue-500/10"
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-indigo-400 transition-colors hover:bg-indigo-500/10"
                   onClick={() => void api.openExternal(proc.url!)}
                   title="在浏览器中打开"
                 >

@@ -421,9 +421,9 @@ export const SendMessageDialog = ({
 
             <div className={quote ? 'flex flex-col' : 'contents'}>
               {quote ? (
-                <div className="relative overflow-hidden rounded-t-md border border-b-0 border-blue-400/30 bg-blue-100/80 py-2 pl-3 pr-2 dark:border-blue-500/20 dark:bg-blue-950/20">
+                <div className="relative overflow-hidden rounded-t-md border border-b-0 border-indigo-400/30 bg-blue-100/80 py-2 pl-3 pr-2 dark:border-indigo-500/20 dark:bg-blue-950/20">
                   {/* Decorative quotation mark */}
-                  <span className="pointer-events-none absolute -right-1 top-1/2 -translate-y-1/2 select-none font-serif text-[64px] leading-none text-blue-500/[0.08] dark:text-blue-400/[0.08]">
+                  <span className="pointer-events-none absolute -right-1 top-1/2 -translate-y-1/2 select-none font-serif text-[64px] leading-none text-indigo-500/[0.08] dark:text-indigo-400/[0.08]">
                     &ldquo;
                   </span>
 
@@ -431,7 +431,7 @@ export const SendMessageDialog = ({
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        className="absolute right-1.5 top-1.5 z-10 rounded p-0.5 text-blue-400/60 hover:text-blue-600 dark:text-blue-300/40 dark:hover:text-blue-200"
+                        className="absolute right-1.5 top-1.5 z-10 rounded p-0.5 text-indigo-400/60 hover:text-indigo-600 dark:text-indigo-300/40 dark:hover:text-blue-200"
                         onClick={() => setQuote(undefined)}
                       >
                         <X size={12} />
@@ -441,7 +441,7 @@ export const SendMessageDialog = ({
                   </Tooltip>
 
                   <div className="mb-1 flex items-center gap-1.5">
-                    <span className="text-[10px] text-blue-600/70 dark:text-blue-300/60">
+                    <span className="text-[10px] text-indigo-600/70 dark:text-indigo-300/60">
                       正在回复
                     </span>
                     <MemberBadge name={quote.from} color={colorMap.get(quote.from)} size="sm" />
@@ -458,7 +458,7 @@ export const SendMessageDialog = ({
                   {isQuoteLong ? (
                     <button
                       type="button"
-                      className="mt-0.5 text-[10px] text-blue-500 hover:text-blue-700 dark:text-blue-400/60 dark:hover:text-blue-300"
+                      className="mt-0.5 text-[10px] text-indigo-500 hover:text-blue-700 dark:text-indigo-400/60 dark:hover:text-indigo-300"
                       onClick={() => setQuoteExpanded((v) => !v)}
                     >
                       {quoteExpanded ? '收起' : '展开'}
@@ -487,7 +487,7 @@ export const SendMessageDialog = ({
                 cornerAction={
                   <button
                     type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!canSend}
                     onClick={handleSubmit}
                   >

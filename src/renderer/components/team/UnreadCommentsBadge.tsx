@@ -21,7 +21,7 @@ export const UnreadCommentsBadge = ({
             {totalCount}
           </span>
           {unreadCount > 0 ? (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[8px] font-bold leading-none text-white shadow-sm">
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 text-[8px] font-bold leading-none text-white shadow-sm">
               {unreadCount}
             </span>
           ) : null}

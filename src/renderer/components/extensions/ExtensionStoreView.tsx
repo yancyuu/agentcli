@@ -300,91 +300,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
       );
     }
 
-    if (isMultimodel) {
-      return (
-        <div className="bg-surface/70 mx-4 mt-3 rounded-md border border-border px-4 py-3">
-          <div className="flex items-start gap-3">
-            <Info className="mt-0.5 size-4 shrink-0 text-text-secondary" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-text">多模型运行时能力</p>
-              <p className="mt-0.5 text-xs text-text-muted">
-                不同区域支持的提供商可能不同。插件会按运行时声明的能力显示。
-              </p>
-            </div>
-          </div>
-          {visibleProviders.length > 0 && (
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {visibleProviders.map((provider) => {
-                const providerLoading = cliProviderStatusLoading[provider.providerId] === true;
-                if (
-                  isProviderCapabilityCardLoading(provider, providerLoading) ||
-                  isCodexSnapshotPending(provider, codexSnapshotPending)
-                ) {
-                  return (
-                    <ProviderCapabilityCardSkeleton
-                      key={provider.providerId}
-                      providerId={provider.providerId}
-                      displayName={provider.displayName}
-                    />
-                  );
-                }
-
-                const statusTone = provider.authenticated
-                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300'
-                  : provider.supported
-                    ? 'border-amber-500/30 bg-amber-500/5 text-amber-300'
-                    : 'border-border bg-surface-raised text-text-muted';
-                const statusLabel = provider.authenticated
-                  ? '已连接'
-                  : provider.supported
-                    ? '需要设置'
-                    : '不支持';
-                return (
-                  <div
-                    key={provider.providerId}
-                    className={`rounded-md border px-3 py-2 ${statusTone}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="inline-flex items-center gap-2 text-sm font-medium">
-                          <ProviderBrandLogo
-                            providerId={provider.providerId}
-                            className="size-4 shrink-0"
-                          />
-                          <span>{provider.displayName}</span>
-                        </p>
-                        <p className="truncate text-[11px] text-text-muted">
-                          {provider.statusMessage ?? provider.backend?.label ?? '可配置'}
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="shrink-0">
-                        {statusLabel}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <div className="mx-4 mt-3 flex items-start gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
-        <Info className="mt-0.5 size-4 shrink-0 text-emerald-300" />
-        <div>
-          <p className="text-sm font-medium text-emerald-300">{runtimeDisplayName} 已就绪</p>
-          <p className="mt-0.5 text-xs text-text-muted">
-            可以从此页面管理插件
-            {effectiveCliStatus.installedVersion
-              ? `，使用 ${runtimeDisplayName} ${effectiveCliStatus.installedVersion}`
-              : ''}
-            .
-          </p>
-        </div>
-      </div>
-    );
+    return null;
   }, [
     cliProviderStatusLoading,
     codexSnapshotPending,
@@ -438,7 +354,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             )}
             {/* Active sessions warning */}
             {hasOngoingSessions && (
-              <div className="mb-4 flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400">
+              <div className="mb-4 flex items-center gap-2 rounded-md border border-indigo-500/30 bg-indigo-500/5 px-4 py-3 text-sm text-indigo-400">
                 <Info className="size-4 shrink-0" />
                 正在运行的会话需要重启后才会应用扩展变更。
               </div>

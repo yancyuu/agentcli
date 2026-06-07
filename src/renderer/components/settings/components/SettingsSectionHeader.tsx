@@ -14,11 +14,15 @@ export const SettingsSectionHeader = ({
 }: SettingsSectionHeaderProps): React.JSX.Element => {
   return (
     <h3
-      className="mb-2 mt-6 flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest first:mt-0"
+      className="mb-3 mt-7 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] first:mt-0"
       style={{ color: 'var(--color-text-muted)' }}
     >
       {icon}
       {title}
+      <div
+        className="ml-1 h-px flex-1"
+        style={{ backgroundColor: 'var(--color-border-subtle)' }}
+      />
     </h3>
   );
 };

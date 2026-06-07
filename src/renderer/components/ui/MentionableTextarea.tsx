@@ -309,8 +309,8 @@ function parseSegments(
 }
 
 // Default fallback color for mentions without a team color
-const DEFAULT_MENTION_BG = 'rgba(59, 130, 246, 0.15)';
-const DEFAULT_MENTION_TEXT = '#60a5fa';
+const DEFAULT_MENTION_BG = 'rgba(99, 102, 241, 0.15)';
+const DEFAULT_MENTION_TEXT = '#818cf8';
 const URL_BADGE_BG = 'var(--url-badge-bg)';
 const URL_BADGE_BORDER = 'var(--url-badge-border)';
 const URL_BADGE_TEXT = 'var(--url-badge-text)';
@@ -1235,7 +1235,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
                         style={
                           seg.encoded
                             ? {
-                                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                backgroundColor: 'rgba(99, 102, 241, 0.15)',
                                 color: PROSE_LINK,
                                 // Only vertical padding (doesn't affect inline text flow).
                                 // No horizontal padding/margin/box-shadow spread to avoid

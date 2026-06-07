@@ -63,8 +63,8 @@ const DISPATCH_STATUS_STYLE: Record<string, { bg: string; text: string; label: s
     text: 'text-yellow-600 dark:text-yellow-400',
     label: '已派发',
   },
-  received: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', label: '已接收' },
-  in_progress: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', label: '执行中' },
+  received: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400', label: '已接收' },
+  in_progress: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400', label: '执行中' },
   completed: {
     bg: 'bg-emerald-500/15',
     text: 'text-emerald-600 dark:text-emerald-400',
@@ -355,7 +355,7 @@ export const KanbanTaskCard = memo(
               className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                 task.needsClarification === 'user'
                   ? 'bg-red-500/15 text-red-400'
-                  : 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                  : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
               }`}
             >
               <HelpCircle size={10} />
@@ -392,7 +392,7 @@ export const KanbanTaskCard = memo(
 
         {hasBlocks ? (
           <div className="mb-2 flex flex-wrap items-center gap-1">
-            <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+            <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 dark:text-indigo-400">
               <ArrowRightFromLine size={10} />
               阻塞
             </span>

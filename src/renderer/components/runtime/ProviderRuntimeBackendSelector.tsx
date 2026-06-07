@@ -190,8 +190,8 @@ export const ProviderRuntimeBackendSelector = ({
                     <span
                       className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px]"
                       style={{
-                        color: '#93c5fd',
-                        backgroundColor: 'rgba(59, 130, 246, 0.14)',
+                        color: '#a5b4fc',
+                        backgroundColor: 'rgba(99, 102, 241, 0.14)',
                       }}
                     >
                       {getProviderRuntimeBackendAudienceLabel(option)}
@@ -258,8 +258,8 @@ export const ProviderRuntimeBackendSelector = ({
               <span
                 className="rounded-full px-1.5 py-0.5 text-[10px]"
                 style={{
-                  color: '#93c5fd',
-                  backgroundColor: 'rgba(59, 130, 246, 0.14)',
+                  color: '#a5b4fc',
+                  backgroundColor: 'rgba(99, 102, 241, 0.14)',
                 }}
               >
                 {selectedAudienceLabel}

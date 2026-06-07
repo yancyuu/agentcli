@@ -165,7 +165,7 @@ export const MentionSuggestionList = ({
         ) : isFile ? (
           <FileIcon fileName={s.name} className="size-3.5" />
         ) : isTask ? (
-          <Hash size={13} className="shrink-0 text-blue-500 dark:text-blue-400" />
+          <Hash size={13} className="shrink-0 text-indigo-500 dark:text-indigo-400" />
         ) : isCommand ? (
           <Command size={13} className="shrink-0 text-amber-500 dark:text-amber-400" />
         ) : isSkill ? (
@@ -190,7 +190,7 @@ export const MentionSuggestionList = ({
               className={isFileOrFolder ? 'truncate' : 'font-medium'}
               style={
                 isTask
-                  ? { color: 'var(--color-link, #60a5fa)' }
+                  ? { color: 'var(--color-link, #818cf8)' }
                   : isCommand
                     ? { color: 'rgb(245 158 11)' }
                     : isSkill

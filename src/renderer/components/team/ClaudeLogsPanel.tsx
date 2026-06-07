@@ -115,7 +115,7 @@ export const ClaudeLogsPanel = ({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 border-blue-500/30 bg-blue-600 px-2 text-xs text-white hover:bg-blue-500"
+              className="h-7 border-indigo-500/30 bg-indigo-600 px-2 text-xs text-white hover:bg-indigo-500"
               onClick={applyPending}
             >
               +{pendingNewCount} 条新日志

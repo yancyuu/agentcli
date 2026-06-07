@@ -40,7 +40,7 @@ function getHighlight(
 ): { className: string; style?: React.CSSProperties } {
   if (!isHighlighted) return { className: 'ring-0 bg-transparent' };
   if (isSearchHighlight) return { className: 'ring-2 ring-yellow-500/30 bg-yellow-500/5' };
-  if (isNavigationHighlight) return { className: 'ring-2 ring-blue-500/30 bg-blue-500/5' };
+  if (isNavigationHighlight) return { className: 'ring-2 ring-indigo-500/30 bg-indigo-500/5' };
   const key = highlightColor ?? 'red';
   if (isPresetColorKey(key)) return { className: HIGHLIGHT_CLASSES[key] };
   return getHighlightProps(key);

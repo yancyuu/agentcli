@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermit Terminal UI — Full Interactive Prototype</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Press+Start+2P&display=swap');
+
+  :root {
+    --bg-crt:        #0a0a0f;
+    --bg-panel:      #0d0e14;
+    --bg-surface:    #111318;
+    --bg-raised:     #181a22;
+    --bg-hover:      #1e2030;
+    --bg-active:     #252838;
+    --text-primary:  #c8cdd8;
+    --text-secondary:#6b7280;
+    --text-muted:    #4b5060;
+    --text-dim:      #2e3240;
+    --accent:        #4ade80;
+    --accent-dim:    #22c55e;
+    --accent-bright: #86efac;
+    --accent-glow:   rgba(74, 222, 128, 0.12);
+    --status-ok:     #4ade80;
+    --status-warn:   #fbbf24;
+    --status-err:    #f87171;
+    --status-info:   #818cf8;
+    --border:        rgba(74, 222, 128, 0.08);
+    --border-focus:  rgba(74, 222, 128, 0.25);
+    --font-mono:     'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+    --font-pixel:    'Press Start 2P', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--bg-crt);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  #app::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+
+  #app::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none; z-index: 9998;
+  }
+
+  #app { display: flex; height: 100vh; position: relative; }
+
+  .sidebar {
+    width: 56px; background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 8px 0; gap: 2px; flex-shrink: 0;
+  }
+
+  .sidebar-logo {
+    font-family: var(--font-pixel); font-size: 8px; color: var(--accent);
+    margin-bottom: 16px; text-shadow: 0 0 8px var(--accent-glow);
+    letter-spacing: 2px; cursor: pointer;
+  }
+
+  .sidebar-item {
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; cursor: pointer; color: var(--text-muted);
+    font-size: 15px; transition: all 0.15s; position: relative;
+  }
+
+  .sidebar-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  .sidebar-item.active { background: var(--accent-glow); color: var(--accent); }
+
+  .sidebar-item.active::before {
+    content: ''; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 16px; background: var(--accent); border-radius: 0 2px 2px 0;
+  }
+
+  .sidebar-sep { width: 24px; height: 1px; background: var(--border); margin: 6px 0; }
+
+  .sidebar-tooltip {
+    display: none; position: absolute; left: 52px; top: 50%; transform: translateY(-50%);
+    background: var(--bg-raised); border: 1px solid var(--border);
+    padding: 3px 8px; border-radius: 3px; font-size: 10px; color: var(--text-secondary);
+    white-space: nowrap; z-index: 100;
+  }
+
+  .sidebar-item:hover .sidebar-tooltip { display: block; }
+
+  .list-panel {
+    width: 240px; background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+
+  .panel-header {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .panel-header .diamond {
+    width: 6px; height: 6px; background: var(--accent);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  }
+
+  .panel-header-actions { margin-left: auto; display: flex; gap: 4px; }
+
+  .panel-header-btn {
+    padding: 2px 6px; font-size: 11px; color: var(--text-muted);
+    background: var(--bg-hover); border: 1px solid var(--border);
+    border-radius: 3px; cursor: pointer; font-family: var(--font-mono);
+    transition: all 0.1s;
+  }
+
+  .panel-header-btn:hover { color: var(--accent); border-color: var(--border-focus); }
+
+  .list-content { flex: 1; overflow-y: auto; padding: 4px 0; }
+
+  .list-item {
+    padding: 6px 12px; cursor: pointer; border-left: 2px solid transparent;
+    transition: all 0.1s; display: flex; align-items: center; gap: 8px;
+  }
+
+  .list-item:hover { background: var(--bg-hover); }
+  .list-item.active { background: var(--accent-glow); border-left-color: var(--accent); }
+
+  .list-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .list-dot.green { background: var(--status-ok); box-shadow: 0 0 4px var(--status-ok); }
+  .list-dot.amber { background: var(--status-warn); }
+  .list-dot.red   { background: var(--status-err); }
+  .list-dot.dim   { background: var(--text-muted); }
+
+  .list-item-name {
+    font-size: 12px; color: var(--text-primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+  }
+
+  .list-item-meta { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+
+  .main-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .tab-bar {
+    height: 36px; background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 8px; gap: 0;
+    -webkit-app-region: drag;
+  }
+
+  .tab {
+    height: 28px; padding: 0 12px; font-size: 11px;
+    display: flex; align-items: center; gap: 6px;
+    color: var(--text-muted); cursor: pointer;
+    border-radius: 4px 4px 0 0; border: 1px solid transparent; border-bottom: none;
+    transition: all 0.1s; -webkit-app-region: no-drag; position: relative;
+  }
+
+  .tab:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  .tab.active { background: var(--bg-surface); color: var(--accent); border-color: var(--border); }
+  .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: var(--bg-surface); }
+
+  .tab-close { font-size: 14px; color: var(--text-muted); opacity: 0; transition: opacity 0.1s; margin-left: 4px; }
+  .tab:hover .tab-close { opacity: 1; }
+
+  .tab-add {
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); cursor: pointer; font-size: 16px; border-radius: 4px;
+  }
+
+  .tab-add:hover { background: var(--bg-hover); color: var(--text-secondary); }
+
+  .content-area { flex: 1; overflow-y: auto; padding: 0; }
+
+  .status-bar {
+    height: 24px; background: var(--bg-raised);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 12px;
+    font-size: 10px; color: var(--text-muted); gap: 16px;
+  }
+
+  .status-bar .sep { color: var(--text-dim); }
+  .status-bar .accent { color: var(--accent); }
+
+  .context-bar { height: 3px; background: var(--bg-hover); }
+  .context-bar-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+    transition: width 0.5s;
+  }
+
+  .term-block {
+    margin: 12px 16px; background: var(--bg-crt);
+    border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
+  }
+
+  .term-header {
+    padding: 4px 10px; background: var(--bg-raised);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px; letter-spacing: 1px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .term-header .prompt { color: var(--accent); font-weight: 700; }
+
+  .term-body { padding: 10px 12px; font-size: 12px; line-height: 1.8; }
+
+  .term-line { display: flex; gap: 8px; align-items: baseline; }
+  .term-line .prefix { color: var(--accent); font-weight: 600; flex-shrink: 0; min-width: 12px; }
+  .term-line .content { color: var(--text-primary); flex: 1; }
+  .term-line .dim { color: var(--text-muted); }
+  .term-line .hi { color: var(--accent-bright); }
+  .term-line .warn { color: var(--status-warn); }
+  .term-line .err { color: var(--status-err); }
+  .term-line .info { color: var(--status-info); }
+  .term-sep { border: none; border-top: 1px dashed var(--border); margin: 6px 0; }
+
+  .form-group { margin-bottom: 14px; }
+  .form-label {
+    display: block; font-size: 10px; font-weight: 600;
+    letter-spacing: 1px; color: var(--text-muted); margin-bottom: 4px;
+  }
+
+  .form-input {
+    width: 100%; padding: 6px 10px; background: var(--bg-crt);
+    border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text-primary); font-family: var(--font-mono);
+    font-size: 12px; outline: none; transition: border-color 0.15s;
+  }
+
+  .form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+  .form-input::placeholder { color: var(--text-dim); }
+
+  .form-select {
+    width: 100%; padding: 6px 10px; background: var(--bg-crt);
+    border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text-primary); font-family: var(--font-mono);
+    font-size: 12px; outline: none; cursor: pointer; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%234b5060'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center;
+  }
+
+  .form-select:focus { border-color: var(--accent); }
+
+  .form-textarea {
+    width: 100%; padding: 6px 10px; background: var(--bg-crt);
+    border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text-primary); font-family: var(--font-mono);
+    font-size: 12px; outline: none; resize: vertical; min-height: 60px;
+  }
+
+  .form-textarea:focus { border-color: var(--accent); }
+
+  .form-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    cursor: pointer; font-size: 12px; color: var(--text-secondary);
+  }
+
+  .form-toggle-track {
+    width: 32px; height: 16px; background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 8px;
+    position: relative; transition: all 0.2s;
+  }
+
+  .form-toggle-track.on { background: var(--accent-glow); border-color: var(--accent); }
+
+  .form-toggle-thumb {
+    width: 12px; height: 12px; background: var(--text-muted);
+    border-radius: 50%; position: absolute; top: 1px; left: 1px; transition: all 0.2s;
+  }
+
+  .form-toggle-track.on .form-toggle-thumb { left: 17px; background: var(--accent); }
+
+  .btn {
+    padding: 6px 14px; font-family: var(--font-mono); font-size: 11px;
+    font-weight: 500; border: 1px solid var(--border); border-radius: 3px;
+    cursor: pointer; transition: all 0.15s; letter-spacing: 0.5px;
+  }
+
+  .btn-primary { background: var(--accent); color: var(--bg-crt); border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-bright); }
+  .btn-secondary { background: transparent; color: var(--text-secondary); }
+  .btn-secondary:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+  .btn-ghost:hover { color: var(--accent); }
+  .btn-danger { background: transparent; color: var(--status-err); border-color: rgba(248,113,113,0.2); }
+  .btn-danger:hover { background: rgba(248,113,113,0.1); }
+
+  .kanban { display: flex; gap: 12px; padding: 0 16px 16px; flex: 1; overflow-x: auto; }
+  .kanban-col { min-width: 220px; flex: 1; display: flex; flex-direction: column; }
+
+  .kanban-col-header {
+    padding: 6px 10px; font-size: 10px; font-weight: 700;
+    letter-spacing: 1.5px; border-bottom: 2px solid; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .kanban-col-header .count { font-weight: 400; color: var(--text-muted); }
+  .kanban-col.todo .kanban-col-header { color: var(--status-info); border-color: rgba(129,140,248,0.3); }
+  .kanban-col.wip .kanban-col-header  { color: var(--status-warn); border-color: rgba(251,191,36,0.3); }
+  .kanban-col.done .kanban-col-header { color: var(--status-ok); border-color: rgba(74,222,128,0.3); }
+
+  .kanban-card {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px; margin-bottom: 6px;
+    cursor: pointer; transition: all 0.1s;
+  }
+
+  .kanban-card:hover { border-color: var(--border-focus); background: var(--bg-raised); }
+  .kanban-card-id { font-size: 9px; color: var(--text-muted); font-weight: 600; margin-bottom: 3px; }
+  .kanban-card-title { font-size: 12px; color: var(--text-primary); margin-bottom: 5px; }
+  .kanban-card-meta { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+
+  .kanban-tag {
+    padding: 1px 5px; background: var(--bg-hover); border-radius: 2px;
+    font-size: 9px; font-weight: 500;
+  }
+
+  .kanban-tag.green { color: var(--accent); }
+  .kanban-tag.amber { color: var(--status-warn); }
+  .kanban-tag.muted { color: var(--text-muted); }
+
+  .kanban-priority { font-size: 10px; }
+  .kanban-priority.high { color: var(--status-err); }
+  .kanban-priority.med  { color: var(--status-warn); }
+  .kanban-priority.low  { color: var(--text-muted); }
+
+  .progress { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .progress-track { flex: 1; height: 4px; background: var(--bg-hover); border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 2px; }
+  .progress-fill.green { background: var(--accent); }
+  .progress-fill.amber { background: var(--status-warn); }
+  .progress-fill.red   { background: var(--status-err); }
+  .progress-text { font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right; }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 1000;
+    align-items: center; justify-content: center;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 6px; width: 520px; max-height: 80vh; overflow-y: auto;
+  }
+
+  .modal-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); flex: 1; }
+  .modal-close { color: var(--text-muted); cursor: pointer; font-size: 16px; }
+  .modal-close:hover { color: var(--text-primary); }
+  .modal-body { padding: 16px; }
+  .modal-footer {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 8px;
+  }
+
+  .settings-layout { display: flex; height: 100%; }
+
+  .settings-nav {
+    width: 180px; background: var(--bg-panel);
+    border-right: 1px solid var(--border); padding: 8px 0;
+  }
+
+  .settings-nav-item {
+    padding: 6px 14px; font-size: 11px; color: var(--text-muted);
+    cursor: pointer; border-left: 2px solid transparent; transition: all 0.1s;
+  }
+
+  .settings-nav-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  .settings-nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-glow); }
+
+  .settings-content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+
+  .settings-title {
+    font-size: 14px; font-weight: 600; color: var(--text-primary);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+
+  .settings-title .prompt { color: var(--accent); }
+
+  .settings-section { margin-bottom: 24px; }
+
+  .settings-section-title {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--text-muted); margin-bottom: 10px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; border-bottom: 1px solid rgba(74,222,128,0.03);
+  }
+
+  .settings-row-label { font-size: 12px; color: var(--text-secondary); }
+  .settings-row-desc { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .settings-row-value { display: flex; align-items: center; gap: 8px; }
+
+  .team-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px; padding: 16px;
+  }
+
+  .team-card {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 14px; cursor: pointer; transition: all 0.15s;
+  }
+
+  .team-card:hover { border-color: var(--border-focus); background: var(--bg-raised); }
+
+  .team-card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+  .team-card-icon {
+    width: 32px; height: 32px; background: var(--accent-glow);
+    border: 1px solid rgba(74,222,128,0.15); border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--accent);
+  }
+
+  .team-card-name { font-size: 13px; font-weight: 600; color: var(--text-primary); flex: 1; }
+
+  .team-card-status {
+    font-size: 9px; letter-spacing: 1px; padding: 1px 6px; border-radius: 2px;
+  }
+
+  .team-card-status.active { color: var(--accent); background: var(--accent-glow); }
+  .team-card-status.idle { color: var(--text-muted); background: var(--bg-hover); }
+  .team-card-status.error { color: var(--status-err); background: rgba(248,113,113,0.1); }
+
+  .team-card-desc {
+    font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .team-card-stats { display: flex; gap: 14px; font-size: 10px; color: var(--text-muted); }
+  .team-card-stats .val { color: var(--accent); font-weight: 600; }
+
+  .team-card-footer {
+    margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 10px; color: var(--text-muted);
+  }
+
+  .sys-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px; padding: 16px;
+  }
+
+  .sys-card {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 14px;
+  }
+
+  .sys-card-label { font-size: 9px; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; }
+  .sys-card-value { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+  .sys-card-value.green { color: var(--accent); }
+  .sys-card-value.amber { color: var(--status-warn); }
+  .sys-card-sub { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+  .calendar-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 1px; padding: 0 16px;
+  }
+
+  .cal-header {
+    padding: 6px; font-size: 9px; letter-spacing: 1px; color: var(--text-muted);
+    text-align: center; border-bottom: 1px solid var(--border);
+  }
+
+  .cal-day {
+    padding: 6px; min-height: 60px; font-size: 10px;
+    color: var(--text-muted); background: var(--bg-surface);
+  }
+
+  .cal-day.today { background: var(--accent-glow); }
+  .cal-day-num { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+  .cal-day.today .cal-day-num { color: var(--accent); font-weight: 700; }
+
+  .cal-event {
+    padding: 1px 4px; font-size: 9px; border-radius: 2px; margin-bottom: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .cal-event.green { background: var(--accent-glow); color: var(--accent); }
+  .cal-event.amber { background: rgba(251,191,36,0.15); color: var(--status-warn); }
+  .cal-event.info  { background: rgba(129,140,248,0.15); color: var(--status-info); }
+
+  .cursor-blink {
+    display: inline-block; width: 7px; height: 14px; background: var(--accent);
+    animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px;
+  }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  @keyframes pulse-glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--bg-active); }
+
+  .hidden { display: none !important; }
+  .page { display: none; height: 100%; flex-direction: column; }
+  .page.active { display: flex; }
+
+  .right-panel {
+    width: 260px; background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+
+  .log-entry {
+    padding: 5px 12px; font-size: 11px; display: flex; gap: 6px;
+    border-bottom: 1px solid rgba(74,222,128,0.03);
+  }
+
+  .log-time { color: var(--text-muted); flex-shrink: 0; font-size: 10px; min-width: 38px; }
+  .log-msg { color: var(--text-secondary); flex: 1; }
+  .log-msg .hi { color: var(--accent); }
+
+  .badge {
+    padding: 1px 6px; font-size: 9px; border-radius: 2px;
+    font-weight: 500; letter-spacing: 0.5px;
+  }
+  .badge.green { background: var(--accent-glow); color: var(--accent); }
+  .badge.amber { background: rgba(251,191,36,0.12); color: var(--status-warn); }
+  .badge.info  { background: rgba(129,140,248,0.12); color: var(--status-info); }
+  .badge.muted { background: var(--bg-hover); color: var(--text-muted); }
+
+  .toast {
+    position: fixed; bottom: 36px; right: 16px;
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 14px;
+    font-size: 11px; color: var(--text-secondary);
+    display: flex; align-items: center; gap: 8px;
+    z-index: 2000; animation: slideIn 0.3s ease-out;
+  }
+
+  .toast .accent { color: var(--accent); }
+
+  @keyframes slideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ Sidebar ═══ -->
+  <nav class="sidebar">
+    <div class="sidebar-logo" onclick="navigate('teams')">H</div>
+    <div class="sidebar-item active" data-nav="teams" onclick="navigate('teams')">
+      ⟐<span class="sidebar-tooltip">团队</span>
+    </div>
+    <div class="sidebar-item" data-nav="sessions" onclick="navigate('sessions')">
+      ◐<span class="sidebar-tooltip">会话</span>
+    </div>
+    <div class="sidebar-item" data-nav="system" onclick="navigate('system')">
+      ◈<span class="sidebar-tooltip">系统</span>
+    </div>
+    <div class="sidebar-sep"></div>
+    <div class="sidebar-item" data-nav="schedules" onclick="navigate('schedules')">
+      ◴<span class="sidebar-tooltip">排期</span>
+    </div>
+    <div class="sidebar-item" data-nav="analytics" onclick="navigate('analytics')">
+      ▧<span class="sidebar-tooltip">统计</span>
+    </div>
+    <div style="flex:1"></div>
+    <div class="sidebar-item" data-nav="settings" onclick="navigate('settings')">
+      ⚙<span class="sidebar-tooltip">设置</span>
+    </div>
+  </nav>
+
+  <!-- ═══ List Panel ═══ -->
+  <div class="list-panel" id="listPanel">
+    <div id="list-teams">
+      <div class="panel-header">
+        <span class="diamond"></span> 团队
+        <div class="panel-header-actions">
+          <button class="panel-header-btn" onclick="openModal('createTeam')">+ 新建</button>
+        </div>
+      </div>
+      <div class="list-content">
+        <div class="list-item active" onclick="navigate('team-detail')">
+          <span class="list-dot green"></span>
+          <span class="list-item-name">后端小队</span>
+          <span class="list-item-meta">4人</span>
+        </div>
+        <div class="list-item" onclick="navigate('team-detail')">
+          <span class="list-dot amber"></span>
+          <span class="list-item-name">前端小队</span>
+          <span class="list-item-meta">3人</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot green"></span>
+          <span class="list-item-name">运维流水线</span>
+          <span class="list-item-meta">2人</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot dim"></span>
+          <span class="list-item-name">数据迁移</span>
+          <span class="list-item-meta">5人</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot red"></span>
+          <span class="list-item-name">安全审计</span>
+          <span class="list-item-meta">1人</span>
+        </div>
+      </div>
+    </div>
+    <div id="list-sessions" class="hidden">
+      <div class="panel-header">
+        <span class="diamond"></span> 会话
+        <div class="panel-header-actions">
+          <button class="panel-header-btn">+ 新建</button>
+        </div>
+      </div>
+      <div class="list-content">
+        <div class="list-item active">
+          <span class="list-dot green"></span>
+          <span class="list-item-name">auth-重构</span>
+          <span class="list-item-meta">3分钟前</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot amber"></span>
+          <span class="list-item-name">api-重设计</span>
+          <span class="list-item-meta">18分钟前</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot dim"></span>
+          <span class="list-item-name">bug修复-452</span>
+          <span class="list-item-meta">2小时前</span>
+        </div>
+        <div class="list-item">
+          <span class="list-dot dim"></span>
+          <span class="list-item-name">文档更新</span>
+          <span class="list-item-meta">1天前</span>
+        </div>
+      </div>
+    </div>
+    <div id="list-system" class="hidden">
+      <div class="panel-header"><span class="diamond"></span> 系统</div>
+      <div class="list-content">
+        <div class="list-item active"><span class="list-item-name" style="color:var(--accent)">▸ 总览</span></div>
+        <div class="list-item"><span class="list-item-name">CLI 状态</span></div>
+        <div class="list-item"><span class="list-item-name">进程管理</span></div>
+        <div class="list-item"><span class="list-item-name">扩展</span></div>
+        <div class="list-item"><span class="list-item-name">日志</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Main Content ═══ -->
+  <div class="main-content">
+    <div class="tab-bar">
+      <div class="tab active" id="tab-main">
+        <span>⟐</span> <span id="tab-main-label">后端小队</span>
+      </div>
+      <div class="tab" onclick="navigate('sessions')">
+        <span>◐</span> 会话
+      </div>
+      <div class="tab-add" onclick="showToast('新标签页 — 原型中暂未实现')">+</div>
+      <div style="flex:1"></div>
+      <span style="font-size:10px; color:var(--text-dim); margin-right:8px">⌘P 命令面板</span>
+    </div>
+
+    <div class="context-bar"><div class="context-bar-fill" style="width:62%"></div></div>
+
+    <div class="content-area">
+
+      <!-- ═══ 团队详情 ═══ -->
+      <div class="page active" id="page-team-detail">
+        <div class="content-area" style="display:flex">
+          <div style="flex:1; overflow-y:auto">
+            <div style="padding:14px 16px; border-bottom:1px solid var(--border); background:var(--bg-surface)">
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px">
+                <div style="width:32px;height:32px;background:var(--accent-glow);border:1px solid rgba(74,222,128,0.15);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--accent)">⟐</div>
+                <span style="font-size:14px;font-weight:600;color:var(--text-primary)">后端小队</span>
+                <span style="font-size:9px;color:var(--text-muted);padding:1px 6px;background:var(--bg-raised);border-radius:3px">team_0x7f3a</span>
+                <div style="flex:1"></div>
+                <button class="btn btn-secondary" onclick="openModal('editTeam')">编辑</button>
+                <button class="btn btn-primary" onclick="showToast('团队已重启 ▸')">重启</button>
+              </div>
+              <div style="display:flex; gap:18px; font-size:11px; color:var(--text-secondary)">
+                <span>员工 <span style="color:var(--accent);font-weight:600">4</span></span>
+                <span>任务 <span style="color:var(--accent);font-weight:600">7/12</span></span>
+                <span>令牌 <span style="color:var(--accent);font-weight:600">142,380</span></span>
+                <span>运行 <span style="color:var(--accent);font-weight:600">2小时34分</span></span>
+              </div>
+            </div>
+
+            <div class="term-block">
+              <div class="term-header"><span class="prompt">▸</span> 员工状态</div>
+              <div class="term-body">
+                <div class="term-line"><span class="prefix" style="color:var(--accent)">●</span><span class="content"><span class="hi">架构师</span> <span class="dim">············</span> <span class="hi">运行中</span> <span class="dim">2小时12分</span></span></div>
+                <div class="term-line"><span class="prefix" style="color:var(--status-ok)">●</span><span class="content"><span class="hi">探索者</span> <span class="dim">············</span> <span style="color:var(--status-ok)">已完成</span> <span class="dim">18分钟前</span></span></div>
+                <div class="term-line"><span class="prefix" style="color:var(--status-warn)">●</span><span class="content"><span class="hi">实现者</span> <span class="dim">···········</span> <span style="color:var(--status-warn)">等待中</span> <span class="dim">阻塞于 #T-005</span></span></div>
+                <div class="term-line"><span class="prefix">●</span><span class="content"><span class="hi">守护者</span> <span class="dim">···········</span> <span class="dim">空闲</span></span></div>
+                <hr class="term-sep">
+                <div class="term-line"><span class="prefix">$</span><span class="content dim">4 名员工 · 2 名活跃 · 142,380 令牌 · 上下文 62%</span></div>
+              </div>
+            </div>
+
+            <div class="term-block">
+              <div class="term-header"><span class="prompt">▸</span> 任务进度</div>
+              <div class="term-body">
+                <div class="term-line"><span class="prefix">[1]</span><span class="content">设计新认证流程</span></div>
+                <div class="progress"><div class="progress-track"><div class="progress-fill green" style="width:100%"></div></div><span class="progress-text">100%</span></div>
+                <div class="term-line" style="margin-top:4px"><span class="prefix">[2]</span><span class="content">实现 JWT 刷新令牌</span></div>
+                <div class="progress"><div class="progress-track"><div class="progress-fill green" style="width:68%"></div></div><span class="progress-text">68%</span></div>
+                <div class="term-line" style="margin-top:4px"><span class="prefix">[3]</span><span class="content">编写集成测试</span></div>
+                <div class="progress"><div class="progress-track"><div class="progress-fill amber" style="width:30%"></div></div><span class="progress-text">30%</span></div>
+                <div class="term-line" style="margin-top:4px"><span class="prefix">[4]</span><span class="content">安全审查与部署</span></div>
+                <div class="progress"><div class="progress-track"><div class="progress-fill red" style="width:5%"></div></div><span class="progress-text">5%</span></div>
+              </div>
+            </div>
+
+            <div style="padding:12px 16px 0">
+              <div class="panel-header" style="padding:0;border:none;margin-bottom:8px">
+                <span class="diamond"></span> 看板
+              </div>
+            </div>
+            <div class="kanban">
+              <div class="kanban-col todo">
+                <div class="kanban-col-header">○ 待办 <span class="count">3</span></div>
+                <div class="kanban-card">
+                  <div class="kanban-card-id">#T-008</div>
+                  <div class="kanban-card-title">添加限流中间件</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">实现者</span><span class="kanban-priority high">● 紧急</span></div>
+                </div>
+                <div class="kanban-card">
+                  <div class="kanban-card-id">#T-009</div>
+                  <div class="kanban-card-title">更新接口文档</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag amber">探索者</span><span class="kanban-priority low">● 低优</span></div>
+                </div>
+                <div class="kanban-card">
+                  <div class="kanban-card-id">#T-010</div>
+                  <div class="kanban-card-title">修复 WebSocket 内存泄漏</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag muted">未分配</span><span class="kanban-priority med">● 中等</span></div>
+                </div>
+              </div>
+              <div class="kanban-col wip">
+                <div class="kanban-col-header">◔ 进行中 <span class="count">2</span></div>
+                <div class="kanban-card">
+                  <div class="kanban-card-id">#T-005</div>
+                  <div class="kanban-card-title">实现 JWT 刷新令牌轮转</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">架构师</span><span class="kanban-priority high">● 紧急</span></div>
+                  <div class="progress" style="margin-top:6px"><div class="progress-track"><div class="progress-fill green" style="width:68%"></div></div><span class="progress-text">68%</span></div>
+                </div>
+                <div class="kanban-card">
+                  <div class="kanban-card-id">#T-006</div>
+                  <div class="kanban-card-title">编写认证集成测试</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">探索者</span><span class="kanban-priority med">● 中等</span></div>
+                  <div class="progress" style="margin-top:6px"><div class="progress-track"><div class="progress-fill amber" style="width:30%"></div></div><span class="progress-text">30%</span></div>
+                </div>
+              </div>
+              <div class="kanban-col done">
+                <div class="kanban-col-header">● 已完成 <span class="count">5</span></div>
+                <div class="kanban-card" style="opacity:0.5">
+                  <div class="kanban-card-id">#T-001</div>
+                  <div class="kanban-card-title">扫描代码库认证模式</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">探索者</span><span style="color:var(--status-ok);font-size:10px">✓</span></div>
+                </div>
+                <div class="kanban-card" style="opacity:0.5">
+                  <div class="kanban-card-id">#T-003</div>
+                  <div class="kanban-card-title">设计新认证流程</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">架构师</span><span style="color:var(--status-ok);font-size:10px">✓</span></div>
+                </div>
+                <div class="kanban-card" style="opacity:0.5">
+                  <div class="kanban-card-id">#T-004</div>
+                  <div class="kanban-card-title">搭建测试环境</div>
+                  <div class="kanban-card-meta"><span class="kanban-tag green">实现者</span><span style="color:var(--status-ok);font-size:10px">✓</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="right-panel">
+            <div class="panel-header"><span class="diamond"></span> 动态</div>
+            <div style="flex:1; overflow-y:auto">
+              <div class="log-entry"><span class="log-time">14:32</span><span style="color:var(--accent)">▸</span><span class="log-msg"><span class="hi">架构师</span> 完成了 #T-003</span></div>
+              <div class="log-entry"><span class="log-time">14:28</span><span style="color:var(--status-info)">↻</span><span class="log-msg"><span class="hi">实现者</span> 等待 #T-005</span></div>
+              <div class="log-entry"><span class="log-time">14:25</span><span style="color:var(--status-ok)">✓</span><span class="log-msg"><span class="hi">探索者</span> 完成扫描</span></div>
+              <div class="log-entry"><span class="log-time">14:20</span><span style="color:var(--status-warn)">⚠</span><span class="log-msg">上下文已达 <span class="hi">62%</span></span></div>
+              <div class="log-entry"><span class="log-time">14:18</span><span style="color:var(--accent)">▸</span><span class="log-msg"><span class="hi">架构师</span> 开始了 #T-005</span></div>
+              <div class="log-entry"><span class="log-time">14:12</span><span style="color:var(--status-info)">◉</span><span class="log-msg">团队 <span class="hi">后端小队</span> 已创建</span></div>
+              <div class="log-entry"><span class="log-time">14:10</span><span style="color:var(--accent)">▸</span><span class="log-msg"><span class="hi">探索者</span> 已加入</span></div>
+              <div class="log-entry"><span class="log-time">14:08</span><span style="color:var(--accent)">▸</span><span class="log-msg"><span class="hi">守护者</span> 已加入</span></div>
+              <div class="log-entry"><span class="log-time">14:05</span><span style="color:var(--text-muted)">◇</span><span class="log-msg">会话已创建</span></div>
+            </div>
+            <div style="border-top:1px solid var(--border); padding:8px 12px">
+              <div class="panel-header" style="padding:0;border:none;margin-bottom:6px"><span class="diamond"></span> 消息</div>
+              <div style="font-size:11px;color:var(--text-secondary);padding:4px 0">
+                <div style="margin-bottom:4px">
+                  <span style="color:var(--accent)">架构师</span>
+                  <span style="color:var(--text-muted)"> → </span>
+                  <span style="color:var(--status-info)">实现者</span>
+                </div>
+                <div style="color:var(--text-muted);font-size:10px">
+                  认证流程设计已完成，请查看 #T-003 输出<span class="cursor-blink"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 团队列表 ═══ -->
+      <div class="page" id="page-teams">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px">
+            <div class="panel-header" style="padding:0;border:none;flex:1">
+              <span class="diamond"></span> 团队
+            </div>
+            <button class="btn btn-secondary" style="font-size:10px">筛选</button>
+            <button class="btn btn-primary" onclick="openModal('createTeam')">+ 创建团队</button>
+          </div>
+          <div class="team-grid">
+            <div class="team-card" onclick="navigate('team-detail')">
+              <div class="team-card-top">
+                <div class="team-card-icon">⟐</div>
+                <span class="team-card-name">后端小队</span>
+                <span class="team-card-status active">● 运行中</span>
+              </div>
+              <div class="team-card-desc">认证重构 + 接口优化团队</div>
+              <div class="team-card-stats">
+                <span>员工 <span class="val">4</span></span>
+                <span>任务 <span class="val">7/12</span></span>
+                <span>令牌 <span class="val">142k</span></span>
+              </div>
+              <div class="team-card-footer"><span>运行 2小时34分</span><span>3分钟前更新</span></div>
+            </div>
+            <div class="team-card" onclick="navigate('team-detail')">
+              <div class="team-card-top">
+                <div class="team-card-icon" style="background:rgba(251,191,36,0.1);border-color:rgba(251,191,36,0.15);color:var(--status-warn)">⟐</div>
+                <span class="team-card-name">前端小队</span>
+                <span class="team-card-status idle">○ 空闲</span>
+              </div>
+              <div class="team-card-desc">界面重构 + 组件库建设</div>
+              <div class="team-card-stats">
+                <span>员工 <span class="val">3</span></span>
+                <span>任务 <span class="val">4/8</span></span>
+                <span>令牌 <span class="val">89k</span></span>
+              </div>
+              <div class="team-card-footer"><span>空闲 12分钟</span><span>12分钟前更新</span></div>
+            </div>
+            <div class="team-card" onclick="navigate('team-detail')">
+              <div class="team-card-top">
+                <div class="team-card-icon">⟐</div>
+                <span class="team-card-name">运维流水线</span>
+                <span class="team-card-status active">● 运行中</span>
+              </div>
+              <div class="team-card-desc">CI/CD + 基础设施自动化</div>
+              <div class="team-card-stats">
+                <span>员工 <span class="val">2</span></span>
+                <span>任务 <span class="val">3/5</span></span>
+                <span>令牌 <span class="val">56k</span></span>
+              </div>
+              <div class="team-card-footer"><span>运行 45分钟</span><span>5分钟前更新</span></div>
+            </div>
+            <div class="team-card" onclick="navigate('team-detail')">
+              <div class="team-card-top">
+                <div class="team-card-icon" style="background:var(--bg-hover);border-color:var(--border);color:var(--text-muted)">⟐</div>
+                <span class="team-card-name">数据迁移</span>
+                <span class="team-card-status idle">○ 已停止</span>
+              </div>
+              <div class="team-card-desc">数据库 Schema 迁移 + 种子数据</div>
+              <div class="team-card-stats">
+                <span>员工 <span class="val">5</span></span>
+                <span>任务 <span class="val">12/12</span></span>
+                <span>令牌 <span class="val">230k</span></span>
+              </div>
+              <div class="team-card-footer"><span>2天前完成</span><span>230k 令牌</span></div>
+            </div>
+            <div class="team-card" onclick="navigate('team-detail')">
+              <div class="team-card-top">
+                <div class="team-card-icon" style="background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.15);color:var(--status-err)">⟐</div>
+                <span class="team-card-name">安全审计</span>
+                <span class="team-card-status error">✕ 异常</span>
+              </div>
+              <div class="team-card-desc">全量安全审计 + 漏洞扫描</div>
+              <div class="team-card-stats">
+                <span>员工 <span class="val">1</span></span>
+                <span>任务 <span class="val">2/6</span></span>
+                <span>令牌 <span class="val">34k</span></span>
+              </div>
+              <div class="team-card-footer"><span>3天前崩溃</span><span style="color:var(--status-err)">退出码 1</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 会话 ═══ -->
+      <div class="page" id="page-sessions">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border)">
+            <div class="panel-header" style="padding:0;border:none"><span class="diamond"></span> 会话</div>
+          </div>
+          <div class="term-block" style="margin:16px">
+            <div class="term-header"><span class="prompt">▸</span> 会话列表</div>
+            <div class="term-body" style="font-size:11px">
+              <div class="term-line" style="color:var(--text-muted);font-weight:600;margin-bottom:4px">
+                <span style="min-width:40px">编号</span>
+                <span style="min-width:120px;flex:1">名称</span>
+                <span style="min-width:50px">令牌</span>
+                <span style="min-width:60px">上下文</span>
+                <span style="min-width:60px">状态</span>
+              </div>
+              <hr class="term-sep">
+              <div class="term-line">
+                <span style="min-width:40px;color:var(--text-muted)">7f3a</span>
+                <span style="min-width:120px;flex:1"><span class="hi">auth-重构</span></span>
+                <span style="min-width:50px">24.1k</span>
+                <span style="min-width:60px">62%</span>
+                <span style="min-width:60px"><span class="hi">活跃</span></span>
+              </div>
+              <div class="term-line">
+                <span style="min-width:40px;color:var(--text-muted)">a1b2</span>
+                <span style="min-width:120px;flex:1">api-重设计</span>
+                <span style="min-width:50px">18.7k</span>
+                <span style="min-width:60px">45%</span>
+                <span style="min-width:60px"><span class="warn">空闲</span></span>
+              </div>
+              <div class="term-line">
+                <span style="min-width:40px;color:var(--text-muted)">c4d5</span>
+                <span style="min-width:120px;flex:1;color:var(--text-muted)">bug修复-452</span>
+                <span style="min-width:50px;color:var(--text-muted)">8.2k</span>
+                <span style="min-width:60px;color:var(--text-muted)">—</span>
+                <span style="min-width:60px"><span class="dim">已结束</span></span>
+              </div>
+              <div class="term-line">
+                <span style="min-width:40px;color:var(--text-muted)">e6f7</span>
+                <span style="min-width:120px;flex:1;color:var(--text-muted)">文档更新</span>
+                <span style="min-width:50px;color:var(--text-muted)">3.1k</span>
+                <span style="min-width:60px;color:var(--text-muted)">—</span>
+                <span style="min-width:60px"><span class="dim">已结束</span></span>
+              </div>
+              <hr class="term-sep">
+              <div class="term-line"><span class="prefix">$</span><span class="content dim">4 个会话 · 1 个活跃 · 共 54.1k 令牌</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 系统管理 ═══ -->
+      <div class="page" id="page-system">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border)">
+            <div class="panel-header" style="padding:0;border:none"><span class="diamond"></span> 系统管理</div>
+          </div>
+          <div class="sys-grid">
+            <div class="sys-card">
+              <div class="sys-card-label">Claude CLI</div>
+              <div class="sys-card-value green">v1.0.38</div>
+              <div class="sys-card-sub">● 已连接</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">活跃团队</div>
+              <div class="sys-card-value green">2</div>
+              <div class="sys-card-sub">共 5 个团队</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">运行中员工</div>
+              <div class="sys-card-value amber">6</div>
+              <div class="sys-card-sub">跨 2 个团队</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">内存占用</div>
+              <div class="sys-card-value">482 MB</div>
+              <div class="sys-card-sub">可用 16 GB</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">5小时限额</div>
+              <div class="sys-card-value amber">48%</div>
+              <div class="progress" style="margin-top:4px"><div class="progress-track"><div class="progress-fill amber" style="width:48%"></div></div></div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">7天限额</div>
+              <div class="sys-card-value green">23%</div>
+              <div class="progress" style="margin-top:4px"><div class="progress-track"><div class="progress-fill green" style="width:23%"></div></div></div>
+            </div>
+          </div>
+          <div class="term-block" style="margin:0 16px 16px">
+            <div class="term-header"><span class="prompt">▸</span> 进程列表</div>
+            <div class="term-body" style="font-size:11px">
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">后端小队/架构师</span> <span class="dim">PID 45231 · 2小时12分 · 89k 令牌</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">后端小队/探索者</span> <span class="dim">PID 45235 · 已完成 · 28k 令牌</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">运维流水线/部署员</span> <span class="dim">PID 45890 · 45分钟 · 34k 令牌</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">运维流水线/监控员</span> <span class="dim">PID 45892 · 45分钟 · 22k 令牌</span></span></div>
+              <hr class="term-sep">
+              <div class="term-line"><span class="prefix">$</span><span class="content dim">4 个进程 · 共 173k 令牌 · 482 MB 内存</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 排期 ═══ -->
+      <div class="page" id="page-schedules">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px">
+            <div class="panel-header" style="padding:0;border:none;flex:1"><span class="diamond"></span> 排期</div>
+            <button class="btn btn-primary" style="font-size:10px">+ 新建排期</button>
+          </div>
+          <div style="padding:12px 16px">
+            <div class="panel-header" style="padding:0;border:none;margin-bottom:8px"><span class="diamond"></span> 2026年6月</div>
+          </div>
+          <div class="calendar-grid">
+            <div class="cal-header">一</div><div class="cal-header">二</div><div class="cal-header">三</div>
+            <div class="cal-header">四</div><div class="cal-header">五</div><div class="cal-header">六</div><div class="cal-header">日</div>
+            <div class="cal-day"><div class="cal-day-num">1</div></div>
+            <div class="cal-day"><div class="cal-day-num">2</div></div>
+            <div class="cal-day"><div class="cal-day-num">3</div><div class="cal-event info">团队评审</div></div>
+            <div class="cal-day"><div class="cal-day-num">4</div></div>
+            <div class="cal-day"><div class="cal-day-num">5</div><div class="cal-event green">部署v2</div></div>
+            <div class="cal-day today"><div class="cal-day-num">6</div><div class="cal-event amber">审计截止</div></div>
+            <div class="cal-day"><div class="cal-day-num">7</div></div>
+            <div class="cal-day"><div class="cal-day-num">8</div></div>
+            <div class="cal-day"><div class="cal-day-num">9</div></div>
+            <div class="cal-day"><div class="cal-day-num">10</div><div class="cal-event green">冲刺结束</div></div>
+            <div class="cal-day"><div class="cal-day-num">11</div></div>
+            <div class="cal-day"><div class="cal-day-num">12</div></div>
+            <div class="cal-day"><div class="cal-day-num">13</div></div>
+            <div class="cal-day"><div class="cal-day-num">14</div></div>
+          </div>
+          <div class="term-block" style="margin:16px 16px 0">
+            <div class="term-header"><span class="prompt">▸</span> 排期列表</div>
+            <div class="term-body" style="font-size:11px">
+              <div class="term-line"><span class="prefix">●</span><span class="content"><span class="hi">部署v2</span> <span class="dim">·········</span> 6月5日 14:00 <span class="dim">·</span> <span style="color:var(--status-ok)">已激活</span></span></div>
+              <div class="term-line"><span class="prefix">●</span><span class="content"><span class="hi">审计截止</span> <span class="dim">·······</span> 6月6日 18:00 <span class="dim">·</span> <span style="color:var(--status-warn)">今日到期</span></span></div>
+              <div class="term-line"><span class="prefix">○</span><span class="content"><span class="hi">冲刺结束</span> <span class="dim">·······</span> 6月10日 17:00 <span class="dim">·</span> <span class="dim">即将到来</span></span></div>
+              <div class="term-line"><span class="prefix">○</span><span class="content"><span class="hi">团队评审</span> <span class="dim">·······</span> 6月3日 10:00 <span class="dim">·</span> <span style="color:var(--status-ok)">已完成</span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 统计 ═══ -->
+      <div class="page" id="page-analytics">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border)">
+            <div class="panel-header" style="padding:0;border:none"><span class="diamond"></span> 统计</div>
+          </div>
+          <div class="sys-grid">
+            <div class="sys-card">
+              <div class="sys-card-label">总令牌数</div>
+              <div class="sys-card-value green">551k</div>
+              <div class="sys-card-sub">本周</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">创建团队</div>
+              <div class="sys-card-value">5</div>
+              <div class="sys-card-sub">2 个活跃</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">完成任务</div>
+              <div class="sys-card-value green">28</div>
+              <div class="sys-card-sub">共 43 个</div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-card-label">平均用时</div>
+              <div class="sys-card-value">18分钟</div>
+              <div class="sys-card-sub">每个任务</div>
+            </div>
+          </div>
+          <div class="term-block" style="margin:0 16px 16px">
+            <div class="term-header"><span class="prompt">▸</span> 令牌用量 --按团队 --本周</div>
+            <div class="term-body" style="font-size:11px">
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">后端小队</span> <span class="dim">██████████████░░░░</span> 142k <span class="dim">(26%)</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">数据迁移</span> <span class="dim">██████████████████░░</span> 230k <span class="dim">(42%)</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">前端小队</span> <span class="dim">████████░░░░░░░░░░░░</span> 89k <span class="dim">(16%)</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">运维流水线</span> <span class="dim">█████░░░░░░░░░░░░░░░</span> 56k <span class="dim">(10%)</span></span></div>
+              <div class="term-line"><span class="prefix">▸</span><span class="content"><span class="hi">安全审计</span> <span class="dim">██░░░░░░░░░░░░░░░░░░</span> 34k <span class="dim">(6%)</span></span></div>
+              <hr class="term-sep">
+              <div class="term-line"><span class="prefix">$</span><span class="content dim">共 551k · 日均 78k · 峰值: 数据迁移 @ 230k</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 设置 ═══ -->
+      <div class="page" id="page-settings">
+        <div class="content-area" style="padding:0">
+          <div style="padding:14px 16px; border-bottom:1px solid var(--border)">
+            <div class="panel-header" style="padding:0;border:none"><span class="diamond"></span> 设置</div>
+          </div>
+          <div class="settings-layout">
+            <div class="settings-nav">
+              <div class="settings-nav-item active">通用</div>
+              <div class="settings-nav-item">外观</div>
+              <div class="settings-nav-item">CLI</div>
+              <div class="settings-nav-item">员工</div>
+              <div class="settings-nav-item">团队</div>
+              <div class="settings-nav-item">终端</div>
+              <div class="settings-nav-item">通知</div>
+              <div class="settings-nav-item">高级</div>
+            </div>
+            <div class="settings-content">
+              <div class="settings-title"><span class="prompt">▸</span> 通用设置</div>
+              <div class="settings-section">
+                <div class="settings-section-title">应用</div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">开机自启</div><div class="settings-row-desc">系统启动时自动运行 Hermit</div></div>
+                  <div class="settings-row-value">
+                    <div class="form-toggle" onclick="this.querySelector('.form-toggle-track').classList.toggle('on')">
+                      <div class="form-toggle-track on"><div class="form-toggle-thumb"></div></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">最小化到托盘</div><div class="settings-row-desc">关闭窗口时保持后台运行</div></div>
+                  <div class="settings-row-value">
+                    <div class="form-toggle" onclick="this.querySelector('.form-toggle-track').classList.toggle('on')">
+                      <div class="form-toggle-track on"><div class="form-toggle-thumb"></div></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">自动更新</div><div class="settings-row-desc">启动时自动检查新版本</div></div>
+                  <div class="settings-row-value">
+                    <select class="form-select" style="width:100px"><option>每天</option><option>每周</option><option>关闭</option></select>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-section">
+                <div class="settings-section-title">默认值</div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">默认模型</div><div class="settings-row-desc">新建会话和员工使用的模型</div></div>
+                  <div class="settings-row-value">
+                    <select class="form-select" style="width:160px">
+                      <option>claude-sonnet-4-6</option><option>claude-opus-4-8</option><option>claude-haiku-4-5</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">权限模式</div><div class="settings-row-desc">员工默认权限等级</div></div>
+                  <div class="settings-row-value">
+                    <select class="form-select" style="width:100px">
+                      <option>默认</option><option>计划</option><option>自动</option><option>绕过</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label">团队员工上限</div><div class="settings-row-desc">单个团队最大并发员工数</div></div>
+                  <div class="settings-row-value">
+                    <input class="form-input" type="number" value="8" style="width:80px;text-align:center">
+                  </div>
+                </div>
+              </div>
+              <div class="settings-section">
+                <div class="settings-section-title">⚠ 危险区域</div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label" style="color:var(--status-err)">清除所有会话</div><div class="settings-row-desc">永久删除所有会话数据</div></div>
+                  <div class="settings-row-value"><button class="btn btn-danger">清除</button></div>
+                </div>
+                <div class="settings-row">
+                  <div><div class="settings-row-label" style="color:var(--status-err)">重置所有设置</div><div class="settings-row-desc">恢复所有设置为默认值</div></div>
+                  <div class="settings-row-value"><button class="btn btn-danger">重置</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="status-bar">
+      <span class="accent">●</span>
+      <span id="status-page">后端小队</span>
+      <span class="sep">│</span>
+      <span id="status-detail">4 名员工 · 7/12 任务</span>
+      <span class="sep">│</span>
+      <span>令牌: <span class="accent" id="status-tokens">142,380</span></span>
+      <span class="sep">│</span>
+      <span>5小时限额: <span class="accent">48%</span></span>
+      <span style="flex:1"></span>
+      <span>hermit v1.6.38</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 创建团队弹窗 ═══ -->
+<div class="modal-overlay" id="modal-createTeam">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="prompt" style="color:var(--accent)">▸</span>
+      <span class="modal-title">创建团队</span>
+      <span class="modal-close" onclick="closeModal('createTeam')">×</span>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">团队名称</label>
+        <input class="form-input" placeholder="例如：后端小队">
+      </div>
+      <div class="form-group">
+        <label class="form-label">描述</label>
+        <textarea class="form-textarea" placeholder="这个团队负责什么？"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">项目路径</label>
+        <input class="form-input" value="/Users/yancyyu/code/hermit">
+      </div>
+      <div class="form-group">
+        <label class="form-label">模型</label>
+        <select class="form-select">
+          <option>claude-sonnet-4-6</option><option>claude-opus-4-8</option><option>claude-haiku-4-5</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">权限模式</label>
+        <select class="form-select">
+          <option>默认</option><option>计划</option><option>自动</option><option>绕过</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">初始员工</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <span class="badge info" style="cursor:pointer">+ 架构师</span>
+          <span class="badge green" style="cursor:pointer">+ 探索者</span>
+          <span class="badge amber" style="cursor:pointer">+ 实现者</span>
+          <span class="badge muted" style="cursor:pointer">+ 守护者</span>
+          <span class="badge muted" style="cursor:pointer">+ 自定义...</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">平台绑定</label>
+        <select class="form-select">
+          <option>本地（默认）</option><option>远程 SSH</option><option>Docker 容器</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('createTeam')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('createTeam'); showToast('团队已创建 ▸ 正在启动...')">创建团队</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 编辑团队弹窗 ═══ -->
+<div class="modal-overlay" id="modal-editTeam">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="prompt" style="color:var(--accent)">▸</span>
+      <span class="modal-title">编辑团队 · 后端小队</span>
+      <span class="modal-close" onclick="closeModal('editTeam')">×</span>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">团队名称</label>
+        <input class="form-input" value="后端小队">
+      </div>
+      <div class="form-group">
+        <label class="form-label">描述</label>
+        <textarea class="form-textarea">认证重构 + 接口优化团队</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">项目路径</label>
+        <input class="form-input" value="/Users/yancyyu/code/hermit">
+      </div>
+      <div class="form-group">
+        <label class="form-label">模型</label>
+        <select class="form-select">
+          <option selected>claude-sonnet-4-6</option><option>claude-opus-4-8</option><option>claude-haiku-4-5</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">权限模式</label>
+        <select class="form-select">
+          <option>默认</option><option selected>计划</option><option>自动</option><option>绕过</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">员工列表</label>
+        <div class="term-block" style="margin:0">
+          <div class="term-body" style="padding:8px 10px;font-size:11px">
+            <div class="term-line">
+              <span class="prefix" style="color:var(--accent)">●</span>
+              <span class="content"><span class="hi">架构师</span> <span class="dim">· sonnet · 运行中</span></span>
+              <span style="color:var(--text-muted);cursor:pointer;font-size:10px">移除</span>
+            </div>
+            <div class="term-line">
+              <span class="prefix" style="color:var(--status-ok)">●</span>
+              <span class="content"><span class="hi">探索者</span> <span class="dim">· sonnet · 已完成</span></span>
+              <span style="color:var(--text-muted);cursor:pointer;font-size:10px">移除</span>
+            </div>
+            <div class="term-line">
+              <span class="prefix" style="color:var(--status-warn)">●</span>
+              <span class="content"><span class="hi">实现者</span> <span class="dim">· sonnet · 等待中</span></span>
+              <span style="color:var(--text-muted);cursor:pointer;font-size:10px">移除</span>
+            </div>
+            <div class="term-line">
+              <span class="prefix">●</span>
+              <span class="content"><span class="hi">守护者</span> <span class="dim">· sonnet · 空闲</span></span>
+              <span style="color:var(--text-muted);cursor:pointer;font-size:10px">移除</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:6px"><span class="badge info" style="cursor:pointer">+ 添加员工</span></div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px">
+        <div class="form-group" style="margin-bottom:0">
+          <div class="form-label" style="color:var(--status-err)">⚠ 危险区域</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-danger">停止团队</button>
+            <button class="btn btn-danger">删除团队</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('editTeam')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('editTeam'); showToast('团队已更新 ▸ 正在重启...')">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" style="display:none">
+  <span class="accent">▸</span><span id="toast-msg"></span>
+</div>
+
+<script>
+  const pages = {
+    'teams':       { page: 'page-teams',       list: 'list-teams',    tab: '团队',     status: '团队',    statusDetail: '5 个团队 · 2 个活跃', tokens: '—' },
+    'team-detail': { page: 'page-team-detail',  list: 'list-teams',    tab: '后端小队', status: '后端小队', statusDetail: '4 名员工 · 7/12 任务', tokens: '142,380' },
+    'sessions':    { page: 'page-sessions',     list: 'list-sessions', tab: '会话',     status: '会话',    statusDetail: '4 个会话 · 1 个活跃', tokens: '54.1k' },
+    'system':      { page: 'page-system',       list: 'list-system',   tab: '系统',     status: '系统',    statusDetail: 'CLI v1.0.38 · 已连接', tokens: '—' },
+    'schedules':   { page: 'page-schedules',    list: null,            tab: '排期',     status: '排期',    statusDetail: '4 个排期 · 1 个今日', tokens: '—' },
+    'analytics':   { page: 'page-analytics',    list: null,            tab: '统计',     status: '统计',    statusDetail: '本周 551k 令牌', tokens: '551k' },
+    'settings':    { page: 'page-settings',     list: null,            tab: '设置',     status: '设置',    statusDetail: '通用', tokens: '—' },
+  };
+
+  function navigate(key) {
+    const config = pages[key]; if (!config) return;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(config.page).classList.add('active');
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+      item.classList.remove('active');
+      if (item.dataset.nav) {
+        const navKey = item.dataset.nav;
+        if (navKey === key || (key === 'team-detail' && navKey === 'teams')) item.classList.add('active');
+      }
+    });
+    if (config.list) {
+      document.getElementById('listPanel').style.display = '';
+      ['list-teams', 'list-sessions', 'list-system'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      document.getElementById(config.list).classList.remove('hidden');
+    } else {
+      document.getElementById('listPanel').style.display = 'none';
+    }
+    document.getElementById('tab-main-label').textContent = config.tab;
+    document.getElementById('status-page').textContent = config.status;
+    document.getElementById('status-detail').textContent = config.statusDetail;
+    document.getElementById('status-tokens').textContent = config.tokens;
+  }
+
+  function openModal(name) { document.getElementById('modal-' + name).classList.add('open'); }
+  function closeModal(name) { document.getElementById('modal-' + name).classList.remove('open'); }
+
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+  });
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    document.getElementById('toast-msg').textContent = msg;
+    toast.style.display = 'flex';
+    setTimeout(() => { toast.style.display = 'none'; }, 3000);
+  }
+
+  document.querySelectorAll('.settings-nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

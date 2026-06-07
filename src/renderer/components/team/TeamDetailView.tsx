@@ -60,9 +60,11 @@ import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskI
 import {
   AlertTriangle,
   Columns3,
+  Download,
   FolderOpen,
   GitBranch,
   History,
+  Link,
   Pencil,
   Play,
   Plus,
@@ -78,7 +80,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { CreateTaskDialog } from './dialogs/CreateTaskDialog';
 import { EditTeamDialog } from './dialogs/EditTeamDialog';
 import { LaunchTeamDialog, type TeamLaunchDialogMode } from './dialogs/LaunchTeamDialog';
+import { PlatformBindingDialog } from './dialogs/PlatformBindingDialog';
 import { ReviewDialog } from './dialogs/ReviewDialog';
+import { RuntimeConfigDialog } from './dialogs/RuntimeConfigDialog';
 import { SendMessageDialog } from './dialogs/SendMessageDialog';
 import { TaskDetailDialog } from './dialogs/TaskDetailDialog';
 import { executeTeamRelaunch } from './dialogs/teamRelaunchFlow';
@@ -87,17 +91,19 @@ import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { KanbanSearchInput } from './kanban/KanbanSearchInput';
 import { TrashDialog } from './kanban/TrashDialog';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
-import { type MemberActivityFilter, type MemberDetailTab } from './members/memberDetailTypes';
+
 
 import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
 import type { ComponentProps } from 'react';
+
+import { TerminalPane, type TerminalPaneRef } from '@renderer/components/common/TerminalPane';
 
 const ProjectEditorOverlay = lazy(() =>
   import('./editor/ProjectEditorOverlay').then((m) => ({ default: m.ProjectEditorOverlay }))
 );
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
-import { CcSessionsSection } from './CcSessionsSection';
+import { CcSessionsSection, buildAllSessionsCsv, buildAllSessionsCsvFilename, downloadTextFile, hasDataRows, isExportPayload } from './CcSessionsSection';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
 import {
   getTeamPendingRepliesState,
@@ -233,7 +239,7 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
   teamName: string;
   onLaunch: () => void;
 }): React.JSX.Element {
-  const message = '团队离线中';
+  const message = '数字员工未运行：当前没有本地 Claude/Agent 进程在运行，已有数据和任务仍会保留。';
 
   return (
     <div
@@ -255,7 +261,7 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
         onClick={onLaunch}
       >
         <Play size={12} />
-        启动
+        启动数字员工
       </Button>
     </div>
   );
@@ -860,6 +866,43 @@ const TeamMemberDetailDialogBridge = memo(function TeamMemberDetailDialogBridge(
   );
 });
 
+/** Map agent harness type to CLI command name */
+function getCommandForHarness(harness?: string): string {
+  switch (harness) {
+    case 'claudecode':
+      return 'claude';
+    case 'codex':
+      return 'codex';
+    case 'opencode':
+      return 'opencode';
+    case 'cursor':
+      return 'cursor';
+    case 'gemini':
+      return 'gemini';
+    case 'iflow':
+      return 'iflow';
+    case 'kimi':
+      return 'kimi';
+    case 'qoder':
+      return 'qoder';
+    case 'pi':
+      return 'pi';
+    case 'acp':
+      return 'acp';
+    case 'tmux':
+      return 'tmux';
+    case 'devin':
+      return 'devin';
+    default:
+      return 'claude';
+  }
+}
+
+/** All CcAgentType values run as local CLI agents */
+function isLocalHarness(harness?: string): boolean {
+  return !!harness;
+}
+
 export const TeamDetailView = ({
   teamName,
   isPaneFocused = false,
@@ -868,10 +911,6 @@ export const TeamDetailView = ({
   const [requestChangesTaskId, setRequestChangesTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TeamTaskWithKanban | null>(null);
   const [selectedMember, setSelectedMember] = useState<ResolvedTeamMember | null>(null);
-  const [selectedMemberView, setSelectedMemberView] = useState<{
-    initialTab?: MemberDetailTab;
-    initialActivityFilter?: MemberActivityFilter;
-  } | null>(null);
   const [pendingRepliesByMember, setPendingRepliesByMember] = useState<Record<string, number>>(() =>
     getTeamPendingRepliesState(teamName)
   );
@@ -885,6 +924,7 @@ export const TeamDetailView = ({
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
@@ -894,8 +934,11 @@ export const TeamDetailView = ({
     mode: 'launch',
   });
   const [editorOpen, setEditorOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(400);
   const contentRef = useRef<HTMLDivElement>(null);
   const provisioningBannerRef = useRef<HTMLDivElement>(null);
+  const terminalPaneRef = useRef<TerminalPaneRef>(null);
+  const terminalSpawnedForTeamRef = useRef<string | null>(null);
   const wasProvisioningRef = useRef(false);
 
   // Set inert on background content when editor overlay is open (a11y focus trap)
@@ -929,17 +972,11 @@ export const TeamDetailView = ({
       const {
         teamName: tn,
         memberName,
-        initialTab,
-        initialActivityFilter,
       } = (e as CustomEvent).detail ?? {};
       if (tn !== teamName || !data) return;
       const member = members.find((m: { name: string }) => m.name === memberName);
       if (member) {
         setSelectedMember(member);
-        setSelectedMemberView({
-          initialTab,
-          initialActivityFilter,
-        });
       }
     };
     const onCreateTask = (e: Event) => {
@@ -1089,6 +1126,53 @@ export const TeamDetailView = ({
   const [ccSessions, setCcSessions] = useState<CcSession[]>([]);
   const [ccSessionsLoading, setCcSessionsLoading] = useState(false);
   const [ccSessionsError, setCcSessionsError] = useState<string | null>(null);
+  const [ccExporting, setCcExporting] = useState(false);
+
+  const handleExportAllCcSessions = useCallback(async () => {
+    if (ccExporting) return;
+    setCcExporting(true);
+    try {
+      const params = new URLSearchParams({
+        teamName,
+        format: 'csv',
+        includeContent: 'full',
+        includeToolResults: 'false',
+        includeSystemMessages: 'false',
+      });
+      const res = await fetch(`/api/telemetry/conversations/export?${params.toString()}`);
+      if (res.ok) {
+        const payload = (await res.json()) as unknown;
+        if (isExportPayload(payload) && hasDataRows(payload.content)) {
+          downloadTextFile(payload.content, payload.filename, payload.mimeType);
+          return;
+        }
+      }
+
+      const details = await Promise.all(
+        ccSessions.map(async (session) => {
+          try {
+            const detail = await api.teams.getSessionDetail(
+              teamName,
+              session.id,
+              Math.max(session.historyCount, 1)
+            );
+            return { session, detail };
+          } catch {
+            return { session, detail: null };
+          }
+        })
+      );
+      downloadTextFile(
+        buildAllSessionsCsv(details),
+        buildAllSessionsCsvFilename(teamName),
+        'text/csv;charset=utf-8'
+      );
+    } catch (err) {
+      console.error('Failed to export all conversation telemetry:', err);
+    } finally {
+      setCcExporting(false);
+    }
+  }, [ccExporting, ccSessions, teamName]);
   const [kanbanFilter, setKanbanFilter] = useState<KanbanFilterState>({
     sessionId: null,
     selectedOwners: new Set(),
@@ -1246,6 +1330,24 @@ export const TeamDetailView = ({
     void selectTeam(teamName);
     void fetchDeletedTasks(teamName);
   }, [teamName, selectTeam, fetchDeletedTasks]);
+
+  // Spawn terminal PTY once per team — imperative, no autoSpawn.
+  // TerminalPane lives outside renderBody() so it never unmounts on data refresh.
+  // terminalSpawnedForTeamRef guards against re-spawning on data changes.
+  useEffect(() => {
+    if (!data || !teamName || teamName === SYSTEM_MANAGER_TEAM_NAME) return;
+    const cwd = data.config.projectPath || data.config.executionTarget?.cwd || data.workDir || '';
+    if (!cwd) return;
+    const harness = data.config.agentType || data.harness;
+    const spawnKey = `${teamName}:${harness ?? ''}`;
+    if (terminalSpawnedForTeamRef.current === spawnKey) return;
+    terminalSpawnedForTeamRef.current = spawnKey;
+    void terminalPaneRef.current?.spawn({
+      command: getCommandForHarness(harness),
+      args: [],
+      cwd,
+    });
+  }, [data, teamName]);
 
   // Recovery: after HMR, all mounted TeamDetailView effects re-run simultaneously.
   // With CSS display-toggle (all tabs stay mounted), the last selectTeam() call wins
@@ -1614,8 +1716,21 @@ export const TeamDetailView = ({
   }, []);
 
   const handleRestartTeam = useCallback(() => {
+    const cfg = data?.config;
+    const harness = cfg?.agentType || data?.harness;
+    if (isLocalHarness(harness)) {
+      const cwd = cfg?.projectPath || cfg?.executionTarget?.cwd || data?.workDir || '';
+      if (cwd) {
+        terminalPaneRef.current?.spawn({
+          command: getCommandForHarness(harness),
+          args: [],
+          cwd,
+        });
+        return;
+      }
+    }
     openLaunchDialog('relaunch');
-  }, [openLaunchDialog]);
+  }, [data, openLaunchDialog]);
 
   const handleStartCcConnectTeam = useCallback(() => {
     void (async () => {
@@ -1623,7 +1738,6 @@ export const TeamDetailView = ({
         openLaunchDialog('launch');
         return;
       }
-      await api.ccSettings.restart();
       await api.teams.launchTeam({
         teamName,
         cwd: data.config.projectPath,
@@ -1664,7 +1778,6 @@ export const TeamDetailView = ({
   );
 
   const handleRestartTeamFromEdit = useCallback(async (): Promise<void> => {
-    await api.ccSettings.restart();
     await Promise.all([fetchTeams(), selectTeam(teamName)]);
   }, [fetchTeams, selectTeam, teamName]);
 
@@ -1710,12 +1823,12 @@ export const TeamDetailView = ({
 
   const handleSelectMember = useCallback((member: ResolvedTeamMember) => {
     setSelectedMember(member);
-    setSelectedMemberView(null);
+    setSelectedMember(null);
   }, []);
 
   const closeSelectedMemberDialog = useCallback(() => {
     setSelectedMember(null);
-    setSelectedMemberView(null);
+    setSelectedMember(null);
   }, []);
 
   const handleSendMessageToMember = useCallback((member: ResolvedTeamMember) => {
@@ -1804,7 +1917,7 @@ export const TeamDetailView = ({
     const member = membersWithLiveBranches.find((m) => m.name === pendingMemberProfile);
     if (member) {
       setSelectedMember(member);
-      setSelectedMemberView(null);
+      setSelectedMember(null);
     }
     useStore.getState().closeMemberProfile();
   }, [pendingMemberProfile, membersWithLiveBranches]);
@@ -1870,9 +1983,6 @@ export const TeamDetailView = ({
     void (async () => {
       try {
         const result = await deleteTeam(teamName);
-        if (result.restartRequired) {
-          await api.ccSettings.restart();
-        }
         await fetchTeams();
         setDeleteConfirmOpen(false);
         if (tabId) closeTab(tabId);
@@ -2022,6 +2132,7 @@ export const TeamDetailView = ({
     if (error === 'TEAM_DRAFT') {
       const draftTeamSummary = useStore.getState().teamByName[teamName];
       const draftDisplayName = draftTeamSummary?.displayName || teamName;
+      const draftCwd = draftTeamSummary?.projectPath || draftTeamSummary?.workDir || '';
 
       return (
         <>
@@ -2029,44 +2140,27 @@ export const TeamDetailView = ({
             <div ref={provisioningBannerRef}>
               <TeamProvisioningBanner teamName={teamName} />
             </div>
-            <div className="flex min-h-[calc(100vh-12rem)] items-center justify-center">
-              <div className="max-w-md text-center">
-                <p className="text-sm font-medium text-text">团队尚未启动</p>
-                <p className="mt-2 text-xs text-text-secondary">
-                  这是一个草稿团队。<strong>{draftDisplayName}</strong>{' '}
-                  尚未完成启动，点击“启动团队”后即可选择模型并进入动态编排。
-                </p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <button
-                    className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
-                    onClick={() => openLaunchDialog('launch')}
-                  >
-                    启动团队
-                  </button>
-                  <button
-                    className="rounded-md bg-surface-raised px-4 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text"
-                    onClick={() => {
-                      void api.teams.deleteDraft(teamName).catch(() => {});
-                    }}
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
+            <div className="flex items-center gap-3 py-2">
+              <p className="text-sm font-medium text-text">{draftDisplayName}</p>
+              <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-medium text-indigo-400">
+                {getCommandForHarness()}
+              </span>
+            </div>
+            <div className="h-[calc(100vh-16rem)] overflow-hidden rounded-lg border border-[var(--color-border-subtle)]">
+              <TerminalPane
+                ref={terminalPaneRef}
+                autoSpawn={
+                  draftCwd
+                    ? {
+                        command: getCommandForHarness(),
+                        args: [],
+                        cwd: draftCwd,
+                      }
+                    : undefined
+                }
+              />
             </div>
           </div>
-          <LaunchTeamDialog
-            mode={launchDialogState.mode}
-            open={launchDialogOpen}
-            teamName={teamName}
-            members={[]}
-            defaultProjectPath={draftTeamSummary?.projectPath}
-            provisioningError={provisioningError}
-            clearProvisioningError={clearProvisioningError}
-            onClose={closeLaunchDialog}
-            onLaunch={handleLaunchDialogSubmit}
-            onRelaunch={handleRelaunchDialogSubmit}
-          />
         </>
       );
     }
@@ -2143,13 +2237,16 @@ export const TeamDetailView = ({
                       <h2 className="text-base font-semibold text-[var(--color-text)]">
                         {data.config.name}
                       </h2>
-                      {data.isAlive && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                      {data.platforms?.filter((pl) => pl.type !== 'bridge').map((pl) => (
+                        <span
+                          key={pl.type}
+                          className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                        >
                           <span className="size-1.5 rounded-full bg-emerald-400" />
-                          运行中
+                          {pl.type}
                         </span>
-                      )}
-                      {!data.isAlive && isTeamProvisioning && (
+                      ))}
+                      {isTeamProvisioning && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
                           <span className="size-1.5 animate-pulse rounded-full bg-yellow-400" />
                           启动中...
@@ -2158,6 +2255,18 @@ export const TeamDetailView = ({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    {teamName !== SYSTEM_MANAGER_TEAM_NAME ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 px-2.5 text-xs text-[var(--color-text-secondary)]"
+                        disabled={isTeamProvisioning}
+                        onClick={() => setBindingDialogOpen(true)}
+                      >
+                        <Link size={12} />
+                        运行时
+                      </Button>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
@@ -2300,6 +2409,42 @@ export const TeamDetailView = ({
                   onSendMessage={handleSendMessageToMember}
                   onRestartMember={handleRestartMember}
                   onSkipMemberForLaunch={handleSkipMemberForLaunch}
+                />
+              </CollapsibleTeamSection>
+
+              <CollapsibleTeamSection
+                sectionId="team-sessions"
+                title="会话"
+                icon={<MessageSquare size={14} />}
+                badge={ccSessions.length}
+                defaultOpen={ccSessions.length > 0}
+                action={
+                  ccSessions.length > 0 ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleExportAllCcSessions();
+                      }}
+                      disabled={ccExporting}
+                      title="导出所有会话为 CSV 表格"
+                    >
+                      {ccExporting ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Download size={12} />
+                      )}
+                      导出
+                    </button>
+                  ) : undefined
+                }
+              >
+                <CcSessionsSection
+                  teamName={teamName}
+                  sessions={ccSessions}
+                  loading={ccSessionsLoading}
+                  error={ccSessionsError}
                 />
               </CollapsibleTeamSection>
 
@@ -2496,23 +2641,6 @@ export const TeamDetailView = ({
                 </div>
               </CollapsibleTeamSection>
 
-              <CollapsibleTeamSection
-                sectionId="team-sessions"
-                title="会话"
-                icon={<MessageSquare size={14} />}
-                badge={ccSessions.length}
-                defaultOpen={ccSessions.length > 0}
-              >
-                <CcSessionsSection
-                  teamName={teamName}
-                  sessions={ccSessions}
-                  loading={ccSessionsLoading}
-                  error={ccSessionsError}
-                />
-              </CollapsibleTeamSection>
-
-              <TeamMessagesPanelBridge position="inline" {...sharedMessagesPanelProps} />
-
               {(data.processes?.length ?? 0) > 0 && (
                 <CollapsibleTeamSection
                   sectionId="processes"
@@ -2571,8 +2699,6 @@ export const TeamDetailView = ({
                 teamName={teamName}
                 members={membersWithLiveBranches}
                 tasks={data.tasks}
-                initialTab={selectedMemberView?.initialTab}
-                initialActivityFilter={selectedMemberView?.initialActivityFilter}
                 isTeamAlive={data.isAlive}
                 isTeamProvisioning={isTeamProvisioning}
                 launchParams={launchParams}
@@ -2797,14 +2923,72 @@ export const TeamDetailView = ({
       {spawnStatusWatcher}
       {teamAgentRuntimeWatcher}
       {leadContextWatcher}
-      {renderBody()}
+      <div className="flex size-full flex-col overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {renderBody()}
+        </div>
+        {/* Persistent terminal — survives data refreshes because it's outside renderBody() */}
+        {teamName && teamName !== SYSTEM_MANAGER_TEAM_NAME && (
+          <div className="shrink-0" style={{ height: terminalHeight }}>
+            {/* Drag handle */}
+            <div
+              className="flex cursor-row-resize items-center justify-center border-t border-[var(--color-border)] py-0.5 transition-colors hover:bg-[var(--color-surface-raised)]"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startY = e.clientY;
+                const startH = terminalHeight;
+                const onMove = (ev: MouseEvent) => {
+                  const delta = startY - ev.clientY; // drag up = grow
+                  const next = Math.max(120, Math.min(800, startH + delta));
+                  setTerminalHeight(next);
+                };
+                const onUp = () => {
+                  window.removeEventListener('mousemove', onMove);
+                  window.removeEventListener('mouseup', onUp);
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+              }}
+            >
+              <div className="h-1 w-8 rounded-full bg-[var(--color-border)]" />
+            </div>
+            <div className="h-[calc(100%-14px)] overflow-hidden">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
+                  <Terminal size={14} />
+                  终端
+                </div>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]"
+                  onClick={() => {
+                    const cwd = data?.config.projectPath || data?.config.executionTarget?.cwd || data?.workDir || '';
+                    const harness = data?.config.agentType || data?.harness;
+                    void api.terminal.openExternal({ command: getCommandForHarness(harness), cwd });
+                  }}
+                >
+                  <Play size={10} />
+                  外部终端
+                </button>
+              </div>
+              <div className="h-[calc(100%-22px)] overflow-hidden rounded-lg border border-[var(--color-border-subtle)]">
+                <TerminalPane ref={terminalPaneRef} />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      {data && teamName !== SYSTEM_MANAGER_TEAM_NAME ? (
+        <RuntimeConfigDialog
+          open={bindingDialogOpen}
+          teamName={teamName}
+          onClose={() => setBindingDialogOpen(false)}
+        />
+      ) : null}
       <EditTeamDialog
         open={editDialogOpen}
         teamName={teamName}
         onClose={() => setEditDialogOpen(false)}
-        onDeleteTeam={
-          teamName !== 'default' && teamName !== 'my-project' ? handleDeleteTeam : undefined
-        }
       />
     </>
   );

@@ -87,7 +87,7 @@ export const TabContextMenu = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[220px] overflow-hidden rounded-md border py-1 shadow-lg"
+      className="fixed z-50 min-w-[220px] overflow-hidden border py-1 shadow-lg"
       style={{
         left: clampedX,
         top: clampedY,

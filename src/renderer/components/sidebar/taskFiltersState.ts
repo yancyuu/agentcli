@@ -12,7 +12,7 @@ export type TaskStatusFilterId =
   | 'approved';
 
 export const STATUS_OPTIONS: { id: TaskStatusFilterId; label: string; color: string }[] = [
-  { id: 'todo', label: 'TODO', color: '#3b82f6' },
+  { id: 'todo', label: 'TODO', color: '#6366f1' },
   { id: 'in_progress', label: 'IN PROGRESS', color: '#eab308' },
   { id: 'needs_fix', label: 'NEEDS FIXES', color: '#f43f5e' },
   { id: 'done', label: 'DONE', color: '#22c55e' },

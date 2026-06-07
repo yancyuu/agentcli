@@ -76,7 +76,7 @@ const SearchToggleButton = React.memo(function SearchToggleButton({
           className={cn(
             'flex size-[22px] items-center justify-center rounded transition-colors',
             active
-              ? 'bg-blue-500/20 text-blue-400'
+              ? 'bg-indigo-500/20 text-indigo-400'
               : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]'
           )}
           onClick={onClick}

@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { api } from '@renderer/api';
+import { useStore } from '@renderer/store';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
 import { SYSTEM_MANAGER_DISPLAY_NAME } from '@shared/types/team';
@@ -14,7 +15,9 @@ import type {
   SystemManagerStatus,
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
-import { Loader2, Play, RefreshCw, Square, TerminalSquare } from 'lucide-react';
+import { Loader2, RefreshCw, TerminalSquare } from 'lucide-react';
+
+import { FolderBrowser } from './FolderBrowser';
 
 interface SystemManagerViewProps {
   isPaneFocused?: boolean;
@@ -38,6 +41,8 @@ export const SystemManagerView = ({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
+  const autoStartedRef = useRef(false);
+  const startClaudeRef = useRef<((workDirOverride?: string) => Promise<void>) | null>(null);
 
   const [status, setStatus] = useState<SystemManagerStatus | null>(null);
   const [config, setConfig] = useState<SystemManagerConfig | null>(null);
@@ -48,6 +53,7 @@ export const SystemManagerView = ({
   const [starting, setStarting] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetchTeams = useStore((state) => state.fetchTeams);
 
   const writeTerminalLine = useCallback((line: string) => {
     terminalRef.current?.writeln(`\x1b[90m${line}\x1b[0m`);
@@ -75,18 +81,18 @@ export const SystemManagerView = ({
       fontSize: 13,
       lineHeight: 1.28,
       theme: {
-        background: '#0b0b0c',
-        foreground: '#e8e8e8',
-        cursor: '#f4f4f5',
-        selectionBackground: '#3f3f46',
-        black: '#09090b',
+        background: 'var(--color-surface)',
+        foreground: 'var(--color-text)',
+        cursor: 'var(--color-text)',
+        selectionBackground: 'var(--color-border-emphasis)',
+        black: 'var(--color-surface-sidebar)',
         red: '#f87171',
         green: '#86efac',
         yellow: '#fde68a',
-        blue: '#93c5fd',
+        blue: 'var(--color-accent)',
         magenta: '#d8b4fe',
-        cyan: '#67e8f9',
-        white: '#f4f4f5',
+        cyan: '#818cf8',
+        white: 'var(--color-text)',
       },
     });
     const fitAddon = new FitAddon();
@@ -121,7 +127,11 @@ export const SystemManagerView = ({
       exitDispose();
       inputDispose.dispose();
       resizeObserver.disconnect();
-      if (ptyIdRef.current) api.terminal.kill(ptyIdRef.current);
+      if (ptyIdRef.current) {
+        void api.terminal.kill(ptyIdRef.current).catch(() => {
+          // Component is unmounting; there is no safe UI surface for this lifecycle error.
+        });
+      }
       term.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -129,7 +139,7 @@ export const SystemManagerView = ({
     };
   }, [fitTerminal]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<SystemManagerConfig | null> => {
     setLoading(true);
     setError(null);
     try {
@@ -163,25 +173,50 @@ export const SystemManagerView = ({
         setWorkflowPrompts([]);
         setWarnings([]);
       }
+      return nextConfig;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const stopClaude = useCallback(async (): Promise<boolean> => {
+    const ptyId = ptyIdRef.current;
+    if (!ptyId) {
+      setRunning(false);
+      return true;
+    }
 
-  const startClaude = useCallback(async () => {
+    try {
+      await api.terminal.kill(ptyId);
+      if (ptyIdRef.current === ptyId) {
+        ptyIdRef.current = null;
+        setRunning(false);
+        writeTerminalLine('[stopped]');
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      writeTerminalLine(`[failed to stop claude] ${message}`);
+      return false;
+    }
+  }, [writeTerminalLine]);
+
+  const startClaude = useCallback(async (workDirOverride?: string) => {
     if (starting) return;
     setStarting(true);
     setError(null);
     try {
-      const nextConfig = await api.systemManager.updateConfig({ selectedWorkDir: workDirInput });
+      const stopped = await stopClaude();
+      if (!stopped) return;
+      const nextConfig = await api.systemManager.updateConfig({
+        selectedWorkDir: workDirOverride ?? workDirInput,
+      });
       setConfig(nextConfig);
-      if (ptyIdRef.current) api.terminal.kill(ptyIdRef.current);
+      void fetchTeams();
       terminalRef.current?.clear();
       writeTerminalLine(`# cd ${nextConfig.selectedWorkDir}`);
       writeTerminalLine('$ claude');
@@ -200,16 +235,25 @@ export const SystemManagerView = ({
     } finally {
       setStarting(false);
     }
-  }, [starting, workDirInput, writeTerminalLine]);
+  }, [fetchTeams, starting, stopClaude, workDirInput, writeTerminalLine]);
 
-  const stopClaude = useCallback(() => {
-    if (ptyIdRef.current) {
-      api.terminal.kill(ptyIdRef.current);
-      ptyIdRef.current = null;
-    }
-    setRunning(false);
-    writeTerminalLine('[stopped]');
-  }, [writeTerminalLine]);
+  useEffect(() => {
+    startClaudeRef.current = startClaude;
+  }, [startClaude]);
+
+  useEffect(() => {
+    void load().then((nextConfig) => {
+      if (nextConfig && !autoStartedRef.current) {
+        autoStartedRef.current = true;
+        void startClaudeRef.current?.(nextConfig.selectedWorkDir);
+      }
+    });
+  }, [load]);
+
+  const refreshConsole = useCallback(async () => {
+    await load();
+    await startClaude(workDirInput || undefined);
+  }, [load, startClaude, workDirInput]);
 
   const runWorkflowPrompt = useCallback(
     async (prompt: WorkflowPromptSummary) => {
@@ -233,63 +277,65 @@ export const SystemManagerView = ({
   );
 
   return (
-    <div className="flex size-full flex-col bg-[#171717] p-4 text-zinc-100">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] shadow-2xl shadow-black/40">
-        <div className="flex items-center justify-between border-b border-white/10 bg-[#202124] px-4 py-2">
-          <div className="flex items-center gap-2">
+    <div className="flex size-full flex-col bg-[var(--color-surface)] p-4 text-[var(--color-text)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl shadow-black/20">
+        <div className="flex min-h-12 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-2">
+          <div className="flex shrink-0 items-center gap-2">
             <span className="size-3 rounded-full bg-[#ff5f57]" />
             <span className="size-3 rounded-full bg-[#febc2e]" />
             <span className="size-3 rounded-full bg-[#28c840]" />
           </div>
-          <div className="flex items-center gap-2 font-mono text-xs text-zinc-300">
-            <TerminalSquare size={14} className="text-zinc-400" />
-            {SYSTEM_MANAGER_DISPLAY_NAME} — {titlePath || 'loading'}
+          <div className="flex shrink-0 items-center gap-2 font-mono text-xs text-[var(--color-text-secondary)]">
+            <TerminalSquare size={14} className="text-[var(--color-text-muted)]" />
+            {SYSTEM_MANAGER_DISPLAY_NAME}
           </div>
-          <div className="text-[11px] text-zinc-500">
-            {running ? 'claude running' : (status?.localStatus ?? 'starting')}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#141415] px-4 py-3">
           <Input
             value={workDirInput}
             onChange={(event) => setWorkDirInput(event.target.value)}
-            className="h-8 min-w-[260px] flex-1 border-white/10 bg-black/30 font-mono text-xs text-zinc-200"
-            placeholder="工作目录"
+            onKeyDown={(e) => { if (e.key === 'Enter') void refreshConsole(); }}
+            className="h-8 min-w-[220px] flex-1 border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-xs text-[var(--color-text)]"
+            placeholder={titlePath || '工作目录'}
           />
-          <Button size="sm" className="h-8" onClick={() => void startClaude()} disabled={starting}>
-            {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-            Start Claude
-          </Button>
-          <Button size="sm" variant="outline" className="h-8 border-white/10" onClick={stopClaude}>
-            <Square size={13} /> Stop
-          </Button>
+          <FolderBrowser
+            value={workDirInput}
+            onChange={(newPath) => {
+              setWorkDirInput(newPath);
+              if (newPath && newPath !== workDirInput) {
+                void startClaude(newPath);
+              }
+            }}
+          />
+          <div className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
+            {running ? 'claude running' : (status?.localStatus ?? 'starting')}
+          </div>
           <Button
             size="sm"
             variant="outline"
-            className="h-8 border-white/10"
-            onClick={() => void load()}
+            className="h-8 shrink-0 border-[var(--color-border)]"
+            disabled={starting}
+            onClick={() => void refreshConsole()}
           >
-            <RefreshCw size={13} /> Refresh
+            {starting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            刷新
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 bg-[#0b0b0c] p-2">
+        <div className="min-h-0 flex-1 bg-[var(--color-surface)] p-2">
           <div
             ref={terminalHostRef}
-            className="size-full overflow-hidden rounded-lg bg-[#0b0b0c]"
+            className="size-full overflow-hidden rounded-lg bg-[var(--color-surface)]"
           />
         </div>
 
         {(workflowPrompts.length || warnings.length || error || loading) && (
-          <div className="border-t border-white/10 bg-[#141415] px-4 py-3">
+          <div className="border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
             {workflowPrompts.length ? (
               <div className="flex flex-wrap gap-2">
                 {workflowPrompts.map((prompt) => (
                   <button
                     key={prompt.id}
                     type="button"
-                    className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-[11px] text-zinc-200 hover:border-zinc-400 hover:bg-white/[0.08]"
+                    className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
                     disabled={starting}
                     onClick={() => void runWorkflowPrompt(prompt)}
                   >
@@ -302,7 +348,9 @@ export const SystemManagerView = ({
               <div className="mt-2 text-xs text-amber-300">{warnings.join('；')}</div>
             ) : null}
             {error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
-            {loading ? <div className="mt-2 text-xs text-zinc-500">加载控制台配置中...</div> : null}
+            {loading ? (
+              <div className="mt-2 text-xs text-[var(--color-text-muted)]">加载控制台配置中...</div>
+            ) : null}
           </div>
         )}
       </div>
