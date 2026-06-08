@@ -233,7 +233,7 @@ describe('EditTeamDialog', () => {
     act(() => root.unmount());
   });
 
-  it('calls updateConfig and restart on save', async () => {
+  it('calls updateConfig on save', async () => {
     const onClose = vi.fn();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -253,7 +253,7 @@ describe('EditTeamDialog', () => {
     });
 
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (btn) => btn.textContent === '保存并重启'
+      (btn) => btn.textContent === '保存'
     );
     expect(saveButton).not.toBeNull();
 
@@ -266,7 +266,7 @@ describe('EditTeamDialog', () => {
       'test-team',
       expect.objectContaining({ name: 'Test Team' })
     );
-    expect(api.ccSettings.restart).toHaveBeenCalled();
+    expect(api.ccSettings.restart).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();
@@ -300,7 +300,7 @@ describe('EditTeamDialog', () => {
     });
 
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (btn) => btn.textContent === '保存并重启'
+      (btn) => btn.textContent === '保存'
     ) as HTMLButtonElement | undefined;
     expect(saveButton?.disabled).toBe(true);
 
@@ -330,7 +330,7 @@ describe('EditTeamDialog', () => {
     });
 
     const saveButton = Array.from(host.querySelectorAll('button')).find(
-      (btn) => btn.textContent === '保存并重启'
+      (btn) => btn.textContent === '保存'
     );
 
     await act(async () => {

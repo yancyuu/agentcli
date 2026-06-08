@@ -233,7 +233,7 @@ export const CreateTaskDialog = ({
           >
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <p className="text-xs leading-relaxed">
-              团队当前离线。任务会加入 <strong>待处理</strong>，启动团队后即可开始执行。
+              数字员工当前未运行：没有本地 Claude/Agent 进程在运行。任务会加入 <strong>待处理</strong>，启动数字员工后即可开始执行。
             </p>
           </div>
         ) : null}
@@ -342,7 +342,7 @@ export const CreateTaskDialog = ({
                                 type="button"
                                 className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
                                   isSelected
-                                    ? 'bg-blue-500/15 text-blue-300'
+                                    ? 'bg-indigo-500/15 text-indigo-300'
                                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
                                 }`}
                                 onClick={() => toggleBlockedBy(t.id)}
@@ -350,7 +350,7 @@ export const CreateTaskDialog = ({
                                 <span
                                   className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${
                                     isSelected
-                                      ? 'border-blue-400 bg-blue-500/30 text-blue-300'
+                                      ? 'border-indigo-400 bg-indigo-500/30 text-indigo-300'
                                       : 'border-[var(--color-border-emphasis)]'
                                   }`}
                                 >
@@ -468,7 +468,7 @@ export const CreateTaskDialog = ({
               </div>
               {!isTeamAlive ? (
                 <p className="text-[10px] text-[var(--color-text-muted)]">
-                  团队当前离线。请先启动团队，才能立即开始任务。
+                  数字员工当前未运行。请先启动数字员工，才能立即开始任务。
                 </p>
               ) : null}
             </div>

@@ -5,30 +5,30 @@
 /* Theme CSS Custom Properties */
 
 :root {
-  /* Dark theme (default) - Midnight Slate palette (cool indigo undertone) */
-  --color-surface: #12131a;
-  /* Main background — deep midnight */
-  --color-surface-raised: #1c1d26;
-  /* Active/Selected items — cool slate */
-  --color-surface-overlay: #1c1d26;
+  /* Dark theme (default) - Phosphor Green terminal palette */
+  --color-surface: #0a0a0f;
+  /* Main background — CRT black */
+  --color-surface-raised: #121318;
+  /* Active/Selected items — terminal surface */
+  --color-surface-overlay: #121318;
   /* Overlay surfaces */
-  --color-surface-sidebar: #0c0d13;
-  /* Sidebar — deepest navy-black */
-  --color-border: rgba(148, 163, 184, 0.07);
-  /* Borders — slate-tinted */
-  --color-border-subtle: rgba(148, 163, 184, 0.05);
+  --color-surface-sidebar: #060609;
+  /* Sidebar — deepest black */
+  --color-border: rgba(74, 222, 128, 0.07);
+  /* Borders — phosphor green-tinted */
+  --color-border-subtle: rgba(74, 222, 128, 0.04);
   /* Subtle borders */
-  --color-border-emphasis: rgba(148, 163, 184, 0.12);
+  --color-border-emphasis: rgba(74, 222, 128, 0.14);
   /* Emphasis borders */
-  --color-text: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-accent: #818cf8;
-  /* Accent — indigo-400, visible on dark surfaces */
+  --color-text: #c8cdd8;
+  --color-text-secondary: #7a8190;
+  --color-text-muted: #4f5564;
+  --color-accent: #4ade80;
+  /* Accent — phosphor green */
   /* Scrollbar colors */
-  --scrollbar-thumb: rgba(148, 163, 184, 0.15);
-  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.25);
-  --scrollbar-thumb-active: rgba(148, 163, 184, 0.35);
+  --scrollbar-thumb: rgba(74, 222, 128, 0.12);
+  --scrollbar-thumb-hover: rgba(74, 222, 128, 0.22);
+  --scrollbar-thumb-active: rgba(74, 222, 128, 0.32);
   /* Search highlights */
   --highlight-bg: rgba(202, 138, 4, 0.7);
   --highlight-bg-inactive: rgba(113, 63, 18, 0.5);
@@ -73,7 +73,7 @@
   --inline-code-bg: rgba(148, 163, 184, 0.08);
   --inline-code-text: #e2e8f0;
   /* URL badge (textarea overlay) */
-  --url-badge-bg: rgba(37, 99, 235, 0.12);
+  --url-badge-bg: rgba(79, 70, 229, 0.12);
   --url-badge-border: rgba(96, 165, 250, 0.22);
   --url-badge-text: #bfdbfe;
   /* Diff viewer */
@@ -195,17 +195,17 @@
   --card-text-lighter: #e2e8f0;
   --card-separator: #2a2c38;
   /* System activity messages */
-  --system-activity-bg: rgba(59, 130, 246, 0.06);
-  --system-activity-border: rgba(59, 130, 246, 0.12);
+  --system-activity-bg: rgba(99, 102, 241, 0.06);
+  --system-activity-border: rgba(99, 102, 241, 0.12);
   --system-activity-accent: rgba(96, 165, 250, 0.5);
   /* Cross-team communication */
   --cross-team-bg: rgba(168, 85, 247, 0.06);
   --cross-team-border: rgba(168, 85, 247, 0.12);
   --cross-team-accent: rgba(192, 132, 252, 0.5);
   /* Info style — banners, status indicators */
-  --info-bg: rgba(59, 130, 246, 0.08);
-  --info-border: rgba(59, 130, 246, 0.25);
-  --info-text: #60a5fa;
+  --info-bg: rgba(99, 102, 241, 0.08);
+  --info-border: rgba(99, 102, 241, 0.25);
+  --info-text: #818cf8;
   /* Assessment severity colors (badges, health indicators) */
   --assess-good: #4ade80;
   --assess-warning: #fbbf24;
@@ -514,7 +514,7 @@
   --code-header-bg: #eae9e6;
   --code-border: #d5d3cf;
   --code-line-number: #a8a5a0;
-  --code-filename: #2563eb;
+  --code-filename: #4f46e5;
   /* Syntax highlighting - GitHub Light inspired */
   --syntax-string: #0a3069;
   --syntax-comment: #6e7781;
@@ -527,9 +527,9 @@
   --inline-code-bg: rgba(0, 0, 0, 0.05);
   --inline-code-text: #3a3935;
   /* URL badge (textarea overlay) - Light mode */
-  --url-badge-bg: rgba(37, 99, 235, 0.1);
-  --url-badge-border: rgba(37, 99, 235, 0.25);
-  --url-badge-text: #1d4ed8;
+  --url-badge-bg: rgba(79, 70, 229, 0.1);
+  --url-badge-border: rgba(79, 70, 229, 0.25);
+  --url-badge-text: #4338ca;
   /* Diff viewer - Light mode */
   --diff-added-bg: rgba(34, 197, 94, 0.18);
   --diff-added-text: #14532d;
@@ -561,7 +561,7 @@
   --prose-heading: #1c1b19;
   --prose-body: #2a2925;
   --prose-muted: #6d6b65;
-  --prose-link: #2563eb;
+  --prose-link: #4f46e5;
   --prose-code-bg: rgba(0, 0, 0, 0.05);
   --prose-code-text: #3a3935;
   --prose-pre-bg: #f0efed;
@@ -605,7 +605,7 @@
   --badge-warning-text: #ffffff;
   --badge-success-bg: #16a34a;
   --badge-success-text: #ffffff;
-  --badge-info-bg: #2563eb;
+  --badge-info-bg: #4f46e5;
   --badge-info-text: #ffffff;
   --badge-neutral-bg: #e3e1dd;
   --badge-neutral-text: #3a3935;
@@ -649,17 +649,17 @@
   --card-text-lighter: #2a2925;
   --card-separator: #d5d3cf;
   /* System activity messages */
-  --system-activity-bg: rgba(59, 130, 246, 0.08);
-  --system-activity-border: rgba(59, 130, 246, 0.25);
-  --system-activity-accent: rgba(37, 99, 235, 0.7);
+  --system-activity-bg: rgba(99, 102, 241, 0.08);
+  --system-activity-border: rgba(99, 102, 241, 0.25);
+  --system-activity-accent: rgba(79, 70, 229, 0.7);
   /* Cross-team communication */
   --cross-team-bg: rgba(168, 85, 247, 0.08);
   --cross-team-border: rgba(168, 85, 247, 0.25);
   --cross-team-accent: rgba(124, 58, 237, 0.7);
   /* Info style — banners, status indicators */
-  --info-bg: rgba(59, 130, 246, 0.1);
-  --info-border: rgba(37, 99, 235, 0.3);
-  --info-text: #2563eb;
+  --info-bg: rgba(99, 102, 241, 0.1);
+  --info-border: rgba(79, 70, 229, 0.3);
+  --info-text: #4f46e5;
   /* Sticky Context button - transparent glass */
   --context-btn-bg: rgba(0, 0, 0, 0.06);
   --context-btn-bg-hover: rgba(0, 0, 0, 0.1);
@@ -797,12 +797,29 @@ body {
   height: 100%;
   overflow: hidden;
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell',
-    'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    'Agave', 'JetBrains Mono', 'Menlo', 'Monaco', 'Consolas',
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-surface);
   color: var(--color-text);
+}
+
+/* Agave font face — yume-style monospace */
+@font-face {
+  font-family: 'Agave';
+  src: url('/fonts/Agave-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Agave';
+  src: url('/fonts/Agave-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 body.theme-transitioning {

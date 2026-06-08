@@ -12,7 +12,7 @@ import {
 import { Textarea } from '@renderer/components/ui/textarea';
 import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import appIcon from '@renderer/favicon.png';
-import { Check, FileEdit, Loader2, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Check, FileEdit, Loader2, RotateCcw, X } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components';
 
@@ -25,7 +25,7 @@ const CcConnectConfigRawDialog = ({
   open,
   onClose,
 }: CcConnectConfigRawDialogProps): React.JSX.Element | null => {
-  const [filePath, setFilePath] = useState('~/.hermit/cc-connect/config.toml');
+  const [filePath, setFilePath] = useState('~/.hermit/config.toml');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,7 +82,7 @@ const CcConnectConfigRawDialog = ({
     >
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>编辑 配置</DialogTitle>
+          <DialogTitle>编辑配置</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-[var(--color-text-muted)]">配置文件：{filePath}</p>
@@ -105,8 +105,8 @@ const CcConnectConfigRawDialog = ({
             </div>
           )}
           <p className="text-xs text-[var(--color-text-muted)]">
-            保存后将直接覆盖 Hermit 管理的 cc-connect config.toml。若修改了端口或
-            token，请点击“重启服务”生效。
+            保存后将直接覆盖 Hermit 管理的配置文件。若修改了端口或
+            token，请点击”重启服务”生效。
           </p>
         </div>
         <DialogFooter>
@@ -136,7 +136,6 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
   const [version, setVersion] = useState<string>('');
   const [ccConfigOpen, setCcConfigOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [reloading, setReloading] = useState(false);
   const [restartMsg, setRestartMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -158,58 +157,28 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
     }
   }, []);
 
-  const handleReload = useCallback(async () => {
-    setReloading(true);
-    setRestartMsg(null);
-    try {
-      await api.ccSettings.reload();
-      setRestartMsg('配置已重载');
-    } catch {
-      setRestartMsg('重载失败');
-    } finally {
-      setReloading(false);
-      setTimeout(() => setRestartMsg(null), 3000);
-    }
-  }, []);
-
   return (
     <div>
       <SettingsSectionHeader title="服务配置" />
       <div className="flex flex-wrap gap-2 py-2">
         <button
           onClick={() => setCcConfigOpen(true)}
-          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-white/5"
+          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-indigo-500/5"
           style={{
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text)',
+            borderColor: 'rgba(99, 102, 241, 0.3)',
+            color: '#818cf8',
           }}
         >
           <FileEdit className="size-4" />
           编辑 配置
         </button>
         <button
-          onClick={() => void handleReload()}
-          disabled={reloading || restarting}
-          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          {reloading ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RefreshCw className="size-4" />
-          )}
-          重载配置
-        </button>
-        <button
           onClick={() => void handleRestart()}
-          disabled={restarting || reloading}
+          disabled={restarting}
           className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             borderColor: 'var(--color-border)',
-            color: 'var(--color-text-secondary)',
+            color: 'var(--color-text-muted)',
           }}
         >
           {restarting ? (
@@ -240,7 +209,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
             Version {version || '...'}
           </p>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-            模型供应商由后端服务统一管理；团队内部任务由 harness 自主管理。
+            本地优先的 AI Agent 团队工作台。支持多模型供应商接入、自主任务管理和跨团队协作。
           </p>
         </div>
       </div>

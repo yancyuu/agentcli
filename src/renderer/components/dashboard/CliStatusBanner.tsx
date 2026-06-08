@@ -961,8 +961,8 @@ const InstalledBanner = ({
                         disabled={isBusy}
                         className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
                         style={{
-                          borderColor: 'rgba(59, 130, 246, 0.45)',
-                          color: '#93c5fd',
+                          borderColor: 'rgba(99, 102, 241, 0.45)',
+                          color: '#a5b4fc',
                         }}
                         title={`更新 Claude Code 到 v${cliStatus.latestVersion ?? 'latest'}`}
                       >
@@ -1405,7 +1405,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Loader2 className="size-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+            <Loader2 className="size-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               正在下载 {runtimeDisplayName}...
             </span>
@@ -1423,12 +1423,12 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
           {downloadTotal > 0 ? (
             <div
               className="h-full rounded-full transition-all duration-300"
-              style={{ width: `${downloadProgress}%`, backgroundColor: '#3b82f6' }}
+              style={{ width: `${downloadProgress}%`, backgroundColor: '#6366f1' }}
             />
           ) : (
             <div
               className="h-full w-1/3 animate-pulse rounded-full"
-              style={{ backgroundColor: '#3b82f6' }}
+              style={{ backgroundColor: '#6366f1' }}
             />
           )}
         </div>
@@ -1445,7 +1445,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
         style={{ borderColor: styles.border, backgroundColor: styles.bg }}
       >
         <div className="flex items-center gap-3">
-          <Loader2 className="size-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+          <Loader2 className="size-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
           <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             {label}
           </span>
@@ -1463,7 +1463,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
         style={{ borderColor: styles.border, backgroundColor: styles.bg }}
       >
         <div className="flex items-center gap-3">
-          <Loader2 className="size-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+          <Loader2 className="size-4 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
           <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             正在安装 {runtimeDisplayName}...
           </span>
@@ -1559,7 +1559,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
                 onClick={handleInstall}
                 disabled={isBusy}
                 className="flex items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
-                style={{ backgroundColor: '#3b82f6' }}
+                style={{ backgroundColor: '#6366f1' }}
               >
                 <Download className="size-4" />
                 {cliLaunchIssue ? `重新安装 ${runtimeDisplayName}` : `安装 ${runtimeDisplayName}`}

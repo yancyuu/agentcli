@@ -11,7 +11,7 @@ interface SourceBadgeProps {
 export const SourceBadge = ({ source }: SourceBadgeProps): React.JSX.Element => {
   if (source === 'official') {
     return (
-      <Badge className="border-blue-500/30 bg-blue-500/10 text-blue-400" variant="outline">
+      <Badge className="border-indigo-500/30 bg-indigo-500/10 text-indigo-400" variant="outline">
         Official
       </Badge>
     );

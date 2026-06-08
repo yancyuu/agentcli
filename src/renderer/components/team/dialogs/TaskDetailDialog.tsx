@@ -821,7 +821,7 @@ export const TaskDetailDialog = ({
               className={`flex items-center justify-between rounded-md px-3 py-2 text-xs ${
                 currentTask.needsClarification === 'user'
                   ? 'border border-red-500/20 bg-red-500/10 text-red-400'
-                  : 'border border-blue-500/20 bg-blue-500/10 text-blue-400'
+                  : 'border border-indigo-500/20 bg-indigo-500/10 text-indigo-400'
               }`}
             >
               <span className="flex items-center gap-1.5">
@@ -953,7 +953,7 @@ export const TaskDetailDialog = ({
 
                 {blocksIds.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="inline-flex items-center gap-0.5 text-xs text-blue-600 dark:text-blue-400">
+                    <span className="inline-flex items-center gap-0.5 text-xs text-indigo-600 dark:text-indigo-400">
                       <ArrowRightFromLine size={12} />
                       阻塞
                     </span>
@@ -971,7 +971,7 @@ export const TaskDetailDialog = ({
                               className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                                 isCompleted
                                   ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-400'
-                                  : 'bg-blue-500/15 text-blue-600 hover:bg-blue-500/25 dark:text-blue-400'
+                                  : 'bg-indigo-500/15 text-indigo-600 hover:bg-indigo-500/25 dark:text-indigo-400'
                               } cursor-pointer`}
                               onClick={() => handleDependencyClick(id)}
                             >

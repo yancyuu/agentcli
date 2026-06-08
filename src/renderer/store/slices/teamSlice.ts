@@ -2020,6 +2020,7 @@ export interface TeamSlice {
   fetchTeams: () => Promise<void>;
   fetchAllTasks: () => Promise<void>;
   openTeamsTab: () => void;
+  openSystemManager: () => Promise<void>;
   openTeamTab: (
     teamName: string,
     projectPath?: string,
@@ -2727,6 +2728,16 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     state.openTab({
       type: 'teams',
       label: '团队',
+    });
+  },
+
+  openSystemManager: async () => {
+    const manager = await unwrapIpc('team:ensureSystemManager', () =>
+      api.teams.ensureSystemManager()
+    );
+    await get().fetchTeams();
+    get().openTeamTab(manager.teamName, manager.projectPath || manager.workDir, {
+      displayName: manager.displayName,
     });
   },
 
@@ -4438,118 +4449,20 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   },
 
   createTeam: async (request: TeamCreateRequest) => {
-    // Ensure provisioning progress subscription is active (defensive).
-    get().subscribeProvisioningProgress();
     invalidateTeamLocalStateEpoch(request.teamName);
     clearPendingReplyRefreshTimer(request.teamName);
     clearPendingReplyRefreshWaits(request.teamName);
     clearTeamScopedTransientState(request.teamName);
 
-    // Establish a per-team floor so late events from a previous run can't override UI.
-    const floor = nowIso();
-    set((state) => ({
-      provisioningStartedAtFloorByTeam: {
-        ...state.provisioningStartedAtFloorByTeam,
-        [request.teamName]: floor,
-      },
-    }));
-
-    // Clear stale provisioning runs for this team so the banner starts fresh
-    set((state) => {
-      const cleaned = { ...state.provisioningRuns };
-      for (const [runId, run] of Object.entries(cleaned)) {
-        if (run.teamName === request.teamName) {
-          delete cleaned[runId];
-        }
-      }
-      const nextErrors = { ...state.provisioningErrorByTeam };
-      delete nextErrors[request.teamName];
-      const nextSpawnStatuses = { ...state.memberSpawnStatusesByTeam };
-      delete nextSpawnStatuses[request.teamName];
-      const nextSpawnSnapshots = { ...state.memberSpawnSnapshotsByTeam };
-      delete nextSpawnSnapshots[request.teamName];
-      const nextRuntime = { ...state.teamAgentRuntimeByTeam };
-      delete nextRuntime[request.teamName];
-      const nextActiveTools = { ...state.activeToolsByTeam };
-      delete nextActiveTools[request.teamName];
-      const nextFinishedVisible = { ...state.finishedVisibleByTeam };
-      delete nextFinishedVisible[request.teamName];
-      const nextToolHistory = { ...state.toolHistoryByTeam };
-      delete nextToolHistory[request.teamName];
-      const nextRuntimeRunIdByTeam = { ...state.currentRuntimeRunIdByTeam };
-      const previousRuntimeRunId = nextRuntimeRunIdByTeam[request.teamName];
-      delete nextRuntimeRunIdByTeam[request.teamName];
-      const nextIgnoredRuntimeRunIds = previousRuntimeRunId
-        ? {
-            ...state.ignoredRuntimeRunIds,
-            [previousRuntimeRunId]: request.teamName,
-          }
-        : state.ignoredRuntimeRunIds;
-      const visibleLoadingResets = collectTeamScopedVisibleLoadingResets(state, request.teamName);
-      return {
-        provisioningRuns: cleaned,
-        provisioningErrorByTeam: nextErrors,
-        memberSpawnStatusesByTeam: nextSpawnStatuses,
-        memberSpawnSnapshotsByTeam: nextSpawnSnapshots,
-        teamAgentRuntimeByTeam: nextRuntime,
-        activeToolsByTeam: nextActiveTools,
-        finishedVisibleByTeam: nextFinishedVisible,
-        toolHistoryByTeam: nextToolHistory,
-        currentRuntimeRunIdByTeam: nextRuntimeRunIdByTeam,
-        ignoredProvisioningRunIds: state.ignoredProvisioningRunIds,
-        ignoredRuntimeRunIds: nextIgnoredRuntimeRunIds,
-        ...visibleLoadingResets,
-      };
-    });
-
-    // Optimistic progress entry: ensures banner shows even if IPC progress is delayed/missed.
-    const pendingRunId = `pending:${request.teamName}:${Date.now()}`;
-    set((state) => ({
-      provisioningRuns: {
-        ...state.provisioningRuns,
-        [pendingRunId]: {
-          runId: pendingRunId,
-          teamName: request.teamName,
-          state: 'spawning',
-          message: '正在启动 Claude CLI 进程...',
-          startedAt: floor,
-          updatedAt: floor,
-        },
-      },
-      currentProvisioningRunIdByTeam: {
-        ...state.currentProvisioningRunIdByTeam,
-        [request.teamName]: pendingRunId,
-      },
-      // Synthetic card for the team list — visible until fetchTeams() picks up the real team.
-      provisioningSnapshotByTeam: {
-        ...state.provisioningSnapshotByTeam,
-        [request.teamName]: {
-          teamName: request.teamName,
-          displayName: request.displayName || request.teamName,
-          description: request.description || '',
-          color: request.color,
-          memberCount: request.members.length,
-          members: request.members.map((m) => ({ name: m.name, role: m.role })),
-          taskCount: 0,
-          lastActivity: null,
-          projectPath: request.cwd || undefined,
-        },
-      },
-    }));
-    // Initialize per-team tool approval settings based on skipPermissions flag
-    const initialSettings: ToolApprovalSettings =
-      request.skipPermissions === false
-        ? DEFAULT_TOOL_APPROVAL_SETTINGS
-        : { ...DEFAULT_TOOL_APPROVAL_SETTINGS, autoAllowAll: true };
-    saveToolApprovalSettingsForTeam(request.teamName, initialSettings);
-    set({ toolApprovalSettings: initialSettings });
     try {
       if (typeof api.teams.createTeam !== 'function') {
         throw new Error(
           'Current preload version does not support team:create. Restart the dev app.'
         );
       }
-      const response = await unwrapIpc('team:create', () => api.teams.createTeam(request));
+
+      // Just create the team config — no provisioning, no launching.
+      await unwrapIpc('team:create', () => api.teams.createTeam(request));
 
       // Persist per-team launch params (model, effort, limit context)
       const baseModel = extractBaseModel(request.model, request.providerId);
@@ -4562,55 +4475,21 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         limitContext: request.limitContext ?? false,
       };
       saveLaunchParams(request.teamName, params);
-      set((state) => ({
-        launchParamsByTeam: {
-          ...state.launchParamsByTeam,
-          [request.teamName]: params,
-        },
-      }));
 
-      set((state) => {
-        const nextRuns = { ...state.provisioningRuns };
-        const pendingRun = nextRuns[pendingRunId];
-        const realProgressAlreadyExists = response.runId in nextRuns;
-        if (pendingRun) {
-          delete nextRuns[pendingRunId];
-          // Only use pending data as fallback if real progress events haven't arrived yet.
-          // This prevents overwriting real progress (e.g. 'assembling') with stale pending data ('spawning')
-          // when the invoke response arrives before IPC progress events.
-          if (!realProgressAlreadyExists) {
-            nextRuns[response.runId] = { ...pendingRun, runId: response.runId };
-          }
-        }
-        return {
-          provisioningRuns: nextRuns,
-          currentProvisioningRunIdByTeam: {
-            ...state.currentProvisioningRunIdByTeam,
-            [request.teamName]: response.runId,
-          },
-          currentRuntimeRunIdByTeam: {
-            ...state.currentRuntimeRunIdByTeam,
-            [request.teamName]: response.runId,
-          },
-        };
-      });
-      try {
-        await get().getProvisioningStatus(response.runId);
-      } catch {
-        // ignore — polling below will retry
-      }
+      // Initialize per-team tool approval settings based on skipPermissions flag
+      const initialSettings: ToolApprovalSettings =
+        request.skipPermissions === false
+          ? DEFAULT_TOOL_APPROVAL_SETTINGS
+          : { ...DEFAULT_TOOL_APPROVAL_SETTINGS, autoAllowAll: true };
+      saveToolApprovalSettingsForTeam(request.teamName, initialSettings);
+
+      // Refresh team list to pick up the new team
       void get().fetchTeams();
-      if (get().selectedTeamName === request.teamName) {
-        void get().selectTeam(request.teamName, { allowReloadWhileProvisioning: true });
-      }
       window.setTimeout(() => {
         void get().fetchTeams();
-        if (get().selectedTeamName === request.teamName) {
-          void get().selectTeam(request.teamName, { allowReloadWhileProvisioning: true });
-        }
       }, 1200);
-      void pollProvisioningStatus(get, response.runId);
-      return response.runId;
+
+      return request.teamName;
     } catch (error) {
       const message =
         error instanceof IpcError
@@ -4618,22 +4497,12 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           : error instanceof Error
             ? error.message
             : 'Failed to create team';
-      set((state) => {
-        const nextRuns = { ...state.provisioningRuns };
-        delete nextRuns[pendingRunId];
-        const nextCurrentRunIdByTeam = { ...state.currentProvisioningRunIdByTeam };
-        if (nextCurrentRunIdByTeam[request.teamName] === pendingRunId) {
-          delete nextCurrentRunIdByTeam[request.teamName];
-        }
-        return {
-          provisioningRuns: nextRuns,
-          currentProvisioningRunIdByTeam: nextCurrentRunIdByTeam,
-          provisioningErrorByTeam: {
-            ...state.provisioningErrorByTeam,
-            [request.teamName]: message,
-          },
-        };
-      });
+      set((state) => ({
+        provisioningErrorByTeam: {
+          ...state.provisioningErrorByTeam,
+          [request.teamName]: message,
+        },
+      }));
       throw error;
     }
   },

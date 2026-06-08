@@ -232,7 +232,7 @@ export const PluginDetailDialog = ({
           {plugin.homepage && (
             <Button
               variant="link"
-              className="h-auto justify-start p-0 text-sm text-blue-400"
+              className="h-auto justify-start p-0 text-sm text-indigo-400"
               onClick={() => void api.openExternal(plugin.homepage!)}
             >
               <ExternalLink className="mr-1 size-3.5" />
@@ -242,7 +242,7 @@ export const PluginDetailDialog = ({
           {plugin.author?.email && (
             <Button
               variant="link"
-              className="h-auto justify-start p-0 text-sm text-blue-400"
+              className="h-auto justify-start p-0 text-sm text-indigo-400"
               onClick={() => void api.openExternal(`mailto:${plugin.author!.email}`)}
             >
               <Mail className="mr-1 size-3.5" />

@@ -241,7 +241,7 @@ export const TaskAttachments = ({
 
       {/* Drop zone indicator */}
       {dragOver ? (
-        <div className="flex items-center justify-center rounded-md border-2 border-dashed border-blue-500/40 bg-blue-500/5 py-4 text-xs text-blue-400">
+        <div className="flex items-center justify-center rounded-md border-2 border-dashed border-indigo-500/40 bg-indigo-500/5 py-4 text-xs text-indigo-400">
           Drop image here
         </div>
       ) : null}

@@ -11,6 +11,10 @@ import type {
   ProviderPresetsResponse,
 } from '@shared/types/providers';
 
+function stringifyProviderPatch(patch: Partial<GlobalProvider>): string {
+  return JSON.stringify(patch, (_key, value: unknown) => (value === undefined ? null : value));
+}
+
 function getBaseUrl(): string {
   const params = new URLSearchParams(window.location.search);
   const explicitPort = params.get('port');
@@ -34,7 +38,24 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
         ...(init?.headers ?? {}),
       },
     });
-    const json = (await res.json()) as { ok?: boolean; data?: T; error?: string };
+
+    // Guard against non-JSON responses (e.g. HTML 404 pages from cc-connect)
+    const contentType = res.headers.get('content-type') ?? '';
+    const text = await res.text();
+    if (!contentType.includes('json') || !text.trim().startsWith('{')) {
+      throw new Error(
+        `Provider API ${path} 返回了非 JSON 响应 (HTTP ${res.status})。` +
+        '请检查 cc-connect 是否正在运行且支持该端点。'
+      );
+    }
+
+    let json: { ok?: boolean; data?: T; error?: string };
+    try {
+      json = JSON.parse(text) as typeof json;
+    } catch (e) {
+      throw new Error(`Provider API ${path} 返回了无效 JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     if (!res.ok || json.ok === false) {
       throw new Error(json.error ?? `HTTP ${res.status}`);
     }
@@ -54,7 +75,7 @@ export const providersApi = {
   update(name: string, patch: Partial<GlobalProvider>): Promise<{ message: string }> {
     return request(`/providers/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      body: JSON.stringify(patch),
+      body: stringifyProviderPatch(patch),
     });
   },
   remove(name: string): Promise<{ message: string }> {

@@ -30,14 +30,14 @@ export const TeamSidebarRail = memo(function TeamSidebarRail({
   const [logsOpen, setLogsOpen] = useState(false);
   const logsSeparator = logsOpen ? (
     <div
-      className={`group relative h-3 shrink-0 cursor-row-resize ${isLogsResizing ? 'bg-blue-500/10' : ''}`}
+      className={`group relative h-3 shrink-0 cursor-row-resize ${isLogsResizing ? 'bg-indigo-500/10' : ''}`}
       onMouseDown={onLogsResizeMouseDown}
     >
       <div
         className={`absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 transition-colors ${
           isLogsResizing
-            ? 'bg-blue-500'
-            : 'bg-[var(--color-text-muted)]/35 group-hover:bg-blue-500/90'
+            ? 'bg-indigo-500'
+            : 'bg-[var(--color-text-muted)]/35 group-hover:bg-indigo-500/90'
         }`}
       />
     </div>
@@ -60,7 +60,7 @@ export const TeamSidebarRail = memo(function TeamSidebarRail({
         <MessagesPanel position="sidebar" {...messagesPanelProps} />
       </div>
       <div
-        className={`absolute inset-y-0 right-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-blue-500/30 ${isResizing ? 'bg-blue-500/40' : ''}`}
+        className={`absolute inset-y-0 right-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-indigo-500/30 ${isResizing ? 'bg-indigo-500/40' : ''}`}
         onMouseDown={onResizeMouseDown}
       />
     </div>

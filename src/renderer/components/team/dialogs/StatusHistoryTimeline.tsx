@@ -203,7 +203,7 @@ function dotColorForStatus(status: TeamTaskStatus): string {
     case 'pending':
       return 'bg-zinc-500';
     case 'in_progress':
-      return 'bg-blue-400';
+      return 'bg-indigo-400';
     case 'completed':
       return 'bg-emerald-400';
     case 'deleted':

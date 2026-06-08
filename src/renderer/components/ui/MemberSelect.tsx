@@ -150,7 +150,7 @@ export const MemberSelect = ({
               >
                 <span className="text-[var(--color-text-muted)]">未分配</span>
                 {value === null ? (
-                  <Check size={12} className="ml-auto shrink-0 text-blue-400" />
+                  <Check size={12} className="ml-auto shrink-0 text-indigo-400" />
                 ) : null}
               </CommandPrimitive.Item>
             ) : null}
@@ -196,7 +196,7 @@ export const MemberSelect = ({
                       </span>
                     ) : null}
                     {isSelected ? (
-                      <Check size={12} className="ml-auto shrink-0 text-blue-400" />
+                      <Check size={12} className="ml-auto shrink-0 text-indigo-400" />
                     ) : null}
                   </CommandPrimitive.Item>
                 );

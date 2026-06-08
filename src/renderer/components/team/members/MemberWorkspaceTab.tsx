@@ -90,7 +90,7 @@ export const MemberWorkspaceTab = ({
         </div>
         {onViewAllChanges && (
           <button
-            className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300"
+            className="flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300"
             onClick={onViewAllChanges}
           >
             <FileDiff size={10} />

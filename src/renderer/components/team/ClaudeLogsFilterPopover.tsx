@@ -112,7 +112,7 @@ export const ClaudeLogsFilterPopover = ({
             >
               <Filter size={14} />
               {activeCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-medium text-white">
                   {activeCount}
                 </span>
               )}

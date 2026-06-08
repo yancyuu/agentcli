@@ -801,7 +801,7 @@ export const SkillEditorDialog = ({
                         </div>
                         <div
                           className={`w-1 shrink-0 cursor-col-resize border-x border-border ${
-                            isResizing ? 'bg-blue-500/50' : 'hover:bg-blue-500/30'
+                            isResizing ? 'bg-indigo-500/50' : 'hover:bg-indigo-500/30'
                           }`}
                           onMouseDown={(event) => {
                             event.preventDefault();

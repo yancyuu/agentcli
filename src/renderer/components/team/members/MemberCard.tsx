@@ -607,55 +607,22 @@ export const MemberCard = ({
               className="shrink-0"
               title={totalTasks > 0 ? `${completed}/${totalTasks} completed` : undefined}
             >
-              <Badge
-                variant="secondary"
-                className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
-              >
-                {member.taskCount} {member.taskCount === 1 ? 'task' : 'tasks'}
-              </Badge>
               {totalTasks > 0 && (
-                <div className="mx-0.5 mt-0.5 h-[2px] rounded-full bg-[var(--color-border)]">
-                  <div
-                    className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
+                <>
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
+                  >
+                    {completed}/{totalTasks}
+                  </Badge>
+                  <div className="mx-0.5 mt-0.5 h-[2px] rounded-full bg-[var(--color-border)]">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </>
               )}
-              {/* NOTE: lead context bar disabled — usage formula is inaccurate */}
-            </div>
-          )}
-          {!isRemoved && (
-            <div className="flex shrink-0 items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSendMessage?.();
-                    }}
-                  >
-                    <MessageSquare size={13} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">发送消息</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAssignTask?.();
-                    }}
-                  >
-                    <Plus size={13} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">分配任务</TooltipContent>
-              </Tooltip>
             </div>
           )}
         </div>

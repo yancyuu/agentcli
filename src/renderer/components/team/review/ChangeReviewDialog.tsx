@@ -106,7 +106,7 @@ export const ChangeReviewDialog: React.FC<ChangeReviewDialogProps> = ({
                       ? 'flex items-center gap-2 rounded-md bg-emerald-500/5 px-3 py-2 font-mono text-xs text-emerald-400'
                       : status === 'deleted'
                         ? 'flex items-center gap-2 rounded-md bg-red-500/5 px-3 py-2 font-mono text-xs text-red-400'
-                        : 'flex items-center gap-2 rounded-md bg-blue-500/5 px-3 py-2 font-mono text-xs text-blue-400'
+                        : 'flex items-center gap-2 rounded-md bg-indigo-500/5 px-3 py-2 font-mono text-xs text-indigo-400'
                   }
                 >
                   <span className="w-12 shrink-0 text-center font-sans text-[10px] uppercase tracking-wide opacity-60">

@@ -52,7 +52,6 @@ interface ProviderFormState {
   agentModels: Partial<Record<AgentType, string>>;
   codexWireApi: string;
   codexHeadersText: string;
-  envText: string;
 }
 
 const AGENT_TYPE_BY_CLI_PROVIDER: Record<CliProviderId, AgentType> = {
@@ -160,7 +159,6 @@ function emptyForm(agentType: AgentType): ProviderFormState {
     agentModels: {},
     codexWireApi: '',
     codexHeadersText: '',
-    envText: '',
   };
 }
 
@@ -180,7 +178,6 @@ function formFromProvider(
     agentModels: provider.agent_models ?? {},
     codexWireApi: provider.codex?.wire_api ?? '',
     codexHeadersText: formatKeyValue(provider.codex?.http_headers),
-    envText: formatKeyValue(provider.env),
   };
 }
 
@@ -214,7 +211,6 @@ function formFromPreset(preset: ProviderPreset, fallbackAgentType: AgentType): P
     agentModels,
     codexWireApi: preset.agents?.codex?.codex_config?.wire_api ?? '',
     codexHeadersText: formatKeyValue(preset.agents?.codex?.codex_config?.http_headers),
-    envText: '',
   };
 }
 
@@ -263,7 +259,6 @@ function formToProvider(form: ProviderFormState, originalName?: string): GlobalP
     ...(Object.keys(endpoints).length > 0 ? { endpoints } : {}),
     ...(Object.keys(agentModels).length > 0 ? { agent_models: agentModels } : {}),
     ...(codex ? { codex } : {}),
-    ...(parseKeyValueText(form.envText) ? { env: parseKeyValueText(form.envText) } : {}),
   };
 }
 
@@ -368,8 +363,22 @@ export const ProviderRuntimeSettingsDialog = ({
     try {
       const payload = formToProvider(form, editingName ?? undefined);
       if (editingName) {
+        const existingProvider = providers.find((provider) => provider.name === editingName);
         const { name: _ignoredName, ...patch } = payload;
-        await providersApi.update(editingName, patch);
+        await providersApi.update(editingName, {
+          ...patch,
+          ...(existingProvider?.env ? { env: existingProvider.env } : {}),
+          ...(existingProvider?.api_key && !patch.api_key ? { api_key: undefined } : {}),
+          ...(existingProvider?.base_url && !patch.base_url ? { base_url: undefined } : {}),
+          ...(existingProvider?.model && !patch.model ? { model: undefined } : {}),
+          ...(existingProvider?.thinking && !patch.thinking ? { thinking: undefined } : {}),
+          ...(existingProvider?.models && !patch.models ? { models: undefined } : {}),
+          ...(existingProvider?.endpoints && !patch.endpoints ? { endpoints: undefined } : {}),
+          ...(existingProvider?.agent_models && !patch.agent_models
+            ? { agent_models: undefined }
+            : {}),
+          ...(existingProvider?.codex && !patch.codex ? { codex: undefined } : {}),
+        });
       } else {
         await providersApi.add(payload);
       }
@@ -641,7 +650,7 @@ export const ProviderRuntimeSettingsDialog = ({
                 </div>
                 {ccSwitchAvailable === false ? (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                    没有检测到可导入的 cc-switch Provider，或 cc-connect 未返回导入数据。
+                    没有检测到可导入的 Provider，或服务未返回导入数据。
                   </div>
                 ) : null}
                 <div className="space-y-2">
@@ -861,25 +870,14 @@ export const ProviderRuntimeSettingsDialog = ({
                 </div>
               ) : null}
 
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="space-y-1 text-xs text-[var(--color-text-secondary)]">
-                  <span>Thinking 设置（可选）</span>
-                  <Input
-                    value={form.thinking}
-                    onChange={(event) => updateForm({ thinking: event.target.value })}
-                    placeholder="enabled / disabled / 留空"
-                  />
-                </label>
-                <label className="space-y-1 text-xs text-[var(--color-text-secondary)]">
-                  <span>环境变量（每行 KEY=VALUE）</span>
-                  <textarea
-                    value={form.envText}
-                    onChange={(event) => updateForm({ envText: event.target.value })}
-                    className="min-h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-border-emphasis)]"
-                    placeholder="ANTHROPIC_BASE_URL=..."
-                  />
-                </label>
-              </div>
+              <label className="block space-y-1 text-xs text-[var(--color-text-secondary)]">
+                <span>Thinking 设置（可选）</span>
+                <Input
+                  value={form.thinking}
+                  onChange={(event) => updateForm({ thinking: event.target.value })}
+                  placeholder="enabled / disabled / 留空"
+                />
+              </label>
 
               {formError ? <div className="text-xs text-red-400">{formError}</div> : null}
 

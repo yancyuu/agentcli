@@ -41,6 +41,7 @@ function buildPathForTab(activeTab: Tab | null): string {
   }
   switch (activeTab.type) {
     case 'team':
+      if (activeTab.teamName === 'system-manager') return '/system-manager';
       return activeTab.teamName
         ? `/team/${encodeURIComponent(activeTab.teamName)}`
         : DEFAULT_APP_PATH;
@@ -142,6 +143,9 @@ function useTabPathPersistence() {
       case 'teams':
         state.openTeamsTab();
         break;
+      case 'system-manager':
+        void state.openSystemManager();
+        break;
       case 'settings':
         state.openSettingsTab();
         break;
@@ -208,11 +212,11 @@ declare global {
   }
 }
 
-const SPLASH_MIN_DURATION_MS = 1600;
-const SPLASH_ENHANCED_HOLD_MS = 600;
+const SPLASH_MIN_DURATION_MS = 2800;
+const SPLASH_ENHANCED_HOLD_MS = 800;
 const SPLASH_FADE_MS = 480;
-const SPLASH_REDUCED_MIN_DURATION_MS = 320;
-const SPLASH_REDUCED_HOLD_MS = 120;
+const SPLASH_REDUCED_MIN_DURATION_MS = 600;
+const SPLASH_REDUCED_HOLD_MS = 200;
 const SPLASH_REDUCED_FADE_MS = 180;
 const SPLASH_AVATAR_READY_MAX_WAIT_MS = 900;
 const SPLASH_REDUCED_AVATAR_READY_MAX_WAIT_MS = 160;

@@ -117,7 +117,7 @@ const SessionResultItemInner = ({
       <div className="flex items-start gap-3">
         <div
           className={`mt-0.5 shrink-0 ${
-            result.messageType === 'user' ? 'text-blue-400' : 'text-green-400'
+            result.messageType === 'user' ? 'text-indigo-400' : 'text-green-400'
           }`}
         >
           {result.messageType === 'user' ? <User className="size-4" /> : <Bot className="size-4" />}
@@ -125,8 +125,8 @@ const SessionResultItemInner = ({
         <div className="min-w-0 flex-1">
           {showProjectName && projectName && (
             <div className="mb-1 flex items-center gap-2">
-              <FolderGit2 className="size-3 text-blue-400" />
-              <span className="truncate text-xs font-medium text-blue-400">{projectName}</span>
+              <FolderGit2 className="size-3 text-indigo-400" />
+              <span className="truncate text-xs font-medium text-indigo-400">{projectName}</span>
             </div>
           )}
           <div className="mb-1 flex items-center gap-2">
@@ -486,7 +486,7 @@ export const CommandPalette = (): React.JSX.Element | null => {
               onClick={() => setGlobalSearchEnabled(!globalSearchEnabled)}
               className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
                 globalSearchEnabled
-                  ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                  ? 'bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30'
                   : 'text-text-muted hover:bg-surface-raised hover:text-text'
               }`}
               title={

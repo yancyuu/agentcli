@@ -33,13 +33,13 @@ export const SkipPermissionsCheckbox: React.FC<SkipPermissionsCheckboxProps> = (
       <div
         className="mt-1.5 rounded-md border px-3 py-2 text-xs"
         style={{
-          backgroundColor: 'rgba(59, 130, 246, 0.08)',
-          borderColor: 'rgba(59, 130, 246, 0.2)',
+          backgroundColor: 'rgba(99, 102, 241, 0.08)',
+          borderColor: 'rgba(99, 102, 241, 0.2)',
           color: 'var(--color-text-secondary)',
         }}
       >
         <div className="flex items-start gap-2">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-blue-400" />
+          <Info className="mt-0.5 size-3.5 shrink-0 text-indigo-400" />
           <p>启用自主模式后，所有工具都会直接执行，不再逐次请求确认。处理不可信代码时请谨慎。</p>
         </div>
       </div>
@@ -47,13 +47,13 @@ export const SkipPermissionsCheckbox: React.FC<SkipPermissionsCheckboxProps> = (
       <div
         className="mt-1.5 rounded-md border px-3 py-2 text-xs"
         style={{
-          backgroundColor: 'rgba(59, 130, 246, 0.08)',
-          borderColor: 'rgba(59, 130, 246, 0.2)',
+          backgroundColor: 'rgba(99, 102, 241, 0.08)',
+          borderColor: 'rgba(99, 102, 241, 0.2)',
           color: 'var(--color-text-secondary)',
         }}
       >
         <div className="flex items-start gap-2">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-blue-400" />
+          <Info className="mt-0.5 size-3.5 shrink-0 text-indigo-400" />
           <p>手动模式：每次工具调用都需要你实时批准或拒绝。</p>
         </div>
       </div>

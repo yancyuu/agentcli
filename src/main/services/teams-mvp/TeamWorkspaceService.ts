@@ -161,9 +161,9 @@ async function readJson<T>(p: string, fallback: T): Promise<T> {
   try {
     const raw = await fs.promises.readFile(p, 'utf8');
     return JSON.parse(raw) as T;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
-    throw err;
+  } catch {
+    // File missing or corrupted JSON — return fallback silently
+    return fallback;
   }
 }
 
@@ -205,7 +205,7 @@ export class TeamWorkspaceService {
     if (!input.bindProject) throw new Error('bindProject is required');
     if (!input.workDir) throw new Error('workDir is required');
 
-    const slug = await this.createUniqueStorageSlug(input.displayName);
+    const slug = await this.createUniqueStorageSlug(input.bindProject);
     const root = teamRoot(slug);
 
     await fs.promises.mkdir(root, { recursive: true });
@@ -276,6 +276,7 @@ export class TeamWorkspaceService {
     const out: TeamManifest[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
+      if (e.name.startsWith('.')) continue;
       try {
         out.push(await this.readTeamManifest(e.name));
       } catch {
@@ -291,6 +292,7 @@ export class TeamWorkspaceService {
       Pick<
         TeamManifest,
         | 'displayName'
+        | 'bindProject'
         | 'color'
         | 'description'
         | 'collaboration'

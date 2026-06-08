@@ -153,7 +153,7 @@ export const InsightsSection = ({
           <div className="mb-2 text-xs font-medium text-text-muted">
             Agent Tree ({agentTree.agentCount} agent{agentTree.agentCount !== 1 ? 's' : ''})
             {agentTree.hasTeamMode && (
-              <span className="ml-2 rounded px-1.5 py-0.5 text-xs" style={{ color: '#60a5fa' }}>
+              <span className="ml-2 rounded px-1.5 py-0.5 text-xs" style={{ color: '#818cf8' }}>
                 Team Mode
               </span>
             )}

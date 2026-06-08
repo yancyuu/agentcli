@@ -304,7 +304,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
         ) : (
           <Bot
             className="size-4 shrink-0"
-            style={{ color: subagent.isOngoing ? '#3b82f6' : COLOR_TEXT_MUTED }}
+            style={{ color: subagent.isOngoing ? '#6366f1' : COLOR_TEXT_MUTED }}
           />
         )}
 
@@ -347,7 +347,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
 
         {/* Status indicator */}
         {subagent.isOngoing ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin" style={{ color: '#3b82f6' }} />
+          <Loader2 className="size-3.5 shrink-0 animate-spin" style={{ color: '#6366f1' }} />
         ) : (
           <CheckCircle2 className="size-3.5 shrink-0" style={{ color: '#22c55e' }} />
         )}

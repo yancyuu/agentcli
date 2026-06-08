@@ -35,19 +35,19 @@ const tabs: TabConfig[] = [
     id: 'harness',
     label: 'Harness',
     icon: Bot,
-    description: '管理 AI Agent 运行时（12 种）的 Provider 配置、API Key、端点和 CLI 安装状态。',
+    description: '管理 AI Agent 运行时的 Provider 配置、API Key、端点和 CLI 安装状态。',
   },
   {
     id: 'task-bus',
     label: '团队总线',
     icon: Share2,
-    description: '配置 Redis 消息总线实现跨主机团队协作，以及团队使用数据的采集和上报。',
+    description: '配置 Redis 消息总线实现跨主机团队协作，以及使用数据采集和上报。',
   },
   {
     id: 'advanced',
     label: '高级',
     icon: Wrench,
-    description: '高级选项：导出/导入配置、重置默认值和编辑原始配置。',
+    description: '导出/导入配置、重置默认值和编辑原始配置。',
   },
 ];
 
@@ -59,51 +59,53 @@ export const SettingsTabs = ({
 
   return (
     <TooltipProvider>
-      <div className="border-b border-border pb-0">
-        <div className="inline-flex h-9 items-center gap-1 rounded-t-lg bg-[var(--color-surface-raised)] p-1 text-[var(--color-text-muted)]">
-          {visibleTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeSection === tab.id;
+      <div className="flex items-center" style={{ backgroundColor: 'var(--color-surface-raised)' }}>
+        {visibleTabs.map((tab, index) => {
+          const Icon = tab.icon;
+          const isActive = activeSection === tab.id;
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => onSectionChange(tab.id)}
-                className={`relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 pr-7 text-sm font-medium transition-all ${
-                  isActive
-                    ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                }`}
-              >
-                <Icon className="size-3.5" />
-                {tab.label}
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onSectionChange(tab.id)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs transition-colors ${
+                isActive
+                  ? 'font-medium'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+              }`}
+              style={{
+                borderLeft: index > 0 ? '1px solid var(--color-border-subtle)' : undefined,
+                color: isActive ? '#818cf8' : undefined,
+              }}
+            >
+              <Icon className={`size-3 ${isActive ? 'opacity-90' : 'opacity-40'}`} />
+              {tab.label}
 
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`What is ${tab.label}?`}
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.stopPropagation();
-                        }
-                      }}
-                      className="size-4.5 absolute right-1.5 top-0.5 z-10 inline-flex items-center justify-center rounded-full text-text-muted transition-colors hover:bg-[var(--color-surface-raised)] hover:text-text"
-                    >
-                      <Info className="size-3" />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-64 text-pretty text-xs leading-relaxed">
-                    {tab.description}
-                  </TooltipContent>
-                </Tooltip>
-              </button>
-            );
-          })}
-        </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`What is ${tab.label}?`}
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.stopPropagation();
+                      }
+                    }}
+                    className="ml-0.5 inline-flex items-center justify-center rounded-full text-[var(--color-text-muted)] opacity-0 transition-opacity hover:opacity-100"
+                  >
+                    <Info className="size-2.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                  {tab.description}
+                </TooltipContent>
+              </Tooltip>
+            </button>
+          );
+        })}
       </div>
     </TooltipProvider>
   );

@@ -1,82 +1,65 @@
-import { formatRelativeTime, formatTokensCompact } from '@renderer/utils/formatters';
+import { formatDuration, formatTokensCompact } from '@renderer/utils/formatters';
 
-import type { MemberDetailTab } from './memberDetailTypes';
+import type { MemberFullStats } from '@shared/types';
 
 interface MemberDetailStatsProps {
-  totalTasks: number;
-  inProgressTasks: number;
-  activityCount?: number;
-  totalTokens: number | null;
+  stats: MemberFullStats | null;
   statsLoading?: boolean;
-  statsComputedAt?: string;
-  onTabChange?: (tab: MemberDetailTab) => void;
+  statsError?: string | null;
 }
 
-const baseClasses =
-  'rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 py-1.5';
-const clickableClasses =
-  'cursor-pointer transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-overlay)]';
-
-const StatBlock = ({
-  label,
-  value,
-  sub,
-  onClick,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  onClick?: () => void;
-}): React.JSX.Element => {
-  const classes = onClick ? `${baseClasses} ${clickableClasses}` : baseClasses;
-  const content = (
-    <>
-      <p className="text-base font-semibold leading-tight text-[var(--color-text)]">{value}</p>
-      <p className="text-[10px] text-[var(--color-text-muted)]">{label}</p>
-      {sub && <p className="mt-0.5 text-[9px] text-[var(--color-text-muted)]">{sub}</p>}
-    </>
-  );
-  if (onClick) {
-    return (
-      <button type="button" className={classes} onClick={onClick}>
-        {content}
-      </button>
-    );
-  }
-  return <div className={classes}>{content}</div>;
-};
+function formatDurationShort(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  if (hours < 24) return `${hours}h ${remainMin}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
 
 export const MemberDetailStats = ({
-  totalTasks,
-  inProgressTasks,
-  activityCount = 0,
-  totalTokens,
+  stats,
   statsLoading,
-  statsComputedAt,
-  onTabChange,
 }: MemberDetailStatsProps): React.JSX.Element => {
-  const tokensValue = statsLoading
-    ? '...'
-    : totalTokens != null
-      ? formatTokensCompact(totalTokens)
-      : '—';
-  const tokensSub =
-    !statsLoading && statsComputedAt ? `updated ${formatRelativeTime(statsComputedAt)}` : undefined;
+  const totalTokens = stats ? stats.inputTokens + stats.outputTokens : 0;
+
+  const items = [
+    {
+      label: 'Sessions',
+      value: statsLoading ? '...' : String(stats?.sessionCount ?? 0),
+      sub: !statsLoading && stats ? `${stats.messageCount} messages` : undefined,
+    },
+    {
+      label: 'Tokens',
+      value: statsLoading ? '...' : formatTokensCompact(totalTokens),
+    },
+    {
+      label: 'Duration',
+      value: statsLoading ? '...' : stats?.totalDurationMs ? formatDurationShort(stats.totalDurationMs) : '—',
+      sub: !statsLoading && stats?.tasksCompleted ? `${stats.tasksCompleted} completed` : undefined,
+    },
+  ];
 
   return (
-    <div className="grid min-w-0 flex-1 grid-cols-2 gap-1.5">
-      <StatBlock
-        label="Tasks"
-        value={totalTasks}
-        sub={inProgressTasks > 0 ? `进行中: ${inProgressTasks}` : undefined}
-        onClick={onTabChange ? () => onTabChange('tasks') : undefined}
-      />
-      <StatBlock
-        label="Tokens"
-        value={tokensValue}
-        sub={activityCount > 0 ? `Activity ${activityCount}` : tokensSub}
-        onClick={onTabChange ? () => onTabChange('stats') : undefined}
-      />
+    <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 py-1.5"
+        >
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-sm font-semibold tabular-nums text-[var(--color-text)]">
+              {item.value}
+            </span>
+            <span className="text-[10px] text-[var(--color-text-muted)]">{item.label}</span>
+          </div>
+          {item.sub && (
+            <span className="block text-[9px] text-[var(--color-text-muted)]">{item.sub}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 };

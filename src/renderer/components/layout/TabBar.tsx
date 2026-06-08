@@ -264,7 +264,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
             scrollContainerRef.current = el;
             setDroppableRef(el);
           }}
-          className="scrollbar-none flex min-w-0 flex-1 items-center gap-1"
+          className="scrollbar-none flex min-w-0 flex-1 items-center"
           style={{
             outline: isDroppableOver ? '1px dashed var(--color-accent, #6366f1)' : 'none',
             outlineOffset: '-1px',

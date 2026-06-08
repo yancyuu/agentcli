@@ -40,11 +40,6 @@ const CODEX_SLASH_COMMAND_SUGGESTIONS: readonly KnownSlashCommandDefinition[] = 
     description: 'Show session configuration and token usage.',
   },
   {
-    name: 'mcp',
-    command: '/mcp',
-    description: 'List configured MCP tools for this session.',
-  },
-  {
     name: 'mention',
     command: '/mention',
     description: 'Attach a file or folder to the conversation.',

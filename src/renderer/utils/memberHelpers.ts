@@ -46,15 +46,9 @@ function hashStringToIndex(str: string): number {
 export function agentAvatarUrl(name: string, size = 64): string {
   void size;
   const normalized = name.trim().toLowerCase();
-  if (isLeadMemberName(normalized)) {
-    return LEAD_PARTICIPANT_AVATAR_URL;
-  }
 
-  // Temporarily disabled external avatar API.
-  // return `https://robohash.org/${encodeURIComponent(name)}?size=${size}x${size}`;
-  return getParticipantAvatarUrlByIndex(
-    hashStringToIndex(normalized) % PARTICIPANT_AVATAR_URLS.length
-  );
+  // DiceBear adventurer avatars — deterministic per name, no API key needed
+  return `https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(normalized)}&backgroundColor=c0aede,d1d4f9,ffd5dc,ffdfbf,b6e3f4,c1f0c1`;
 }
 
 export const STATUS_DOT_COLORS: Record<MemberStatus, string> = {
@@ -804,22 +798,16 @@ export function buildMemberAvatarMap(members: readonly MemberAvatarInput[]): Map
   const teammateMembers = activeMembers.filter((member) => !isLeadMember(member));
 
   for (const [index, member] of leadMembers.entries()) {
-    map.set(member.name, index === 0 ? LEAD_PARTICIPANT_AVATAR_URL : agentAvatarUrl(member.name));
+    map.set(member.name, agentAvatarUrl(member.name));
   }
 
   for (const [index, member] of teammateMembers.entries()) {
-    map.set(
-      member.name,
-      getParticipantAvatarUrlByIndex(1 + (index % (PARTICIPANT_AVATAR_URLS.length - 1)))
-    );
+    map.set(member.name, agentAvatarUrl(member.name));
   }
 
   for (const member of members) {
     if (!map.has(member.name)) {
-      map.set(
-        member.name,
-        isLeadMember(member) ? LEAD_PARTICIPANT_AVATAR_URL : agentAvatarUrl(member.name)
-      );
+      map.set(member.name, agentAvatarUrl(member.name));
     }
   }
 

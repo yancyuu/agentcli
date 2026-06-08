@@ -589,7 +589,7 @@ const RootDropZone = React.forwardRef<
     <div
       ref={combinedRef}
       className={`scrollbar-thin h-full overflow-y-auto transition-colors ${
-        isDropTarget ? 'bg-blue-400/5 ring-1 ring-inset ring-blue-400/30' : ''
+        isDropTarget ? 'bg-indigo-400/5 ring-1 ring-inset ring-indigo-400/30' : ''
       }`}
       role="tree"
     >
@@ -709,8 +709,8 @@ const DraggableTreeItem = React.memo(
         className={`flex h-full cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors hover:bg-surface-raised ${
           isSelected ? 'bg-surface-raised text-text' : 'text-text-secondary'
         } ${isDragging ? 'opacity-30' : ''} ${
-          isDropTarget ? 'rounded bg-blue-400/10 ring-2 ring-blue-400/50' : ''
-        } ${isInsideDropTarget && !isDropTarget ? 'border-l-2 border-l-blue-400/40 bg-blue-400/5' : ''}`}
+          isDropTarget ? 'rounded bg-indigo-400/10 ring-2 ring-indigo-400/50' : ''
+        } ${isInsideDropTarget && !isDropTarget ? 'border-l-2 border-l-indigo-400/40 bg-indigo-400/5' : ''}`}
         style={{ paddingLeft: `${visualDepth * INDENT_PX + 8}px` }}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -843,7 +843,7 @@ const InlineRenameInput = ({
       }}
       onBlur={() => requestAnimationFrame(() => inputRef.current?.focus())}
       onClick={(e) => e.stopPropagation()}
-      className="min-w-0 flex-1 rounded border border-blue-400/50 bg-surface px-1 py-0 text-xs text-text outline-none focus:ring-1 focus:ring-blue-400/50"
+      className="min-w-0 flex-1 rounded border border-indigo-400/50 bg-surface px-1 py-0 text-xs text-text outline-none focus:ring-1 focus:ring-indigo-400/50"
     />
   );
 };

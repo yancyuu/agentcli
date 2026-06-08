@@ -295,7 +295,7 @@ export const MemberDraftRow = ({
               )}
               工作流
               {!workflowExpanded && workflowDraft.value.trim() ? (
-                <span className="absolute -right-1 -top-1 size-2 rounded-full bg-blue-500" />
+                <span className="absolute -right-1 -top-1 size-2 rounded-full bg-indigo-500" />
               ) : null}
             </Button>
           ) : null}

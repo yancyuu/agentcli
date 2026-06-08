@@ -153,8 +153,8 @@ export const Sidebar = (): React.JSX.Element => {
         <button
           type="button"
           aria-label="调整侧栏宽度"
-          className={`absolute left-0 top-0 z-20 h-full w-1 cursor-col-resize border-0 bg-transparent p-0 transition-colors hover:bg-blue-500/50 ${
-            isResizing ? 'bg-blue-500/50' : ''
+          className={`absolute left-0 top-0 z-20 h-full w-1 cursor-col-resize border-0 bg-transparent p-0 transition-colors hover:bg-indigo-500/50 ${
+            isResizing ? 'bg-indigo-500/50' : ''
           }`}
           onMouseDown={handleResizeStart}
         />

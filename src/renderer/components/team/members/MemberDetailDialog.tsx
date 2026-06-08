@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button } from '@renderer/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '@renderer/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import { useMemberStats } from '@renderer/hooks/useMemberStats';
-import { useStore } from '@renderer/store';
-import { selectMemberMessagesForTeamMember } from '@renderer/store/slices/teamSlice';
 import {
   buildMemberLaunchDiagnosticsPayload,
   getMemberLaunchDiagnosticsErrorMessage,
@@ -17,16 +13,10 @@ import {
   resolveMemberRuntimeSummary,
 } from '@renderer/utils/memberRuntimeSummary';
 import { isLeadMember } from '@shared/utils/leadDetection';
-import { BarChart3, FolderOpen, Loader2 } from 'lucide-react';
 
-import { buildMemberActivityEntries } from './memberActivityEntries';
 import { MemberDetailHeader } from './MemberDetailHeader';
 import { MemberDetailStats } from './MemberDetailStats';
-import { type MemberActivityFilter, type MemberDetailTab } from './memberDetailTypes';
 import { MemberLaunchDiagnosticsButton } from './MemberLaunchDiagnosticsButton';
-import { MemberMessagesTab } from './MemberMessagesTab';
-import { MemberStatsTab } from './MemberStatsTab';
-import { MemberWorkspaceTab } from './MemberWorkspaceTab';
 
 import type { TeamLaunchParams } from '@renderer/store/slices/teamSlice';
 import type {
@@ -43,8 +33,6 @@ interface MemberDetailDialogProps {
   teamName: string;
   members: ResolvedTeamMember[];
   tasks: TeamTaskWithKanban[];
-  initialTab?: MemberDetailTab;
-  initialActivityFilter?: MemberActivityFilter;
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
   isLaunchSettling?: boolean;
@@ -72,8 +60,6 @@ export const MemberDetailDialog = ({
   teamName,
   members,
   tasks,
-  initialTab = 'tasks',
-  initialActivityFilter = 'all',
   isTeamAlive,
   isTeamProvisioning,
   isLaunchSettling,
@@ -90,25 +76,6 @@ export const MemberDetailDialog = ({
   updatingRole,
   onViewMemberChanges,
 }: MemberDetailDialogProps): React.JSX.Element | null => {
-  const memberMessages = useStore((state) =>
-    selectMemberMessagesForTeamMember(state, teamName, member?.name ?? null)
-  );
-  const memberActivityCount = useMemo(() => {
-    if (!member) {
-      return 0;
-    }
-    return buildMemberActivityEntries({
-      teamName,
-      memberName: member.name,
-      members,
-      tasks,
-      messages: memberMessages,
-    }).length;
-  }, [member, memberMessages, members, tasks, teamName]);
-
-  const [activeTab, setActiveTab] = useState<MemberDetailTab>(
-    initialTab === 'tasks' ? 'workspace' : initialTab
-  );
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
 
@@ -149,18 +116,15 @@ export const MemberDetailDialog = ({
     if (!open || !member) {
       return;
     }
-    setActiveTab(initialTab);
     setRestartError(null);
     setRestarting(false);
-  }, [initialTab, member, open]);
+  }, [member, open]);
 
   const {
     stats: memberStats,
     loading: statsLoading,
     error: statsError,
   } = useMemberStats(teamName, member?.name ?? null);
-
-  const totalTokens = memberStats ? memberStats.inputTokens + memberStats.outputTokens : null;
 
   if (!member) return null;
 
@@ -189,68 +153,11 @@ export const MemberDetailDialog = ({
           </DialogHeader>
 
           <MemberDetailStats
-            totalTasks={0}
-            inProgressTasks={0}
-            activityCount={memberActivityCount}
-            totalTokens={totalTokens}
+            stats={memberStats}
             statsLoading={statsLoading}
-            statsComputedAt={memberStats?.computedAt}
-            onTabChange={setActiveTab}
+            statsError={statsError}
           />
         </div>
-
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as MemberDetailTab)}
-          className="min-w-0 overflow-hidden"
-        >
-          <TabsList className="w-full">
-            <TabsTrigger value="workspace" className="flex-1 gap-1.5">
-              <FolderOpen size={12} />
-              Workspace
-            </TabsTrigger>
-            <TabsTrigger value="activity" className="flex-1 gap-1.5">
-              Activity
-              {memberActivityCount > 0 && (
-                <span className="rounded-full bg-[var(--color-surface)] px-1.5 text-[10px]">
-                  {memberActivityCount}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="stats" className="flex-1 gap-1.5">
-              <BarChart3 size={12} />
-              Stats
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="workspace">
-            <MemberWorkspaceTab
-              teamName={teamName}
-              memberName={member.name}
-              onFileClick={(filePath) => onViewMemberChanges?.(member.name, filePath)}
-              onViewAllChanges={() => onViewMemberChanges?.(member.name)}
-            />
-          </TabsContent>
-          <TabsContent value="activity">
-            <MemberMessagesTab
-              teamName={teamName}
-              memberName={member.name}
-              members={members}
-              tasks={tasks}
-              initialFilter={initialActivityFilter}
-            />
-          </TabsContent>
-          <TabsContent value="stats">
-            <MemberStatsTab
-              teamName={teamName}
-              memberName={member.name}
-              prefetchedStats={memberStats}
-              prefetchedLoading={statsLoading}
-              prefetchedError={statsError}
-              onFileClick={(filePath) => onViewMemberChanges?.(member.name, filePath)}
-              onShowAllFiles={() => onViewMemberChanges?.(member.name)}
-            />
-          </TabsContent>
-        </Tabs>
 
         <DialogFooter>
           {restartError ? (

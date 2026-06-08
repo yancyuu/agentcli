@@ -4,20 +4,11 @@
  * Global catalog caches are in extensionsSlice (Zustand).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import { api } from '@renderer/api';
+import type { PluginCapability, PluginFilters, PluginSortField } from '@shared/types/extensions';
 
-import type {
-  McpCatalogItem,
-  McpSearchResult,
-  PluginCapability,
-  PluginFilters,
-  PluginSortField,
-} from '@shared/types/extensions';
-
-export type ExtensionsSubTab = 'plugins' | 'mcp-servers' | 'skills' | 'env-vars';
-export type SkillsSortState = 'name-asc' | 'recent-desc';
+export type ExtensionsSubTab = 'plugins';
 
 interface PluginSortState {
   field: PluginSortField;
@@ -42,90 +33,6 @@ export function useExtensionsTabState() {
     order: 'desc',
   });
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
-
-  // ── MCP search (per-tab, calls API directly) ──
-  const [mcpSearchQuery, setMcpSearchQuery] = useState('');
-  const [mcpSearchResults, setMcpSearchResults] = useState<McpCatalogItem[]>([]);
-  const [mcpSearchLoading, setMcpSearchLoading] = useState(false);
-  const [mcpSearchWarnings, setMcpSearchWarnings] = useState<string[]>([]);
-  const [selectedMcpServerId, setSelectedMcpServerId] = useState<string | null>(null);
-
-  // ── Skills browse ──
-  const [skillsSearchQuery, setSkillsSearchQuery] = useState('');
-  const [skillsInstalledOnly] = useState(false);
-  const [skillsSort, setSkillsSort] = useState<SkillsSortState>('name-asc');
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-
-  // ── Debounced MCP search ──
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mcpSearchRequestSeqRef = useRef(0);
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current);
-      }
-      mcpSearchRequestSeqRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (activeSubTab !== 'plugins' && selectedPluginId !== null) {
-      setSelectedPluginId(null);
-    }
-    if (activeSubTab !== 'mcp-servers' && selectedMcpServerId !== null) {
-      setSelectedMcpServerId(null);
-    }
-    if (activeSubTab !== 'skills' && selectedSkillId !== null) {
-      setSelectedSkillId(null);
-    }
-  }, [activeSubTab, selectedMcpServerId, selectedPluginId, selectedSkillId]);
-
-  const mcpSearch = useCallback((query: string) => {
-    setMcpSearchQuery(query);
-    const requestId = ++mcpSearchRequestSeqRef.current;
-
-    if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current);
-    }
-
-    if (!query.trim()) {
-      setMcpSearchResults([]);
-      setMcpSearchWarnings([]);
-      setMcpSearchLoading(false);
-      return;
-    }
-
-    setMcpSearchLoading(true);
-
-    searchTimerRef.current = setTimeout(() => {
-      if (!api.mcpRegistry) {
-        if (mcpSearchRequestSeqRef.current === requestId) {
-          setMcpSearchLoading(false);
-        }
-        return;
-      }
-
-      void api.mcpRegistry.search(query).then(
-        (result: McpSearchResult) => {
-          if (mcpSearchRequestSeqRef.current !== requestId) {
-            return;
-          }
-          setMcpSearchResults(result.servers);
-          setMcpSearchWarnings(result.warnings);
-          setMcpSearchLoading(false);
-        },
-        () => {
-          if (mcpSearchRequestSeqRef.current !== requestId) {
-            return;
-          }
-          setMcpSearchLoading(false);
-          setMcpSearchWarnings(['Search failed']);
-        }
-      );
-    }, 300);
-  }, []);
 
   // ── Plugin filter helpers ──
   const updatePluginSearch = useCallback((search: string) => {
@@ -184,23 +91,5 @@ export function useExtensionsTabState() {
     toggleInstalledOnly,
     clearFilters,
     hasActiveFilters,
-
-    // MCP
-    mcpSearchQuery,
-    mcpSearch,
-    mcpSearchResults,
-    mcpSearchLoading,
-    mcpSearchWarnings,
-    selectedMcpServerId,
-    setSelectedMcpServerId,
-
-    // Skills
-    skillsSearchQuery,
-    setSkillsSearchQuery,
-    skillsInstalledOnly,
-    skillsSort,
-    setSkillsSort,
-    selectedSkillId,
-    setSelectedSkillId,
   };
 }

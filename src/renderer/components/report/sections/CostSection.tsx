@@ -97,7 +97,7 @@ export const CostSection = ({
           <div className="mb-1.5 flex h-3 w-full overflow-hidden rounded-full">
             <div
               className="h-full"
-              style={{ width: `${parentPct}%`, backgroundColor: '#60a5fa' }}
+              style={{ width: `${parentPct}%`, backgroundColor: '#818cf8' }}
             />
             <div
               className="h-full"
@@ -108,7 +108,7 @@ export const CostSection = ({
             <div className="flex items-center gap-1.5">
               <span
                 className="inline-block size-2 rounded-full"
-                style={{ backgroundColor: '#60a5fa' }}
+                style={{ backgroundColor: '#818cf8' }}
               />
               <span className="text-text-secondary">主会话：{fmt(data.parentCostUsd)}</span>
             </div>

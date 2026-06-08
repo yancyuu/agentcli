@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.6.38",
+  "version": "1.6.42",
   "description": "openHermit: team-oriented agent management workbench atop cc-connect.",
   "license": "AGPL-3.0",
   "author": {
@@ -105,6 +105,9 @@
     "@tiptap/pm": "^3.20.4",
     "@tiptap/react": "^3.20.4",
     "@tiptap/starter-kit": "^3.20.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "anser": "^2.3.5",
     "cc-connect": "1.3.3-beta.4",
     "chokidar": "^5.0.0",
@@ -124,6 +127,7 @@
     "mdast-util-to-hast": "^13.2.1",
     "mermaid": "^11.12.3",
     "motion": "12.38.0",
+    "node-pty": "^1.1.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

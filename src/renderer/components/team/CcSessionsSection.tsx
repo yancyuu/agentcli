@@ -17,7 +17,6 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
-  Download,
   Loader2,
   MessageSquare,
   Monitor,
@@ -49,7 +48,6 @@ export function CcSessionsSection({
   const [visibleHistoricalCount, setVisibleHistoricalCount] = useState(
     HISTORICAL_SESSION_PAGE_SIZE
   );
-  const [exportingAllSessions, setExportingAllSessions] = useState(false);
 
   useEffect(() => {
     setExpandedSessionId((current) =>
@@ -68,52 +66,6 @@ export function CcSessionsSection({
   const loadMoreHistoricalSessions = useCallback(() => {
     setVisibleHistoricalCount((current) => current + HISTORICAL_SESSION_PAGE_SIZE);
   }, []);
-
-  const handleExportAllSessions = useCallback(async () => {
-    if (exportingAllSessions) return;
-    setExportingAllSessions(true);
-    try {
-      const params = new URLSearchParams({
-        teamName,
-        format: 'csv',
-        includeContent: 'full',
-        includeToolResults: 'false',
-        includeSystemMessages: 'false',
-      });
-      const res = await fetch(`/api/telemetry/conversations/export?${params.toString()}`);
-      if (res.ok) {
-        const payload = (await res.json()) as unknown;
-        if (isExportPayload(payload) && hasDataRows(payload.content)) {
-          downloadTextFile(payload.content, payload.filename, payload.mimeType);
-          return;
-        }
-      }
-
-      const details = await Promise.all(
-        sessions.map(async (session) => {
-          try {
-            const detail = await api.teams.getSessionDetail(
-              teamName,
-              session.id,
-              Math.max(session.historyCount, 1)
-            );
-            return { session, detail };
-          } catch {
-            return { session, detail: null };
-          }
-        })
-      );
-      downloadTextFile(
-        buildAllSessionsCsv(details),
-        buildAllSessionsCsvFilename(teamName),
-        'text/csv;charset=utf-8'
-      );
-    } catch (err) {
-      console.error('Failed to export all conversation telemetry:', err);
-    } finally {
-      setExportingAllSessions(false);
-    }
-  }, [exportingAllSessions, sessions, teamName]);
 
   if (loading) {
     return (
@@ -154,22 +106,6 @@ export function CcSessionsSection({
   );
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-end px-2.5 pb-1">
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-raised)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => void handleExportAllSessions()}
-          disabled={exportingAllSessions}
-          title="导出所有会话为 CSV 表格"
-        >
-          {exportingAllSessions ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Download size={12} />
-          )}
-          导出所有会话表格
-        </button>
-      </div>
       {liveSessions.length > 0 && (
         <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-emerald-400/70">
           运行中 ({liveSessions.length})
@@ -213,7 +149,7 @@ export function CcSessionsSection({
   );
 }
 
-function isExportPayload(
+export function isExportPayload(
   value: unknown
 ): value is { filename: string; mimeType: string; content: string } {
   if (!value || typeof value !== 'object') return false;
@@ -225,7 +161,7 @@ function isExportPayload(
   );
 }
 
-function hasDataRows(csv: string): boolean {
+export function hasDataRows(csv: string): boolean {
   return (
     csv
       .split('\n')
@@ -234,7 +170,7 @@ function hasDataRows(csv: string): boolean {
   );
 }
 
-function downloadTextFile(content: string, filename: string, mimeType: string): void {
+export function downloadTextFile(content: string, filename: string, mimeType: string): void {
   const blob = new Blob([`﻿${content}`], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -246,7 +182,7 @@ function downloadTextFile(content: string, filename: string, mimeType: string): 
   URL.revokeObjectURL(url);
 }
 
-function buildAllSessionsCsv(
+export function buildAllSessionsCsv(
   rows: { session: CcSession; detail: CcSessionDetail | null }[]
 ): string {
   const headers = [
@@ -301,7 +237,7 @@ function buildAllSessionsCsv(
   return `${lines.join('\n')}\n`;
 }
 
-function buildAllSessionsCsvFilename(teamName: string): string {
+export function buildAllSessionsCsvFilename(teamName: string): string {
   return `${sanitizeFilename(teamName)}-all-sessions-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
 }
 
@@ -330,7 +266,6 @@ function CcSessionRow({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [historyLimit, setHistoryLimit] = useState(SESSION_DETAIL_PAGE_SIZE);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
-  const [stoppingSession, setStoppingSession] = useState(false);
   const hasMoreHistory =
     detail != null &&
     Array.isArray(detail.history) &&
@@ -381,27 +316,11 @@ function CcSessionRow({
     setHistoryLimit((prev) => prev + SESSION_DETAIL_PAGE_SIZE);
   }, [hasMoreHistory, loadingDetail, loadingMoreHistory]);
 
-  const handleStopSession = useCallback(() => {
-    if (stoppingSession || !session.live) {
-      return;
-    }
-    setStoppingSession(true);
-    setDetailError(null);
-    void api.teams
-      .cancelSession(teamName, session.id)
-      .catch((err) => {
-        setDetailError(err instanceof Error ? err.message : '关闭会话失败');
-      })
-      .finally(() => {
-        setStoppingSession(false);
-      });
-  }, [session.id, session.live, stoppingSession, teamName]);
-
   return (
     <div
       className={`group relative rounded-xl border transition-colors ${
         isExpanded
-          ? 'border-blue-500/20 bg-blue-500/[0.04]'
+          ? 'border-indigo-500/20 bg-indigo-500/[0.04]'
           : session.live
             ? 'border-emerald-500/20 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.08]'
             : 'border-transparent bg-[var(--color-surface)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-raised)]'
@@ -421,7 +340,7 @@ function CcSessionRow({
           {session.live ? (
             <Radio size={12} className="animate-pulse text-emerald-400" />
           ) : session.active ? (
-            <Wifi size={12} className="text-blue-400" />
+            <Wifi size={12} className="text-indigo-400" />
           ) : (
             <WifiOff size={12} className="text-[var(--color-text-muted)] opacity-50" />
           )}
@@ -452,7 +371,7 @@ function CcSessionRow({
               <span
                 className={
                   session.lastMessage.role === 'user'
-                    ? 'text-blue-400'
+                    ? 'text-indigo-400'
                     : 'text-[var(--color-text-muted)]'
                 }
               >
@@ -465,23 +384,6 @@ function CcSessionRow({
         </div>
       </button>
 
-      <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        {session.live && (
-          <button
-            type="button"
-            className="rounded-md p-1 text-[var(--color-text-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleStopSession();
-            }}
-            disabled={stoppingSession}
-            title="关闭会话并归档"
-            aria-label="关闭会话并归档"
-          >
-            {stoppingSession ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-          </button>
-        )}
-      </div>
 
       {isExpanded && (
         <div className="px-3 pb-3">
@@ -523,14 +425,14 @@ function CcSessionRow({
                           key={`${msg.timestamp}-${i}`}
                           className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
                             isUserMessage
-                              ? 'bg-blue-500/10 text-[var(--color-text)]'
+                              ? 'bg-indigo-500/10 text-[var(--color-text)]'
                               : 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
                           }`}
                         >
                           <div className="mb-1 flex items-center gap-2">
                             <span
                               className={`shrink-0 text-[10px] font-medium ${
-                                isUserMessage ? 'text-blue-400' : 'text-[var(--color-text-muted)]'
+                                isUserMessage ? 'text-indigo-400' : 'text-[var(--color-text-muted)]'
                               }`}
                             >
                               {isUserMessage ? '用户' : 'Agent'}

@@ -26,8 +26,8 @@ afterEach(() => {
 describe('createTeam', () => {
   it('creates team.json with correct fields', async () => {
     const { slug, manifest } = await svc.createTeam({
-      displayName: 'frontend-team',
-      bindProject: 'frontend-cc',
+      displayName: '前端团队',
+      bindProject: 'frontend-team',
       harness: 'claudecode',
       workDir: '/tmp/frontend',
       color: 'blue',
@@ -36,13 +36,13 @@ describe('createTeam', () => {
 
     expect(slug).toBe('frontend-team');
     expect(manifest.schemaVersion).toBe(2);
-    expect(manifest.bindProject).toBe('frontend-cc');
+    expect(manifest.bindProject).toBe('frontend-team');
     expect(manifest.harness).toBe('claudecode');
     expect(manifest.collaboration).toBe(true);
 
     const teamJsonPath = path.join(tmpDir, 'teams', slug, 'team.json');
     const stored = JSON.parse(fs.readFileSync(teamJsonPath, 'utf8'));
-    expect(stored.displayName).toBe('frontend-team');
+    expect(stored.displayName).toBe('前端团队');
   });
 
   it('defaults collaboration to true', async () => {
@@ -67,8 +67,8 @@ describe('createTeam', () => {
   });
 
   it('generates unique slug on collision', async () => {
-    const { slug: s1 } = await svc.createTeam({ displayName: 'alpha', bindProject: 'p1', harness: 'claudecode', workDir: '/tmp/a' });
-    const { slug: s2 } = await svc.createTeam({ displayName: 'alpha', bindProject: 'p2', harness: 'claudecode', workDir: '/tmp/b' });
+    const { slug: s1 } = await svc.createTeam({ displayName: '团队A', bindProject: 'alpha', harness: 'claudecode', workDir: '/tmp/a' });
+    const { slug: s2 } = await svc.createTeam({ displayName: '团队A', bindProject: 'alpha-2', harness: 'claudecode', workDir: '/tmp/b' });
     expect(s1).toBe('alpha');
     expect(s2).toBe('alpha-2');
   });
@@ -86,9 +86,9 @@ describe('listTeams / readTeamManifest', () => {
   });
 
   it('lists created teams sorted by createdAt desc', async () => {
-    await svc.createTeam({ displayName: 'team-a', bindProject: 'a', harness: 'claudecode', workDir: '/tmp/a' });
+    await svc.createTeam({ displayName: '团队A', bindProject: 'team-a', harness: 'claudecode', workDir: '/tmp/a' });
     await new Promise((r) => setTimeout(r, 10));
-    await svc.createTeam({ displayName: 'team-b', bindProject: 'b', harness: 'codex', workDir: '/tmp/b' });
+    await svc.createTeam({ displayName: '团队B', bindProject: 'team-b', harness: 'codex', workDir: '/tmp/b' });
     const teams = await svc.listTeams();
     expect(teams[0].slug).toBe('team-b');
     expect(teams[1].slug).toBe('team-a');

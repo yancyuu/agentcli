@@ -40,8 +40,10 @@ export interface TerminalAPI {
   write: (ptyId: string, data: string) => void;
   /** Resize PTY terminal (fire-and-forget). */
   resize: (ptyId: string, cols: number, rows: number) => void;
-  /** Kill PTY process (fire-and-forget). */
-  kill: (ptyId: string) => void;
+  /** Kill PTY process. */
+  kill: (ptyId: string) => Promise<void>;
+  /** Open command in system Terminal.app (macOS). */
+  openExternal: (options: { command: string; args?: string[]; cwd?: string }) => Promise<void>;
   /** Subscribe to PTY data output. Returns cleanup function. */
   onData: (cb: (event: unknown, ptyId: string, data: string) => void) => () => void;
   /** Subscribe to PTY exit events. Returns cleanup function. */

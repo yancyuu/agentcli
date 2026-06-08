@@ -5,6 +5,7 @@
 
 import { TeamGraphTab } from '@features/agent-graph/renderer';
 import { TabUIProvider } from '@renderer/contexts/TabUIContext';
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
 import { DashboardView } from '../dashboard/DashboardView';
 import { ExtensionStoreView } from '../extensions/ExtensionStoreView';
@@ -13,6 +14,7 @@ import { SessionReportTab } from '../report/SessionReportTab';
 import { SchedulesView } from '../schedules/SchedulesView';
 import { SettingsView } from '../settings/SettingsView';
 import { TasksView } from '../tasks/TasksView';
+import { SystemManagerView } from '../system-manager/SystemManagerView';
 import { TeamDetailView } from '../team/TeamDetailView';
 import { TeamListView } from '../team/TeamListView';
 
@@ -51,7 +53,12 @@ export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JS
             {tab.type === 'notifications' && <NotificationsView />}
             {tab.type === 'settings' && <SettingsView />}
             {tab.type === 'teams' && <TeamListView />}
-            {tab.type === 'team' && (
+            {tab.type === 'team' && tab.teamName === SYSTEM_MANAGER_TEAM_NAME && (
+              <TabUIProvider tabId={tab.id}>
+                <SystemManagerView isPaneFocused={isPaneFocused} />
+              </TabUIProvider>
+            )}
+            {tab.type === 'team' && tab.teamName !== SYSTEM_MANAGER_TEAM_NAME && (
               <TabUIProvider tabId={tab.id}>
                 <TeamDetailView teamName={tab.teamName ?? ''} isPaneFocused={isPaneFocused} />
               </TabUIProvider>

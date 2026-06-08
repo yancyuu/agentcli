@@ -19,7 +19,7 @@ import type { LucideIcon } from 'lucide-react';
 
 const statusConfig: Record<TeamTaskStatus, { icon: LucideIcon; color: string; label: string }> = {
   pending: { icon: Circle, color: 'text-amber-400', label: 'pending' },
-  in_progress: { icon: Loader2, color: 'text-blue-400', label: 'in progress' },
+  in_progress: { icon: Loader2, color: 'text-indigo-400', label: 'in progress' },
   completed: { icon: CheckCircle2, color: 'text-emerald-400', label: 'completed' },
   deleted: { icon: Circle, color: 'text-zinc-500', label: 'deleted' },
 };
@@ -145,7 +145,7 @@ export const SidebarTaskItem = ({
 
   const showTeamRow = showTeamName && !hideTeamName;
   const unreadBackgroundClass =
-    unreadCount > 0 ? (isLight ? 'bg-blue-500/[0.03]' : 'bg-blue-500/[0.05]') : '';
+    unreadCount > 0 ? (isLight ? 'bg-indigo-500/[0.03]' : 'bg-indigo-500/[0.05]') : '';
 
   return (
     <button
@@ -205,9 +205,9 @@ export const SidebarTaskItem = ({
                 <StatusIcon className={`mr-1.5 inline-block size-3 align-[-1px] ${cfg.color}`} />
                 {unreadCount > 0 &&
                   (unreadCount === 1 ? (
-                    <span className="mr-1 inline-block size-1.5 rounded-full bg-blue-400 align-middle" />
+                    <span className="mr-1 inline-block size-1.5 rounded-full bg-indigo-400 align-middle" />
                   ) : (
-                    <span className="mr-1 inline-flex size-3.5 items-center justify-center rounded-full bg-blue-500 align-middle text-[8px] font-bold leading-none text-white">
+                    <span className="mr-1 inline-flex size-3.5 items-center justify-center rounded-full bg-indigo-500 align-middle text-[8px] font-bold leading-none text-white">
                       {unreadCount > 9 ? '9+' : unreadCount}
                     </span>
                   ))}

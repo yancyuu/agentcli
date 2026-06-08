@@ -41,6 +41,9 @@ export type * from './providers';
 // Re-export Terminal types
 export type * from './terminal';
 
+// Re-export System Manager types
+export type * from './systemManager';
+
 // Re-export Editor types
 export type * from './editor';
 

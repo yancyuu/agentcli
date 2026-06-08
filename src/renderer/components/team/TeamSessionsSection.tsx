@@ -128,7 +128,7 @@ export const TeamSessionsSection = ({
       {selectedSessionId !== null && (
         <button
           type="button"
-          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-blue-600 transition-colors hover:bg-blue-500/10 dark:text-blue-400"
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-indigo-600 transition-colors hover:bg-indigo-500/10 dark:text-indigo-400"
           onClick={() => onSelectSession(null)}
         >
           <FilterX size={12} />
@@ -176,10 +176,10 @@ const SessionRow = ({
   return (
     <div
       className={`group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)] ${
-        isLead ? 'border border-blue-500/20 bg-blue-500/5' : ''
-      } ${isSelected ? 'bg-blue-500/10 ring-1 ring-blue-400/50' : ''}`}
+        isLead ? 'border border-indigo-500/20 bg-indigo-500/5' : ''
+      } ${isSelected ? 'bg-indigo-500/10 ring-1 ring-indigo-400/50' : ''}`}
     >
-      {isLead && <Crown size={12} className="shrink-0 text-blue-400" />}
+      {isLead && <Crown size={12} className="shrink-0 text-indigo-400" />}
 
       <button type="button" className="min-w-0 flex-1 text-left" onClick={onClick}>
         <div className="flex items-center gap-1.5">
@@ -199,7 +199,7 @@ const SessionRow = ({
           {isLead && (
             <>
               <span style={{ opacity: 0.5 }}>·</span>
-              <span className="text-blue-600 dark:text-blue-400">负责人</span>
+              <span className="text-indigo-600 dark:text-indigo-400">负责人</span>
             </>
           )}
         </div>
@@ -210,7 +210,7 @@ const SessionRow = ({
           <TooltipTrigger asChild>
             <button
               type="button"
-              className={`rounded p-0.5 text-[var(--color-text-muted)] transition-opacity hover:text-blue-400 ${
+              className={`rounded p-0.5 text-[var(--color-text-muted)] transition-opacity hover:text-indigo-400 ${
                 isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
               }`}
               onClick={(e) => {

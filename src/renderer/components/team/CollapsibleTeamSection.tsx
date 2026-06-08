@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Badge } from '@renderer/components/ui/badge';
 import { cn } from '@renderer/lib/utils';
 import { ChevronRight } from 'lucide-react';
 
@@ -88,17 +87,14 @@ export const CollapsibleTeamSection = ({
     <section ref={sectionRef} data-section-id={sectionId} className="min-w-0">
       <div
         className={cn(
-          'relative -mx-[calc(1rem-5px)] flex min-h-9 w-[calc(100%+2rem-10px)] items-stretch py-1.5',
+          'flex min-h-7 items-center gap-2',
           headerClassName
         )}
       >
         <button
           type="button"
           className={cn(
-            'absolute inset-0 z-0 cursor-pointer transition-colors',
-            isOpen
-              ? 'rounded-t-xl bg-[var(--color-section-bg-open)] hover:bg-[var(--color-section-hover-open)]'
-              : 'rounded-xl bg-[var(--color-section-bg)] hover:bg-[var(--color-section-hover)]',
+            'flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[var(--color-section-bg)]',
             headerSurfaceClassName
           )}
           onClick={() =>
@@ -111,47 +107,36 @@ export const CollapsibleTeamSection = ({
             })
           }
           aria-label={isOpen ? '收起区域' : '展开区域'}
-        />
-        <div
-          className={cn(
-            'pointer-events-none relative z-10 flex min-w-0 flex-1 basis-0 items-center gap-2 pl-4',
-            headerContentClassName
-          )}
         >
           <ChevronRight
-            size={14}
-            className={`shrink-0 text-[var(--color-text-muted)] transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}
+            size={12}
+            className={`shrink-0 text-[var(--color-text-muted)] opacity-50 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}
           />
-          {icon ? <span className="shrink-0 text-[var(--color-text-muted)]">{icon}</span> : null}
-          <span className="text-sm font-medium text-[var(--color-text)]">{title}</span>
+          {icon ? <span className="shrink-0 text-[var(--color-text-muted)] opacity-60">{icon}</span> : null}
+          <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            {title}
+          </span>
           {badge != null && (
-            <Badge
-              variant="secondary"
-              className="px-1.5 py-0.5 text-[10px] font-normal leading-none"
-            >
+            <span className="text-[10px] tabular-nums text-[var(--color-text-muted)] opacity-50">
               {badge}
-            </Badge>
+            </span>
           )}
           {secondaryBadge != null && secondaryBadge > 0 && (
-            <Badge
-              variant="secondary"
-              className="bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-blue-600 dark:text-blue-400"
-              title={`${secondaryBadge} unread`}
-            >
-              {secondaryBadge} new
-            </Badge>
+            <span className="text-[10px] tabular-nums text-indigo-400 opacity-70" title={`${secondaryBadge} unread`}>
+              +{secondaryBadge}
+            </span>
           )}
           {afterBadge}
           {headerExtra}
-        </div>
+        </button>
         {action && (
-          <div className="relative z-10 flex shrink-0 items-center self-start">{action}</div>
+          <div className="flex shrink-0 items-center">{action}</div>
         )}
       </div>
       {keepMounted ? (
         <div
           className={cn(
-            'mt-1.5 min-w-0 overflow-x-clip pb-2',
+            'min-w-0 overflow-x-clip pt-1 pb-2',
             contentWrapperClassName,
             contentClassName
           )}
@@ -163,7 +148,7 @@ export const CollapsibleTeamSection = ({
         isOpen && (
           <div
             className={cn(
-              'mt-1.5 min-w-0 overflow-x-clip pb-2',
+              'min-w-0 overflow-x-clip pt-1 pb-2',
               contentWrapperClassName,
               contentClassName
             )}

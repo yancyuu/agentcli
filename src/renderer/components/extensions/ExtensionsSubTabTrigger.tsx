@@ -5,7 +5,7 @@ import { Info } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 interface ExtensionsSubTabTriggerProps {
-  value: 'plugins' | 'mcp-servers' | 'skills' | 'env-vars';
+  value: 'plugins';
   label: string;
   description: string;
   icon: LucideIcon;

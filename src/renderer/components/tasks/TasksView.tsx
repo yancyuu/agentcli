@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
-import { Calendar, CheckCircle2, Circle, Columns3, Loader2, RefreshCw } from 'lucide-react';
+import { CheckCircle2, ClipboardList, PlayCircle, Calendar, Columns3, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { KanbanColumn } from '../team/kanban/KanbanColumn';
 import { SchedulesView } from '../schedules/SchedulesView';
 
 import type { GlobalTask, TeamTaskStatus } from '@shared/types';
@@ -15,37 +15,37 @@ type TasksSubTab = 'overview' | 'schedules';
 type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'overview', label: '任务总览', icon: <Columns3 size={14} /> },
-  { id: 'schedules', label: '定时任务', icon: <Calendar size={14} /> },
+  { id: 'overview', label: '任务总览', icon: <Columns3 size={13} /> },
+  { id: 'schedules', label: '定时任务', icon: <Calendar size={13} /> },
 ];
 
 const COLUMNS: {
   id: OverviewStatus;
   title: string;
-  icon: React.ReactNode;
   headerBg: string;
   bodyBg: string;
+  icon: React.ReactNode;
 }[] = [
   {
     id: 'pending',
     title: 'TODO',
-    icon: <Circle size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
-    headerBg: 'rgba(59, 130, 246, 0.22)',
-    bodyBg: 'rgba(59, 130, 246, 0.05)',
+    headerBg: 'rgba(148, 163, 184, 0.08)',
+    bodyBg: 'rgba(148, 163, 184, 0.02)',
+    icon: <ClipboardList size={13} className="shrink-0 text-[var(--color-text-muted)]" />,
   },
   {
     id: 'in_progress',
     title: 'IN PROGRESS',
-    icon: <Loader2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
-    headerBg: 'rgba(234, 179, 8, 0.24)',
-    bodyBg: 'rgba(234, 179, 8, 0.06)',
+    headerBg: 'rgba(6, 182, 212, 0.08)',
+    bodyBg: 'rgba(6, 182, 212, 0.02)',
+    icon: <PlayCircle size={13} className="shrink-0 text-cyan-400/60" />,
   },
   {
     id: 'completed',
     title: 'DONE',
-    icon: <CheckCircle2 size={14} className="shrink-0 text-[var(--color-text-muted)]" />,
-    headerBg: 'rgba(34, 197, 94, 0.22)',
-    bodyBg: 'rgba(34, 197, 94, 0.05)',
+    headerBg: 'rgba(34, 197, 94, 0.08)',
+    bodyBg: 'rgba(34, 197, 94, 0.02)',
+    icon: <CheckCircle2 size={13} className="shrink-0 text-green-400/60" />,
   },
 ];
 
@@ -69,15 +69,16 @@ export const TasksView = (): React.JSX.Element => {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center border-b border-[var(--color-border)] px-4 pt-2">
+      {/* Minimal tab bar */}
+      <div className="flex items-center gap-0 px-4 pt-3">
         {SUB_TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              'flex items-center gap-1.5 border-b-2 px-4 pb-2 text-sm font-medium transition-colors',
+              'flex items-center gap-1.5 border-b-2 px-3 pb-2 text-xs transition-colors',
               activeTab === tab.id
-                ? 'border-[var(--color-primary)] text-[var(--color-text)]'
+                ? 'border-[var(--color-text)] font-medium text-[var(--color-text)]'
                 : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
             )}
           >
@@ -168,6 +169,8 @@ const TaskOverviewPool = (): React.JSX.Element => {
     setOwnerFilter('all');
   }, []);
 
+  const hasFilters = teamFilter !== 'all' || statusFilter !== 'all' || ownerFilter !== 'all';
+
   if (globalTasksLoading && !globalTasksInitialized) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
@@ -176,127 +179,97 @@ const TaskOverviewPool = (): React.JSX.Element => {
     );
   }
 
+  const selectCls =
+    'h-7 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[11px] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-border-emphasis)] focus:text-[var(--color-text)]';
+
   return (
     <div className="flex h-full min-w-0 flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[180px]">
-          <label
-            htmlFor="tasks-overview-team-filter"
-            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
-          >
-            团队
-          </label>
-          <select
-            id="tasks-overview-team-filter"
-            value={teamFilter}
-            onChange={(event) => setTeamFilter(event.target.value)}
-            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-          >
-            <option value="all">全部团队</option>
-            {teamOptions.map(([teamName, displayName]) => (
-              <option key={teamName} value={teamName}>
-                {displayName}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Compact filter row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={teamFilter}
+          onChange={(e) => setTeamFilter(e.target.value)}
+          className={selectCls}
+        >
+          <option value="all">全部团队</option>
+          {teamOptions.map(([teamName, displayName]) => (
+            <option key={teamName} value={teamName}>
+              {displayName}
+            </option>
+          ))}
+        </select>
 
-        <div className="min-w-[160px]">
-          <label
-            htmlFor="tasks-overview-status-filter"
-            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
-          >
-            状态
-          </label>
-          <select
-            id="tasks-overview-status-filter"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as 'all' | OverviewStatus)}
-            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-          >
-            <option value="all">全部状态</option>
-            <option value="pending">TODO</option>
-            <option value="in_progress">IN PROGRESS</option>
-            <option value="completed">DONE</option>
-          </select>
-        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as 'all' | OverviewStatus)}
+          className={selectCls}
+        >
+          <option value="all">全部状态</option>
+          <option value="pending">TODO</option>
+          <option value="in_progress">IN PROGRESS</option>
+          <option value="completed">DONE</option>
+        </select>
 
-        <div className="min-w-[160px]">
-          <label
-            htmlFor="tasks-overview-owner-filter"
-            className="mb-1 block text-[11px] font-medium text-[var(--color-text-muted)]"
-          >
-            负责人
-          </label>
-          <select
-            id="tasks-overview-owner-filter"
-            value={ownerFilter}
-            onChange={(event) => setOwnerFilter(event.target.value)}
-            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
-          >
-            <option value="all">全部负责人</option>
-            {ownerOptions.map((owner) => (
-              <option key={owner} value={owner}>
-                {owner}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={ownerFilter}
+          onChange={(e) => setOwnerFilter(e.target.value)}
+          className={selectCls}
+        >
+          <option value="all">全部负责人</option>
+          {ownerOptions.map((owner) => (
+            <option key={owner} value={owner}>
+              {owner}
+            </option>
+          ))}
+        </select>
 
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={clearFilters}>
-          清空筛选
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-8 gap-1.5 text-xs text-[var(--color-text-muted)]"
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+          >
+            清空筛选
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="ml-auto text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
           onClick={() => void fetchAllTasks()}
         >
           <RefreshCw size={12} />
-          刷新
-        </Button>
+        </button>
       </div>
 
+      {/* Kanban columns — reuse team kanban styling */}
       <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-6">
         <div className="grid min-w-[900px] grid-cols-3 items-start gap-3">
           {COLUMNS.map((column) => {
             const tasks = grouped.get(column.id) ?? [];
             return (
-              <section
+              <KanbanColumn
                 key={column.id}
-                className="relative rounded-md"
-                style={{ backgroundColor: column.bodyBg }}
+                title={column.title}
+                count={tasks.length}
+                icon={column.icon}
+                headerBg={column.headerBg}
+                bodyBg={column.bodyBg}
               >
-                {tasks.length > 0 ? (
-                  <span className="absolute -right-2 -top-2 z-10 min-w-5 rounded-full bg-[var(--color-surface-raised)] px-1.5 py-0 text-center text-[10px] font-medium leading-5 text-[var(--color-text-secondary)] ring-1 ring-[var(--color-border)]">
-                    {tasks.length}
-                  </span>
-                ) : null}
-                <header
-                  className="rounded-t-md px-3 py-2"
-                  style={{ backgroundColor: column.headerBg }}
-                >
-                  <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text)]">
-                    {column.icon}
-                    {column.title}
-                  </h4>
-                </header>
-                <div className="flex flex-col gap-1.5 p-2">
-                  {tasks.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
-                      No tasks
-                    </div>
-                  ) : (
-                    tasks.map((task) => (
-                      <GlobalOverviewTaskCard
-                        key={`${task.teamName}:${task.id}`}
-                        task={task}
-                        onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
-                      />
-                    ))
-                  )}
-                </div>
-              </section>
+                {tasks.length === 0 ? (
+                  <div className="py-6 text-center text-[11px] text-[var(--color-text-muted)] opacity-40">
+                    No tasks
+                  </div>
+                ) : (
+                  tasks.map((task) => (
+                    <GlobalOverviewTaskCard
+                      key={`${task.teamName}:${task.id}`}
+                      task={task}
+                      onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
+                    />
+                  ))
+                )}
+              </KanbanColumn>
             );
           })}
         </div>
@@ -318,25 +291,30 @@ const GlobalOverviewTaskCard = ({
   return (
     <button
       type="button"
-      className="relative w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-1.5 py-3 text-left text-xs transition-colors hover:border-[var(--color-border-emphasis)]"
+      className="w-full rounded-md border px-2.5 py-2 text-left transition-colors hover:border-[var(--color-border-emphasis)]"
+      style={{
+        borderColor: 'var(--color-border)',
+        backgroundColor: 'var(--color-surface-raised)',
+      }}
       onClick={onOpen}
     >
-      <span className="absolute left-[3px] top-[2px] text-[9px] leading-none text-[var(--color-text-muted)]">
-        #{task.displayId ?? deriveTaskDisplayId(task.id)}
-      </span>
-      <div className="mb-2 pt-[11px]">
-        <h5 className="line-clamp-2 text-xs font-medium text-[var(--color-text)]">
+      <div className="flex items-start gap-1.5">
+        <span className="mt-0.5 shrink-0 text-[9px] tabular-nums text-[var(--color-text-muted)] opacity-50">
+          #{task.displayId ?? deriveTaskDisplayId(task.id)}
+        </span>
+        <h5 className="min-w-0 flex-1 line-clamp-2 text-[11px] font-medium" style={{ color: 'var(--color-text)' }}>
           {task.subject}
         </h5>
-        {task.dispatchMeta ? (
-          <span className="mt-1 inline-flex items-center rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
-            {dispatchFrom} 给 {dispatchTo} 派单
-          </span>
-        ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
-        <span className="rounded bg-white/5 px-1.5 py-0.5">{task.teamDisplayName}</span>
-        <span className="rounded bg-white/5 px-1.5 py-0.5">{ownerLabel}</span>
+      {task.dispatchMeta ? (
+        <span className="mt-1 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">
+          {dispatchFrom} → {dispatchTo}
+        </span>
+      ) : null}
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+        <span>{task.teamDisplayName}</span>
+        <span style={{ opacity: 0.3 }}>·</span>
+        <span>{ownerLabel}</span>
       </div>
     </button>
   );

@@ -82,6 +82,7 @@ import type {
   TeamLaunchRequest,
   TeamLaunchResponse,
   TeamMemberActivityMeta,
+  SystemManagerSummary,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -141,6 +142,7 @@ import type {
   TaskChangeSetV2,
 } from '@shared/types/review';
 import type { ApplyReviewRequest } from '@shared/types/review';
+import type { SystemManagerAPI } from '@shared/types/systemManager';
 import type { TerminalAPI } from '@shared/types/terminal';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 
@@ -238,8 +240,8 @@ export class HttpAPIClient implements ElectronAPI {
     return JSON.parse(text, (key, value) => HttpAPIClient.reviveDates(key, value)) as T;
   }
 
-  private async get<T>(path: string): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async get<T>(path: string, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
       return this.parseJson<T>(res);
@@ -248,8 +250,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async post<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
@@ -278,8 +280,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async del<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async del<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'DELETE',
@@ -293,8 +295,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async put<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async put<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PUT',
@@ -308,8 +310,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async patch<T>(path: string, body?: unknown): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async patch<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'PATCH',
@@ -323,8 +325,8 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async delete<T>(path: string): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(10_000);
+  private async delete<T>(path: string, timeoutMs = 10_000): Promise<T> {
+    const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'DELETE',
@@ -1091,9 +1093,11 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   teams: TeamsAPI = {
-    list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams'),
+    list: async (): Promise<TeamSummary[]> => this.get<TeamSummary[]>('/api/teams', 30_000),
+    ensureSystemManager: async (): Promise<SystemManagerSummary> =>
+      this.post<SystemManagerSummary>('/api/system-manager/ensure'),
     getData: async (teamName: string): Promise<TeamViewSnapshot> =>
-      this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`),
+      this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`, 30_000),
     getTaskChangePresence: async (): Promise<
       Record<string, 'has_changes' | 'no_changes' | 'unknown'>
     > => {
@@ -1473,7 +1477,9 @@ export class HttpAPIClient implements ElectronAPI {
     },
     restartMember: async (teamName: string, memberName: string): Promise<void> => {
       await this.post(
-        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/restart`
+        `/api/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}/restart`,
+        undefined,
+        30_000
       );
     },
     skipMemberForLaunch: async (teamName: string, memberName: string): Promise<void> => {
@@ -2293,18 +2299,52 @@ export class HttpAPIClient implements ElectronAPI {
   };
 
   // ---------------------------------------------------------------------------
-  // Terminal (not available in browser mode)
+  // System Manager / Control Console
+  // ---------------------------------------------------------------------------
+
+  systemManager: SystemManagerAPI = {
+    getStatus: () => this.get('/api/system-manager/status'),
+    getConfig: () => this.get('/api/system-manager/config'),
+    updateConfig: (patch) => this.put('/api/system-manager/config', patch),
+    listWorkflowPrompts: (folder) => this.post('/api/system-manager/workflows/list', { folder }),
+    readWorkflowPrompt: (_folder, id) => this.post('/api/system-manager/workflows/read', { id }),
+  };
+
+  // ---------------------------------------------------------------------------
+  // Terminal (HTTP/SSE-backed browser mode)
   // ---------------------------------------------------------------------------
 
   terminal: TerminalAPI = {
-    spawn: async (): Promise<string> => {
-      throw new Error('Terminal not available in browser mode');
+    spawn: async (options = {}): Promise<string> => {
+      const result = await this.post<{ ptyId: string }>('/api/terminal/spawn', options);
+      return result.ptyId;
     },
-    write: () => {},
-    resize: () => {},
-    kill: () => {},
-    onData: (): (() => void) => () => {},
-    onExit: (): (() => void) => () => {},
+    write: (ptyId: string, data: string): void => {
+      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/write`, { data });
+    },
+    resize: (ptyId: string, cols: number, rows: number): void => {
+      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/resize`, { cols, rows });
+    },
+    kill: async (ptyId: string): Promise<void> => {
+      await this.del(`/api/terminal/${encodeURIComponent(ptyId)}`);
+    },
+    openExternal: async (options: { command: string; args?: string[]; cwd?: string }): Promise<void> => {
+      await this.post('/api/terminal/open-external', options);
+    },
+    onData: (callback): (() => void) =>
+      this.addEventListener('terminal:data', (data: unknown) => {
+        const event = data as { ptyId?: string; data?: string };
+        if (event.ptyId && typeof event.data === 'string') {
+          callback(null, event.ptyId, event.data);
+        }
+      }),
+    onExit: (callback): (() => void) =>
+      this.addEventListener('terminal:exit', (data: unknown) => {
+        const event = data as { ptyId?: string; exitCode?: number };
+        if (event.ptyId && typeof event.exitCode === 'number') {
+          callback(null, event.ptyId, event.exitCode);
+        }
+      }),
   };
 
   // ---------------------------------------------------------------------------

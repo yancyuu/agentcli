@@ -566,7 +566,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         className={cn(
           'shrink-0 rounded-full border px-2 py-0.5 transition-colors',
           quickParticipantFilter === null
-            ? 'border-blue-500/40 bg-blue-500/10 text-blue-500'
+            ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-500'
             : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
         )}
         onClick={() => setParticipantFilter(null)}
@@ -580,7 +580,7 @@ export const MessagesPanel = memo(function MessagesPanel({
           className={cn(
             'shrink-0 rounded-full border px-2 py-0.5 transition-colors',
             quickParticipantFilter === participant
-              ? 'border-blue-500/40 bg-blue-500/10 text-blue-500'
+              ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-500'
               : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
           )}
           onClick={() =>
@@ -1056,7 +1056,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               <TooltipTrigger asChild>
                 <Badge
                   variant="secondary"
-                  className="bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-blue-600 dark:text-blue-400"
+                  className="bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-indigo-600 dark:text-indigo-400"
                 >
                   {messagesUnreadCount} 条新消息
                 </Badge>
@@ -1069,7 +1069,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-blue-400 transition-colors hover:bg-blue-500/10"
+                  className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-indigo-400 transition-colors hover:bg-indigo-500/10"
                   onClick={handleMarkAllRead}
                 >
                   <CheckCheck size={12} />
@@ -1291,7 +1291,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     <TooltipTrigger asChild>
                       <Badge
                         variant="secondary"
-                        className="bg-blue-500/20 px-1 py-0 text-[9px] font-normal leading-none text-blue-600 dark:text-blue-400"
+                        className="bg-indigo-500/20 px-1 py-0 text-[9px] font-normal leading-none text-indigo-600 dark:text-indigo-400"
                       >
                         {messagesUnreadCount} 条新消息
                       </Badge>
@@ -1309,7 +1309,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="size-[22px] p-0 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                          className="size-[22px] p-0 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300"
                           onClick={handleMarkAllRead}
                           aria-label="将全部消息标为已读"
                         >
@@ -1542,7 +1542,7 @@ export const MessagesPanel = memo(function MessagesPanel({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-blue-400 transition-colors hover:bg-blue-500/10"
+                className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-indigo-400 transition-colors hover:bg-indigo-500/10"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleMarkAllRead();

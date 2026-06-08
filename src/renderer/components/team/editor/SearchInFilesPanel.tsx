@@ -193,7 +193,7 @@ export const SearchInFilesPanel = ({
                 onClick={handleCaseSensitiveToggle}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                   caseSensitive
-                    ? 'bg-blue-500/20 text-blue-400'
+                    ? 'bg-indigo-500/20 text-indigo-400'
                     : 'text-text-muted hover:bg-surface-raised'
                 }`}
                 aria-label="区分大小写"

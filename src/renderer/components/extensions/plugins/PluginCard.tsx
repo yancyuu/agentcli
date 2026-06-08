@@ -80,7 +80,7 @@ export const PluginCard = ({
       )}
       {plugin.source === 'official' && (
         <div className="pointer-events-none absolute -right-px -top-px size-16 overflow-hidden">
-          <div className="absolute right-[-24px] top-[4px] w-[80px] rotate-45 bg-blue-500/90 text-center text-[9px] font-semibold leading-[18px] text-white shadow-sm">
+          <div className="absolute right-[-24px] top-[4px] w-[80px] rotate-45 bg-indigo-500/90 text-center text-[9px] font-semibold leading-[18px] text-white shadow-sm">
             Official
           </div>
         </div>

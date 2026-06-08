@@ -161,7 +161,7 @@ export const createScheduleSlice: StateCreator<AppState, [], [], ScheduleSlice> 
             startedAt: now,
             executionStartedAt: now,
             retryCount: 0,
-            summary: '正在触发 cc-connect runtime...',
+            summary: '正在触发运行时...',
           },
           ...(state.scheduleRuns[id] ?? []),
         ],

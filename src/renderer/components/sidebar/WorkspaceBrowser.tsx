@@ -7,6 +7,7 @@ import { Folder, FolderOpen, ChevronRight, ChevronDown, ArrowUp, HardDrive } fro
 import { useShallow } from 'zustand/react/shallow';
 
 import type { WorkspaceFileEntry, WorkspaceListResponse } from '@shared/types/editor';
+import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
 function getRelativePath(currentDir: string, rootPath: string): string {
   if (!currentDir || currentDir === rootPath) return '';
@@ -141,10 +142,15 @@ const TeamWorkspace = ({
           className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${isExpanded ? '' : '-rotate-90'}`}
         />
         <HardDrive size={14} className="shrink-0 text-[var(--color-text-muted)]" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text)]">
-          {teamDisplayName}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-[var(--color-text)]">
+            {teamDisplayName}
+          </span>
+          <span className="block truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={projectPath}>
+            {projectPath}
+          </span>
         </span>
-        <span className="shrink-0 rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+        <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-medium text-indigo-400">
           当前
         </span>
       </button>
@@ -254,6 +260,7 @@ export const WorkspaceBrowser = (): React.JSX.Element => {
     }))
   );
   const revealFileInEditor = useStore((s) => s.revealFileInEditor);
+  const [systemManagerProjectPath, setSystemManagerProjectPath] = useState<string | null>(null);
 
   const scopedTeamName = useMemo(() => {
     if (!activeTabId) {
@@ -268,9 +275,37 @@ export const WorkspaceBrowser = (): React.JSX.Element => {
     return selectedTeamName;
   }, [activeTabId, paneLayout.panes, selectedTeamName]);
 
+  useEffect(() => {
+    if (scopedTeamName !== SYSTEM_MANAGER_TEAM_NAME) {
+      setSystemManagerProjectPath(null);
+      return;
+    }
+
+    let cancelled = false;
+    void api.systemManager
+      .getConfig()
+      .then((config) => {
+        if (!cancelled) setSystemManagerProjectPath(config.selectedWorkDir);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemManagerProjectPath(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scopedTeamName]);
+
   const currentTeamWorkspace = useMemo(() => {
     if (!scopedTeamName) {
       return null;
+    }
+    if (scopedTeamName === SYSTEM_MANAGER_TEAM_NAME) {
+      return {
+        teamName: SYSTEM_MANAGER_TEAM_NAME,
+        teamDisplayName: SYSTEM_MANAGER_DISPLAY_NAME,
+        projectPath: systemManagerProjectPath,
+      };
     }
     const team = teams.find((candidate) => candidate.teamName === scopedTeamName);
     if (!team) {
@@ -289,7 +324,7 @@ export const WorkspaceBrowser = (): React.JSX.Element => {
       teamDisplayName: team.displayName || team.teamName,
       projectPath,
     };
-  }, [scopedTeamName, teams]);
+  }, [scopedTeamName, systemManagerProjectPath, teams]);
 
   const [expanded, setExpanded] = useState(true);
 
@@ -334,7 +369,7 @@ export const WorkspaceBrowser = (): React.JSX.Element => {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto">
         <TeamWorkspace
-          key={currentTeamWorkspace.teamName}
+          key={`${currentTeamWorkspace.teamName}:${currentTeamWorkspace.projectPath}`}
           teamDisplayName={currentTeamWorkspace.teamDisplayName}
           projectPath={currentTeamWorkspace.projectPath}
           isExpanded={expanded}

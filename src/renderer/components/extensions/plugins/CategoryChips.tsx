@@ -45,7 +45,7 @@ export const CategoryChips = ({
             aria-pressed={isActive}
             className={`h-7 rounded-full border px-2.5 text-[11px] font-medium transition-all ${
               isActive
-                ? 'border-blue-500/40 bg-blue-500/15 text-blue-300 shadow-sm'
+                ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300 shadow-sm'
                 : 'hover:bg-surface-raised/60 border-border bg-transparent text-text-secondary hover:border-border-emphasis hover:text-text'
             }`}
           >

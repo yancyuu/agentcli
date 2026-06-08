@@ -8,12 +8,7 @@ import { useCallback, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import {
-  getTeamColorSet,
-  getThemedBadge,
-  getThemedBorder,
-  getThemedText,
-} from '@renderer/constants/teamColors';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { nameColorSet } from '@renderer/utils/projectColor';
@@ -91,15 +86,11 @@ export const SortableTab = ({
         team?.color ??
         (s.selectedTeamName === tab.teamName ? s.selectedTeamData?.config.color : undefined);
       if (explicitColor) return getTeamColorSet(explicitColor);
-      // Fallback: deterministic color derived from display name
       const displayName = team?.displayName ?? tab.label;
       return nameColorSet(displayName, isLight);
     })
   );
-  const activeBorderColor = teamColorSet
-    ? getThemedBorder(teamColorSet, isLight)
-    : 'var(--color-accent, #6366f1)';
-  const inactiveTeamTextColor = teamColorSet ? getThemedText(teamColorSet, isLight) : null;
+  const accentColor = teamColorSet?.text ?? null;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id,
@@ -116,33 +107,25 @@ export const SortableTab = ({
     transition: isDragging ? 'none' : transition,
     opacity: isDragging ? 0.3 : 1,
     backgroundColor: isActive
-      ? teamColorSet
-        ? getThemedBadge(teamColorSet, isLight)
-        : 'var(--color-surface-raised)'
+      ? 'var(--color-surface-raised)'
       : isHovered
-        ? teamColorSet
-          ? getThemedBadge(teamColorSet, isLight)
-          : 'var(--color-surface-overlay)'
-        : teamColorSet
-          ? getThemedBadge(teamColorSet, isLight)
-          : 'transparent',
+        ? 'var(--color-surface-overlay)'
+        : 'transparent',
     color: isActive
       ? 'var(--color-text)'
-      : inactiveTeamTextColor
-        ? inactiveTeamTextColor
-        : isHovered
-          ? 'var(--color-text)'
-          : 'var(--color-text-muted)',
+      : isHovered
+        ? 'var(--color-text)'
+        : 'var(--color-text-muted)',
     outline: isSelected ? '1px solid var(--color-border-emphasis)' : 'none',
     outlineOffset: '-1px',
-    borderTop: isActive ? `1px solid ${activeBorderColor}` : '1px solid transparent',
-    borderLeft: '1px solid transparent',
-    borderRight: '1px solid transparent',
+    borderTop: isActive ? '1px solid var(--color-border)' : '1px solid transparent',
+    borderLeft: '1px solid var(--color-border-subtle)',
+    borderRight: isActive ? '1px solid var(--color-border)' : '1px solid transparent',
     borderBottom: isActive ? '1px solid var(--color-surface-raised)' : '1px solid transparent',
-    borderTopLeftRadius: '8px',
-    borderTopRightRadius: '8px',
-    borderBottomLeftRadius: isActive ? 0 : '8px',
-    borderBottomRightRadius: isActive ? 0 : '8px',
+    borderTopLeftRadius: '0',
+    borderTopRightRadius: '0',
+    borderBottomLeftRadius: '0',
+    borderBottomRightRadius: '0',
     marginBottom: isActive ? '-1px' : 0,
     position: 'relative' as const,
     zIndex: isActive ? 1 : 0,
@@ -184,6 +167,12 @@ export const SortableTab = ({
         }
       }}
     >
+      {isActive && accentColor && (
+        <div
+          className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full"
+          style={{ backgroundColor: accentColor, opacity: 0.6 }}
+        />
+      )}
       <Icon className="size-4 shrink-0" />
       {tab.fromSearch && (
         <span title="从搜索打开">
@@ -192,7 +181,7 @@ export const SortableTab = ({
       )}
       {isPinned && (
         <span title="已固定会话">
-          <Pin className="size-3 shrink-0 text-blue-400" />
+          <Pin className="size-3 shrink-0 text-indigo-400" />
         </span>
       )}
       <span
