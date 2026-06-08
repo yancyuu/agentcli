@@ -205,37 +205,41 @@ export const SystemManagerView = ({
     }
   }, [writeTerminalLine]);
 
-  const startClaude = useCallback(async (workDirOverride?: string) => {
-    if (starting) return;
-    setStarting(true);
-    setError(null);
-    try {
-      const stopped = await stopClaude();
-      if (!stopped) return;
-      const nextConfig = await api.systemManager.updateConfig({
-        selectedWorkDir: workDirOverride ?? workDirInput,
-      });
-      setConfig(nextConfig);
-      void fetchTeams();
-      terminalRef.current?.clear();
-      writeTerminalLine(`# cd ${nextConfig.selectedWorkDir}`);
-      writeTerminalLine('$ claude');
-      const ptyId = await api.terminal.spawn({
-        cwd: nextConfig.selectedWorkDir,
-        cols: terminalRef.current?.cols ?? 120,
-        rows: terminalRef.current?.rows ?? 34,
-      });
-      ptyIdRef.current = ptyId;
-      setRunning(true);
-      terminalRef.current?.focus();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      writeTerminalLine(`[failed to start claude] ${message}`);
-    } finally {
-      setStarting(false);
-    }
-  }, [fetchTeams, starting, stopClaude, workDirInput, writeTerminalLine]);
+  const startClaude = useCallback(
+    async (workDirOverride?: string) => {
+      setStarting(true);
+      setError(null);
+      try {
+        const stopped = await stopClaude();
+        if (!stopped) return;
+        const effectiveWorkDir = workDirOverride ?? workDirInput;
+        const nextConfig = await api.systemManager.updateConfig({
+          selectedWorkDir: effectiveWorkDir,
+        });
+        setConfig(nextConfig);
+        setWorkDirInput(nextConfig.selectedWorkDir);
+        void fetchTeams();
+        terminalRef.current?.clear();
+        writeTerminalLine(`# cd ${nextConfig.selectedWorkDir}`);
+        writeTerminalLine('$ claude');
+        const ptyId = await api.terminal.spawn({
+          cwd: nextConfig.selectedWorkDir,
+          cols: terminalRef.current?.cols ?? 120,
+          rows: terminalRef.current?.rows ?? 34,
+        });
+        ptyIdRef.current = ptyId;
+        setRunning(true);
+        terminalRef.current?.focus();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        writeTerminalLine(`[failed to start claude] ${message}`);
+      } finally {
+        setStarting(false);
+      }
+    },
+    [fetchTeams, stopClaude, workDirInput, writeTerminalLine]
+  );
 
   useEffect(() => {
     startClaudeRef.current = startClaude;
@@ -251,8 +255,10 @@ export const SystemManagerView = ({
   }, [load]);
 
   const refreshConsole = useCallback(async () => {
+    // Capture user's current input before load() overwrites it with server config
+    const userPath = workDirInput;
     await load();
-    await startClaude(workDirInput || undefined);
+    await startClaude(userPath || undefined);
   }, [load, startClaude, workDirInput]);
 
   const runWorkflowPrompt = useCallback(
@@ -292,7 +298,9 @@ export const SystemManagerView = ({
           <Input
             value={workDirInput}
             onChange={(event) => setWorkDirInput(event.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void refreshConsole(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void refreshConsole();
+            }}
             className="h-8 min-w-[220px] flex-1 border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-xs text-[var(--color-text)]"
             placeholder={titlePath || '工作目录'}
           />

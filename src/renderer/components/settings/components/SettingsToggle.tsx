@@ -27,17 +27,18 @@ export const SettingsToggle = ({
       aria-checked={enabled}
       disabled={disabled}
       onClick={handleClick}
-      className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-text)]/20 focus:ring-offset-2 focus:ring-offset-[var(--color-surface)]"
+      className="relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] active:scale-95"
       style={{
         backgroundColor: enabled ? '#6366f1' : '#3f3f46',
-        opacity: disabled ? 0.5 : 1,
+        opacity: disabled ? 0.4 : 1,
         cursor: disabled ? 'not-allowed' : 'pointer',
+        boxShadow: enabled ? '0 0 8px rgba(99,102,241,0.3)' : 'none',
       }}
     >
       <span
-        className="pointer-events-none inline-block size-4 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+        className="pointer-events-none inline-block size-[18px] rounded-full bg-white shadow-sm ring-0 transition-all duration-200 ease-out"
         style={{
-          transform: enabled ? 'translateX(1rem)' : 'translateX(0)',
+          transform: enabled ? 'translateX(18px)' : 'translateX(0)',
         }}
       />
     </button>

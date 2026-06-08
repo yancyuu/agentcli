@@ -18,12 +18,15 @@ export const SettingRow = ({
 }: SettingRowProps): React.JSX.Element => {
   return (
     <div
-      className="flex items-center justify-between border-b py-3"
+      className="group flex items-center justify-between rounded-lg border-b px-3 py-3.5 transition-colors duration-150 hover:bg-white/[0.03]"
       style={{ borderColor: 'var(--color-border-subtle)' }}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-start gap-3">
         {icon ? (
-          <div className="mt-0.5 shrink-0" style={{ color: 'var(--color-text-muted)' }}>
+          <div
+            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded transition-colors duration-150 group-hover:text-[var(--color-text)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
             {icon}
           </div>
         ) : null}
@@ -32,13 +35,18 @@ export const SettingRow = ({
             {label}
           </div>
           {description && (
-            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <div
+              className="mt-0.5 text-xs leading-relaxed"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
               {description}
             </div>
           )}
         </div>
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="shrink-0 transition-transform duration-100 group-active:scale-[0.97]">
+        {children}
+      </div>
     </div>
   );
 };
