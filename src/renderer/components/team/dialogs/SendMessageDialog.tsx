@@ -130,8 +130,8 @@ export const SendMessageDialog = ({
   const canAttach = supportsAttachments && canAddMore;
   const attachmentRestrictionReason = !supportsAttachments
     ? !isLeadRecipient
-      ? '文件只能发送给团队负责人'
-      : '团队在线时才能添加文件'
+      ? '文件只能发送给 Loop Lead'
+      : 'Loop runtime 在线时才能添加文件'
     : undefined;
 
   const [pendingAutoClose, setPendingAutoClose] = useState(false);
@@ -273,7 +273,7 @@ export const SendMessageDialog = ({
   );
 
   const showFileRestrictionError = useCallback(() => {
-    setFileRestrictionError(attachmentRestrictionReason ?? '文件只能发送给团队负责人');
+    setFileRestrictionError(attachmentRestrictionReason ?? '文件只能发送给 Loop Lead');
     window.clearTimeout(fileRestrictionTimerRef.current);
     fileRestrictionTimerRef.current = window.setTimeout(() => {
       setFileRestrictionError(null);
@@ -354,8 +354,10 @@ export const SendMessageDialog = ({
         />
 
         <DialogHeader>
-          <DialogTitle>发送消息</DialogTitle>
-          <DialogDescription>向团队成员发送一条私信。</DialogDescription>
+          <DialogTitle>下发 Loop 指令</DialogTitle>
+          <DialogDescription>
+            向 runtime 成员下发 Loop 指令或协作请求，用于推进当前工作。
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -372,7 +374,7 @@ export const SendMessageDialog = ({
 
           <div className="grid gap-2">
             <div className="flex items-center gap-2">
-              <Label htmlFor="smd-message">消息内容</Label>
+              <Label htmlFor="smd-message">Loop 指令</Label>
               {isLeadRecipient ? (
                 <>
                   <input
@@ -400,7 +402,7 @@ export const SendMessageDialog = ({
                     </TooltipTrigger>
                     <TooltipContent side="top">
                       {!isTeamAlive
-                        ? '团队在线时才能添加文件'
+                        ? 'Loop runtime 在线时才能添加文件'
                         : !canAddMore
                           ? '已达到附件上限'
                           : '添加文件（支持粘贴或拖拽）'}
@@ -416,7 +418,7 @@ export const SendMessageDialog = ({
               error={attachmentError ?? fileRestrictionError}
               onDismissError={clearAttachmentError}
               disabled={attachmentsBlocked}
-              disabledHint="仅在团队在线且接收人为团队负责人时支持附件。请移除附件或切换接收人。"
+              disabledHint="仅在 Loop runtime 在线且接收人为 Loop Lead 时支持附件。请移除附件或切换接收人。"
             />
 
             <div className={quote ? 'flex flex-col' : 'contents'}>
@@ -469,7 +471,7 @@ export const SendMessageDialog = ({
               <MentionableTextarea
                 id="smd-message"
                 className={quote ? 'rounded-t-none' : undefined}
-                placeholder="输入消息...（回车发送）"
+                placeholder="输入 Loop 指令...（回车发送）"
                 value={textDraft.value}
                 onValueChange={textDraft.setValue}
                 suggestions={mentionSuggestions}
@@ -492,7 +494,7 @@ export const SendMessageDialog = ({
                     onClick={handleSubmit}
                   >
                     <Send size={12} />
-                    {sending ? '发送中...' : '发送'}
+                    {sending ? '下发中...' : '下发'}
                   </button>
                 }
                 footerRight={

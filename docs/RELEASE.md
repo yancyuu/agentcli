@@ -1,260 +1,192 @@
 # Release Guide
 
-## Published: v1.2.0 (2026-03-31)
+本文记录 `yancyuu/Hermit` 当前发布流程。当前包名是 `@yancyyu/openhermit`，版本事实以 `package.json` 为准；当前版本为 v1.6.42。
 
-Agent Graph, per-team tool approval, interactive AskUserQuestion, task comment notifications, cross-team ghost nodes. Major graph improvements: force-directed visualization with kanban task layout, fullscreen/tab mode, animated particles, member hexagons with avatars, popover actions. Permission system overhaul with proper Write/Edit/NotebookEdit seeding and MCP tool catalog integration. Full list: [CHANGELOG.md](./CHANGELOG.md).
+## 当前发布事实
 
-## Published: v1.1.0 (2026-03-26)
+| 项 | 当前值 |
+|:---|:---|
+| Repository | `https://github.com/yancyuu/Hermit` |
+| npm package | `@yancyyu/openhermit` |
+| CLI binaries | `openhermit`、`open-hermit`、`hermit` |
+| Web build | `pnpm build:web` |
+| Release workflow | `.github/workflows/release.yml` |
+| Docker image | workflow 目标为 `ghcr.io/yancyuu/hermit`；当前仓库必须先补齐 `docker/Dockerfile` 才能实际构建 |
+| 产品形态 | Fastify API + Vite Web UI |
+| 默认入口 | `/teams` |
+| 默认数据目录 | `~/.hermit/` |
 
-Minor release: React 19 + Electron 40 migration, start-task-by-user, auth troubleshooting guide, syntax highlighting for R/Ruby/PHP/SQL, search performance improvements, cost tracking accuracy, WSL/Windows path fixes. Full list: [CHANGELOG.md](./CHANGELOG.md).
+当前没有 Electron 桌面安装包发布流程，也没有内嵌 PTY 相关产物。旧 release note 中的桌面安装包名称只属于历史版本。
 
-## Published: v1.0.0 (2026-03-19)
+## 版本号
 
-Initial release: Agent Teams with reliable CLI detection in packaged builds (shell PATH/HOME, `CLAUDE_CONFIG_DIR`, auth output parsing), IPC status cache handling, concurrent binary resolution, capped NDJSON diagnostics. Full list: [CHANGELOG.md](./CHANGELOG.md).
+使用 SemVer：`MAJOR.MINOR.PATCH`。
 
-After CI uploads artifacts, optional notes update:
+| 类型 | 适用场景 | 示例 |
+|:---|:---|:---|
+| MAJOR | 破坏 CLI、HTTP API、存储或 runtime 行为 | `1.6.42` → `2.0.0` |
+| MINOR | 新面板、新 runtime、新渠道、新工作流 | `1.6.42` → `1.7.0` |
+| PATCH | Bug fix、文档、兼容性和体验修正 | `1.6.42` → `1.6.43` |
 
-```bash
-gh release edit v1.0.0 --repo 777genius/claude_agent_teams_ui --notes "$(cat <<'EOF'
-## Agent Teams v1.0.0
+## 发布前检查
 
-First stable build: CLI/auth reliability in packaged apps, IPC hardening, and platform packaging.
-
-### What's New
-- Setting to auto-expand AI response groups in transcripts (`general.autoExpandAIGroups`).
-
-### Improvements
-- CLI status uses interactive shell environment and merged PATH so packaged builds match terminal behavior.
-- Stricter IPC validation and clearer notification/update contracts.
-
-### Bug Fixes
-- Fix false "not logged in" when the CLI is authenticated in the shell.
-- Clear stale CLI status cache when status refresh fails.
-- Windows path edge cases in tooling and tests.
-
-### Downloads
-
-<table>
-<tr>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/Claude.Agent.Teams.UI-1.0.0-arm64.dmg">
-    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
-  </a>
-  <br />
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/Claude.Agent.Teams.UI-1.0.0.dmg">
-    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
-  </a>
-</td>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/Claude.Agent.Teams.UI.Setup.1.0.0.exe">
-    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
-  </a>
-  <br />
-  <sub>May trigger SmartScreen — click "More info" → "Run anyway"</sub>
-</td>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/Claude.Agent.Teams.UI-1.0.0.AppImage">
-    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
-  </a>
-  <br />
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/claude-agent-teams-ui_1.0.0_amd64.deb">
-    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
-  </a>&nbsp;
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/claude-agent-teams-ui-1.0.0.x86_64.rpm">
-    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
-  </a>&nbsp;
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.0/claude-agent-teams-ui-1.0.0.pacman">
-    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
-  </a>
-</td>
-</tr>
-</table>
-EOF
-)"
-```
-
-## Versioning (SemVer)
-
-Format: `MAJOR.MINOR.PATCH`
-
-| Bump    | When                                                        | Example          |
-|---------|-------------------------------------------------------------|------------------|
-| MAJOR   | Breaking changes, major UI overhaul, incompatible data format changes | 1.0.0 → 2.0.0 |
-| MINOR   | New features, new panels/views, new integrations            | 1.0.0 → 1.1.0   |
-| PATCH   | Bug fixes, performance improvements, small UI tweaks        | 1.0.0 → 1.0.1   |
-
-## Release Process
-
-### 1. Prepare
+从干净分支开始，避免把 release 修改和无关功能混在一起。
 
 ```bash
-# Make sure branch is clean and pushed
-git status
-git push origin <branch>
+git status --short
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build:web
 ```
 
-### 2. Create tag and push
+如果工作树里有无关修改导致检查不可运行，必须在 release 说明里写明。
+
+## 更新版本
 
 ```bash
-git tag v<VERSION>
-git push origin v<VERSION>
+pnpm version <major|minor|patch> --no-git-tag-version
+pnpm install --lockfile-only
 ```
 
-This triggers the `release.yml` GitHub Actions workflow which:
-- Builds the app (ubuntu)
-- Packages macOS arm64 + x64 (with code signing & notarization)
-- Packages Windows (NSIS installer)
-- Packages Linux (AppImage, deb, rpm, pacman)
-- Creates a GitHub Release with all artifacts
-
-### 3. Update release notes
-
-After the workflow completes, edit the release notes:
+检查版本和文档 diff：
 
 ```bash
-gh release edit v<VERSION> --repo 777genius/claude_agent_teams_ui --notes "$(cat <<'EOF'
-<paste release notes here>
-EOF
-)"
+git diff -- package.json pnpm-lock.yaml README.md docs/README.md docs/CHANGELOG.md docs/RELEASE.md
 ```
 
-## Release Notes Template
+发布前必须更新 `docs/CHANGELOG.md`，从用户视角描述变化。
+
+## GitHub Release
+
+当前 GitHub release workflow 由 tag 触发。Tag 使用纯 semver，例如 `1.6.43`。
+
+```bash
+git tag <VERSION>
+git push origin <VERSION>
+```
+
+也可以手动创建 release notes：
+
+```bash
+gh release create "$VERSION" \
+  --repo yancyuu/Hermit \
+  --title "$VERSION" \
+  --generate-notes \
+  --draft=false
+```
+
+workflow 的 Docker job 目标是构建并发布：
+
+```text
+ghcr.io/yancyuu/hermit:latest
+ghcr.io/yancyuu/hermit:<VERSION>
+```
+
+注意：当前 workflow 引用 `docker/Dockerfile`。发布前必须确认该文件存在并且 `docker build` 可用；否则 Docker job 会失败。npm 发布不依赖 Docker job。
+
+## npm 发布
+
+当前 workflow 不自动发布 npm。GitHub Release 准备好后手动发布。
+
+```bash
+pnpm build:web
+pnpm pack
+pnpm publish --access public
+```
+
+发布后验证：
+
+```bash
+npm view @yancyyu/openhermit version
+npx @yancyyu/openhermit@latest --version
+```
+
+## Release notes 模板
 
 ```markdown
-## Agent Teams v<VERSION>
+## openHermit <VERSION>
 
-<1-2 sentence summary of the release>
+<用 1-2 句话说明本次发布。>
 
-### What's New
-- feat: <feature description>
-- feat: <feature description>
+### 新增
 
-### Improvements
-- improve: <improvement description>
+- <用户可见能力>
 
-### Bug Fixes
-- fix: <bug fix description>
+### 改进
 
-### Downloads
+- <用户可见改进>
 
-<table>
-<tr>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude.Agent.Teams.UI-<VERSION>-arm64.dmg">
-    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
-  </a>
-  <br />
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude.Agent.Teams.UI-<VERSION>-x64.dmg">
-    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
-  </a>
-</td>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude.Agent.Teams.UI.Setup.<VERSION>.exe">
-    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
-  </a>
-  <br />
-  <sub>May trigger SmartScreen — click "More info" → "Run anyway"</sub>
-</td>
-<td align="center">
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude.Agent.Teams.UI-<VERSION>.AppImage">
-    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
-  </a>
-  <br />
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui_<VERSION>_amd64.deb">
-    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
-  </a>&nbsp;
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.x86_64.rpm">
-    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
-  </a>&nbsp;
-  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.pacman">
-    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
-  </a>
-</td>
-</tr>
-</table>
+### 修复
+
+- <用户可见修复>
+
+### 升级说明
+
+- <用户或运维必须采取的动作；没有则省略>
 ```
 
-## Changelog Guidelines
+## Changelog 规则
 
-Write changelog entries from the **user's perspective**, not the developer's.
+写用户能理解的结果，不写内部实现流水账。
 
-**Good:**
-- "Add team member activity timeline with live status tracking"
-- "Fix crash when opening sessions with corrupted JSONL data"
-- "Improve session list loading speed by 3x with streaming parser"
+推荐：
 
-**Bad:**
-- "Refactor ChunkBuilder to use new pipeline"
-- "Update dependencies"
-- "Fix bug in useEffect cleanup"
+- “新增团队渠道绑定白名单，限制外部群聊访问指定团队。”
+- “修复 Redis task bus 未配置时跨团队派单提示不清晰的问题。”
+- “改进 `/teams` 工作台的团队详情加载体验。”
 
-Group entries by type: `What's New` > `Improvements` > `Bug Fixes` > `Breaking Changes` (if any).
+避免：
 
-## File Naming Convention
+- “Refactor TaskDispatchService。”
+- “Update dependencies。”
+- “Fix useEffect cleanup。”
 
-electron-builder generates these artifacts per platform:
+分组顺序：
 
-| Platform         | Versioned Name                                   | Stable Name (for /latest/download)         |
-|------------------|--------------------------------------------------|--------------------------------------------|
-| macOS arm64 DMG  | `Claude.Agent.Teams.UI-<VER>-arm64.dmg`          | `Claude-Agent-Teams-UI-arm64.dmg`          |
-| macOS x64 DMG    | `Claude.Agent.Teams.UI-<VER>-x64.dmg`            | `Claude-Agent-Teams-UI-x64.dmg`            |
-| macOS arm64 ZIP  | `Claude.Agent.Teams.UI-<VER>-arm64-mac.zip`      | -                                          |
-| macOS x64 ZIP    | `Claude.Agent.Teams.UI-<VER>-x64-mac.zip`        | -                                          |
-| Windows          | `Claude.Agent.Teams.UI.Setup.<VER>.exe`          | `Claude-Agent-Teams-UI-Setup.exe`          |
-| Linux AppImage   | `Claude.Agent.Teams.UI-<VER>.AppImage`           | `Claude-Agent-Teams-UI.AppImage`           |
-| Linux deb        | `claude-agent-teams-ui_<VER>_amd64.deb`          | `Claude-Agent-Teams-UI-amd64.deb`          |
-| Linux rpm        | `claude-agent-teams-ui-<VER>.x86_64.rpm`         | `Claude-Agent-Teams-UI-x86_64.rpm`         |
-| Linux pacman     | `claude-agent-teams-ui-<VER>.pacman`              | `Claude-Agent-Teams-UI.pacman`             |
+1. 新增
+2. 改进
+3. 修复
+4. 移除
+5. Breaking Changes
+6. 升级说明
 
-## Stable Download Links
+## 文档同步要求
 
-The `upload-stable-links` job in `release.yml` re-uploads key assets with version-agnostic names.
-It starts only after **release-mac** (two matrix jobs), **release-win**, and **release-linux** all succeed, so it often stays in **Queued** until the slowest job finishes. Delays of several minutes are common when macOS hosted runners are backed up.
+以下变化必须同步 README、docs index、release note 或相关架构文档：
 
-This enables permanent links in README that always point to the latest release:
+- runtime adapter 变化。
+- cc-connect setup、Bridge 或 Management API 变化。
+- 外部平台、渠道绑定、白名单或 session key 路由变化。
+- `/teams`、团队详情、任务、消息工作区变化。
+- worktree 隔离行为变化。
+- Redis-backed dispatch 或 Task Bus 语义变化。
+- 默认数据目录、CLI 命令、端口或路由变化。
+- 截图变化。
 
-```
-https://github.com/777genius/claude_agent_teams_ui/releases/latest/download/Claude-Agent-Teams-UI-arm64.dmg
-```
+写渠道能力时必须区分：Hermit 控制面能力、cc-connect 平台适配能力、目标能力。不要把平台列表写成 Hermit 内置 Bot。
 
-GitHub automatically redirects `/releases/latest/download/FILENAME` to the asset from the most recent release. No README updates needed when releasing a new version.
+写 Task Bus 时必须区分：当前 Redis-backed dispatch 和目标 offer / bid / lease / event 模型。
 
-## macOS Code Signing
+## Docker 发布检查
 
-macOS builds are signed and notarized via GitHub Actions secrets:
-
-| Secret                        | Description                  |
-|-------------------------------|------------------------------|
-| `CSC_LINK`                    | Base64-encoded .p12 certificate |
-| `CSC_KEY_PASSWORD`            | Certificate password         |
-| `APPLE_ID`                    | Apple Developer account email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password from appleid.apple.com |
-| `APPLE_TEAM_ID`               | Apple Developer Team ID      |
-
-Without these secrets, macOS builds will be unsigned (users need to bypass Gatekeeper manually).
-
-## Auto-Update
-
-The release workflow publishes canonical updater metadata after all platform assets are uploaded:
-- `latest.yml` for Windows
-- `latest-linux.yml` for Linux
-- `latest-mac.yml` for macOS
-
-⚠️ `latest-mac.yml` is currently Apple Silicon first because `electron-updater` on GitHub releases still uses a single macOS metadata file. Intel Mac users keep manual download support, while automatic macOS updates stay aligned with the native arm64 build until we move to universal packaging or an arch-aware provider.
-
-## Quick Reference
+Tag 推送后检查 workflow。只有 Docker job 具备 `docker/Dockerfile` 并成功构建时，才继续拉取镜像：
 
 ```bash
-# Create and publish a release
-git tag v1.0.0
-git push origin v1.0.0
-# Wait for CI to finish (~10 min), then update notes
-
-# Delete a release (if needed)
-gh release delete v1.0.0 --repo 777genius/claude_agent_teams_ui --yes
-git tag -d v1.0.0
-git push origin :refs/tags/v1.0.0
-
-# Check workflow status
-gh run list --repo 777genius/claude_agent_teams_ui --workflow release.yml --limit 3
+gh run list --repo yancyuu/Hermit --workflow release.yml --limit 3
+docker pull ghcr.io/yancyuu/hermit:<VERSION>
 ```
+
+## 删除或修复 release
+
+```bash
+gh release delete <VERSION> --repo yancyuu/Hermit --yes
+git tag -d <VERSION>
+git push origin :refs/tags/<VERSION>
+```
+
+只有公开 release 明确损坏时才删除。普通问题优先发 patch release。
+
+## 历史说明
+
+旧版本可能提到 Electron 桌面安装包、签名产物或 `Claude.Agent.Teams.UI-*` 之类 artifact。当前仓库发布主线是 npm CLI package + GitHub Release；Docker/GHCR 是 workflow 中的目标 job，但需要仓库存在可用 `docker/Dockerfile`。只有在当前 workflow 重新支持桌面产物后，才恢复 Electron 打包说明。

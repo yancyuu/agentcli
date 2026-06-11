@@ -23,7 +23,7 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
   style,
   onClick,
 }: CalendarEventBlockProps): React.JSX.Element {
-  const label = occurrence.label || '定时任务';
+  const label = occurrence.label || '定时 Loop';
   const timeStr = occurrence.date.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -37,12 +37,15 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
         type="button"
         className={cn(
           'flex w-full items-center gap-1 overflow-hidden rounded px-1 py-[1px] text-left transition-opacity hover:opacity-80',
-          className,
+          className
         )}
         style={{ backgroundColor: hexToRgba(occurrence.color, 0.12), ...style }}
         onClick={onClick}
       >
-        <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: occurrence.color }} />
+        <span
+          className="size-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: occurrence.color }}
+        />
         <span className="truncate text-[10px] leading-tight" style={{ color: occurrence.color }}>
           {label}
         </span>
@@ -57,7 +60,7 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
       className={cn(
         'group relative flex w-full flex-col overflow-hidden rounded-[3px] px-1.5 py-0.5 text-left transition-opacity hover:opacity-90 focus:outline-none',
         occurrence.status === 'paused' && 'opacity-50',
-        className,
+        className
       )}
       style={{
         backgroundColor: occurrence.color,
@@ -68,9 +71,7 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
       onClick={onClick}
       title={`${label} · ${occurrence.teamDisplayName}\n${timeStr}`}
     >
-      <span className="truncate text-[11px] font-medium leading-tight text-white/95">
-        {label}
-      </span>
+      <span className="truncate text-[11px] font-medium leading-tight text-white/95">{label}</span>
       {variant === 'day' && (
         <span className="truncate text-[10px] leading-tight text-white/70">
           {occurrence.teamDisplayName}

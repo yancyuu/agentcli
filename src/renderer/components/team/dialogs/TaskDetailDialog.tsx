@@ -828,7 +828,7 @@ export const TaskDetailDialog = ({
                 <HelpCircle size={14} />
                 {currentTask.needsClarification === 'user'
                   ? '等待你补充说明'
-                  : '等待团队负责人补充说明'}
+                  : '等待 Loop Lead 补充说明'}
               </span>
               <Button
                 variant="ghost"

@@ -69,6 +69,8 @@ describe('resolveLaunchDialogPrefill', () => {
 
     const savedRequest = {
       teamName: 'vector-room-2',
+      bindProject: 'vector-room-2',
+      displayName: 'Vector Room',
       cwd: '/Users/test/project',
       providerId: 'anthropic',
       model: 'haiku',
@@ -137,6 +139,8 @@ describe('resolveLaunchDialogPrefill', () => {
       members: [],
       savedRequest: {
         teamName: 'vector-room-2',
+        bindProject: 'vector-room-2',
+        displayName: 'Vector Room',
         cwd: '/Users/test/project',
         providerId: 'codex',
         providerBackendId: 'codex-native',

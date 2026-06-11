@@ -18,7 +18,7 @@ export const SettingRow = ({
 }: SettingRowProps): React.JSX.Element => {
   return (
     <div
-      className="group flex items-center justify-between rounded-lg border-b px-3 py-3.5 transition-colors duration-150 hover:bg-white/[0.03]"
+      className="group flex items-center justify-between border-b px-3 py-3.5 transition-colors duration-150 last:border-b-0 hover:bg-[var(--color-accent-soft)]"
       style={{ borderColor: 'var(--color-border-subtle)' }}
     >
       <div className="flex items-start gap-3">

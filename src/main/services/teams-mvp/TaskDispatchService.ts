@@ -8,7 +8,7 @@ import type {
   TaskHandshakeResponse,
   TaskStatusUpdate,
 } from '@shared/types/team';
-import type { TeamWorkspaceService, TeamManifest } from './TeamWorkspaceService';
+import type { TeamWorkspaceService, TeamManifest, Task } from './TeamWorkspaceService';
 import type { CollaborationBoardService } from './CollaborationBoardService';
 import type Redis from 'ioredis';
 
@@ -51,8 +51,11 @@ export class TaskDispatchService {
   private responseConsumerTeamSlugs = new Set<string>();
   private disposed = false;
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private startingTasks = new Set<string>();
   /** Callback fired when collab task state changes (for SSE broadcast). */
   onCollabChange?: (dispatchId: string, status: string, fromTeam: string, toTeam: string) => void;
+  /** Runtime delivery hook. Cross-team tasks must only use this after a human clicks Start. */
+  onRuntimeStart?: (params: { teamName: string; text: string }) => Promise<void>;
 
   constructor(workspace: TeamWorkspaceService, collabBoard: CollaborationBoardService) {
     this.workspace = workspace;
@@ -155,7 +158,7 @@ export class TaskDispatchService {
     fromTeam: string,
     task: { subject: string; description?: string; prompt?: string },
     targetTeam: string,
-    opts?: { deadlineMinutes?: number; needsHumanReview?: boolean }
+    opts?: { deadlineMinutes?: number; needsHumanReview?: boolean; dispatchId?: string }
   ): Promise<DispatchResult> {
     if (fromTeam === targetTeam) {
       return {
@@ -166,8 +169,9 @@ export class TaskDispatchService {
       };
     }
 
-    const dispatchId = crypto.randomUUID();
+    const dispatchId = opts?.dispatchId ?? crypto.randomUUID();
     const now = new Date();
+    const dispatchedAt = now.toISOString();
     const deadline = opts?.deadlineMinutes
       ? new Date(now.getTime() + opts.deadlineMinutes * 60_000).toISOString()
       : undefined;
@@ -176,13 +180,23 @@ export class TaskDispatchService {
       dispatchId,
       originTeam: fromTeam,
       targetTeam,
-      status: 'pending_accept',
-      dispatchedAt: now.toISOString(),
+      status: 'received',
+      dispatchedAt,
+      receivedAt: dispatchedAt,
       deadline,
     };
+    const payload: TaskDispatchPayload = {
+      dispatchId,
+      originTeam: fromTeam,
+      targetTeam,
+      task: { subject: task.subject, description: task.description, prompt: task.prompt },
+      dispatchedAt,
+      deadline,
+      needsHumanReview: opts?.needsHumanReview,
+    };
 
-    // Add to collaboration board before external delivery. Even failed dispatches
-    // must remain visible in the canonical task projection for diagnosis/retry.
+    // Add to collaboration board before external delivery. Dispatch creation only
+    // means "visible in the target team's TODO"; runtime execution waits for Start.
     const fromTeamManifest = await this.safeReadManifest(fromTeam);
     const toTeamManifest = await this.safeReadManifest(targetTeam);
     const collabTask: CollabTask = {
@@ -194,32 +208,54 @@ export class TaskDispatchService {
       fromTeamDisplay: fromTeamManifest?.displayName ?? fromTeam,
       toTeam: targetTeam,
       toTeamDisplay: toTeamManifest?.displayName ?? targetTeam,
-      status: 'pending_accept',
+      status: 'received',
       deadline,
       needsHumanReview: opts?.needsHumanReview ?? false,
       revisionCount: 0,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
+      createdAt: dispatchedAt,
+      updatedAt: dispatchedAt,
     };
     this.collabBoard.addTask(collabTask);
 
-    // Route: all dispatches require Redis
+    const isLocalTarget = await this.isLocalTeam(targetTeam);
+    if (isLocalTarget) {
+      const localTask = await this.createOrReuseReceivedTask(targetTeam, payload, dispatchMeta);
+      this.pendingRequests.set(dispatchId, {
+        payload,
+        msgId: `local-${Date.now()}`,
+        groupName: 'local-dispatch',
+        teamSlug: targetTeam,
+        localTaskId: localTask.id,
+      });
+      this.emitCollabChange(dispatchId, 'received', fromTeam, targetTeam);
+      this.sendFeishuNotification(
+        `跨团队任务进入待启动：${fromTeam} → ${targetTeam}\n${task.subject}`
+      );
+      return {
+        dispatchId,
+        status: 'received',
+        targetTeam,
+        message: `Task queued in ${targetTeam} TODO, waiting for manual start.`,
+      };
+    }
+
+    // Remote teams still require Redis to create the target-side TODO projection.
     if (!this.redis) {
       const failedTask = this.collabBoard.transition({
         dispatchId,
-        expected: 'pending_accept',
+        expected: ['received', 'pending_accept'],
         next: 'failed',
         actor: { type: 'system', id: 'task-dispatch' },
         eventType: 'task_failed',
         payload: { reason: 'Redis not configured' },
-        extra: { reason: 'Redis not configured — cross-team dispatch requires task bus.' },
+        extra: { reason: 'Redis not configured — remote cross-team dispatch requires task bus.' },
       });
       this.emitCollabChange(dispatchId, failedTask.status, fromTeam, targetTeam);
       return {
         dispatchId,
         status: 'failed',
         targetTeam,
-        message: 'Redis not configured — cross-team dispatch requires task bus.',
+        message: 'Redis not configured — remote cross-team dispatch requires task bus.',
       };
     }
 
@@ -230,7 +266,7 @@ export class TaskDispatchService {
       const reason = err instanceof Error ? err.message : 'Unknown Redis dispatch failure';
       const failedTask = this.collabBoard.transition({
         dispatchId,
-        expected: 'pending_accept',
+        expected: ['received', 'pending_accept'],
         next: 'failed',
         actor: { type: 'system', id: 'task-dispatch' },
         eventType: 'task_failed',
@@ -246,14 +282,141 @@ export class TaskDispatchService {
       };
     }
 
-    this.emitCollabChange(dispatchId, 'pending_accept', fromTeam, targetTeam);
+    this.emitCollabChange(dispatchId, 'received', fromTeam, targetTeam);
 
     return {
       dispatchId,
-      status: 'pending_accept',
+      status: 'received',
       targetTeam,
-      message: `Task dispatched to ${targetTeam}, awaiting acceptance.`,
+      message: `Task queued in ${targetTeam} TODO, waiting for manual start.`,
     };
+  }
+
+  private async createOrReuseReceivedTask(
+    teamSlug: string,
+    payload: TaskDispatchPayload,
+    dispatchMeta: DispatchMeta
+  ): Promise<Task> {
+    const existingTasks = await this.workspace.readTasks(teamSlug).catch(() => []);
+    const existingTask = existingTasks.find(
+      (task) => task.dispatchMeta?.dispatchId === payload.dispatchId
+    );
+    if (existingTask) return existingTask;
+
+    return this.workspace.createTask(teamSlug, {
+      title: payload.task.subject,
+      description: payload.task.description ?? payload.task.prompt ?? '',
+      status: 'todo',
+      dispatchMeta,
+    });
+  }
+
+  async startDispatchedTask(
+    teamSlug: string,
+    taskId: string
+  ): Promise<{ taskId: string; dispatchId: string }> {
+    const lockKey = `${teamSlug}:${taskId}`;
+    if (this.startingTasks.has(lockKey)) {
+      throw new Error('cross-team task is already starting');
+    }
+    this.startingTasks.add(lockKey);
+    try {
+      return await this.startDispatchedTaskLocked(teamSlug, taskId);
+    } finally {
+      this.startingTasks.delete(lockKey);
+    }
+  }
+
+  private async startDispatchedTaskLocked(
+    teamSlug: string,
+    taskId: string
+  ): Promise<{ taskId: string; dispatchId: string }> {
+    const tasks = await this.workspace.readTasks(teamSlug);
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (!task.dispatchMeta) throw new Error(`task is not a cross-team dispatch: ${taskId}`);
+    if (task.dispatchMeta.targetTeam !== teamSlug) {
+      throw new Error(
+        `cross-team task belongs to ${task.dispatchMeta.targetTeam}, not ${teamSlug}`
+      );
+    }
+    if (task.status !== 'todo') {
+      throw new Error('cross-team task has already been started or completed');
+    }
+    if (!['received', 'pending_accept', 'accepted'].includes(task.dispatchMeta.status)) {
+      throw new Error(`cross-team task cannot be started from status ${task.dispatchMeta.status}`);
+    }
+
+    const startedAt = new Date().toISOString();
+    const meta: DispatchMeta = {
+      ...task.dispatchMeta,
+      status: 'in_progress',
+      acceptedAt: task.dispatchMeta.acceptedAt ?? startedAt,
+      remoteTaskId: task.id,
+    };
+
+    const updated = await this.workspace.patchTask(teamSlug, taskId, {
+      status: 'doing',
+      dispatchMeta: meta,
+    } as any);
+
+    const collabTask = this.collabBoard.getTask(meta.dispatchId);
+    if (collabTask && ['received', 'pending_accept', 'accepted'].includes(collabTask.status)) {
+      const next = this.collabBoard.transition({
+        dispatchId: meta.dispatchId,
+        expected: ['received', 'pending_accept', 'accepted'],
+        next: 'in_progress',
+        actor: { type: 'team', id: teamSlug },
+        eventType: 'task_accepted',
+        payload: { remoteTaskId: task.id, startedAt },
+        extra: { acceptedAt: startedAt, remoteTaskId: task.id },
+      });
+      this.emitCollabChange(meta.dispatchId, next.status, next.fromTeam, next.toTeam);
+    }
+
+    const description = updated.description?.trim();
+    const runtimeText = `[跨团队任务启动] 来自 ${meta.originTeam} 的任务已由用户点击启动，请开始执行。\n\n任务：${updated.title}${description ? `\n\n描述：${description}` : ''}\n\n完成后请调用 complete_task 标记完成。`;
+    await this.onRuntimeStart?.({ teamName: teamSlug, text: runtimeText });
+
+    const pending = this.pendingRequests.get(meta.dispatchId);
+    if (pending?.teamSlug === teamSlug) {
+      if (this.redis && !pending.msgId.startsWith('local-')) {
+        await this.redis
+          .xack(`task:dispatch:${teamSlug}`, pending.groupName, pending.msgId)
+          .catch(() => {});
+      }
+      this.pendingRequests.delete(meta.dispatchId);
+    }
+
+    const update: TaskStatusUpdate = {
+      dispatchId: meta.dispatchId,
+      originTeam: meta.originTeam,
+      status: 'in_progress',
+      remoteTaskId: task.id,
+      timestamp: startedAt,
+    };
+    if (this.redis) {
+      await this.redis
+        .publish(`task:status:${meta.originTeam}`, JSON.stringify(update))
+        .catch(() => {});
+    }
+
+    await this.workspace
+      .appendMessage(meta.originTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务已启动] "${updated.title}" — ${teamSlug} 已从 TODO 点击启动并开始执行。`,
+        meta: {
+          source: 'cross_team_started',
+          dispatchId: meta.dispatchId,
+          targetTeam: teamSlug,
+          taskId,
+        },
+      })
+      .catch(() => {});
+
+    return { taskId, dispatchId: meta.dispatchId };
   }
 
   async acceptTask(teamSlug: string, dispatchId: string): Promise<{ taskId: string }> {
@@ -262,87 +425,50 @@ export class TaskDispatchService {
       throw new Error(`No pending request found for dispatchId: ${dispatchId}`);
     }
 
-    const { payload, msgId, groupName, localTaskId } = pending;
+    const { payload, localTaskId } = pending;
 
     const remoteTaskId = localTaskId ?? payload.dispatchId;
 
-    // Send accept response
-    const response: TaskHandshakeResponse = {
-      dispatchId: payload.dispatchId,
-      type: 'task_accept',
-      fromTeam: teamSlug,
-      toTeam: payload.originTeam,
-      remoteTaskId,
-      acceptedAt: new Date().toISOString(),
-    };
-
-    const isLocalOrigin = await this.isLocalTeam(payload.originTeam);
-    if (isLocalOrigin) {
-      await this.handleLocalResponse(response);
-    } else if (this.redis) {
-      await this.redis
-        .xadd(`task:response:${payload.originTeam}`, '*', 'payload', JSON.stringify(response))
-        .catch((err: Error) => {
-          console.error('[TaskDispatchService] accept xadd failed:', err.message);
-        });
+    // Legacy accept_task only acknowledges receipt. It must not advance execution;
+    // runtime delivery is gated by the target team's TODO Start button.
+    const tasks = await this.workspace.readTasks(teamSlug).catch(() => []);
+    const localTask = tasks.find(
+      (task) => task.id === remoteTaskId || task.dispatchMeta?.dispatchId === payload.dispatchId
+    );
+    if (localTask?.dispatchMeta) {
+      await this.workspace
+        .patchTask(teamSlug, localTask.id, {
+          dispatchMeta: {
+            ...localTask.dispatchMeta,
+            status: 'received',
+            remoteTaskId: localTask.id,
+          },
+        } as any)
+        .catch(() => {});
     }
+    this.emitCollabChange(payload.dispatchId, 'received', payload.originTeam, payload.targetTeam);
 
-    if (this.redis) {
-      await this.redis.xack(`task:dispatch:${teamSlug}`, groupName, msgId).catch(() => {});
-    }
-
-    this.pendingRequests.delete(dispatchId);
-
-    // Update collab board
-    const acceptedAt = new Date().toISOString();
-    this.collabBoard.transition({
-      dispatchId: payload.dispatchId,
-      expected: 'pending_accept',
-      next: 'accepted',
-      actor: { type: 'team', id: teamSlug },
-      eventType: 'task_accepted',
-      payload: { remoteTaskId },
-      extra: { acceptedAt },
-    });
-    this.emitCollabChange(payload.dispatchId, 'accepted', payload.originTeam, payload.targetTeam);
-
-    // Fixed flow: notify receiving agent to start executing
     try {
       await this.workspace.appendMessage(teamSlug, {
         from: 'system',
         to: 'team',
         role: 'agent',
-        content: `[跨团队任务已确认] "${payload.task.subject}" — 来自 ${payload.originTeam} 的任务已被人工确认接单，请开始执行。任务描述：${payload.task.description ?? '无'}`,
+        content: `[跨团队任务已接收] "${payload.task.subject}" — 来自 ${payload.originTeam} 的任务已记录，等待目标团队在 TODO 中点击启动。`,
         meta: {
-          source: 'cross_team_accepted',
+          source: 'cross_team_received',
           dispatchId: payload.dispatchId,
           originTeam: payload.originTeam,
-          taskId: remoteTaskId,
+          taskId: localTask?.id ?? remoteTaskId,
+          runtimeDeliverable: false,
         },
       });
     } catch {}
 
-    // Fixed flow: notify originating agent that task was accepted
-    try {
-      await this.workspace.appendMessage(payload.originTeam, {
-        from: 'system',
-        to: 'team',
-        role: 'agent',
-        content: `[跨团队任务已接单] "${payload.task.subject}" — ${teamSlug} 已确认接单，正在执行中。`,
-        meta: {
-          source: 'cross_team_accepted_notify',
-          dispatchId: payload.dispatchId,
-          targetTeam: teamSlug,
-        },
-      });
-    } catch {}
-
-    // Feishu notification
     this.sendFeishuNotification(
-      `跨团队任务已接单：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n状态：执行中`
+      `跨团队任务待启动：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n状态：等待目标团队点击启动`
     );
 
-    return { taskId: remoteTaskId };
+    return { taskId: localTask?.id ?? remoteTaskId };
   }
 
   async rejectTask(teamSlug: string, dispatchId: string, reason?: string): Promise<void> {
@@ -382,7 +508,7 @@ export class TaskDispatchService {
     // Update collab board
     this.collabBoard.transition({
       dispatchId: payload.dispatchId,
-      expected: 'pending_accept',
+      expected: ['received', 'pending_accept'],
       next: 'rejected',
       actor: { type: 'team', id: teamSlug },
       eventType: 'task_rejected',
@@ -658,6 +784,39 @@ export class TaskDispatchService {
       dispatchMeta: { ...meta, status: 'completed', completedAt: update.timestamp },
     } as any);
 
+    const collabTask = this.collabBoard.getTask(meta.dispatchId);
+    if (
+      collabTask &&
+      ['in_progress', 'accepted', 'delivered', 'revision'].includes(collabTask.status)
+    ) {
+      const next = this.collabBoard.transition({
+        dispatchId: meta.dispatchId,
+        expected: ['in_progress', 'accepted', 'delivered', 'revision'],
+        next: 'approved',
+        actor: { type: 'team', id: teamSlug },
+        eventType: 'task_approved',
+        payload: { remoteTaskId: task.id, completedAt: update.timestamp },
+        extra: { completedAt: update.timestamp, result: task.result ?? undefined },
+      });
+      this.emitCollabChange(meta.dispatchId, next.status, next.fromTeam, next.toTeam);
+    }
+
+    await this.workspace
+      .appendMessage(meta.originTeam, {
+        from: 'system',
+        to: 'team',
+        role: 'agent',
+        content: `[跨团队任务已完成] "${task.title}" — ${teamSlug} 已完成任务${task.result ? `。结果：${task.result}` : '。'}`,
+        meta: {
+          source: 'cross_team_completed',
+          dispatchId: meta.dispatchId,
+          targetTeam: teamSlug,
+          taskId,
+          result: task.result ?? undefined,
+        },
+      })
+      .catch(() => {});
+
     if (this.redis) {
       const channel = `task:status:${meta.originTeam}`;
       await this.redis.publish(channel, JSON.stringify(update)).catch((err: Error) => {
@@ -706,26 +865,9 @@ export class TaskDispatchService {
     const streamKey = `task:dispatch:${dispatchMeta.targetTeam}`;
     await this.redis!.xadd(streamKey, '*', 'payload', JSON.stringify(payload));
 
-    // If local team, also write to inbox
-    const isLocal = await this.isLocalTeam(dispatchMeta.targetTeam);
-    if (isLocal) {
-      try {
-        await this.workspace.appendMessage(dispatchMeta.targetTeam, {
-          from: dispatchMeta.originTeam,
-          to: 'team',
-          role: 'agent',
-          content: `[跨团队任务] ${task.subject}${task.description ? '\n' + task.description : ''}`,
-          meta: {
-            source: 'cross_team_dispatch',
-            dispatchId: dispatchMeta.dispatchId,
-            originTeam: dispatchMeta.originTeam,
-            needsHumanReview,
-          },
-        });
-      } catch (err) {
-        console.error('[TaskDispatchService] inbox write failed:', (err as Error).message);
-      }
-    }
+    // Do not write an execution-looking runtime/inbox prompt here. Dispatch creation
+    // only makes a target TODO visible; runtime delivery happens after Start.
+    void needsHumanReview;
 
     this.sendFeishuNotification(
       `跨团队任务派发：${dispatchMeta.originTeam} → ${dispatchMeta.targetTeam}\n${task.subject}`
@@ -850,8 +992,8 @@ export class TaskDispatchService {
         const tasks = await this.workspace.readTasks(team.slug);
         for (const task of tasks) {
           if (
-            task.dispatchMeta?.status === 'pending_accept' &&
-            task.dispatchMeta.deadline &&
+            ['received', 'pending_accept'].includes(task.dispatchMeta?.status ?? '') &&
+            task.dispatchMeta?.deadline &&
             new Date(task.dispatchMeta.deadline).getTime() < Date.now()
           ) {
             await this.workspace.patchTask(team.slug, task.id, {
@@ -957,14 +1099,14 @@ export class TaskDispatchService {
         fromTeamDisplay: fromTeamManifest?.displayName ?? payload.originTeam,
         toTeam: teamSlug,
         toTeamDisplay: toTeamManifest?.displayName ?? teamSlug,
-        status: 'pending_accept',
+        status: 'received',
         deadline: payload.deadline,
         needsHumanReview: payload.needsHumanReview ?? false,
         revisionCount: 0,
         createdAt,
         updatedAt: createdAt,
       });
-      this.emitCollabChange(payload.dispatchId, 'pending_accept', payload.originTeam, teamSlug);
+      this.emitCollabChange(payload.dispatchId, 'received', payload.originTeam, teamSlug);
 
       const existingTasks = await this.workspace.readTasks(teamSlug).catch(() => []);
       const existingTask = existingTasks.find(
@@ -980,7 +1122,7 @@ export class TaskDispatchService {
             dispatchId: payload.dispatchId,
             originTeam: payload.originTeam,
             targetTeam: teamSlug,
-            status: 'pending_accept',
+            status: 'received',
             dispatchedAt: payload.dispatchedAt,
             receivedAt: new Date().toISOString(),
             deadline: payload.deadline,
@@ -996,26 +1138,9 @@ export class TaskDispatchService {
         localTaskId: localTask.id,
       });
 
-      if (!alreadyPending) {
-        await this.workspace
-          .appendMessage(teamSlug, {
-            from: payload.originTeam,
-            to: 'team',
-            role: 'agent',
-            content: `[跨团队任务] ${payload.task.subject}${
-              payload.task.description ? '\n' + payload.task.description : ''
-            }`,
-            meta: {
-              source: 'cross_team_dispatch',
-              dispatchId: payload.dispatchId,
-              originTeam: payload.originTeam,
-              needsHumanReview: payload.needsHumanReview,
-            },
-          })
-          .catch((err: Error) => {
-            console.error('[TaskDispatchService] inbox write failed:', err.message);
-          });
-      }
+      // Do not append an execution-looking message here. The target TODO card is
+      // the only pre-start surface; runtime delivery happens after the user clicks Start.
+      void alreadyPending;
 
       console.log(
         `[TaskDispatchService] received dispatch request: ${payload.dispatchId} from ${payload.originTeam} → ${teamSlug}`

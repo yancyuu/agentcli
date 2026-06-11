@@ -2,7 +2,7 @@ import type { ExecutionTarget } from './api';
 import type { EnhancedChunk } from '@main/types';
 
 export const SYSTEM_MANAGER_TEAM_NAME = 'system-manager';
-export const SYSTEM_MANAGER_DISPLAY_NAME = '控制台';
+export const SYSTEM_MANAGER_DISPLAY_NAME = 'Admin Loop';
 export const SYSTEM_MANAGER_BIND_PROJECT = 'my-project';
 
 export interface SystemManagerSummary {
@@ -57,6 +57,7 @@ export interface TeamConfig {
   members?: TeamMember[];
   projectPath?: string;
   projectPathHistory?: string[];
+  ccSyncError?: string | null;
   /** Default machine/cwd used when launching this team. */
   executionTarget?: ExecutionTarget;
   leadSessionId?: string;
@@ -105,6 +106,8 @@ export interface TeamSummary {
   color?: string;
   memberCount: number;
   members?: TeamSummaryMember[];
+  /** Runtime harness used to launch the team, e.g. claudecode/codex/opencode. */
+  harness?: string;
   taskCount: number;
   lastActivity: string | null;
   projectPath?: string;
@@ -272,7 +275,9 @@ export interface TaskHandshakeResponse {
 
 export type CollabTaskStatus =
   | 'pending_accept'
+  | 'received'
   | 'accepted'
+  | 'in_progress'
   | 'delivered'
   | 'approved'
   | 'revision'
@@ -324,6 +329,8 @@ export interface CollabTask {
   rejectedAt?: string;
   deliveredAt?: string;
   approvedAt?: string;
+  completedAt?: string;
+  remoteTaskId?: string;
 }
 
 export interface TaskWorkInterval {
@@ -1502,9 +1509,10 @@ export interface TeamProvisioningMemberInput {
 
 export interface TeamCreateRequest {
   teamName: string;
-  /** cc-connect project name — ASCII, unique. Auto-generated if not provided. */
-  bindProject?: string;
-  displayName?: string;
+  /** cc-connect project name — ASCII, unique. Required for URL routing and cc-connect binding. */
+  bindProject: string;
+  /** Human-facing display name. Required and may contain Chinese/Unicode characters. */
+  displayName: string;
   description?: string;
   color?: string;
   members: TeamProvisioningMemberInput[];
@@ -1747,6 +1755,8 @@ export interface MemberFullStats {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
   costUsd: number;
   tasksCompleted: number;
   messageCount: number;

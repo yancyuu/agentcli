@@ -15,6 +15,7 @@ describe('slashCommands', () => {
       '/reset',
       '/new',
       '/plan',
+      '/loop',
       '/model',
       '/effort',
       '/fast',

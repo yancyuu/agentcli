@@ -39,7 +39,7 @@ function actorLabel(actor: BoardTaskLogActor): string {
     return actor.memberName;
   }
   if (actor.role === 'lead' || actor.isSidechain === false) {
-    return '负责人会话';
+    return 'Loop Lead 会话';
   }
   if (actor.agentId) {
     return `成员 ${actor.agentId.slice(0, 8)}`;

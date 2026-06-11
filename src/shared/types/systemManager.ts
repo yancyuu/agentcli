@@ -1,5 +1,5 @@
 export interface SystemManagerStatus {
-  displayName: '控制台';
+  displayName: 'Admin Loop';
   defaultWorkDir: string;
   selectedWorkDir: string;
   workflowFolder?: string;
@@ -20,6 +20,17 @@ export interface SystemManagerConfigPatch {
   workflowFolder?: string | null;
 }
 
+export type WorkflowPromptSource = 'claude-command' | 'workflow-folder';
+
+export type WorkflowPromptSafety =
+  | 'read-only'
+  | 'reporting'
+  | 'audit'
+  | 'proposal-only'
+  | 'apply'
+  | 'destructive'
+  | 'unknown';
+
 export interface WorkflowPromptSummary {
   id: string;
   label: string;
@@ -27,6 +38,14 @@ export interface WorkflowPromptSummary {
   path: string;
   sizeBytes: number;
   updatedAt: string;
+  folder?: string;
+  source?: WorkflowPromptSource;
+  commandName?: string;
+  description?: string;
+  category?: string;
+  safety?: WorkflowPromptSafety;
+  builtin?: boolean;
+  order?: number;
 }
 
 export interface WorkflowPromptListResponse {

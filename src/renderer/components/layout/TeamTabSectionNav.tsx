@@ -16,7 +16,7 @@ const SECTIONS: readonly { id: string; label: string; icon: LucideIcon }[] = [
   { id: 'sessions', label: '会话', icon: History },
   { id: 'kanban', label: '看板', icon: Columns3 },
   { id: 'claude-logs', label: '运行日志', icon: Terminal },
-  { id: 'messages', label: '消息', icon: MessageSquare },
+  { id: 'messages', label: 'Loop 指令', icon: MessageSquare },
 ];
 
 export const TeamTabSectionNav = ({

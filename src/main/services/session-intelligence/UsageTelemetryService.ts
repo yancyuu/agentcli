@@ -71,6 +71,7 @@ async function uploadMetrics(client: Redis, slug: string, result: ParseResult): 
       tokens_out: m.tokensOut,
       cache_read: m.cacheRead,
       cache_creation: m.cacheCreation,
+      tokens_total: m.tokensTotal,
       work_seconds: m.workSeconds,
     });
     pipe.expire(KEY_DAILY(slug, day), 90 * 86400);
@@ -84,6 +85,7 @@ async function uploadMetrics(client: Redis, slug: string, result: ParseResult): 
     tokens_out: aggregate.tokens.output,
     cache_read: aggregate.tokens.cacheRead,
     cache_creation: aggregate.tokens.cacheCreation,
+    tokens_total: aggregate.tokens.total,
     active_days: aggregate.activeDays,
     last_scan: new Date().toISOString(),
   });
@@ -172,6 +174,7 @@ interface TelemetryStatusResult {
   tokensOut: number;
   cacheRead: number;
   cacheCreation: number;
+  totalTokens: number;
   activeDays: number;
   hourly: number[];
   projects: Array<{
@@ -180,6 +183,7 @@ interface TelemetryStatusResult {
     messages: number;
     tokensIn: number;
     tokensOut: number;
+    tokensTotal: number;
   }>;
   workSecondsByDay: Record<string, number>;
 }
@@ -195,6 +199,7 @@ function statusFromParseResult(result: ParseResult, connected: boolean): Telemet
     tokensOut: aggregate.tokens.output,
     cacheRead: aggregate.tokens.cacheRead,
     cacheCreation: aggregate.tokens.cacheCreation,
+    totalTokens: aggregate.tokens.total,
     activeDays: aggregate.activeDays,
     hourly: aggregate.hourly,
     projects: aggregate.projects,
@@ -250,6 +255,12 @@ export async function getTelemetryStatus(
       tokensOut: Number(summary.tokens_out ?? 0),
       cacheRead: Number(summary.cache_read ?? 0),
       cacheCreation: Number(summary.cache_creation ?? 0),
+      totalTokens:
+        Number(summary.tokens_total) ||
+        Number(summary.tokens_in ?? 0) +
+          Number(summary.tokens_out ?? 0) +
+          Number(summary.cache_read ?? 0) +
+          Number(summary.cache_creation ?? 0),
       activeDays: Number(summary.active_days ?? 0),
       hourly: hourlyRaw ? JSON.parse(hourlyRaw) : new Array(24).fill(0),
       projects: projectsRaw ? JSON.parse(projectsRaw) : [],

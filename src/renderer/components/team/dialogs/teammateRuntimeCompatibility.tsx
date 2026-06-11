@@ -93,7 +93,7 @@ export function analyzeTeammateRuntimeCompatibility({
     blocksSubmission: false,
     checking: false,
     title: '已切换为进程内成员运行',
-    message: `当前团队会通过 ${getProviderLabel(leadProviderId)} 负责人会话启动成员，不再依赖 tmux。`,
+    message: `当前 Loop runtime 会通过 ${getProviderLabel(leadProviderId)} Loop Lead 会话启动成员，不再依赖 tmux。`,
     details: ['自定义 CLI 参数里的 --teammate-mode tmux 会被忽略，并改为 in-process。'],
     tmuxDetail: null,
     memberWarningById: {},

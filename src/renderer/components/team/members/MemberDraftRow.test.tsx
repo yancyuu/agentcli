@@ -158,7 +158,7 @@ describe('MemberDraftRow', () => {
       lockProviderModel: false,
       forceInheritedModelSettings: false,
       modelLockReason:
-        '该成员当前与团队负责人模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。',
+        '该成员当前与 Loop Lead 模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。',
     });
 
     expect(host.textContent).not.toBeNull();

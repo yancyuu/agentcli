@@ -32,7 +32,7 @@ interface MemberMessagesTabProps {
 const MAX_MESSAGES = 100;
 const FILTER_OPTIONS: readonly { value: MemberActivityFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'messages', label: 'Messages' },
+  { value: 'messages', label: 'Loop events' },
   { value: 'comments', label: 'Comments' },
 ];
 
@@ -227,7 +227,7 @@ export const MemberMessagesTab = ({
               disabled={loadingOlderMessages}
               onClick={() => void loadOlderMessages()}
             >
-              Load older messages
+              Load older Loop events
             </Button>
           </div>
         )}

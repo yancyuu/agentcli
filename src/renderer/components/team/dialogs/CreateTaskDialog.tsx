@@ -91,7 +91,7 @@ export const CreateTaskDialog = ({
   const [owner, setOwner] = useState<string>(defaultOwner);
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
   const [related, setRelated] = useState<string[]>([]);
-  const [startImmediately, setStartImmediately] = useState(true);
+  const [startImmediately, setStartImmediately] = useState(false);
   const promptDraft = useDraftPersistence({ key: `createTask:${teamName}:prompt` });
   const [blockedBySearch, setBlockedBySearch] = useState('');
   const [relatedSearch, setRelatedSearch] = useState('');
@@ -117,7 +117,7 @@ export const CreateTaskDialog = ({
       setOwner(defaultOwner);
       setBlockedBy([]);
       setRelated([]);
-      setStartImmediately(defaultStartImmediately ?? isTeamAlive);
+      setStartImmediately(defaultStartImmediately ?? false);
       promptDraft.clearDraft();
       setBlockedBySearch('');
       setRelatedSearch('');
@@ -184,7 +184,7 @@ export const CreateTaskDialog = ({
       blockedBy.length > 0 ? blockedBy : undefined,
       related.length > 0 ? related : undefined,
       trimmedPrompt || undefined,
-      startImmediately,
+      isTeamAlive ? startImmediately : false,
       descriptionTaskRefs,
       promptTaskRefs
     );
@@ -218,8 +218,10 @@ export const CreateTaskDialog = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[580px]">
         <DialogHeader>
-          <DialogTitle>创建任务</DialogTitle>
-          <DialogDescription>任务会创建到团队的 tasks/ 目录，并显示在看板中。</DialogDescription>
+          <DialogTitle>创建 Loop 任务</DialogTitle>
+          <DialogDescription>
+            任务会创建到 Loop workspace 的 tasks/ 目录，并显示在看板中。
+          </DialogDescription>
         </DialogHeader>
 
         {!isTeamAlive ? (
@@ -233,7 +235,8 @@ export const CreateTaskDialog = ({
           >
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <p className="text-xs leading-relaxed">
-              数字员工当前未运行：没有本地 Claude/Agent 进程在运行。任务会加入 <strong>待处理</strong>，启动数字员工后即可开始执行。
+              Loop runtime 当前未运行：没有本地 Claude/Agent 进程在运行。任务会加入{' '}
+              <strong>待处理</strong>，启动 runtime 后即可进入循环。
             </p>
           </div>
         ) : null}
@@ -277,7 +280,7 @@ export const CreateTaskDialog = ({
                   <TiptapEditor
                     content={descriptionDraft.value}
                     onChange={descriptionDraft.setValue}
-                    placeholder="任务详情（支持 Markdown）"
+                    placeholder="Loop 目标详情（支持 Markdown）"
                     minHeight="100px"
                     maxHeight="200px"
                     toolbar
@@ -286,11 +289,11 @@ export const CreateTaskDialog = ({
 
                 <div className="grid gap-2">
                   <Label htmlFor="task-prompt" className="label-optional">
-                    给负责人的提示词（可选）
+                    给 Loop Lead 的执行指令（可选）
                   </Label>
                   <MentionableTextarea
                     id="task-prompt"
-                    placeholder="给团队成员的额外执行说明..."
+                    placeholder="给 Loop worker 的额外执行说明..."
                     value={promptDraft.value}
                     onValueChange={promptDraft.setValue}
                     suggestions={mentionSuggestions}
@@ -468,7 +471,7 @@ export const CreateTaskDialog = ({
               </div>
               {!isTeamAlive ? (
                 <p className="text-[10px] text-[var(--color-text-muted)]">
-                  数字员工当前未运行。请先启动数字员工，才能立即开始任务。
+                  Loop runtime 当前未运行。请先启动 runtime，才能立即开始循环。
                 </p>
               ) : null}
             </div>

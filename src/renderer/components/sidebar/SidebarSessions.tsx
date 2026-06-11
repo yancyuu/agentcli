@@ -39,6 +39,18 @@ const PAGE_SIZE = 8;
 const REFRESH_INTERVAL_MS = 2000;
 const SESSION_DETAIL_PAGE_SIZE = 50;
 
+function sessionExpansionKey(teamName: string, sessionId: string): string {
+  return `${teamName}\0${sessionId}`;
+}
+
+function formatSessionDetailError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/session not found/i.test(message)) {
+    return '会话文件已不存在，请刷新会话列表';
+  }
+  return message || '加载会话历史失败';
+}
+
 interface TaggedSession extends CcSession {
   teamName: string;
   teamDisplayName: string;
@@ -55,11 +67,11 @@ export const SidebarSessions = (): React.JSX.Element => {
   const [error, setError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [searchQuery, setSearchQuery] = useState('');
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancellingKey, setCancellingKey] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [telemetryRows, setTelemetryRows] = useState<ConversationTelemetryRow[]>([]);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
   const needsRefreshRef = useRef(false);
 
@@ -115,7 +127,9 @@ export const SidebarSessions = (): React.JSX.Element => {
           if (r.status === 'fulfilled') merged.push(...r.value);
         }
         setAllSessions(merged);
-        setExpandedId((prev) => (prev && merged.some((s) => s.id === prev) ? prev : null));
+        setExpandedKey((prev) =>
+          prev && merged.some((s) => sessionExpansionKey(s.teamName, s.id) === prev) ? prev : null
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载失败');
       } finally {
@@ -185,7 +199,7 @@ export const SidebarSessions = (): React.JSX.Element => {
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-    setExpandedId(null);
+    setExpandedKey(null);
   }, [scopedTeamName]);
 
   useEffect(() => {
@@ -227,26 +241,28 @@ export const SidebarSessions = (): React.JSX.Element => {
 
   const handleCancel = useCallback(
     async (teamName: string, sessionId: string) => {
-      setCancellingId(sessionId);
+      const key = sessionExpansionKey(teamName, sessionId);
+      setCancellingKey(key);
       try {
         await api.teams.cancelSession(teamName, sessionId);
         // Remove from list immediately
-        setAllSessions((prev) => prev.filter((s) => s.id !== sessionId));
+        setAllSessions((prev) => prev.filter((s) => sessionExpansionKey(s.teamName, s.id) !== key));
         // Clear expanded state if this session was expanded
-        if (expandedId === sessionId) {
-          setExpandedId(null);
+        if (expandedKey === key) {
+          setExpandedKey(null);
         }
       } catch (err) {
         console.error('Failed to close session:', err);
       } finally {
-        setCancellingId(null);
+        setCancellingKey(null);
       }
     },
-    [expandedId]
+    [expandedKey]
   );
 
   const handleExpand = useCallback((teamName: string, sessionId: string) => {
-    setExpandedId((prev) => (prev === sessionId ? null : sessionId));
+    const key = sessionExpansionKey(teamName, sessionId);
+    setExpandedKey((prev) => (prev === key ? null : key));
   }, []);
 
   const handleExportAllSessions = useCallback(async () => {
@@ -425,12 +441,12 @@ export const SidebarSessions = (): React.JSX.Element => {
               .filter((s) => s.live)
               .map((s) => (
                 <SessionRow
-                  key={s.id}
+                  key={sessionExpansionKey(s.teamName, s.id)}
                   session={s}
                   onCancel={handleCancel}
                   onExpand={handleExpand}
-                  isExpanded={expandedId === s.id}
-                  cancelling={cancellingId === s.id}
+                  isExpanded={expandedKey === sessionExpansionKey(s.teamName, s.id)}
+                  cancelling={cancellingKey === sessionExpansionKey(s.teamName, s.id)}
                 />
               ))}
           </>
@@ -446,11 +462,11 @@ export const SidebarSessions = (): React.JSX.Element => {
               .filter((s) => !s.live)
               .map((s) => (
                 <SessionRow
-                  key={s.id}
+                  key={sessionExpansionKey(s.teamName, s.id)}
                   session={s}
                   onCancel={handleCancel}
                   onExpand={handleExpand}
-                  isExpanded={expandedId === s.id}
+                  isExpanded={expandedKey === sessionExpansionKey(s.teamName, s.id)}
                   cancelling={false}
                 />
               ))}
@@ -492,6 +508,7 @@ const SessionRow = ({
   const platformLabel = session.platform === 'bridge' ? 'Bridge' : session.platform;
   const [detail, setDetail] = useState<CcSessionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [historyLimit, setHistoryLimit] = useState(SESSION_DETAIL_PAGE_SIZE);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const hasMoreHistory =
@@ -503,6 +520,7 @@ const SessionRow = ({
   useEffect(() => {
     if (!isExpanded) {
       setDetail(null);
+      setDetailError(null);
       setLoadingDetail(false);
       setLoadingMoreHistory(false);
       setHistoryLimit(SESSION_DETAIL_PAGE_SIZE);
@@ -510,14 +528,18 @@ const SessionRow = ({
     }
     let cancelled = false;
     setLoadingDetail(true);
+    setDetailError(null);
     const isIncrementalLoad = historyLimit > SESSION_DETAIL_PAGE_SIZE;
     setLoadingMoreHistory(isIncrementalLoad);
     void (async () => {
       try {
         const d = await api.teams.getSessionDetail(session.teamName, session.id, historyLimit);
         if (!cancelled) setDetail(d);
-      } catch {
-        if (!cancelled) setDetail(null);
+      } catch (err) {
+        if (!cancelled) {
+          setDetail(null);
+          setDetailError(formatSessionDetailError(err));
+        }
       } finally {
         if (!cancelled) {
           setLoadingDetail(false);
@@ -699,6 +721,12 @@ const SessionRow = ({
                   />
                 ))}
               </div>
+            </div>
+          )}
+          {detailError && !loadingDetail && (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-red-400">
+              <AlertCircle size={13} className="shrink-0" />
+              <span>{detailError}</span>
             </div>
           )}
           {detail && (

@@ -58,18 +58,20 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
   return (
     <div className="space-y-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-[var(--color-text-muted)]">使用指标概览</span>
-        <span className="text-[10px] text-[var(--color-text-muted)]">累计数据（全部历史）</span>
+        <span className="text-xs font-medium text-[var(--color-text-muted)]">Loop 使用概览</span>
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          累计 Loop 数据（全部历史）
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           icon={<MessageSquare size={14} />}
-          label="会话"
+          label="Loop runs"
           value={formatNum(status.sessions)}
         />
         <StatCard
           icon={<MessageSquare size={14} />}
-          label="消息"
+          label="指令事件"
           value={formatNum(status.messages)}
         />
         <StatCard icon={<Zap size={14} />} label="Input" value={formatNum(status.tokensIn)} />
@@ -89,16 +91,18 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
       </div>
 
       <div>
-        <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">24小时分布</div>
+        <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
+          24小时 Loop 分布
+        </div>
         <div className="flex h-16 items-end gap-0.5">
           {status.hourly.map((count, i) => {
             const pct = (count / maxHourly) * 100;
             return (
               <div
                 key={i}
-                className="flex-1 rounded-sm bg-indigo-500/60 transition-all hover:bg-indigo-500"
+                className="flex-1 rounded-sm bg-[var(--color-accent-muted)] transition-all hover:bg-[var(--color-accent)]"
                 style={{ height: `${Math.max(pct, 2)}%` }}
-                title={`${i}:00 - ${count} messages`}
+                title={`${i}:00 - ${count} Loop events`}
               />
             );
           })}
@@ -143,12 +147,12 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
       {status.projects.length > 0 && (
         <div>
           <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
-            项目排行（累计）
+            项目 Loop 吞吐（累计）
           </div>
           {/* Header row */}
           <div className="grid grid-cols-[1fr_64px_64px] items-center gap-2 pb-1 text-[10px] text-[var(--color-text-muted)]">
             <span>项目</span>
-            <span className="text-right">消息</span>
+            <span className="text-right">事件</span>
             <span className="text-right">Token</span>
           </div>
           <div className="max-h-40 space-y-1 overflow-y-auto">
@@ -412,7 +416,7 @@ export function TaskBusSection(): React.JSX.Element {
 
       <SettingRow
         label="数据采集"
-        description="扫描本机 ~/.claude/projects 会话文件，采集使用指标；不需要 Redis，也不会上传对话内容"
+        description="扫描本机 ~/.claude/projects 会话文件，采集 Loop 使用指标；不需要 Redis，也不会上传对话内容"
       >
         <div className="flex items-center gap-2">
           <select
@@ -422,7 +426,7 @@ export function TaskBusSection(): React.JSX.Element {
               setTelemetryPlatform(nextPlatform);
               saveTelemetryPlatform(nextPlatform);
             }}
-            className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
+            className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent-border)]"
           >
             <option value="claudecode">Claude Code</option>
           </select>
@@ -457,7 +461,7 @@ export function TaskBusSection(): React.JSX.Element {
           <UsageDashboard status={telemetryStatus} />
         ) : (
           <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4 text-xs text-[var(--color-text-muted)]">
-            使用指标概览加载中；开启数据采集后会扫描本机 Claude Code 会话文件。
+            Loop 使用概览加载中；开启数据采集后会扫描本机 Claude Code 会话文件。
           </div>
         )}
       </div>
@@ -507,7 +511,7 @@ export function TaskBusSection(): React.JSX.Element {
                       setHost(e.target.value);
                       setConnected(false);
                     }}
-                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
                     placeholder="127.0.0.1"
                   />
                 </div>
@@ -520,7 +524,7 @@ export function TaskBusSection(): React.JSX.Element {
                       setPort(Number(e.target.value));
                       setConnected(false);
                     }}
-                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
                     placeholder="6379"
                   />
                 </div>
@@ -534,7 +538,7 @@ export function TaskBusSection(): React.JSX.Element {
                     setPassword(e.target.value);
                     setConnected(false);
                   }}
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30"
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
                   placeholder="可选"
                 />
               </div>

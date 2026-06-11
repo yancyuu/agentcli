@@ -50,8 +50,10 @@ function normalizeTask(task: CollabTask): CollabTask {
 function eventTypeForStatus(status: CollabTaskStatus): CollabTaskEventType {
   switch (status) {
     case 'pending_accept':
+    case 'received':
       return 'task_sent';
     case 'accepted':
+    case 'in_progress':
       return 'task_accepted';
     case 'delivered':
       return 'task_delivered';

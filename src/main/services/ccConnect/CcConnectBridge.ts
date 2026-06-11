@@ -71,6 +71,13 @@ export class CcConnectBridge extends EventEmitter {
     this.connect();
   }
 
+  reconnect(): void {
+    if (this._disposed) return;
+    this._connected = false;
+    this.cleanup();
+    this.connect();
+  }
+
   dispose(): void {
     this._disposed = true;
     this.cleanup();
@@ -175,15 +182,20 @@ export class CcConnectBridge extends EventEmitter {
 
     logger.info(`Connecting to cc-connect Bridge: ${this.bridgeUrl}`);
 
-    try {
-      this.ws = new WebSocket(url);
-    } catch (error) {
-      logger.warn(`Failed to create WebSocket: ${error}`);
-      this.scheduleReconnect();
-      return;
-    }
+    const ws = (() => {
+      try {
+        return new WebSocket(url);
+      } catch (error) {
+        logger.warn(`Failed to create WebSocket: ${error}`);
+        this.scheduleReconnect();
+        return null;
+      }
+    })();
+    if (!ws) return;
+    this.ws = ws;
 
-    this.ws.addEventListener('open', () => {
+    ws.addEventListener('open', () => {
+      if (this.ws !== ws) return;
       logger.info('Bridge WebSocket connected');
       this._connected = true;
 
@@ -198,7 +210,8 @@ export class CcConnectBridge extends EventEmitter {
       this.emit('connected');
     });
 
-    this.ws.addEventListener('message', (event: MessageEvent) => {
+    ws.addEventListener('message', (event: MessageEvent) => {
+      if (this.ws !== ws) return;
       try {
         const data = typeof event.data === 'string' ? event.data : String(event.data);
         const msg = JSON.parse(data) as CcBridgeIncomingMessage;
@@ -208,13 +221,15 @@ export class CcConnectBridge extends EventEmitter {
       }
     });
 
-    this.ws.addEventListener('close', (event: CloseEvent) => {
+    ws.addEventListener('close', (event: CloseEvent) => {
       logger.info(`Bridge WebSocket closed: ${event.code} ${event.reason}`);
+      if (this.ws !== ws) return;
       this.handleDisconnect();
     });
 
-    this.ws.addEventListener('error', () => {
+    ws.addEventListener('error', () => {
       logger.warn('Bridge WebSocket error');
+      if (this.ws !== ws) return;
       this.handleDisconnect(new Error('WebSocket error'));
     });
   }

@@ -1,18 +1,18 @@
 # Feature Architecture Standard
 
-**Status**: team standard  
-**Reference implementation**: `src/features/recent-projects`
+**状态**：团队标准
+**参考实现**：`src/features/recent-projects`
 
-This document defines the default architecture for medium and large features in this repository.
+本文定义 openHermit 中大型功能的默认代码组织方式。当前产品是 Fastify API + Vite Web UI + cc-connect Bridge，本标准优先服务浏览器工作台和本地优先后端；不要按 Electron 桌面应用假设设计新功能。
 
-## Goals
+## 目标
 
-- keep business rules isolated from Electron-specific runtime details
-- make features easier to scale, test, and review
-- keep renderer code closer to browser and Tauri portability
-- enforce architecture with tooling, not only with code review comments
+- 把业务规则和运行时细节隔离。
+- 让功能更容易测试、迁移和 review。
+- 让 renderer 代码保持浏览器友好。
+- 用 lint 和 public entrypoint 约束边界，而不是只靠口头约定。
 
-## Canonical Template
+## 标准目录
 
 ```text
 src/features/<feature-name>/
@@ -30,138 +30,150 @@ src/features/<feature-name>/
   renderer/
 ```
 
-Use this template by default when a feature:
+新功能满足以下任一条件时，优先使用完整 slice：
 
-- spans more than one process boundary
-- introduces its own use case or business policy
-- needs its own transport bridge or integration surface
-- is expected to grow with new providers, sources, or presentation flows
+- 跨越 renderer / Fastify / runtime bridge 边界。
+- 有自己的 use case、状态机、合并策略或过滤规则。
+- 需要独立 HTTP route、WebSocket、cc-connect、MCP 或外部存储适配。
+- 预计会继续扩展 provider、source、channel 或 UI 流程。
 
-## Layer Responsibilities
+纯展示、小改动或只重排已有数据的功能可以使用 thin slice。
+
+## 分层职责
 
 ### `contracts/`
 
-Cross-process public API for the feature.
+跨边界公共 API。
 
-Allowed content:
+允许：
 
-- DTOs
-- API fragment types
-- IPC or route constants
+- DTO
+- route 常量
+- API fragment 类型
+- 可序列化枚举和错误码
 
-Not allowed:
+禁止：
 
-- store access
-- Electron APIs
-- business orchestration
+- store 访问
+- Fastify / React / Node runtime 调用
+- 业务编排
 
 ### `core/domain/`
 
-Pure business rules and invariants.
+纯业务规则和不变量。
 
-Examples:
+示例：
 
-- merge policies
-- provider-agnostic models
-- selection rules
-- dedupe logic
+- 状态机
+- 去重规则
+- merge policy
+- provider-agnostic model
+- 权限或白名单判定
 
-Not allowed:
+禁止：
 
-- infrastructure access
-- framework access
-- side effects
+- 文件系统、网络、数据库、Redis
+- Fastify、React、Zustand、cc-connect
+- child process 或 shell 调用
 
 ### `core/application/`
 
-Use cases and ports.
+Use case 和 port。
 
-Examples:
+示例：
 
-- orchestration flow
-- output ports
-- cache ports
-- source ports
-- response models
+- 创建团队、派发任务、绑定渠道等应用流程
+- repository / gateway / bridge port
+- response model
+- 错误映射
 
-Not allowed:
+禁止：
 
-- Electron, Fastify, React, Zustand, child processes
+- Fastify 实例
+- React / Zustand
+- 具体文件路径、Redis client、cc-connect client、child process
 
 ### `main/composition/`
 
-Feature composition root in the main process.
+后端 composition root。
 
-Responsibilities:
+职责：
 
-- instantiate infrastructure
-- wire adapters
-- wire use cases
-- expose a small facade to app shell entrypoints
+- 实例化 infrastructure
+- 连接 adapters 和 use cases
+- 向 `src/main/server.ts` 或上层 shell 暴露小 facade
 
 ### `main/adapters/input/`
 
-Driving adapters for the main process.
+Driving adapter。
 
-Examples:
+示例：
 
-- IPC handlers
-- HTTP route registration
+- Fastify route registration
+- WebSocket handler
+- MCP/CLI command adapter
 
-Responsibilities:
+职责：
 
-- translate transport input into use case calls
-- keep transport concerns out of use cases
+- 校验 transport input
+- 转成 use case command/query
+- 把 use case 结果转成 HTTP/WebSocket 响应
 
 ### `main/adapters/output/`
 
-Driven adapters that implement application ports.
+Driven adapter。
 
-Examples:
+示例：
 
-- presenters
-- source adapters
+- presenter
+- repository adapter
+- cc-connect gateway adapter
+- Redis task bus adapter
 
-Responsibilities:
+职责：
 
-- translate between external data and core models
-- stay thin around infrastructure helpers
+- 实现 application port
+- 转换外部数据和 core model
+- 保持薄封装，复杂规则回到 core
 
 ### `main/infrastructure/`
 
-Concrete technical implementation details.
+具体技术实现。
 
-Examples:
+示例：
 
-- file system adapters
-- JSON-RPC transport clients
-- binary discovery
-- cache implementation
-- git identity helpers
+- `~/.hermit` 文件读写
+- Redis client
+- cc-connect Bridge / Management API client
+- git / worktree helper
+- runtime discovery
+- cache
 
-Responsibilities:
+职责：
 
-- know about runtime, process, OS, or protocol details
+- 处理 OS、协议、网络、文件、进程等细节
+- 不承载业务状态机
 
 ### `preload/`
 
-Thin transport bridge between renderer and main.
+保留给需要 shell bridge 的场景。当前 openHermit 主要是 Web UI + HTTP API，新功能不要为了凑模板强行添加 preload。
 
-Responsibilities:
+允许：
 
-- expose a feature API fragment
-- depend on `contracts/`
+- 暴露极薄的 API fragment
+- 依赖 `contracts/`
 
-Not allowed:
+禁止：
 
-- main composition code
-- renderer logic
+- 业务编排
+- renderer 状态
+- main composition 细节
 
 ### `renderer/`
 
-Feature presentation and interaction.
+展示和交互。
 
-Recommended structure:
+推荐结构：
 
 ```text
 renderer/
@@ -172,143 +184,140 @@ renderer/
   utils/
 ```
 
-Responsibilities:
+职责：
 
-- `ui/` renders
-- `hooks/` orchestrate interaction and transport usage
-- `adapters/` transform DTOs into view models
-- `utils/` contain small pure renderer helpers
+- `ui/` 只渲染 props 和触发事件
+- `hooks/` 编排交互、store 和 API 调用
+- `adapters/` 把 DTO 转成 view model
+- `utils/` 放纯 renderer helper
 
-## Import Rules
+## Import 规则
 
-### Public entrypoints only
+### 只从 public entrypoint 引入
 
-Outside the feature, import only:
+feature 外部只能引入：
 
 - `@features/<feature>/contracts`
 - `@features/<feature>/main`
 - `@features/<feature>/preload`
 - `@features/<feature>/renderer`
 
-Do not deep-import feature internals from app shell or from other features.
+不要从 app shell 或其它 feature deep import 内部文件。
 
-### Core isolation
+### Core 隔离
 
-`core/domain` must not import:
+`core/domain` 不得 import：
 
 - `@main/*`
 - `@renderer/*`
 - `@preload/*`
 - adapters
 - infrastructure
-- Electron APIs
 - Fastify
-- child process modules
+- React / Zustand
+- Node process / child process
 
-`core/application` must not import:
+`core/application` 不得 import：
 
 - `main/*`
 - `renderer/*`
-- Electron APIs
-- Fastify
-- child process modules
+- Fastify instance
+- React / Zustand
+- 具体 Redis、文件系统、cc-connect client
 
-### UI isolation
+### UI 隔离
 
-`renderer/ui` must not import:
+`renderer/ui` 不得 import：
 
 - `@renderer/api`
 - `@renderer/store`
 - `@main/*`
-- Electron APIs
+- Node / Electron API
 
-Push transport and store access into feature hooks or adapters.
+把 API、store、bridge 访问放到 feature hook 或 adapter。
 
-## Browser and Tauri Friendly Guidance
+## 当前产品边界
 
-The default transport direction should be:
+新文档和新功能要按以下事实设计：
 
-`renderer -> feature contracts -> app api abstraction -> preload/http adapter`
+- 当前工作台是 Fastify + Vite，不是 Electron 桌面打包。
+- 当前没有内嵌 PTY；终端能力不要写成 renderer 内终端。
+- 默认数据目录是 `~/.hermit/`。
+- 团队页是核心入口，默认路由是 `/teams`。
+- runtime 和外部渠道通过 cc-connect Bridge / Management API 接入。
+- 团队工作区围绕 team、task、message、project workspace 组织。
+- worktree 是当前团队成员隔离能力。
+- 跨团队协作当前是 Redis-backed dispatch；完整 Task Bus 是目标模型。
 
-This keeps renderer code closer to:
+## 浏览器友好方向
 
-- browser mode through HTTP adapters
-- a future Tauri bridge
-- alternative shells with minimal feature rewrites
+默认 transport 方向：
 
-To keep that path clean:
+```text
+renderer -> feature contracts -> renderer API adapter -> Fastify route -> use case
+```
 
-- never call `window.electronAPI` directly inside feature UI or hooks
-- go through shared renderer API adapters
-- keep Electron-specific concerns in `main/` and `preload/`
-- keep business rules in `core/`
+保持这条路径清晰：
 
-## When To Use The Full Slice
+- UI 不直接访问 `window.electronAPI` 或 Node API。
+- renderer 通过统一 API adapter 调后端。
+- 业务规则留在 `core/`。
+- Fastify、Redis、cc-connect、文件系统都留在 `main/`。
 
-Use the full template when a feature has:
+## Thin Slice 规则
 
-- its own business rules
-- its own merge or filtering policy
-- transport wiring
-- more than one adapter
-- a roadmap beyond a one-off screen tweak
+可以跳过 `core/`、`main/`、`preload/` 的情况：
 
-## When A Thin Slice Is Enough
+- 只做展示组件。
+- 只组合已有 API 数据。
+- 不增加新状态机、存储或 transport。
+- 不引入 runtime、channel、Task Bus、worktree 等边界。
 
-A smaller feature may skip `core/` and `preload/` when it is:
+如果功能有有意义的纯语义或投影规则，至少保留 `core/domain`。
 
-- purely presentational
-- only reshaping already-owned data
-- not adding a new use case
-- not adding a new transport boundary
+## Definition of Done
 
-If the feature still owns meaningful pure semantics or projection rules, keep
-`core/` and skip only the process layers you do not need.
+一个 reference-quality feature 应满足：
 
-Example:
-- `src/features/agent-graph` keeps `core/domain` and `renderer`, but does not add fake `main/` or `preload/` folders because the transport boundary lives elsewhere.
-## Definition Of Done For A Reference Feature
+- 目录结构匹配本标准或明确说明 thin slice 原因。
+- core 无副作用。
+- app shell 只引 public entrypoint。
+- renderer UI 保持 presentational。
+- route / adapter / repository 职责清晰。
+- 中大型功能至少覆盖 domain 和 application 规则测试。
+- 新边界有简短文档或 plan。
 
-A feature is reference-quality when:
+## 推荐测试覆盖
 
-- structure matches the canonical template
-- core is side-effect free
-- app shell imports only public entrypoints
-- renderer UI is dumb and presentational
-- at least the main domain and application rules are tested
-- architecture is enforced by lint rules
-- feature has a concise standard or plan doc if it introduces a new pattern
+中大型功能至少覆盖：
 
-## Recommended Test Coverage
+- domain policy
+- application use case
+- renderer interaction utility
+- adapter mapping
 
-For medium and large features, cover at least:
+## 参考实现
 
-- domain policy tests
-- application use case tests
-- critical renderer interaction utilities
-- one adapter-level mapping test
+### Recent Projects
 
-## Recent Projects As The Reference
+`src/features/recent-projects` 是完整 slice 参考。
 
-`src/features/recent-projects` is the first slice that follows this standard end-to-end.
-
-Use it as the example for:
+适合参考：
 
 - contracts ownership
 - core/application separation
-- composition-root wiring
+- composition root wiring
 - renderer dumb UI + hook orchestration
-- browser-friendly transport direction
-- feature-level lint guard rails
+- browser-friendly transport
+- lint guard rails
 
-## Agent Graph As The Thin-Slice Reference
+### Agent Graph
 
-`src/features/agent-graph` is the thin-slice example for a renderer integration
-feature built on top of a reusable package.
+`src/features/agent-graph` 是 thin slice 参考。
 
-Use it as the example for:
+适合参考：
 
-- keeping pure graph semantics in `core/domain`
-- exposing a renderer-only public entrypoint
-- integrating `packages/agent-graph` without inventing fake process layers
-- migrating legacy `src/renderer/features/*` code into the canonical feature root
+- 把纯图语义放在 `core/domain`
+- 暴露 renderer-only public entrypoint
+- 集成 `packages/agent-graph` 时不虚构进程层
+- 从旧 `src/renderer/features/*` 迁移到 canonical feature root

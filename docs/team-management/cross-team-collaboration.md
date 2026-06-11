@@ -1,34 +1,259 @@
 # Cross-Team Collaboration Workflow
 
-## 目标
+本文说明当前跨团队消息和跨团队派单的真实路径，并标出 Task Bus 目标模型边界。
 
-跨团队协作不是消息通知系统，而是一个轻量 workflow engine。
+## 核心原则
 
-核心原则：
+跨团队协作不是普通通知系统。正式派单必须有状态、事实源和审计记录。
 
-> 跨团队任务只有一个事实源：`CollabTask` 状态机 + `TaskEventLog`。
+当前实现分两条路径：
 
-Redis、Inbox、飞书、看板都只是事实源的投影或通知通道，不能各自维护独立状态。
+1. **轻量跨团队消息**：把一条消息同步到另一个团队的 message workspace。
+2. **正式 Task Bus dispatch**：通过 Redis-backed dispatch 创建跨团队任务请求，并进入接受、拒绝、交付、审批、修订生命周期。
 
-## 总体架构
+不要把两者混在一起。普通消息不代表对方团队已接单；dispatch 失败也不应静默退化为普通消息。
+
+## 当前产品边界
+
+- 后端是 Fastify API，跨团队入口集中在 `/api/cross-team/*`。
+- 团队数据默认落在 `~/.hermit/` 的 team/task/message workspace。
+- cc-connect 负责 runtime 和渠道 Bridge，不负责跨团队任务状态机。
+- 正式派单依赖 Redis task bus 配置。
+- 当前没有 Electron IPC inbox 作为主路径，也没有内嵌 PTY。
+
+## 路径一：轻量跨团队消息
+
+用途：同步沟通内容、引用上下文、提醒另一个团队。
+
+当前链路：
+
+1. Renderer composer 序列化文本、chips 和 `taskRefs`。
+2. Messages panel 调用 team store 的 cross-team send action。
+3. Store 调用 HTTP `/api/cross-team/send`。
+4. Fastify server 的 text 分支写入发送方 `cross_team_sent` 和目标团队 `cross_team` 消息。
+5. `TeamWorkspaceService.appendMessage()` 落盘到团队 message workspace。
+6. UI 订阅变更并刷新消息流。
+
+`taskRefs` 来自结构化 task mention。它们用于渲染可点击 task 链接，不等于创建 dispatch。
+
+## 路径二：正式 Task Bus dispatch
+
+用途：创建真正的跨团队任务请求，让目标团队进入生命周期。
+
+当前链路：
+
+1. 用户或 Agent 在消息输入中发起面向团队的 subject 请求，或调用跨团队派单入口。
+2. Fastify `/api/teams/:name/send-message` 或 `/api/cross-team/send` 进入 dispatch / task projection 逻辑。
+3. 系统只在目标团队创建 TODO 任务，并写入 `dispatchMeta.status = "received"`。
+4. 创建阶段不会发送 runtime 执行消息；目标团队必须在自己的 TODO 中点击「启动」。
+5. 点击「启动」后，任务进入执行中，`dispatchMeta.status = "in_progress"`，此时才发送给目标团队 runtime。
+6. 目标团队完成后，任务进入 done，`dispatchMeta.status = "completed"`，并通知派发方。
+
+跨实例目标团队仍依赖 Redis task bus 来创建目标侧 TODO 投影；本地团队之间不应因为 Redis 未配置而绕过「TODO → 启动 → 执行」流程。
+
+## 当前状态机
 
 ```text
-Command API
-  ↓
-CollabTaskStore       当前状态、版本号、SLA
-  ↓
-TaskEventLog          append-only 事件日志
-  ↓
-Outbox                待投递通知，可重试
-  ↓
-Redis / Inbox / Feishu / UI Projection
+received
+  └─ target user clicks 启动 → in_progress → completed/approved
+
+legacy pending_accept
+  ├─ start/accept → in_progress
+  ├─ reject       → rejected
+  └─ timeout/fail → failed
 ```
 
-## 核心组件
+说明：
 
-### 1. CollabTaskStore
+- `received`：任务已经进入目标团队 TODO，等待目标团队用户点击「启动」。
+- `pending_accept`：旧状态兼容，UI 也按「待启动」处理。
+- `in_progress`：目标团队已点击「启动」，runtime 才开始执行。
+- `completed` / `approved`：目标团队已完成，并同步/通知派发方。
+- `rejected`：目标团队拒绝。
+- `failed`：派单或流转失败。
 
-保存协作任务当前状态。
+## API 入口
+
+当前主要接口：
+
+```text
+GET  /api/cross-team/targets
+POST /api/cross-team/send
+POST /api/cross-team/accept
+POST /api/cross-team/reject
+POST /api/cross-team/deliver
+POST /api/cross-team/approve
+POST /api/cross-team/revision
+GET  /api/settings/task-bus
+POST /api/settings/task-bus
+```
+
+示例请求只说明字段形态，实际返回以当前 Fastify handler 为准。
+
+### 发现团队
+
+```http
+GET /api/cross-team/targets?excludeTeam=prd
+```
+
+返回本地和 Redis 上可用团队，排除自身。
+
+### 派发任务
+
+```http
+POST /api/cross-team/send
+Content-Type: application/json
+
+{
+  "fromTeam": "prd",
+  "toTeam": "hermit",
+  "subject": "修改 API 返回格式",
+  "description": "需要修改 /api/users 的分页字段",
+  "deadlineMinutes": 120,
+  "needsHumanReview": true
+}
+```
+
+成功后通常会：
+
+- 在派发方形成外部派单投影。
+- 在目标团队形成待接单任务/消息投影。
+- 写入 Redis task bus。
+- 触发 UI 刷新和可用通知。
+
+### 接受任务
+
+```http
+POST /api/cross-team/accept
+Content-Type: application/json
+
+{
+  "team_slug": "hermit",
+  "dispatch_id": "dispatch-id"
+}
+```
+
+### 拒绝任务
+
+```http
+POST /api/cross-team/reject
+Content-Type: application/json
+
+{
+  "team_slug": "hermit",
+  "dispatch_id": "dispatch-id",
+  "reason": "当前团队没有仓库访问权限"
+}
+```
+
+### 交付结果
+
+```http
+POST /api/cross-team/deliver
+Content-Type: application/json
+
+{
+  "team_slug": "hermit",
+  "dispatch_id": "dispatch-id",
+  "result": "已完成，修改了 3 个文件"
+}
+```
+
+### 审批通过
+
+```http
+POST /api/cross-team/approve
+Content-Type: application/json
+
+{
+  "team_slug": "prd",
+  "dispatch_id": "dispatch-id"
+}
+```
+
+### 要求修订
+
+```http
+POST /api/cross-team/revision
+Content-Type: application/json
+
+{
+  "team_slug": "prd",
+  "dispatch_id": "dispatch-id",
+  "feedback": "返回格式还缺少分页信息"
+}
+```
+
+## UI 投影
+
+跨团队协作在 UI 中是投影，不是独立事实源。
+
+派发方看到：
+
+- 目标团队
+- 当前状态
+- 是否已接单
+- 交付摘要
+- 审批 / 退回按钮
+
+接收方看到：
+
+- 来源团队
+- 待接单任务
+- 执行中任务
+- 待重新提交任务
+- 交付入口
+
+消息流里出现的跨团队消息只代表沟通记录。正式派单状态以 dispatch metadata 和 task bus 状态为准。
+
+## Redis Task Bus 配置
+
+正式跨团队派单需要 Redis task bus：
+
+1. 在设置中配置 Redis 连接。
+2. 开启分布式团队协作能力。
+3. 多个 openHermit 实例连接同一个 Redis 时，才能跨实例发现和派单。
+
+Redis 用于 dispatch 请求、响应和团队发现。它不是聊天渠道，也不是团队内部 todo 存储。
+
+## cc-connect 与渠道关系
+
+外部平台消息先进入 cc-connect，再由 Hermit 根据 session key 和团队白名单路由到 team message workspace。
+
+渠道消息可以触发团队工作，但渠道本身不等于 Task Bus：
+
+| 场景 | 当前归属 |
+|:---|:---|
+| Feishu/Lark、微信、Slack 等消息进入团队 | cc-connect + Hermit channel routing |
+| 团队 A 给团队 B 发普通消息 | cross-team message |
+| 团队 A 要求团队 B 接单并交付 | Redis-backed dispatch |
+| offer / bid / lease / event 完整协议 | 目标 Task Bus |
+
+## 目标模型：CollabTask + Event Log
+
+下面是目标设计，不代表当前全部实现。
+
+目标事实源：
+
+```text
+CollabTaskStore
+  ↓
+TaskEventLog
+  ↓
+Outbox / Projection
+  ↓
+Redis / Inbox / Channel / UI
+```
+
+目标底线：
+
+1. 状态只由 command 触发。
+2. 状态变化必须写 event log。
+3. 通知通过 outbox 异步投递，可重试。
+4. Agent 以 pull/ack 方式读取 inbox，不被异步消息强行打断。
+5. 大文件、日志、截图、patch 只走 artifact ref，不进 Redis/inbox/context。
+
+目标对象：
 
 ```typescript
 interface CollabTask {
@@ -40,490 +265,23 @@ interface CollabTask {
   status: CollabTaskStatus;
   version: number;
   revisionCount: number;
-  sla: CollabTaskSla;
-  currentAttemptId?: string;
   createdAt: string;
   updatedAt: string;
 }
-
-type CollabTaskStatus =
-  | 'pending_accept'
-  | 'accepted'
-  | 'in_progress'
-  | 'delivered'
-  | 'revision_requested'
-  | 'approved'
-  | 'rejected'
-  | 'timeout_cancelled'
-  | 'review_timeout'
-  | 'escalated'
-  | 'failed'
-  | 'cancelled';
-
-interface CollabTaskSla {
-  acceptBy: string;
-  reviewBy?: string;
-  maxRevisionCount: number;
-}
 ```
 
-### 2. TaskEventLog
+目标状态机会扩展为 `pending_accept`、`accepted`、`in_progress`、`delivered`、`revision_requested`、`approved`、`rejected`、`timeout_cancelled`、`review_timeout`、`escalated`、`failed`、`cancelled`。
 
-所有状态变化都写事件。事件不可变，可用于审计、恢复、重放看板。
+## 排查顺序
 
-```typescript
-interface CollabTaskEvent {
-  eventId: string;
-  dispatchId: string;
-  version: number;
-  type:
-    | 'task_sent'
-    | 'task_accepted'
-    | 'task_rejected'
-    | 'task_delivered'
-    | 'revision_requested'
-    | 'task_approved'
-    | 'task_timeout_cancelled'
-    | 'review_timeout'
-    | 'task_escalated'
-    | 'task_failed'
-    | 'notification_enqueued'
-    | 'notification_delivered'
-    | 'notification_failed';
-  actor: ActorRef;
-  payload?: Record<string, unknown>;
-  createdAt: string;
-}
-```
+排查跨团队问题时按以下顺序确认：
 
-### 3. InboxLedger
+1. 这是普通跨团队消息，还是正式 dispatch。
+2. Redis task bus 是否配置并可连接。
+3. `/api/cross-team/*` 请求是否成功。
+4. `TaskDispatchService` 是否写入 dispatch metadata。
+5. 目标团队 message/task projection 是否落盘。
+6. UI 是否收到刷新事件。
+7. 如果涉及外部平台，再检查 cc-connect session key、团队绑定和白名单。
 
-Inbox 是拉取式，不是中断式。
-
-不要在任意状态变化时把消息强行塞进 agent 当前上下文。只写入 InboxLedger，agent 在合适时机主动调用：
-
-```text
-check_inbox()
-ack_inbox()
-```
-
-适合读取 inbox 的时机：
-
-- 当前任务完成
-- agent 处于等待依赖状态
-- heartbeat/checkpoint
-- 用户要求查看进展
-
-### 4. Outbox
-
-所有通知先进入 Outbox，再异步投递。
-
-```typescript
-interface OutboxItem {
-  id: string;
-  dispatchId: string;
-  channel: 'redis' | 'inbox' | 'feishu';
-  target: string;
-  payload: Record<string, unknown>;
-  status: 'pending' | 'delivered' | 'failed';
-  attempts: number;
-  nextRetryAt?: string;
-  createdAt: string;
-}
-```
-
-Redis、Inbox、飞书通知失败不能回滚任务状态，只能在 Outbox 里重试。
-
-### 5. ArtifactRef
-
-跨团队总线只传控制面数据，不传大内容。
-
-`result` 只允许放摘要。大文件、日志、截图、patch 都用引用：
-
-```typescript
-interface Delivery {
-  summary: string; // 建议 <= 1KB
-  artifactRefs: ArtifactRef[];
-}
-
-interface ArtifactRef {
-  id: string;
-  kind: 'file' | 'directory' | 'url' | 'patch' | 'screenshot';
-  uri: string; // file://..., hermit-artifact://..., https://...
-  sizeBytes?: number;
-  sha256?: string;
-  description?: string;
-}
-```
-
-## 状态机
-
-```text
-pending_accept
-  ├─ accept  → accepted → in_progress → delivered → approved
-  ├─ reject  → rejected
-  └─ timeout → timeout_cancelled
-
-delivered
-  ├─ approve          → approved
-  ├─ request_revision → revision_requested → in_progress
-  └─ timeout          → review_timeout → escalated
-
-any
-  ├─ cancel → cancelled
-  └─ fail   → failed
-```
-
-不要用 `revision` 表示执行中。`revision_requested` 表示“被退回”这个事实，然后重新进入 `in_progress`。
-
-## Command API
-
-所有操作都走 command。UI、Agent、系统定时器不能直接改状态。
-
-```typescript
-type CollabCommand =
-  | { type: 'send'; taskId: string; fromTeam: string; toTeam: string; payload: SendPayload }
-  | { type: 'accept'; taskId: string; actor: ActorRef; expectedStatus: 'pending_accept'; expectedVersion: number }
-  | { type: 'reject'; taskId: string; actor: ActorRef; reason: string; expectedStatus: 'pending_accept'; expectedVersion: number }
-  | { type: 'deliver'; taskId: string; actor: ActorRef; delivery: Delivery; expectedStatus: 'in_progress'; expectedVersion: number }
-  | { type: 'approve'; taskId: string; actor: ActorRef; expectedStatus: 'delivered'; expectedVersion: number }
-  | { type: 'request_revision'; taskId: string; actor: ActorRef; feedback: string; expectedStatus: 'delivered'; expectedVersion: number }
-  | { type: 'timeout'; taskId: string; actor: 'system'; expectedStatus: 'pending_accept' | 'delivered'; expectedVersion: number }
-  | { type: 'cancel'; taskId: string; actor: ActorRef; reason: string; expectedVersion: number };
-```
-
-后端处理 command 的统一步骤：
-
-1. 读取当前 `CollabTask`
-2. 校验 `expectedStatus`
-3. 校验 `expectedVersion`
-4. 原子更新状态和 `version`
-5. 写 `TaskEventLog`
-6. 写 `Outbox`
-7. 返回新状态
-
-## 并发与幂等
-
-状态更新必须带前置条件。
-
-SQL 形态：
-
-```sql
-UPDATE collab_tasks
-SET status = ?, version = version + 1, updated_at = now()
-WHERE dispatch_id = ?
-  AND status = ?
-  AND version = ?;
-```
-
-Redis 形态：
-
-- 用 Lua script
-- 或 WATCH/MULTI
-- 或 stream event + single writer
-
-如果更新失败，返回：
-
-```text
-任务状态已变化，请刷新
-```
-
-并且不能触发 Outbox。
-
-## TTL / 超时熔断
-
-必须有 `CollabTaskSweeper`。
-
-建议每 30s 或 60s 扫描：
-
-```text
-pending_accept 且 now > acceptBy
-  → timeout_cancelled
-
-delivered 且 now > reviewBy
-  → review_timeout
-
-revisionCount > maxRevisionCount
-  → escalated
-```
-
-Sweeper 不能直接改状态，也要提交 command：
-
-```typescript
-{ type: 'timeout', actor: 'system', expectedStatus, expectedVersion }
-```
-
-## Revision 上下文
-
-每次退回都创建新的 attempt。
-
-```typescript
-interface Attempt {
-  attemptId: string;
-  dispatchId: string;
-  executorTeam: string;
-  startedAt: string;
-  deliveredAt?: string;
-  delivery?: Delivery;
-  feedback?: string;
-  previousAttemptId?: string;
-}
-```
-
-进入 `revision_requested` 后，下一次给接收方 agent 的上下文必须包含：
-
-```typescript
-interface RevisionContext {
-  originalTask: {
-    subject: string;
-    description?: string;
-  };
-  previousDelivery: Delivery;
-  feedback: string;
-  acceptanceCriteria?: string[];
-  revisionCount: number;
-}
-```
-
-不能只发一句“退回：xxx”。
-
-## Deferred Promise 的定位
-
-Deferred Promise 只能作为在线 agent 的加速器，不能作为事实源。
-
-正确顺序：
-
-```typescript
-await taskStore.transition(...);
-await eventLog.append(...);
-await inbox.add(...);
-
-pendingAgents.get(dispatchId)?.resolve(result);
-pendingAgents.delete(dispatchId);
-```
-
-如果 agent 还在线，就立即唤醒；如果不在线，状态和 inbox 已经落库，下次 `check_inbox()` 仍然能恢复。
-
-## UI 投影
-
-协作看板不是独立状态源，只是 `CollabTask + TaskEventLog` 的投影。
-
-### 派发方视角
-
-- 目标团队
-- 当前状态
-- 是否已接单
-- 是否待审核
-- 交付摘要
-- 审核按钮
-
-### 接收方视角
-
-- 来源团队
-- 待接单任务
-- 执行中任务
-- 待重新提交任务
-- 交付按钮
-
-## API 草案
-
-```text
-POST /api/cross-team/tasks
-POST /api/cross-team/tasks/:id/accept
-POST /api/cross-team/tasks/:id/reject
-POST /api/cross-team/tasks/:id/deliver
-POST /api/cross-team/tasks/:id/approve
-POST /api/cross-team/tasks/:id/request-revision
-POST /api/cross-team/tasks/:id/cancel
-GET  /api/cross-team/tasks
-GET  /api/cross-team/tasks/:id/events
-GET  /api/cross-team/inbox
-POST /api/cross-team/inbox/ack
-```
-
-## 实施顺序
-
-1. 定义 `CollabTask`、`TaskEventLog`、`OutboxItem`、`ArtifactRef` 类型。
-2. 实现 `CollabTaskStore`，支持 CAS/version 更新。
-3. 实现 `TaskEventLog` append-only 存储。
-4. 实现 `Outbox` 和异步投递 worker。
-5. 实现 `InboxLedger`，只允许 pull/ack。
-6. 实现 command API。
-7. 加 TTL sweeper。
-8. 改造 Redis/飞书/inbox 为投影和通知。
-9. 用 CollabTask 投影出派发方/接收方协作看板。
-
-## 设计底线
-
-1. 状态只由 command 触发，不能直接写。
-2. 状态变化必须写 event log。
-3. 通知通过 outbox 异步投递，可重试。
-4. Agent 只 pull inbox，不被异步消息打断。
-5. 大内容只走 artifact ref，不进 Redis/inbox/context。
-# 跨团队协作设计
-
-## 概述
-
-跨团队协作允许不同 Hermit 团队之间派发和接收任务。需要配置 Redis 任务总线 + 开启"分布式团队协作"才能使用。
-
-## 前置条件
-
-1. **Redis 任务总线** — 在 设置 → 团队总线 中配置 Redis 连接
-2. **分布式团队协作开关** — 在团队总线最下方开启"分布式团队协作 (beta)"
-3. 两个团队都连接到同一个 Redis 实例
-
-## 任务状态流转
-
-```
-                    ┌──────────────────────────────────────────┐
-                    │                                          │
-派发方                │  接收方                                   │
-                    │                                          │
-POST /api/cross-team/send ──→ pending_accept (待接受)           │
-                    │       │                                  │
-                    │       ├── 接单 ──→ accepted (进行中)      │
-                    │       │              │                   │
-                    │       │              ├── 交付 ──→ delivered (待审核)
-                    │       │              │              │    │
-                    │       │              │              ├── 通过 → approved (已完成) ✓
-                    │       │              │              │         │
-                    │       │              │              └── 退回 → revision (修改中)
-                    │       │              │                         │
-                    │       │              │                         └── 重新交付 → delivered
-                    │       │              │                                  │
-                    │       │              │                                  └── (循环)
-                    │       │              │
-                    │       └── 拒绝 ──→ rejected (已拒绝) ──→ 通知派发方 agent
-                    │                                          │
-                    └──────────────────────────────────────────┘
-```
-
-## API 交互
-
-### 1. 发现团队
-
-```
-GET /api/cross-team/targets?excludeTeam=prd
-```
-
-返回所有可用团队列表（本地 + Redis 远程），排除自身。
-
-### 2. 派发任务
-
-```
-POST /api/cross-team/send
-{
-  "fromTeam": "prd",
-  "toTeam": "hermit",
-  "subject": "修改 API 接口",
-  "description": "需要修改 /api/users 的返回格式",
-  "deadlineMinutes": 120,
-  "needsHumanReview": true
-}
-```
-
-返回：
-```json
-{
-  "ok": true,
-  "dispatchId": "uuid",
-  "status": "pending_accept",
-  "message": "Task dispatched to hermit, awaiting acceptance."
-}
-```
-
-**派发后自动执行：**
-1. 派发方的看板创建 shadow task `[→hermit] 修改 API 接口`
-2. 协作看板创建 pending_accept 任务
-3. 写入目标团队 inbox 消息
-4. 飞书通知
-
-### 3. 接受任务（接收方）
-
-```
-POST /api/cross-team/accept
-{
-  "team_slug": "hermit",
-  "dispatch_id": "uuid"
-}
-```
-
-- 目标团队看板创建实际任务
-- 协作看板状态变为 `accepted`
-- 通知派发方任务已接受
-
-### 4. 拒绝任务（接收方）
-
-```
-POST /api/cross-team/reject
-{
-  "team_slug": "hermit",
-  "dispatch_id": "uuid",
-  "reason": "当前团队没有该仓库的访问权限"
-}
-```
-
-- 协作看板状态变为 `rejected`
-- 通知派发方 agent 任务被拒绝
-
-### 5. 交付结果（接收方完成工作后）
-
-```
-POST /api/cross-team/deliver
-{
-  "team_slug": "hermit",
-  "dispatch_id": "uuid",
-  "result": "已完成，修改了 3 个文件的 API 返回格式"
-}
-```
-
-### 6. 审核通过（派发方确认）
-
-```
-POST /api/cross-team/approve
-{
-  "team_slug": "hermit",
-  "dispatch_id": "uuid"
-}
-```
-
-### 7. 退回修改（派发方不满意）
-
-```
-POST /api/cross-team/revision
-{
-  "team_slug": "hermit",
-  "dispatch_id": "uuid",
-  "feedback": "返回格式还是不对，需要包含分页信息"
-}
-```
-
-## UI 交互
-
-### 协作看板（CollabBoardPanel）
-
-5 列看板视图：
-- **待接受** — 黄色背景，incoming 任务显示"接单"/"拒绝"按钮
-- **进行中** — 蓝色背景，incoming 任务显示"交付结果"按钮
-- **待审核** — 紫色背景，origin 任务显示"通过"/"退回"按钮
-- **修改中** — 橙色背景，incoming 任务显示"重新交付"按钮
-- **已完成** — 绿色背景
-
-10 秒自动刷新。
-
-### 任务池（外部派单）
-
-TeamDetailView 中的"外部派单"section 显示团队内部 kanban，包含 shadow task。
-
-## 分布式团队协作开关
-
-在 设置 → 团队总线 最下方：
-- **开启** — 注入跨团队协作指令到 CLAUDE.md，agent 可以 dispatch 任务
-- **关闭** — 不注入指令，agent 不会主动跨团队
-
-## 消息投递机制
-
-| 场景 | 投递方式 |
-|------|----------|
-| 同实例本地团队 | 写入目标团队 inbox (appendMessage) + 飞书通知 |
-| 跨实例 Redis | Redis Streams (task:dispatch:{teamSlug}) + 飞书通知 |
+旧文档中提到的 `TeamInboxReader` / IPC inbox 路径不是当前跨团队任务主入口。

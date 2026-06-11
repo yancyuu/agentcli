@@ -57,7 +57,7 @@ export const SettingsSelect = <T extends string | number>({
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={`flex h-8 items-center justify-between gap-2 rounded-lg border bg-transparent px-2.5 text-sm transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 ${fullWidth ? 'w-full' : 'min-w-[140px]'} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-[var(--color-border)]'} ${isOpen ? 'border-[var(--color-border)] ring-1 ring-[var(--color-border-emphasis)]' : ''} `}
+        className={`flex h-8 items-center justify-between gap-2 rounded-lg border bg-transparent px-2.5 text-sm transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-border)] ${fullWidth ? 'w-full' : 'min-w-[140px]'} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-[var(--color-border)]'} ${isOpen ? 'border-[var(--color-accent-border)] ring-1 ring-[var(--color-accent-border)]' : ''} `}
         style={{
           color: 'var(--color-text-secondary)',
           borderColor: isOpen ? undefined : 'var(--color-border-subtle)',
@@ -77,8 +77,10 @@ export const SettingsSelect = <T extends string | number>({
           style={{
             backgroundColor: 'var(--color-surface-raised)',
             borderColor: 'var(--color-border-subtle)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.3), 0 0 18px var(--color-accent-glow)',
           }}
         >
+          <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
           {options.map((option) => (
             <button
               key={String(option.value)}
@@ -86,12 +88,14 @@ export const SettingsSelect = <T extends string | number>({
               onClick={() => handleSelect(option.value)}
               className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors duration-150 ${
                 value === option.value
-                  ? 'bg-indigo-500/10 text-indigo-300'
-                  : 'text-[var(--color-text-secondary)] hover:bg-white/[0.06]'
+                  ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
+                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-accent-soft)]'
               } `}
             >
               <span className="whitespace-nowrap">{option.label}</span>
-              {value === option.value && <Check className="size-3.5 shrink-0 text-indigo-400" />}
+              {value === option.value && (
+                <Check className="size-3.5 shrink-0 text-[var(--color-accent)]" />
+              )}
             </button>
           ))}
         </div>

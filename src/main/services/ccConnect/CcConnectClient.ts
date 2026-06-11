@@ -251,11 +251,18 @@ export class CcConnectClient {
     );
   }
 
-  async createSession(projectName: string, name?: string): Promise<CcSessionDetail> {
+  async createSession(
+    projectName: string,
+    name?: string,
+    sessionKey?: string
+  ): Promise<CcSessionDetail> {
+    const body: Record<string, string> = {};
+    if (name) body.name = name;
+    if (sessionKey) body.session_key = sessionKey;
     return this.request<CcSessionDetail>(
       'POST',
       `/api/v1/projects/${encodeURIComponent(projectName)}/sessions`,
-      name ? { name } : {}
+      body
     );
   }
 

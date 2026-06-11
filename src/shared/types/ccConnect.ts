@@ -118,6 +118,7 @@ export interface CcSessionListItem {
   id: string;
   name: string;
   session_key: string;
+  agent_session_id?: string;
   agent_type: CcAgentType;
   active: boolean;
   live: boolean;

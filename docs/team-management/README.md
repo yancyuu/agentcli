@@ -1,264 +1,141 @@
 # Team Management Architecture
 
+本文是团队、渠道和跨团队任务的 canonical 入口。若历史 research / plan 文档与本文冲突，以当前代码和本文为准。
+
 ## 当前结论
 
-Hermit 不应该模拟人类组织里的固定 Leader/Member 结构。更稳定的模型是：
+Hermit 不是团队内部 Leader/Member 模拟器。更稳定的模型是：
 
-> Hermit 是跨团队任务协议层，不是团队内部管理者。
+> Hermit 是本地优先的团队工作区和跨团队任务协议层。
 
-每个团队由 cc-connect runtime 承载，团队内部如何计划、执行、重试、review，由团队自己的运行时和工作流决定。Hermit 只负责团队之间的任务协议、路由、状态机、审计和用户可见控制面。
+团队内部如何计划、执行、重试、review，由各自 runtime 和工作流决定。Hermit 负责团队配置、任务/消息工作区、渠道路由、跨团队状态机、审计和用户可见控制面。
+
+## 当前产品边界
+
+| 项 | 当前事实 |
+|:---|:---|
+| 产品形态 | Fastify API + Vite Web UI |
+| 默认入口 | `/teams` |
+| 默认数据目录 | `~/.hermit/` |
+| 包名 | `@yancyyu/openhermit` v1.6.42 |
+| Bridge | cc-connect Bridge / Management API |
+| 工作区 | team、task、message、project workspace |
+| 隔离 | 成员可使用独立 worktree |
+| 跨团队 | Redis-backed dispatch 是当前实现；完整 Task Bus 是目标模型 |
+| 不包含 | 当前没有 Electron 桌面打包；没有内嵌 PTY |
 
 ## 架构分工
 
-| 层级 | 责任 | 不负责 |
-|------|------|--------|
-| Hermit | 团队列表、渠道配置、跨团队任务协议、Kanban、事件审计、使用报告、Skills/MCP 全局管理 | 团队内部 todo、具体工具调用、成员内部协作细节 |
+| 层级 | 负责 | 不负责 |
+|:---|:---|:---|
+| Hermit | 团队列表、团队配置、任务看板、消息工作区、渠道绑定、白名单、审计、跨团队 dispatch、Task Bus 目标协议 | 平台 Bot 适配、模型能力、团队内部 todo 细节 |
 | Team runtime | 执行任务、内部计划、工具调用、局部重试、局部 review | 全局路由、跨团队审计、其他团队状态管理 |
-| cc-connect | runtime 生命周期、渠道接入、消息投递、project 配置 | Hermit 业务状态、跨团队任务决策 |
+| cc-connect | runtime 生命周期、渠道接入、Bridge 消息投递、project 配置 | Hermit 业务状态、跨团队任务决策 |
+| Redis Task Bus | 当前跨团队派单和响应流转 | 用户聊天渠道、团队内部任务存储 |
 
-Hermit 只读取和写入标准化事件，不深入解析某个团队内部如何完成任务。
+## 团队工作区
 
-```mermaid
-flowchart LR
-  userRequest["User Or Team Request"] --> taskBus["Hermit Task Bus"]
-  taskBus --> offer["Task Offer"]
-  offer --> teamA["Team A Bid"]
-  offer --> teamB["Team B Bid"]
-  offer --> teamC["Team C Bid"]
-  teamA --> router["Router Score"]
-  teamB --> router
-  teamC --> router
-  router --> lease["Coordinator Lease"]
-  lease --> runtime["Team Runtime"]
-  runtime --> eventLog["Task Event Log"]
-  eventLog --> kanban["Kanban And Reports"]
-```
-
-## 核心模型
-
-### Task Bus
-
-Task Bus 是 Hermit 的跨团队协议层。所有跨团队任务先进入 Task Bus，再由团队认领、竞标或被用户指定。
-
-Task Bus 记录的是跨团队协作事实，而不是团队内部 todo：
-
-- 谁发起了任务
-- 任务需要什么能力
-- 哪些团队表示可以做
-- 谁获得临时协调权
-- 过程发生了哪些事件
-- 最终结果是什么
-
-### Task Offer
-
-任务进入总线后形成一个 offer。
-
-```typescript
-interface TaskOffer {
-  taskId: string;
-  title: string;
-  description?: string;
-  intent: 'execute' | 'coordinate' | 'review';
-  requiredCapabilities: string[];
-  constraints?: {
-    deadlineAt?: string;
-    maxCost?: number;
-    preferredTeams?: string[];
-    blockedTeams?: string[];
-  };
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  origin: {
-    type: 'user' | 'team' | 'system';
-    id: string;
-  };
-  createdAt: string;
-}
-```
-
-`intent` 只影响路由和 UI，不产生三套系统。
-
-| intent | 含义 |
-|--------|------|
-| `execute` | 单团队可完成的执行任务 |
-| `coordinate` | 需要协调多个团队的任务 |
-| `review` | 需要独立验证、背书或代码审查的任务 |
-
-### Task Bid
-
-团队不一定被强派任务。它可以先返回 bid，说明自己为什么适合做。
-
-```typescript
-interface TaskBid {
-  bidId: string;
-  taskId: string;
-  teamId: string;
-  confidence: number;
-  estimatedTimeMinutes?: number;
-  estimatedCost?: number;
-  planSummary: string;
-  risks?: string[];
-  createdAt: string;
-}
-```
-
-Hermit 的 router 根据可解释信号打分：
-
-- capability 匹配度
-- 当前负载
-- 近期成功率
-- 同类任务失败次数
-- 用户指定偏好
-- 预计成本和时间
-
-第一版可以先支持用户手动选择 bid；自动选择放到后续版本。
-
-### Coordinator Lease
-
-协调者不是固定身份，而是某个任务上的临时 lease。
-
-```typescript
-interface CoordinatorLease {
-  taskId: string;
-  teamId: string;
-  acquiredAt: string;
-  expiresAt: string;
-  renewCount: number;
-  reason: string;
-}
-```
-
-lease 的意义：
-
-- 让任务有明确 owner
-- 避免固定 Leader 瓶颈
-- 超时后可切换协调者
-- 所有切换都可审计
-
-### Task Event Log
-
-Hermit 的 Kanban、报告、审计都基于事件日志，而不是直接读取团队内部 todo。
-
-```typescript
-type TaskBusEventType =
-  | 'task_offered'
-  | 'bid_submitted'
-  | 'bid_selected'
-  | 'lease_acquired'
-  | 'lease_renewed'
-  | 'progress_reported'
-  | 'dependency_created'
-  | 'review_requested'
-  | 'review_completed'
-  | 'blocked'
-  | 'completed'
-  | 'failed'
-  | 'escalated'
-  | 'cancelled';
-
-interface TaskBusEvent {
-  eventId: string;
-  taskId: string;
-  type: TaskBusEventType;
-  actor: {
-    type: 'user' | 'team' | 'system';
-    id: string;
-  };
-  summary: string;
-  payload?: Record<string, unknown>;
-  evidenceRefs?: string[];
-  createdAt: string;
-}
-```
-
-事件日志是最小可观察状态。团队内部可以有自己的计划、todo、loop、review 流程，但对 Hermit 只需要提交标准事件。
-
-## 状态机
-
-所有跨团队任务共用一套状态机。
-
-```mermaid
-stateDiagram-v2
-  [*] --> created
-  created --> offered
-  offered --> claimed
-  claimed --> planning
-  planning --> running
-  running --> waiting_on_dependency
-  waiting_on_dependency --> running
-  running --> review_requested
-  review_requested --> running
-  review_requested --> completed
-  running --> completed
-  running --> failed
-  failed --> offered
-  failed --> escalated
-  offered --> cancelled
-  claimed --> cancelled
-```
-
-| 状态 | 说明 |
-|------|------|
-| `created` | 任务刚创建，还未广播 |
-| `offered` | 已进入任务市场，等待 bid 或认领 |
-| `claimed` | 已选出负责人或协调者 |
-| `planning` | 协调者正在拆解和安排 |
-| `running` | 正在执行 |
-| `waiting_on_dependency` | 等待子任务、外部输入或用户确认 |
-| `review_requested` | 等待审核 |
-| `completed` | 完成 |
-| `failed` | 当前尝试失败，可重新 offer |
-| `escalated` | 自动流程无法处理，升级给用户 |
-| `cancelled` | 用户或系统取消 |
-
-## 与现有代码的映射
-
-现有实现不需要推倒重来，应该在当前模块上增量演进。
-
-| 当前模块 | 未来职责 |
-|----------|----------|
-| `TeamWorkspaceService` | 本地 team/task 存储，新增 task bus repository |
-| `TeamProvisioningService.dispatchTask()` | 从简单 assignee 推消息，升级为 Task Offer/Lease 投递 |
-| `CcConnectBridge` | 继续负责把 Hermit 消息投递给 runtime |
-| `src/shared/types/team.ts` | 增加 Task Bus 类型 |
-| `src/main/server.ts` | 增加 `/api/task-bus/*` API |
-| Renderer team store | 展示 bus 状态、lease、事件时间线 |
-
-建议新增：
+每个团队围绕四类数据组织：
 
 ```text
-src/main/services/teams-mvp/TaskBusService.ts
+team
+  ├─ members / runtime config
+  ├─ tasks
+  ├─ messages
+  └─ project workspace / worktree
 ```
 
-该服务负责：
+- **team**：团队 slug、名称、成员、harness、runtime 配置、渠道绑定。
+- **tasks**：团队看板任务、外部派单投影、交付和审核状态。
+- **messages**：团队消息、跨团队消息、cc-connect Bridge 事件、渠道消息。
+- **workspace**：项目目录和可选 worktree 隔离。
 
-- 创建 offer
-- 接收 bid
-- 选择 bid
-- 写入 lease
-- 记录事件
-- 标记完成/失败/升级
+Hermit 只持久化控制面和投影状态，不把 runtime 内部思考、工具调用或私有 todo 强行改造成统一格式。
 
-## 本地存储结构
+## cc-connect 与渠道边界
 
-第一版继续使用本地文件，后续再替换为 Git/Redis/server-backed adapter。
+外部平台接入由 cc-connect 承载。Hermit 不直接实现 Feishu/Lark、微信、Telegram、Discord、Slack 等平台 Bot 适配器。
+
+当前分层：
+
+1. **平台绑定**：团队绑定弹窗把平台凭据交给 cc-connect。Feishu/Lark 和微信支持扫码授权；其它平台通过 token、secret、bot id 等表单配置。
+2. **团队路由**：Hermit 根据 cc-connect 传入的外部 `session_key` 匹配团队。当前主要覆盖 Feishu/Lark、微信、Telegram、Discord、Slack 的 session key 解析。
+3. **访问控制**：团队配置里的 `platformAllowChat` / `platformAllowFrom` 用平台维度限制群聊、频道或用户，支持逗号/空白分隔列表和 `*`。
+4. **审计归档**：渠道消息进入团队 message workspace，不能映射到团队的外部 session 不应写成伪团队目录。
+
+渠道不是 Task Bus。渠道解决“谁能触达团队”；Task Bus 解决“团队之间如何派单、验收和审计”。
+
+## Worktree 隔离
+
+团队创建、启动或添加成员时，可以让成员使用独立 worktree。
+
+用途：
+
+- 降低多成员并行修改同一仓库的冲突。
+- 让每个成员拥有可追踪的工作目录。
+- 支持按任务或成员隔离变更，再由用户审查合并。
+
+边界：
+
+- Worktree 是代码工作区隔离，不是安全沙箱。
+- 是否创建、命名和清理 worktree 由团队配置和 runtime 流程决定。
+- 文档不要把它描述成容器隔离或远程执行环境。
+
+## 当前跨团队实现：Redis-backed dispatch
+
+当前跨团队任务以 dispatch-first 实现为主。
+
+当前能力：
+
+- 发现本地和 Redis 上的可用团队。
+- 从一个团队向另一个团队派发任务。
+- 目标团队接受或拒绝。
+- 接受后创建本地任务/消息投影。
+- 接收方交付结果。
+- 派发方审批通过或要求修订。
+
+当前接口集中在：
 
 ```text
-~/.hermit/task-bus/
-  tasks/
-    <taskId>.json
-  events/
-    <taskId>.jsonl
-  leases/
-    <taskId>.json
+/api/cross-team/*
+/api/settings/task-bus
 ```
 
-文件语义：
+当前服务重点：
 
-- `tasks/<taskId>.json`：任务 offer、当前状态、选中的 coordinator
-- `events/<taskId>.jsonl`：不可变事件流
-- `leases/<taskId>.json`：当前协调者 lease，可过期和续租
+| 模块 | 职责 |
+|:---|:---|
+| `TeamWorkspaceService` | 本地 team/task/message workspace 存储 |
+| `TaskDispatchService` | Redis 团队发现、派单、接受/拒绝、交付、审批、修订 |
+| `CcConnectBridge` | runtime / Channel Bridge，不承载 Task Bus 决策 |
+| `externalPlatformSessionRouting` | 外部 session key 到团队的路由和白名单判断 |
+| `src/shared/types/team.ts` | dispatch、task bus config、团队渠道白名单类型 |
 
-## API 草案
+未配置 Redis task bus 时，正式跨团队派单会失败并提示需要配置，不会自动退化成普通消息。
+
+## 目标模型：Task Bus
+
+完整 Task Bus 是后续目标，不是当前全部可用能力。
+
+目标 Task Bus 记录跨团队协作事实，而不是团队内部 todo：
+
+- 谁发起任务。
+- 任务需要什么能力。
+- 哪些团队可以做。
+- 谁获得临时协调权。
+- 过程发生哪些事件。
+- 最终结果是什么。
+
+目标核心对象：
+
+| 对象 | 说明 |
+|:---|:---|
+| Task Offer | 进入总线的任务请求 |
+| Task Bid | 团队对任务的能力、计划、成本和风险声明 |
+| Coordinator Lease | 某个任务上的临时协调权，不是固定 Leader |
+| Task Event Log | 看板、报告和审计的事实源 |
+
+目标 API 草案：
 
 ```text
 POST /api/task-bus/offers
@@ -273,53 +150,36 @@ POST /api/task-bus/tasks/:taskId/complete
 POST /api/task-bus/tasks/:taskId/fail
 ```
 
-这些 API 只操作跨团队协议状态，不直接控制团队内部 todo。
+这些 API 是演进方向。当前公开跨团队接口仍以 `/api/cross-team/*` 和 `/api/settings/task-bus` 为主。
 
-## Agent 可用动作
-
-后续 MCP/Skill 只暴露少量稳定动作：
+## 目标状态机
 
 ```text
-task_bus_list_offers()
-task_bus_bid(taskId, confidence, planSummary, estimate)
-task_bus_claim(taskId)
-task_bus_report(taskId, status, summary, evidenceRefs)
-task_bus_request_review(taskId, reviewerTeam)
-task_bus_complete(taskId, result)
-task_bus_fail(taskId, reason)
+created
+  → offered
+  → claimed
+  → planning
+  → running
+  → waiting_on_dependency
+  → running
+  → review_requested
+  → completed
+
+running → failed → offered | escalated
+created/offered/claimed → cancelled
 ```
 
-Agent 不应该直接改 Hermit 内部数据结构，只能提交事件或请求状态转换。
+状态只描述跨团队协议，不替代团队内部计划。
 
-## UI 设计
+## 后续演进顺序
 
-第一版 UI 不需要复杂自动化，只需要让用户看懂发生了什么。
-
-任务卡展示：
-
-- `intent`
-- 当前 `TaskBusStatus`
-- coordinator team
-- lease 剩余时间
-- 是否等待 review
-
-任务详情展示：
-
-- bid 列表
-- 选择原因
-- event timeline
-- 子任务/依赖
-- review result
-
-## 实施顺序
-
-1. 定义 shared types 和本地 repository。
-2. 新增 `TaskBusService`，支持 offer、event、lease。
-3. 新增 `/api/task-bus/*`，先给 UI 和手动测试用。
-4. 把现有 `dispatchTask()` 改成创建 offer + 投递给目标团队。
-5. UI 展示 task bus 状态和事件时间线。
-6. 加入 bid/score，先手动选择，再做自动选择。
-7. 加入 review 分支和 structured review result。
+1. 保持当前 Redis dispatch 稳定。
+2. 把 dispatch 事件沉淀为统一 event log。
+3. 补齐本地 Task Bus repository。
+4. 新增 `TaskBusService` 管理 offer、bid、lease、event。
+5. 新增 `/api/task-bus/*` 给 UI 和手动测试。
+6. 把当前 dispatch 逐步映射到 Task Offer / Event。
+7. 在 UI 展示 lease、事件时间线和 review 结果。
 
 ## 历史文档
 
@@ -333,4 +193,4 @@ Agent 不应该直接改 Hermit 内部数据结构，只能提交事件或请求
 - `opencode-native-semantic-messaging-plan.md`
 - `task-queue-derived-agenda-plan.md`
 
-以后新实现以本文为 canonical 入口。若历史文档与本文冲突，以本文为准。
+这些文档可能包含 Electron 桌面时代、旧 Leader/Member 假设或 pre-cc-connect 路由描述。新实现以当前代码和本文为准。

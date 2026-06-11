@@ -8,7 +8,7 @@ export function getSuggestionTriggerChar(suggestion: MentionSuggestion): '@' | '
 
 export function getSuggestionInsertionText(suggestion: MentionSuggestion): string {
   if (suggestion.type === 'command' || suggestion.type === 'skill') {
-    return suggestion.command?.slice(1) ?? suggestion.insertText ?? suggestion.name;
+    return suggestion.insertText ?? suggestion.command?.slice(1) ?? suggestion.name;
   }
   return suggestion.insertText ?? suggestion.name;
 }

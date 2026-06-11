@@ -78,7 +78,7 @@ export const CcCronScheduleDialog = ({
     const normalizedTimeout = Number.parseInt(timeoutMins, 10);
 
     if (!normalizedTeamName) {
-      setError('请选择团队');
+      setError('请选择 Loop workspace');
       return;
     }
     if (!normalizedCron) {
@@ -86,7 +86,7 @@ export const CcCronScheduleDialog = ({
       return;
     }
     if (!normalizedPrompt) {
-      setError('请填写定时发送的消息');
+      setError('请填写定时 Loop 指令');
       return;
     }
 
@@ -122,7 +122,7 @@ export const CcCronScheduleDialog = ({
       }
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存定时任务失败');
+      setError(err instanceof Error ? err.message : '保存定时 Loop 失败');
     } finally {
       setSaving(false);
     }
@@ -132,19 +132,19 @@ export const CcCronScheduleDialog = ({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEditing ? '编辑定时任务' : '添加定时任务'}</DialogTitle>
+          <DialogTitle>{isEditing ? '编辑定时 Loop' : '添加定时 Loop'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {canChooseTeam ? (
             <div className="space-y-1.5">
-              <Label>团队</Label>
+              <Label>Loop workspace</Label>
               <select
                 value={selectedTeamName}
                 onChange={(event) => setSelectedTeamName(event.target.value)}
                 className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm text-[var(--color-text)]"
               >
-                <option value="">选择团队...</option>
+                <option value="">选择 Loop workspace...</option>
                 {teams.map((team) => (
                   <option key={team.teamName} value={team.teamName}>
                     {team.displayName || team.teamName}
@@ -175,11 +175,11 @@ export const CcCronScheduleDialog = ({
           </div>
 
           <div className="space-y-1.5">
-            <Label>定时消息</Label>
+            <Label>定时 Loop 指令</Label>
             <Textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="到时间后发送给团队负责人的消息..."
+              placeholder="到时间后发送给 Loop Lead 的循环指令..."
               className="min-h-28"
             />
           </div>

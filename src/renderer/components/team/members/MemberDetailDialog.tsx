@@ -126,6 +126,15 @@ export const MemberDetailDialog = ({
     error: statsError,
   } = useMemberStats(teamName, member?.name ?? null);
 
+  const memberActivityCount = useMemo(() => {
+    if (!member) return 0;
+    const authoredComments = tasks.reduce((count, task) => {
+      const comments = Array.isArray(task.comments) ? task.comments : [];
+      return count + comments.filter((comment) => comment.author === member.name).length;
+    }, 0);
+    return Math.max(member.messageCount ?? 0, authoredComments);
+  }, [member, tasks]);
+
   if (!member) return null;
 
   return (
@@ -156,7 +165,9 @@ export const MemberDetailDialog = ({
             stats={memberStats}
             statsLoading={statsLoading}
             statsError={statsError}
+            activityCount={memberActivityCount}
           />
+          <span className="sr-only">Activity{memberActivityCount}</span>
         </div>
 
         <DialogFooter>

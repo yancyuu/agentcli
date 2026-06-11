@@ -102,7 +102,7 @@ export class SystemManagerConfigService {
     const config = await this.getConfig();
     const hasClaude = await commandExists('claude');
     return {
-      displayName: '控制台',
+      displayName: 'Admin Loop',
       defaultWorkDir: this.defaultWorkDir,
       selectedWorkDir: config.selectedWorkDir,
       ...(config.workflowFolder ? { workflowFolder: config.workflowFolder } : {}),

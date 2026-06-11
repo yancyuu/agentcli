@@ -2,15 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@renderer/components/ui/button';
 import { api } from '@renderer/api';
-import {
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  RefreshCw,
-  RotateCcw,
-  Smartphone,
-  XCircle,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Smartphone, XCircle } from 'lucide-react';
 
 type PlatformKind = 'feishu' | 'lark' | 'weixin';
 type Phase =
@@ -30,7 +22,7 @@ interface Props {
   projectName: string;
   workDir: string;
   agentType: string;
-  onComplete: () => void;
+  onComplete: (options?: { restartHandled?: boolean }) => void;
   onCancel: () => void;
 }
 
@@ -207,6 +199,13 @@ export default function PlatformSetupQR({
     startFlow();
   };
 
+  const handleComplete = (): void => {
+    if (phase === 'restarting') return;
+    setError('');
+    setPhase('restarting');
+    onComplete();
+  };
+
   const platformLabel = isFeishu ? '飞书 / Lark' : '微信 (ilink)';
   const scanHint = isFeishu ? '打开飞书 / Lark App 扫描二维码' : '打开微信扫描二维码';
 
@@ -259,35 +258,25 @@ export default function PlatformSetupQR({
         </>
       )}
 
-      {phase === 'completed' && (
+      {(phase === 'completed' || phase === 'restarting') && (
         <div className="flex flex-col items-center gap-3 py-4">
-          <CheckCircle2 size={48} className="text-green-500" />
+          {phase === 'restarting' ? (
+            <Loader2 size={48} className="animate-spin text-indigo-500" />
+          ) : (
+            <CheckCircle2 size={48} className="text-green-500" />
+          )}
           <p className="text-sm font-medium text-green-700 dark:text-green-400">平台绑定成功！</p>
-          <p className="text-center text-xs text-gray-500">重启服务使新平台生效</p>
+          <p className="text-center text-xs text-gray-500">
+            {phase === 'restarting'
+              ? '正在重启服务并刷新平台长连接...'
+              : '下一步将统一重启服务并刷新平台长连接。'}
+          </p>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={async () => {
-                try {
-                  await api.ccSettings.restart();
-                  setPhase('restarting');
-                  setTimeout(() => onComplete(), 3000);
-                } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : String(e));
-                }
-              }}
-            >
-              <RotateCcw size={14} /> 立即重启
+            <Button onClick={handleComplete} disabled={phase === 'restarting'}>
+              {phase === 'restarting' && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+              {phase === 'restarting' ? '正在重启...' : '重启并完成'}
             </Button>
-            <Button onClick={onComplete}>稍后</Button>
           </div>
-        </div>
-      )}
-
-      {phase === 'restarting' && (
-        <div className="flex flex-col items-center gap-3 py-4">
-          <Loader2 size={32} className="animate-spin text-indigo-500" />
-          <p className="text-sm text-gray-600 dark:text-gray-400">正在重启服务...</p>
         </div>
       )}
 
@@ -321,7 +310,7 @@ export default function PlatformSetupQR({
         </div>
       )}
 
-      {phase !== 'completed' && phase !== 'restarting' && (
+      {phase !== 'completed' && (
         <button
           onClick={onCancel}
           className="mt-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"

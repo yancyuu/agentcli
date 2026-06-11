@@ -81,6 +81,28 @@ describe('createTeam', () => {
     );
   });
 
+  it('uses restart hook when project creation requires cc-connect restart', async () => {
+    mockCc.createProject.mockResolvedValueOnce({ message: 'ok', restart_required: true });
+    const restartCcConnect = vi.fn().mockResolvedValue(undefined);
+    const hookedSvc = new TeamProvisioningService(
+      mockCc as any,
+      mockBridge as any,
+      workspace,
+      { restartCcConnect }
+    );
+
+    await hookedSvc.createTeam({
+      displayName: 'restart-team',
+      bindProject: 'restart-project',
+      harness: 'codex',
+      workDir: path.join(tmpDir, 'restart-work'),
+      createCcProject: true,
+    });
+
+    expect(restartCcConnect).toHaveBeenCalledTimes(1);
+    expect(mockCc.restart).not.toHaveBeenCalled();
+  });
+
   it('injects MCP config for claudecode harness', async () => {
     const workDir = path.join(tmpDir, 'mcp-work');
     fs.mkdirSync(workDir, { recursive: true });

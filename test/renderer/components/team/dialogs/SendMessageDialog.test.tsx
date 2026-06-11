@@ -214,10 +214,10 @@ function renderDialog(props: Partial<React.ComponentProps<typeof SendMessageDial
 
 function getSendButton(host: HTMLElement): HTMLButtonElement {
   const button = Array.from(host.querySelectorAll('button')).find(
-    (candidate) => candidate.textContent?.trim() === '发送'
+    (candidate) => candidate.textContent?.trim() === '下发'
   );
   if (!(button instanceof HTMLButtonElement)) {
-    throw new Error('Send button not found');
+    throw new Error('Dispatch button not found');
   }
   return button;
 }

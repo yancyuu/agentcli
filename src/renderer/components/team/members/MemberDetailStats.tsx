@@ -6,6 +6,7 @@ interface MemberDetailStatsProps {
   stats: MemberFullStats | null;
   statsLoading?: boolean;
   statsError?: string | null;
+  activityCount?: number;
 }
 
 function formatDurationShort(ms: number): string {
@@ -22,8 +23,9 @@ function formatDurationShort(ms: number): string {
 export const MemberDetailStats = ({
   stats,
   statsLoading,
+  activityCount,
 }: MemberDetailStatsProps): React.JSX.Element => {
-  const totalTokens = stats ? stats.inputTokens + stats.outputTokens : 0;
+  const totalTokens = stats?.totalTokens ?? 0;
 
   const items = [
     {
@@ -37,13 +39,21 @@ export const MemberDetailStats = ({
     },
     {
       label: 'Duration',
-      value: statsLoading ? '...' : stats?.totalDurationMs ? formatDurationShort(stats.totalDurationMs) : '—',
+      value: statsLoading
+        ? '...'
+        : stats?.totalDurationMs
+          ? formatDurationShort(stats.totalDurationMs)
+          : '—',
       sub: !statsLoading && stats?.tasksCompleted ? `${stats.tasksCompleted} completed` : undefined,
+    },
+    {
+      label: 'Activity',
+      value: String(activityCount ?? stats?.messageCount ?? 0),
     },
   ];
 
   return (
-    <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
+    <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
       {items.map((item) => (
         <div
           key={item.label}

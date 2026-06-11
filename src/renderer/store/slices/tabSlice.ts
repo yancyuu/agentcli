@@ -52,6 +52,7 @@ export interface TabSlice {
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   openDashboard: () => void;
+  openChatTab: () => void;
   openSessionReport: (sourceTabId: string) => void;
   getActiveTab: () => Tab | null;
   isSessionOpen: (sessionId: string) => boolean;
@@ -453,6 +454,21 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
     };
     const newLayout = updatePane(paneLayout, updatedPane);
     set(syncFromLayout(newLayout));
+  },
+
+  openChatTab: () => {
+    const state = get();
+    const focusedPane = findPane(state.paneLayout, state.paneLayout.focusedPaneId);
+    const existingTab = focusedPane?.tabs.find((tab) => tab.type === 'chat');
+    if (existingTab) {
+      state.setActiveTab(existingTab.id);
+      return;
+    }
+
+    state.openTab({
+      type: 'chat',
+      label: '交流圈',
+    });
   },
 
   // Open a session report tab based on a source session tab

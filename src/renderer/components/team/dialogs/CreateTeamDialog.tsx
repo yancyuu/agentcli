@@ -66,16 +66,6 @@ export interface TeamCopyData {
  * Sanitize team name: keep Unicode letters and digits (Chinese, Latin, etc.),
  * replace other sequences with `-`, then lowercase Latin chars.
  */
-function sanitizeTeamName(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return '';
-  let result = trimmed
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return result;
-}
-
 /**
  * Generate a unique ASCII project identifier from a display name.
  * For Chinese names: produces "team-xxxx" (4-char random suffix).
@@ -99,7 +89,7 @@ function generateBindProject(displayName: string): string {
 
 /** Validate bindProject: ASCII lowercase alphanumeric, hyphens, underscores. */
 function isValidBindProject(value: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]{1,}$/.test(value);
+  return /^[a-z0-9][a-z0-9_-]*$/.test(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -191,8 +181,20 @@ export const CreateTeamDialog = ({
   const [fieldErrors, setFieldErrors] = useState<{ teamName?: string; cwd?: string }>({});
 
   // ── Name conflict detection ──────────────────────────────────────────
-  const isBindProjectTaken = existingBindProjects.includes(bindProject);
-  const isNameProvisioning = provisioningTeamNames.includes(bindProject) && !isBindProjectTaken;
+  const normalizedBindProject = bindProject.trim().toLowerCase();
+  const existingBindProjectSet = useMemo(
+    () => new Set(existingBindProjects.map((value) => value.trim().toLowerCase()).filter(Boolean)),
+    [existingBindProjects]
+  );
+  const provisioningTeamNameSet = useMemo(
+    () => new Set(provisioningTeamNames.map((value) => value.trim().toLowerCase()).filter(Boolean)),
+    [provisioningTeamNames]
+  );
+  const isBindProjectTaken = existingBindProjectSet.has(normalizedBindProject);
+  const isNameProvisioning =
+    provisioningTeamNameSet.has(normalizedBindProject) && !isBindProjectTaken;
+  const isBindProjectFormatInvalid =
+    Boolean(bindProject) && !isValidBindProject(normalizedBindProject);
 
   const effectiveCwd =
     cwdMode === 'project'
@@ -311,9 +313,9 @@ export const CreateTeamDialog = ({
   };
 
   const buildCreateRequest = (): TeamCreateRequest => ({
-    teamName: bindProject,
-    bindProject,
-    displayName: teamName.trim() || undefined,
+    teamName: normalizedBindProject,
+    bindProject: normalizedBindProject,
+    displayName: teamName.trim(),
     description: description.trim() || undefined,
     color: teamColor || undefined,
     members: [],
@@ -330,16 +332,22 @@ export const CreateTeamDialog = ({
       setLocalError('请输入数字员工名称');
       return false;
     }
-    if (!bindProject) {
+    if (!normalizedBindProject) {
       setLocalError('请输入项目标识');
       return false;
     }
-    if (!isValidBindProject(bindProject)) {
-      setLocalError('项目标识只能包含小写英文字母、数字、连字符和下划线（至少2个字符，以字母或数字开头）');
+    if (!isValidBindProject(normalizedBindProject)) {
+      setLocalError(
+        '项目标识为必填，只能包含小写英文字母、数字、连字符和下划线，且必须以字母或数字开头'
+      );
+      return false;
+    }
+    if (isNameProvisioning) {
+      setLocalError('数字员工正在启动中');
       return false;
     }
     if (isBindProjectTaken) {
-      setLocalError(isNameProvisioning ? '数字员工正在启动中' : `项目标识"${bindProject}"已存在，请换一个`);
+      setLocalError(`项目标识"${normalizedBindProject}"已存在，请换一个`);
       return false;
     }
     if (!effectiveCwd) {
@@ -407,7 +415,7 @@ export const CreateTeamDialog = ({
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="font-medium">
-                  该工作目录下已有数字员工"{conflictingTeam.displayName}"正在运行
+                  该工作目录下已有数字员工&quot;{conflictingTeam.displayName}&quot;正在运行
                 </p>
                 <p className="opacity-80">在同一目录同时运行两个数字员工存在风险。</p>
               </div>
@@ -426,9 +434,10 @@ export const CreateTeamDialog = ({
         {step === 'name' && (
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="team-name">数字员工名称</Label>
+              <Label htmlFor="team-name">数字员工名称 *</Label>
               <Input
                 id="team-name"
+                required
                 className={cn(
                   'h-8 text-xs',
                   fieldErrors.teamName && 'border-[var(--field-error-border)]'
@@ -446,12 +455,14 @@ export const CreateTeamDialog = ({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="team-bind-project">项目标识</Label>
+              <Label htmlFor="team-bind-project">项目标识 *</Label>
               <Input
                 id="team-bind-project"
+                required
                 className={cn(
-                  'h-8 text-xs font-mono',
-                  isBindProjectTaken && 'border-[var(--field-error-border)]'
+                  'h-8 font-mono text-xs',
+                  (isBindProjectTaken || isBindProjectFormatInvalid) &&
+                    'border-[var(--field-error-border)]'
                 )}
                 value={bindProject}
                 onChange={(e) => {
@@ -460,6 +471,16 @@ export const CreateTeamDialog = ({
                 }}
                 placeholder="auto-generated-id"
               />
+              {isBindProjectFormatInvalid && (
+                <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
+                  项目标识只能包含小写英文、数字、连字符和下划线，且必须以字母或数字开头
+                </p>
+              )}
+              {isNameProvisioning && (
+                <p className="text-[11px]" style={{ color: 'var(--warning-text)' }}>
+                  该项目标识正在创建中
+                </p>
+              )}
               {isBindProjectTaken && (
                 <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
                   该项目标识已存在
@@ -533,8 +554,8 @@ export const CreateTeamDialog = ({
                         onClick={() => selectProviderRef(provider.name)}
                         className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                           checked
-                            ? 'border-indigo-400/60 bg-indigo-500/10'
-                            : 'border-[var(--color-border-subtle)] bg-black/10 hover:border-[var(--color-border)] hover:bg-white/[0.04]'
+                            ? 'shadow-[var(--color-accent-glow)]/20 border-[var(--color-accent-border)] bg-[var(--color-accent-muted)] shadow-sm'
+                            : 'border-[var(--color-border-subtle)] bg-black/10 hover:border-[var(--color-border)] hover:bg-[var(--color-accent-soft)]'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -549,7 +570,7 @@ export const CreateTeamDialog = ({
                           <span
                             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
                               checked
-                                ? 'bg-indigo-400/20 text-indigo-200'
+                                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                                 : 'bg-white/5 text-[var(--color-text-muted)]'
                             }`}
                           >
@@ -647,7 +668,19 @@ export const CreateTeamDialog = ({
                 <Button variant="outline" size="sm" onClick={onClose}>
                   取消
                 </Button>
-                <Button size="sm" disabled={!teamName.trim() || !bindProject || !effectiveCwd || isSubmitting} onClick={handleCreate}>
+                <Button
+                  size="sm"
+                  disabled={
+                    !teamName.trim() ||
+                    !normalizedBindProject ||
+                    !effectiveCwd ||
+                    isBindProjectFormatInvalid ||
+                    isBindProjectTaken ||
+                    isNameProvisioning ||
+                    isSubmitting
+                  }
+                  onClick={handleCreate}
+                >
                   {isSubmitting ? '创建中...' : '创建数字员工'}
                 </Button>
               </>

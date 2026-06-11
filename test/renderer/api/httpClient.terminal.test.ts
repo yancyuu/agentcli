@@ -2,148 +2,29 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpAPIClient } from '../../../src/renderer/api/httpClient';
 
-type Listener = (event: MessageEvent) => void;
-const listeners = new Map<string, Listener>();
-
-class MockEventSource {
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(public readonly url: string) {}
-  addEventListener(eventName: string, listener: Listener): void {
-    listeners.set(eventName, listener);
-  }
-  close(): void {}
-}
-
 describe('HttpAPIClient terminal API', () => {
   afterEach(() => {
-    listeners.clear();
     vi.unstubAllGlobals();
   });
 
-  it('maps terminal commands to HTTP and SSE events', async () => {
-    vi.stubGlobal('EventSource', MockEventSource);
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/terminal/spawn')) {
-        expect(init?.method).toBe('POST');
-        expect(init?.body).toBe(JSON.stringify({ command: 'claude', cwd: '/repo' }));
-        return new Response(JSON.stringify({ ptyId: 'pty-1' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      return new Response(JSON.stringify({ ok: true }), {
+  it('posts openExternal commands to the system terminal endpoint', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      });
-    });
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const client = new HttpAPIClient('http://127.0.0.1:5681');
-    const ptyId = await client.terminal.spawn({ command: 'claude', cwd: '/repo' });
-    expect(ptyId).toBe('pty-1');
-
-    client.terminal.write('pty-1', '/help\r');
-    client.terminal.resize('pty-1', 100, 30);
-    await client.terminal.kill('pty-1');
+    await client.terminal.openExternal({ command: 'claude', args: ['/loop-scan'], cwd: '/repo' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:5681/api/terminal/pty-1/write',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ data: '/help\r' }) })
+      'http://127.0.0.1:5681/api/terminal/open-external',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ command: 'claude', args: ['/loop-scan'], cwd: '/repo' }),
+      })
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:5681/api/terminal/pty-1/resize',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ cols: 100, rows: 30 }) })
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:5681/api/terminal/pty-1',
-      expect.objectContaining({ method: 'DELETE' })
-    );
-
-    const onData = vi.fn();
-    const onExit = vi.fn();
-    client.terminal.onData(onData);
-    client.terminal.onExit(onExit);
-    listeners.get('terminal:data')?.(
-      new MessageEvent('terminal:data', { data: JSON.stringify({ ptyId: 'pty-1', data: 'hello' }) })
-    );
-    listeners.get('terminal:exit')?.(
-      new MessageEvent('terminal:exit', { data: JSON.stringify({ ptyId: 'pty-1', exitCode: 0 }) })
-    );
-
-    expect(onData).toHaveBeenCalledWith(null, 'pty-1', 'hello');
-    expect(onExit).toHaveBeenCalledWith(null, 'pty-1', 0);
-  });
-
-  it('spawn with args field sends args in request body', async () => {
-    vi.stubGlobal('EventSource', MockEventSource);
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.body) {
-        const body = JSON.parse(init.body as string) as Record<string, unknown>;
-        expect(body).toEqual({ command: 'bash', args: ['-c', 'echo hi'], cwd: '/tmp' });
-      }
-      return new Response(JSON.stringify({ ptyId: 'pty-2' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new HttpAPIClient('http://127.0.0.1:5681');
-    const ptyId = await client.terminal.spawn({
-      command: 'bash',
-      args: ['-c', 'echo hi'],
-      cwd: '/tmp',
-    });
-    expect(ptyId).toBe('pty-2');
-  });
-
-  it('spawn with no options sends empty object', async () => {
-    vi.stubGlobal('EventSource', MockEventSource);
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.body) {
-        const body = JSON.parse(init.body as string) as Record<string, unknown>;
-        expect(Object.keys(body).length).toBe(0);
-      }
-      return new Response(JSON.stringify({ ptyId: 'pty-3' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new HttpAPIClient('http://127.0.0.1:5681');
-    const ptyId = await client.terminal.spawn();
-    expect(ptyId).toBe('pty-3');
-  });
-
-  it('SSE listener cleanup stops callback delivery', async () => {
-    vi.stubGlobal('EventSource', MockEventSource);
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ ptyId: 'pty-1' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })),
-    );
-
-    const client = new HttpAPIClient('http://127.0.0.1:5681');
-    const onData = vi.fn();
-    const dispose = client.terminal.onData(onData);
-
-    // Fire event — should be delivered
-    listeners.get('terminal:data')?.(
-      new MessageEvent('terminal:data', { data: JSON.stringify({ ptyId: 'pty-1', data: 'before' }) })
-    );
-    expect(onData).toHaveBeenCalledTimes(1);
-
-    // Dispose
-    dispose();
-
-    // Fire again — should NOT be delivered
-    listeners.get('terminal:data')?.(
-      new MessageEvent('terminal:data', { data: JSON.stringify({ ptyId: 'pty-1', data: 'after' }) })
-    );
-    expect(onData).toHaveBeenCalledTimes(1); // still 1, not 2
   });
 });

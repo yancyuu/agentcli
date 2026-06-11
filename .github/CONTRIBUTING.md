@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to Agent Teams!
+Thanks for contributing to openHermit!
 
 ## Before You Start
 
@@ -25,18 +25,15 @@ Before opening a PR, run:
 pnpm typecheck
 pnpm lint
 pnpm test
-pnpm build
+pnpm build:web
 ```
 
-Or all at once:
-```bash
-pnpm check
-```
+CI uses workspace-specific validation jobs. Locally, run the individual commands above so failures are easy to isolate.
 
 ## Pull Request Guidelines
 - Keep changes focused and small - one purpose per PR.
 - Add/adjust tests for behavior changes.
-- Update docs when changing public behavior or setup.
+- Update docs when changing public behavior or setup. Runtime adapters, external platforms, channel binding, cc-connect setup, screenshots, release packaging, and public API changes should update the README/changelog/release notes together so the docs stay aligned with the code.
 - Use clear PR titles and include a short validation checklist.
 - Avoid committing large hardcoded data blobs. If data can be fetched at runtime or generated at build time, prefer that approach.
 

@@ -80,7 +80,8 @@ export class TeamProvisioningService {
   constructor(
     private readonly cc: CcConnectClient,
     private readonly bridge: CcConnectBridge,
-    workspace?: TeamWorkspaceService
+    workspace?: TeamWorkspaceService,
+    private readonly hooks: { restartCcConnect?: () => Promise<void> } = {}
   ) {
     this.workspace = workspace ?? new TeamWorkspaceService();
   }
@@ -119,7 +120,11 @@ export class TeamProvisioningService {
           platformOpts as Record<string, string>
         );
         if (result.restart_required) {
-          await this.cc.restart();
+          if (this.hooks.restartCcConnect) {
+            await this.hooks.restartCcConnect();
+          } else {
+            await this.cc.restart();
+          }
           logger.info(`cc-connect restarted after creating project ${manifest.bindProject}`);
         }
       } catch (err) {

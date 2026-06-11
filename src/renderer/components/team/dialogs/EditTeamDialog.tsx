@@ -15,6 +15,12 @@ import { Loader2 } from 'lucide-react';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 
+import {
+  buildFeishuLarkAllowUpdatePayload,
+  getFeishuLarkAllowValue,
+  readStringRecord,
+} from './platformAllowUtils';
+
 interface EditTeamDialogProps {
   open: boolean;
   teamName: string;
@@ -59,19 +65,9 @@ export const EditTeamDialog = ({
         cfg?.managedSources ??
         (typeof rawSettings.admin_from === 'string' ? rawSettings.admin_from : '*'),
       platformAllowFrom:
-        cfg?.platformAllowFrom ??
-        (typeof rawSettings.platform_allow_from === 'object' &&
-        rawSettings.platform_allow_from !== null &&
-        !Array.isArray(rawSettings.platform_allow_from)
-          ? (rawSettings.platform_allow_from as Record<string, string>)
-          : {}),
+        cfg?.platformAllowFrom ?? readStringRecord(rawSettings.platform_allow_from),
       platformAllowChat:
-        cfg?.platformAllowChat ??
-        (typeof (rawSettings as Record<string, unknown>).platform_allow_chat === 'object' &&
-        (rawSettings as Record<string, unknown>).platform_allow_chat !== null &&
-        !Array.isArray((rawSettings as Record<string, unknown>).platform_allow_chat)
-          ? ((rawSettings as Record<string, unknown>).platform_allow_chat as Record<string, string>)
-          : {}),
+        cfg?.platformAllowChat ?? readStringRecord(rawSettings.platform_allow_chat),
       showContextIndicator:
         cfg?.showContextIndicator ??
         (typeof rawSettings.show_context_indicator === 'boolean'
@@ -91,8 +87,12 @@ export const EditTeamDialog = ({
   const [description, setDescription] = useState(defaults.description);
   const [language, setLanguage] = useState(defaults.language);
   const [managedSources, setManagedSources] = useState(defaults.managedSources);
-  const [feishuAllowFrom, setFeishuAllowFrom] = useState(defaults.platformAllowFrom.feishu ?? '*');
-  const [feishuAllowChat, setFeishuAllowChat] = useState(defaults.platformAllowChat.feishu ?? '*');
+  const [feishuAllowFrom, setFeishuAllowFrom] = useState(
+    getFeishuLarkAllowValue(defaults.platformAllowFrom)
+  );
+  const [feishuAllowChat, setFeishuAllowChat] = useState(
+    getFeishuLarkAllowValue(defaults.platformAllowChat)
+  );
   const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
   const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
   const [injectSender, setInjectSender] = useState(defaults.injectSender);
@@ -117,8 +117,8 @@ export const EditTeamDialog = ({
     setDescription(d.description);
     setLanguage(d.language);
     setManagedSources(d.managedSources);
-    setFeishuAllowFrom(d.platformAllowFrom.feishu ?? '*');
-    setFeishuAllowChat(d.platformAllowChat.feishu ?? '*');
+    setFeishuAllowFrom(getFeishuLarkAllowValue(d.platformAllowFrom));
+    setFeishuAllowChat(getFeishuLarkAllowValue(d.platformAllowChat));
     setShowContextIndicator(d.showContextIndicator);
     setReplyFooter(d.replyFooter);
     setInjectSender(d.injectSender);
@@ -133,8 +133,14 @@ export const EditTeamDialog = ({
     setSavePhase('saving');
     setError(null);
 
-    const feishu = feishuAllowFrom.trim();
-    const feishuChat = feishuAllowChat.trim();
+    const platformAllowFrom = buildFeishuLarkAllowUpdatePayload(
+      defaultsRef.current.platformAllowFrom,
+      feishuAllowFrom
+    );
+    const platformAllowChat = buildFeishuLarkAllowUpdatePayload(
+      defaultsRef.current.platformAllowChat,
+      feishuAllowChat
+    );
 
     void (async () => {
       try {
@@ -144,8 +150,8 @@ export const EditTeamDialog = ({
           color: defaultsRef.current.color,
           language: language.trim() || undefined,
           managedSources: managedSources.trim() || undefined,
-          platformAllowFrom: feishu ? { feishu } : {},
-          platformAllowChat: feishuChat ? { feishu: feishuChat } : {},
+          platformAllowFrom,
+          platformAllowChat,
           showContextIndicator,
           replyFooter,
           injectSender,
@@ -173,7 +179,7 @@ export const EditTeamDialog = ({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>编辑团队</DialogTitle>
-          <DialogDescription>修改团队信息和消息设置（无需重启）</DialogDescription>
+          <DialogDescription>修改团队信息和 Loop 动态设置（无需重启）</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -216,7 +222,7 @@ export const EditTeamDialog = ({
 
           {/* Messaging settings */}
           <div className="rounded-md border border-[var(--color-border)] p-3">
-            <h3 className="text-xs font-medium text-[var(--color-text)]">消息设置</h3>
+            <h3 className="text-xs font-medium text-[var(--color-text)]">Loop 动态设置</h3>
             <div className="mt-3 space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
@@ -313,6 +319,11 @@ export const EditTeamDialog = ({
         </div>
 
         <DialogFooter>
+          {onDeleteTeam && teamName !== 'default' ? (
+            <Button variant="ghost" size="sm" onClick={onDeleteTeam} disabled={saving}>
+              删除项目
+            </Button>
+          ) : null}
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
             {savePhase === 'done' ? '关闭' : '取消'}
           </Button>

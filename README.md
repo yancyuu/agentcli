@@ -5,30 +5,35 @@
 <h1 align="center">openHermit</h1>
 
 <p align="center">
-  <strong>超级个体的 AI 基础设施 — 一个人，一块看板，一支军队</strong><br/>
-  用代码重构公司形态，让 AI Agent 团队自主协作、自动流转、自动驾驶。
+  <strong>Loop Engineering 工作台</strong><br/>
+  用 Fastify + Vite 把 Claude Code、Codex、Gemini、Cursor、OpenCode 等本机 Agent 运行时组织成可观察、可派工、可验证的本地循环系统。
 </p>
 
 <p align="center">
   <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=version&color=black" alt="最新版本" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-black?style=flat-square" alt="许可证" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black?style=flat-square" alt="平台" />
+  <img src="https://img.shields.io/badge/package-@yancyyu/openhermit@1.6.42-black?style=flat-square" alt="npm package" />
+  <img src="https://img.shields.io/badge/local--first-~/.hermit-black?style=flat-square" alt="Local first" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/openhermit/team-detail.png" alt="openHermit 看板总览" width="100%" />
+  <img src="docs/screenshots/openhermit/team-list.png" alt="openHermit 团队工作台" width="100%" />
 </p>
 
 ---
 
-## 为什么需要 openHermit？
+## openHermit 是什么？
 
-目前的 AI Agent 赛道充满了一个巨大误区：**大家都在试图用人类的"HR 组织架构"来管理 AI。**
-让大模型扮演"资深前端"或"产品经理"，本质上是在模仿人类的**职责驱动**（因岗设人）。这注定会走向死锁——因为人类有精力上限和认知边界，才需要划分部门和扯皮；而 AI 没有。
+openHermit 是本地优先的 Loop Engineering 控制台。它不提供模型、不托管你的仓库，也不把 Agent 固定成聊天窗口。你在 Web 工作台里创建团队、拆任务、派工、观察消息与事件、审查交付；实际执行由本机或基础设施中的 Agent CLI / cc-connect runtime 完成。
 
-**openHermit 的核心哲学：用管理机器的方式管理 Agent，而不是用管理人的方式。**
+当前产品形态：
 
-任务流是一张 DAG，每个节点代表一种确定的状态（Pending → Running → Review → Done）。遇到网络波动或反爬环境，状态机自动 `Fail-Over`，流水线永远不会因为"超出角色职责"而卡死。
+- **后端**：Fastify 5 + Node.js
+- **前端**：Vite + React 19 + TypeScript
+- **默认入口**：`/teams`
+- **默认存储**：`~/.hermit/`
+- **分发方式**：npm CLI 包 `@yancyyu/openhermit` v1.6.42
+- **当前不包含**：Electron 桌面打包、内嵌 PTY 终端
 
 ---
 
@@ -44,12 +49,12 @@
     <td><img src="docs/screenshots/openhermit/team-detail.png" alt="团队详情" width="480" /></td>
   </tr>
   <tr>
-    <td align="center"><b>运行时配置</b></td>
-    <td align="center"><b>渠道绑定</b></td>
+    <td align="center"><b>全局任务</b></td>
+    <td align="center"><b>设置与运行时</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/openhermit/harness-settings.png" alt="运行时配置" width="480" /></td>
-    <td><img src="docs/screenshots/openhermit/channel-binding.png" alt="渠道绑定" width="480" /></td>
+    <td><img src="docs/screenshots/openhermit/tasks.png" alt="全局任务" width="480" /></td>
+    <td><img src="docs/screenshots/openhermit/settings.png" alt="设置与运行时" width="480" /></td>
   </tr>
 </table>
 
@@ -57,33 +62,32 @@
 
 ## 核心能力
 
-| 能力 | 说明 |
+| 能力 | 当前说明 |
 |:---|:---|
-| **Agent 团队** | 创建多角色团队，Agent 自主并行工作 |
-| **看板管理** | 任务状态实时流转 — 待办、执行中、审查、完成 |
-| **代码审查** | 每个任务独立的 Diff 视图，支持接受/拒绝/评论 |
-| **跨团队通信** | Agent 之间跨团队结构化消息传递 |
-| **直接消息** | 向任意 Agent 发消息、评论任务、快捷操作 |
-| **会话分析** | 深度拆解：Bash 命令、推理链、子进程 |
-| **上下文监控** | 按类别追踪 Token 消耗，掌控上下文窗口 |
-| **MCP 集成** | 内置 MCP Server，支持外部工具和 Agent 插件 |
-| **权限控制** | 精细化允许/拒绝工具执行和 Agent 操作 |
-| **渠道绑定** | 接入飞书、Slack、Telegram、Discord、微信等 10+ 渠道 |
-| **零配置上手** | 内置 Claude Code CLI 安装和认证 |
+| **团队工作台** | 默认进入 `/teams`，按团队管理成员、任务、消息、运行时配置和项目工作区 |
+| **任务看板** | 维护团队内任务、评论、外部派单投影和执行状态 |
+| **消息工作区** | 保存团队消息、跨团队消息和 cc-connect Bridge 事件 |
+| **Loop Engineering** | 把扫描、派工、执行、验证、报告组织成可重复的工程循环 |
+| **cc-connect Bridge** | 连接本机 Agent runtime、Management API、WebSocket Bridge 和外部渠道 |
+| **渠道绑定** | 在团队级别配置 Feishu/Lark、微信、Telegram、Discord、Slack 等平台凭据与白名单；实际 Bot 适配由 cc-connect 承载 |
+| **渠道边界** | Hermit 当前负责已支持 session key 的团队路由、权限白名单和审计；平台能力取决于 cc-connect 版本和本机配置 |
+| **Worktree 隔离** | 创建或启动团队时可让成员使用独立 worktree，降低并行修改冲突 |
+| **跨团队协作** | 当前通过 Redis-backed dispatch 派单实现接受、拒绝、交付、审批、修订；完整 Task Bus 是后续目标模型 |
+| **本地优先** | 配置、团队、任务、消息和审计数据默认落在 `~/.hermit/` |
 
 ---
 
-## 极速部署
+## 快速开始
 
-### 方式一：npx（免安装直接运行）
+### npx 直接运行
 
 ```bash
 npx @yancyyu/openhermit@latest
 ```
 
-启动后打开 [http://127.0.0.1:5680](http://127.0.0.1:5680)
+启动后打开 [http://127.0.0.1:5680/teams](http://127.0.0.1:5680/teams)。
 
-### 方式二：全局安装
+### 全局安装
 
 ```bash
 npm install -g @yancyyu/openhermit@latest --prefer-online
@@ -102,70 +106,70 @@ openhermit --version      # 查看版本
 openhermit update         # 自更新
 ```
 
+openHermit 会尝试准备本机运行时配置。真实使用 Claude Code、Codex、Gemini、Cursor、OpenCode 或外部协作渠道时，仍需在本机完成对应 CLI、账号、API key 或平台凭据配置。
+
 ### 本地开发
 
 ```bash
-git clone https://github.com/yancyuu/hermit.git
-cd hermit
+git clone https://github.com/yancyuu/Hermit.git
+cd Hermit
 pnpm install
 pnpm dev
 ```
 
-在另一个终端启动运行时服务：
+开发模式默认启动：
 
-```bash
-npx cc-connect -config ~/.hermit/cc-connect/config.toml
-```
+- Fastify 后端：[http://127.0.0.1:5680](http://127.0.0.1:5680)
+- Vite 前端：[http://127.0.0.1:5174](http://127.0.0.1:5174)，端口占用时会自动切换
 
-浏览器打开 [http://localhost:5174](http://localhost:5174)，开发模式连接本机运行时。
+如需连接真实 runtime，请配置 `~/.hermit/cc-connect/config.toml` 或相关环境变量。也可以在设置页调整 cc-connect Management API / Bridge 地址和 token；在团队详情里使用「渠道绑定」为团队添加外部平台。新增或修改渠道后，cc-connect 可能需要重启。
 
-### 创建第一个 AI 团队
+---
 
-1. 点击 **「新建团队」**
-2. 填写团队名，选择 harness（如 `claudecode`）
-3. 选择本地项目目录和运行时
-4. 保存 → 看板就绪，任务等你分配
+## 创建第一个团队
+
+1. 进入 `/teams`
+2. 点击 **「创建数字员工」**
+3. 填写团队名和 slug
+4. 选择 harness / runtime（如 `claudecode`）
+5. 选择项目目录；需要隔离时启用 worktree
+6. 如需外部平台访问，配置渠道绑定与访问白名单
+7. 保存后进入团队详情，在看板或消息区创建任务并启动 Agent
 
 ---
 
 ## 支持的 Agent 运行时
 
-openHermit 不提供闭源模型，也不劫持你的代码。它是一个高度可扩展的本地壳层。
+openHermit 的运行时能力取决于你安装和授权的本机 CLI、cc-connect 配置和当前适配器。
 
-| 标识 | 运行时 | 标识 | 运行时 |
-|:---|:---|:---|:---|
-| `claudecode` | Anthropic Claude Code CLI | `devin` | Cognition Devin |
-| `codex` | OpenAI Codex CLI | `opencode` | OpenCode CLI |
-| `cursor` | Cursor IDE Agent | `qoder` | Qoder CLI |
-| `gemini` | Google Gemini CLI | `pi` | Inflection Pi |
-| `iflow` | iFlow CLI | `acp` | Agent Communication Protocol |
-| `kimi` | Moonshot Kimi | `tmux` | 经典 Tmux Session |
+| 支持层级 | 运行时 |
+|:---|:---|
+| **一等适配器** | `claudecode`、`codex`、`gemini`、`opencode`、`cursor` |
+| **已注册/兼容标识** | `devin`、`qoder`、`pi`、`iflow`、`acp`、`kimi`、`tmux` |
+
+一等适配器通常提供更完整的安装状态、凭据、MCP、Skills 或环境变量管理。兼容标识用于团队配置、桥接或实验性接入，具体能力以本机环境为准。
 
 ---
 
-## 核心架构：TPC 引擎
+## 架构边界
 
-```
-┌─────────────────────────────────────────────┐
-│                 openHermit                   │
-│                                             │
-│  ┌─────────┐  ┌─────────┐  ┌─────────────┐ │
-│  │  Team A  │  │  Team B  │  │  Team C     │ │
-│  │ (agents) │  │ (agents) │  │ (agents)    │ │
-│  └────┬─────┘  └────┬─────┘  └──────┬─────┘ │
-│       │              │               │       │
-│  ─────┴──────────────┴───────────────┴────── │
-│         看板 · 消息总线                      │
-│  ─────────────────────────────────────────── │
-│       MCP Server · Bridge 协议               │
-│  ─────────────────────────────────────────── │
-│       渠道（飞书 · Slack · Telegram · ...）  │
-└─────────────────────────────────────────────┘
+```text
+Browser / Vite UI
+  ↓ HTTP / WebSocket
+Fastify API
+  ↓
+~/.hermit team · task · message workspace
+  ↓
+cc-connect Bridge / Management API
+  ↓
+Local agent runtimes and external channels
 ```
 
-- **[T]eam（隔离与并发）** — 不同团队独立运行时，全局看板跨团队调度
-- **[P]rocess（状态流转）** — 任务以原子化状态为核心，MCP 动态注入能力
-- **[C]hannel（全渠道触达）** — 10+ 消息渠道统一控制面，消息即指令
+- **Team**：团队、成员、项目目录、worktree 隔离和 runtime 配置
+- **Task**：团队看板、外部派单投影、交付和审核状态
+- **Message**：团队消息、跨团队消息、渠道消息和 Bridge 事件
+- **Channel**：cc-connect 承载平台适配；Hermit 做团队路由、白名单和审计
+- **Task Bus**：当前是 Redis-backed dispatch；目标是 offer / bid / lease / event 的完整跨团队协议
 
 ---
 
@@ -173,24 +177,39 @@ openHermit 不提供闭源模型，也不劫持你的代码。它是一个高度
 
 | 层级 | 技术 |
 |:---|:---|
-| 前端 | React 19 · TypeScript 5 · Tailwind CSS 3 · Zustand 4 |
-| 后端 | Fastify (Node.js) |
-| 桌面 | Electron 40 |
-| 存储 | 本地文件（`~/.hermit/`） |
-| 通信 | WebSocket Bridge + HTTP Management API |
-| 协议 | MCP over HTTP（SSE + JSON-RPC） |
+| 前端 | React 19 · TypeScript 5 · Tailwind CSS 3 · Zustand 4 · Vite |
+| 后端 | Fastify 5 · Node.js |
+| 运行时桥接 | cc-connect · WebSocket Bridge · HTTP Management API |
+| 扩展 | MCP · Plugins · Skills · Credentials |
+| 存储 | 本地文件，默认 `~/.hermit/` |
+| 发布 | npm CLI package · GitHub Release；`.github/workflows/release.yml` 的 Docker job 引用 `docker/Dockerfile`，发布前需要补齐或禁用 |
+
+---
+
+## 文档
+
+- [文档索引](docs/README.md)
+- [Feature Architecture Standard](docs/FEATURE_ARCHITECTURE_STANDARD.md)
+- [Team Management Architecture](docs/team-management/README.md)
+- [Cross-Team Collaboration Workflow](docs/team-management/cross-team-collaboration.md)
+- [Release Guide](docs/RELEASE.md)
+- [Changelog](docs/CHANGELOG.md)
 
 ---
 
 ## 贡献
 
-欢迎 PR。Fork → Branch → Push → PR，标准流程。
+欢迎 PR。Fork → Branch → Push → PR。
 
 ```bash
 pnpm install
-pnpm dev        # 启动开发服务
-pnpm check      # 完整质量检查（类型 + Lint + 测试 + 构建）
+pnpm dev
+pnpm typecheck
+pnpm test
+pnpm build:web
 ```
+
+请使用 pnpm。不要把 Electron 打包、内嵌 PTY 或未落地的完整 Task Bus 写成当前能力。
 
 ---
 

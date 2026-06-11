@@ -8,9 +8,10 @@
 
 import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
 import * as path from 'node:path';
-import { getProjectsBasePath } from '@main/utils/pathDecoder';
+import { createInterface } from 'node:readline';
+
+import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
 
 export interface SessionEntry {
   relPath: string;
@@ -23,6 +24,7 @@ export interface SessionEntry {
     output: number;
     cacheRead: number;
     cacheCreation: number;
+    total: number;
   };
   startTime: string;
   endTime: string;
@@ -39,6 +41,7 @@ export interface UsageAggregate {
     output: number;
     cacheRead: number;
     cacheCreation: number;
+    total: number;
   };
   activeDays: number;
   daily: Record<string, DailyMetrics>;
@@ -55,6 +58,7 @@ export interface DailyMetrics {
   tokensOut: number;
   cacheRead: number;
   cacheCreation: number;
+  tokensTotal: number;
   workSeconds: number;
 }
 
@@ -64,6 +68,7 @@ export interface ProjectMetricsEntry {
   messages: number;
   tokensIn: number;
   tokensOut: number;
+  tokensTotal: number;
 }
 
 export interface EventEntry {
@@ -72,6 +77,7 @@ export interface EventEntry {
   tokensOut: number;
   cacheRead: number;
   cacheCreation: number;
+  tokensTotal: number;
 }
 
 export interface ParseResult {
@@ -137,7 +143,13 @@ interface ParsedSession {
   isWorktree: boolean;
   messageCount: number;
   toolCalls: Record<string, number>;
-  tokens: { input: number; output: number; cacheRead: number; cacheCreation: number };
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+    total: number;
+  };
   startTime: string;
   endTime: string;
   dailyTokens: Record<string, DailyMetrics>;
@@ -151,7 +163,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
   let rawCwd = '';
   let isWorktree = false;
   const toolCalls: Record<string, number> = {};
-  const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
   let startTime = '';
   let endTime = '';
   const dailyTokens: Record<string, DailyMetrics> = {};
@@ -173,8 +185,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
 
     if (!rawCwd && typeof obj.cwd === 'string') {
       rawCwd = obj.cwd;
-      const { normalized, isWorktree: iw } = normalizeCwd(rawCwd);
-      isWorktree = iw;
+      isWorktree = normalizeCwd(rawCwd).isWorktree;
     }
 
     const msg = obj.message as Record<string, unknown> | undefined;
@@ -191,6 +202,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
     } else if (obj.type === 'user' || obj.type === 'assistant') {
       role = obj.type as string;
       content = obj.content;
+      usage = obj.usage as Record<string, unknown> | undefined;
       ts = obj.timestamp as string | undefined;
     }
 
@@ -211,11 +223,13 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
       const out = Number(usage.output_tokens ?? 0) || 0;
       const cread = Number(usage.cache_read_input_tokens ?? 0) || 0;
       const ccreate = Number(usage.cache_creation_input_tokens ?? 0) || 0;
+      const total = inp + out + cread + ccreate;
 
       tokens.input += inp;
       tokens.output += out;
       tokens.cacheRead += cread;
       tokens.cacheCreation += ccreate;
+      tokens.total += total;
 
       // Daily aggregation
       const day = ts.slice(0, 10);
@@ -227,6 +241,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
           tokensOut: 0,
           cacheRead: 0,
           cacheCreation: 0,
+          tokensTotal: 0,
           workSeconds: 0,
         });
         d.messages++;
@@ -234,6 +249,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
         d.tokensOut += out;
         d.cacheRead += cread;
         d.cacheCreation += ccreate;
+        d.tokensTotal += total;
       }
 
       // Hourly distribution
@@ -251,6 +267,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
           tokensOut: out,
           cacheRead: cread,
           cacheCreation: ccreate,
+          tokensTotal: total,
         });
       }
     }
@@ -331,12 +348,79 @@ function calcWorkSeconds(events: EventEntry[]): Record<string, number> {
   return workSeconds;
 }
 
+export interface ProjectUsageStats {
+  sessions: number;
+  messages: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheCreation: number;
+  totalTokens: number;
+  durationMs: number;
+}
+
+/**
+ * Full-file usage stats for one work directory.
+ * Full-file stats are used by the digital worker list to avoid the old first-200-line
+ * approximation. Callers decide whether their displayed total includes cache tokens.
+ */
+export async function scanProjectStats(workDir: string): Promise<ProjectUsageStats | null> {
+  if (!workDir) return null;
+
+  const projectsRoot = getProjectsBasePath();
+  const jsonlDirs = Array.from(
+    new Set(
+      getProjectDirNameCandidates(workDir)
+        .filter((candidate) => !path.isAbsolute(candidate))
+        .map((candidate) => path.join(projectsRoot, candidate))
+    )
+  );
+  const normalizedWorkDir = normalizeCwd(workDir).normalized;
+  const stats: ProjectUsageStats = {
+    sessions: 0,
+    messages: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    totalTokens: 0,
+    durationMs: 0,
+  };
+  let earliest = '';
+  let latest = '';
+
+  for (const jsonlDir of jsonlDirs) {
+    for await (const filePath of walkJsonl(jsonlDir)) {
+      const parsed = await parseJsonl(filePath);
+      if (!parsed) continue;
+      if (parsed.projectPath && parsed.projectPath !== normalizedWorkDir) continue;
+
+      stats.sessions++;
+      stats.messages += parsed.messageCount;
+      stats.tokensIn += parsed.tokens.input;
+      stats.tokensOut += parsed.tokens.output;
+      stats.cacheRead += parsed.tokens.cacheRead;
+      stats.cacheCreation += parsed.tokens.cacheCreation;
+      stats.totalTokens += parsed.tokens.total;
+      if (parsed.startTime && (!earliest || parsed.startTime < earliest))
+        earliest = parsed.startTime;
+      if (parsed.endTime && (!latest || parsed.endTime > latest)) latest = parsed.endTime;
+    }
+  }
+
+  if (stats.sessions === 0) return null;
+  if (earliest && latest) {
+    stats.durationMs = Math.max(0, Date.parse(latest) - Date.parse(earliest));
+  }
+  return stats;
+}
+
 export async function scanSessions(): Promise<ParseResult> {
   const sessions: SessionEntry[] = [];
   const aggregate: UsageAggregate = {
     sessions: 0,
     messages: 0,
-    tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 },
     activeDays: 0,
     daily: {},
     hourly: new Array(24).fill(0),
@@ -382,6 +466,7 @@ export async function scanSessions(): Promise<ParseResult> {
     aggregate.tokens.output += parsed.tokens.output;
     aggregate.tokens.cacheRead += parsed.tokens.cacheRead;
     aggregate.tokens.cacheCreation += parsed.tokens.cacheCreation;
+    aggregate.tokens.total += parsed.tokens.total;
 
     // Hourly
     for (let h = 0; h < 24; h++) {
@@ -401,6 +486,7 @@ export async function scanSessions(): Promise<ParseResult> {
         tokensOut: 0,
         cacheRead: 0,
         cacheCreation: 0,
+        tokensTotal: 0,
         workSeconds: 0,
       });
       d.sessions++;
@@ -409,18 +495,27 @@ export async function scanSessions(): Promise<ParseResult> {
       d.tokensOut += m.tokensOut;
       d.cacheRead += m.cacheRead;
       d.cacheCreation += m.cacheCreation;
+      d.tokensTotal += m.tokensTotal;
     }
 
     // Projects
     const proj = parsed.projectPath || '(untracked)';
     if (!projectMap[proj]) {
-      projectMap[proj] = { cwd: proj, sessions: 0, messages: 0, tokensIn: 0, tokensOut: 0 };
+      projectMap[proj] = {
+        cwd: proj,
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        tokensTotal: 0,
+      };
     }
     const p = projectMap[proj];
     p.sessions++;
     p.messages += parsed.messageCount;
     p.tokensIn += parsed.tokens.input;
     p.tokensOut += parsed.tokens.output;
+    p.tokensTotal += parsed.tokens.total;
   }
 
   // Work seconds per day

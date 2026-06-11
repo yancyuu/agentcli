@@ -859,8 +859,8 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   if (messages.length === 0) {
     return (
       <div className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]">
-        <p>暂无消息</p>
-        <p className="mt-1 text-[11px]">向成员发送消息后，这里会显示活动。</p>
+        <p>暂无 Loop 动态</p>
+        <p className="mt-1 text-[11px]">向成员派发 Loop 指令后，这里会显示活动。</p>
       </div>
     );
   }

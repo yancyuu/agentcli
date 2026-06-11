@@ -11,11 +11,11 @@ import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { getFullResetState } from '@renderer/store/utils/stateResetHelpers';
 import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agentLanguage';
-import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-react';
+import { Bot, Check, Copy, Gauge, Loader2, Palette, Shield, Server } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { Button } from '@renderer/components/ui/button';
-import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
+import { SettingRow, SettingsSectionCard, SettingsSelect, SettingsToggle } from '../components';
 
 import type { SafeConfig } from '../hooks/useSettingsConfig';
 import type { ClaudeRootInfo, WslClaudeRootCandidate } from '@shared/types';
@@ -410,211 +410,241 @@ export const GeneralSection = ({
   }, [ccSettings.rate_limit_max_messages, ccSettings.rate_limit_window_secs]);
 
   return (
-    <div>
+    <div className="space-y-5">
       {/* Language */}
-      <SettingsSectionHeader title="Agent 语言" />
-      <SettingRow label="语言" description={agentLanguageDescription}>
-        <Combobox
-          options={languageComboboxOptions}
-          value={safeConfig.general.agentLanguage ?? 'system'}
-          onValueChange={onLanguageChange}
-          placeholder="选择语言..."
-          searchPlaceholder="搜索语言..."
-          emptyMessage="未找到匹配语言。"
-          disabled={saving}
-          className="min-w-[180px]"
-          renderOption={renderLanguageOption}
-        />
-      </SettingRow>
+      <SettingsSectionCard
+        title="Agent 语言"
+        description="控制数字员工与用户交流时默认使用的语言。"
+        icon={<Bot className="size-3.5" />}
+      >
+        <SettingRow label="语言" description={agentLanguageDescription}>
+          <Combobox
+            options={languageComboboxOptions}
+            value={safeConfig.general.agentLanguage ?? 'system'}
+            onValueChange={onLanguageChange}
+            placeholder="选择语言..."
+            searchPlaceholder="搜索语言..."
+            emptyMessage="未找到匹配语言。"
+            disabled={saving}
+            className="min-w-[180px]"
+            renderOption={renderLanguageOption}
+          />
+        </SettingRow>
+      </SettingsSectionCard>
 
       {/* Appearance */}
-      <SettingsSectionHeader title="外观" />
-      <SettingRow label="主题" description="选择你偏好的界面主题">
-        <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
-          {THEME_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              disabled={saving}
-              className={cn(
-                'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50',
-                safeConfig.general.theme === opt.value
-                  ? 'shadow-sm'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-              )}
-              style={
-                safeConfig.general.theme === opt.value
-                  ? {
-                      backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                      color: '#818cf8',
-                    }
-                  : undefined
-              }
-              onClick={() => onThemeChange(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </SettingRow>
-      <SettingRow
-        label="默认展开 AI 回复"
-        description="打开会话记录或收到新消息时，自动展开每轮回复"
+      <SettingsSectionCard
+        title="外观"
+        description="调整主题、展开行为和界面默认显示方式。"
+        icon={<Palette className="size-3.5" />}
       >
-        <SettingsToggle
-          enabled={safeConfig.general.autoExpandAIGroups ?? false}
-          onChange={(v) => onGeneralToggle('autoExpandAIGroups', v)}
-          disabled={saving}
-        />
-      </SettingRow>
+        <SettingRow label="主题" description="选择你偏好的界面主题">
+          <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={saving}
+                className={cn(
+                  'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+                  safeConfig.general.theme === opt.value
+                    ? 'shadow-sm'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                )}
+                style={
+                  safeConfig.general.theme === opt.value
+                    ? {
+                        backgroundColor: 'var(--color-accent-muted)',
+                        color: 'var(--color-accent)',
+                      }
+                    : undefined
+                }
+                onClick={() => onThemeChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="默认展开 AI 回复"
+          description="打开会话记录或收到新消息时，自动展开每轮回复"
+        >
+          <SettingsToggle
+            enabled={safeConfig.general.autoExpandAIGroups ?? false}
+            onChange={(v) => onGeneralToggle('autoExpandAIGroups', v)}
+            disabled={saving}
+          />
+        </SettingRow>
+      </SettingsSectionCard>
 
       {/* Server Status */}
-      <SettingsSectionHeader title="服务状态" />
-      <div
-        className="mb-2 flex items-center gap-3 rounded-md px-3 py-2.5"
-        style={{ backgroundColor: 'var(--color-surface-raised)' }}
+      <SettingsSectionCard
+        title="服务状态"
+        description="查看 Web Admin Loop 连接和本地服务地址。"
+        icon={<Server className="size-3.5" />}
       >
         <div
-          className="size-2 shrink-0 rounded-full"
-          style={{ backgroundColor: serverStatus.running ? '#22c55e' : '#f59e0b' }}
-        />
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          {serverStatus.running ? 'Web 服务运行中' : 'Web 服务状态未知'}
-        </span>
-        <code
-          className="rounded px-1.5 py-0.5 font-mono text-xs"
+          className="m-3 flex items-center gap-3 rounded-xl border px-3 py-2.5"
           style={{
             backgroundColor: 'var(--color-surface)',
-            color: 'var(--color-text)',
-            border: '1px solid var(--color-border)',
+            borderColor: 'var(--color-border-subtle)',
           }}
         >
-          {serverLoading ? '检查中...' : serverUrl}
-        </code>
-        <button
-          onClick={handleCopyUrl}
-          className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-          style={{
-            borderColor: 'var(--color-border)',
-            color: copied ? '#22c55e' : 'var(--color-text-secondary)',
-          }}
-        >
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-          {copied ? '已复制' : '复制链接'}
-        </button>
-      </div>
-      {serverError && <p className="mb-2 text-xs text-red-400">服务状态获取失败：{serverError}</p>}
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        当前为 Web 控制台模式。服务由 Hermit 后端托管，不能在浏览器内启动或关闭。
-      </p>
+          <div
+            className="size-2 shrink-0 rounded-full"
+            style={{ backgroundColor: serverStatus.running ? '#22c55e' : '#f59e0b' }}
+          />
+          <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {serverStatus.running ? 'Web 服务运行中' : 'Web 服务状态未知'}
+          </span>
+          <code
+            className="rounded px-1.5 py-0.5 font-mono text-xs"
+            style={{
+              backgroundColor: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            {serverLoading ? '检查中...' : serverUrl}
+          </code>
+          <button
+            onClick={handleCopyUrl}
+            className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: copied ? '#22c55e' : 'var(--color-text-secondary)',
+            }}
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+            {copied ? '已复制' : '复制链接'}
+          </button>
+        </div>
+        {serverError && (
+          <p className="px-3 pb-2 text-xs text-red-400">服务状态获取失败：{serverError}</p>
+        )}
+        <p className="px-3 pb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          当前为 Web Admin Loop 模式。服务由 Hermit 后端托管，不能在浏览器内启动或关闭。
+        </p>
+      </SettingsSectionCard>
 
       {/* Runtime Settings */}
-      <SettingsSectionHeader title="运行设置" />
-      {ccSettingsLoading ? (
-        <div className="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
-          <Loader2 className="size-3.5 animate-spin" />
-          正在加载...
-        </div>
-      ) : (
-        <>
-          <SettingRow label="附件回传" description="控制是否将对话中的附件文件回传给 Agent">
-            <SettingsSelect
-              value={ccSettings.attachment_send}
-              options={CC_ATTACHMENT_OPTIONS}
-              onChange={(v) => void autoSaveCcSetting('attachment_send', v)}
-            />
-          </SettingRow>
-          <SettingRow label="空闲超时" description="Agent 空闲多久后自动断开（分钟）">
-            <CompactNum
-              value={ccSettings.idle_timeout_mins}
-              onChange={(v) => patchCcSettings({ idle_timeout_mins: v })}
-              onSave={() =>
-                void autoSaveCcSetting('idle_timeout_mins', ccSettings.idle_timeout_mins)
-              }
-              min={0}
-            />
-          </SettingRow>
-          <SettingRow label="日志等级" description="运行时日志输出级别">
-            <SettingsSelect
-              value={ccSettings.log_level}
-              options={CC_LOG_LEVEL_OPTIONS}
-              onChange={(v) => void autoSaveCcSetting('log_level', v)}
-            />
-          </SettingRow>
-          <SettingRow label="显示 Thinking 消息" description="在对话中展示 Agent 的思考过程">
-            <SettingsToggle
-              enabled={ccSettings.thinking_messages}
-              onChange={(v) => void autoSaveCcSetting('thinking_messages', v)}
-            />
-          </SettingRow>
-          <SettingRow label="显示工具进度" description="在对话中展示 Agent 调用工具的详细信息">
-            <SettingsToggle
-              enabled={ccSettings.tool_messages}
-              onChange={(v) => void autoSaveCcSetting('tool_messages', v)}
-            />
-          </SettingRow>
-          <SettingRow label="启用流式预览" description="实时预览 Agent 的流式输出内容">
-            <SettingsToggle
-              enabled={ccSettings.stream_preview_enabled}
-              onChange={(v) => void autoSaveCcSetting('stream_preview_enabled', v)}
-            />
-          </SettingRow>
-          <SettingRow label="Thinking 最大长度" description="截断展示的 Thinking 消息最大字符数">
-            <CompactNum
-              value={ccSettings.thinking_max_len}
-              onChange={(v) => patchCcSettings({ thinking_max_len: v })}
-              onSave={() => void autoSaveCcSetting('thinking_max_len', ccSettings.thinking_max_len)}
-              min={0}
-            />
-          </SettingRow>
-          <SettingRow label="工具消息最大长度" description="截断展示的工具消息最大字符数">
-            <CompactNum
-              value={ccSettings.tool_max_len}
-              onChange={(v) => patchCcSettings({ tool_max_len: v })}
-              onSave={() => void autoSaveCcSetting('tool_max_len', ccSettings.tool_max_len)}
-              min={0}
-            />
-          </SettingRow>
-          <SettingRow label="预览间隔" description="流式预览刷新间隔（毫秒）">
-            <CompactNum
-              value={ccSettings.stream_preview_interval_ms}
-              onChange={(v) => patchCcSettings({ stream_preview_interval_ms: v })}
-              onSave={() =>
-                void autoSaveCcSetting(
-                  'stream_preview_interval_ms',
-                  ccSettings.stream_preview_interval_ms
-                )
-              }
-              min={100}
-            />
-          </SettingRow>
-          <SettingRow label="频率限制" description="限制时间窗口内发送的最大消息数">
-            <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+      <SettingsSectionCard
+        title="运行设置"
+        description="控制 Claude Code 运行时输出、限流和会话超时策略。"
+        icon={<Gauge className="size-3.5" />}
+      >
+        {ccSettingsLoading ? (
+          <div className="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
+            <Loader2 className="size-3.5 animate-spin" />
+            正在加载...
+          </div>
+        ) : (
+          <>
+            <SettingRow label="附件回传" description="控制是否将对话中的附件文件回传给 Agent">
+              <SettingsSelect
+                value={ccSettings.attachment_send}
+                options={CC_ATTACHMENT_OPTIONS}
+                onChange={(v) => void autoSaveCcSetting('attachment_send', v)}
+              />
+            </SettingRow>
+            <SettingRow label="空闲超时" description="Agent 空闲多久后自动断开（分钟）">
               <CompactNum
-                value={ccSettings.rate_limit_max_messages}
-                onChange={(v) => patchCcSettings({ rate_limit_max_messages: v })}
-                onSave={() => void saveRateLimit()}
+                value={ccSettings.idle_timeout_mins}
+                onChange={(v) => patchCcSettings({ idle_timeout_mins: v })}
+                onSave={() =>
+                  void autoSaveCcSetting('idle_timeout_mins', ccSettings.idle_timeout_mins)
+                }
                 min={0}
-                className="w-20"
               />
-              <span>条 /</span>
+            </SettingRow>
+            <SettingRow label="日志等级" description="运行时日志输出级别">
+              <SettingsSelect
+                value={ccSettings.log_level}
+                options={CC_LOG_LEVEL_OPTIONS}
+                onChange={(v) => void autoSaveCcSetting('log_level', v)}
+              />
+            </SettingRow>
+            <SettingRow label="显示 Thinking 消息" description="在对话中展示 Agent 的思考过程">
+              <SettingsToggle
+                enabled={ccSettings.thinking_messages}
+                onChange={(v) => void autoSaveCcSetting('thinking_messages', v)}
+              />
+            </SettingRow>
+            <SettingRow label="显示工具进度" description="在对话中展示 Agent 调用工具的详细信息">
+              <SettingsToggle
+                enabled={ccSettings.tool_messages}
+                onChange={(v) => void autoSaveCcSetting('tool_messages', v)}
+              />
+            </SettingRow>
+            <SettingRow label="启用流式预览" description="实时预览 Agent 的流式输出内容">
+              <SettingsToggle
+                enabled={ccSettings.stream_preview_enabled}
+                onChange={(v) => void autoSaveCcSetting('stream_preview_enabled', v)}
+              />
+            </SettingRow>
+            <SettingRow label="Thinking 最大长度" description="截断展示的 Thinking 消息最大字符数">
               <CompactNum
-                value={ccSettings.rate_limit_window_secs}
-                onChange={(v) => patchCcSettings({ rate_limit_window_secs: v })}
-                onSave={() => void saveRateLimit()}
-                min={1}
-                className="w-20"
+                value={ccSettings.thinking_max_len}
+                onChange={(v) => patchCcSettings({ thinking_max_len: v })}
+                onSave={() =>
+                  void autoSaveCcSetting('thinking_max_len', ccSettings.thinking_max_len)
+                }
+                min={0}
               />
-              <span>秒</span>
-            </div>
-          </SettingRow>
-        </>
-      )}
+            </SettingRow>
+            <SettingRow label="工具消息最大长度" description="截断展示的工具消息最大字符数">
+              <CompactNum
+                value={ccSettings.tool_max_len}
+                onChange={(v) => patchCcSettings({ tool_max_len: v })}
+                onSave={() => void autoSaveCcSetting('tool_max_len', ccSettings.tool_max_len)}
+                min={0}
+              />
+            </SettingRow>
+            <SettingRow label="预览间隔" description="流式预览刷新间隔（毫秒）">
+              <CompactNum
+                value={ccSettings.stream_preview_interval_ms}
+                onChange={(v) => patchCcSettings({ stream_preview_interval_ms: v })}
+                onSave={() =>
+                  void autoSaveCcSetting(
+                    'stream_preview_interval_ms',
+                    ccSettings.stream_preview_interval_ms
+                  )
+                }
+                min={100}
+              />
+            </SettingRow>
+            <SettingRow label="频率限制" description="限制时间窗口内发送的最大消息数">
+              <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                <CompactNum
+                  value={ccSettings.rate_limit_max_messages}
+                  onChange={(v) => patchCcSettings({ rate_limit_max_messages: v })}
+                  onSave={() => void saveRateLimit()}
+                  min={0}
+                  className="w-20"
+                />
+                <span>条 /</span>
+                <CompactNum
+                  value={ccSettings.rate_limit_window_secs}
+                  onChange={(v) => patchCcSettings({ rate_limit_window_secs: v })}
+                  onSave={() => void saveRateLimit()}
+                  min={1}
+                  className="w-20"
+                />
+                <span>秒</span>
+              </div>
+            </SettingRow>
+          </>
+        )}
+      </SettingsSectionCard>
 
       {/* Privacy */}
       {import.meta.env.VITE_SENTRY_DSN && (
-        <>
-          <SettingsSectionHeader title="隐私" />
+        <SettingsSectionCard
+          title="隐私"
+          description="配置匿名崩溃与性能数据上报。"
+          icon={<Shield className="size-3.5" />}
+        >
           <SettingRow label="发送崩溃报告" description="发送匿名崩溃与性能数据，帮助改进应用">
             <SettingsToggle
               enabled={safeConfig.general.telemetryEnabled ?? true}
@@ -622,7 +652,7 @@ export const GeneralSection = ({
               disabled={saving}
             />
           </SettingRow>
-        </>
+        </SettingsSectionCard>
       )}
     </div>
   );

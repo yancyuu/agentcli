@@ -9,9 +9,8 @@
  *     final frame instead of dumping every intermediate line
  *   - optional `$ command` prompt line so a Bash call reads like a real terminal
  *
- * It is intentionally lightweight (no xterm.js / node-pty): the session view is a
- * read-only viewer of recorded output, so we only need faithful rendering, not a
- * live PTY.
+ * It is intentionally lightweight: the session view is a read-only viewer of
+ * recorded output, so we only need faithful rendering, not a live PTY.
  */
 
 import { useMemo, useState } from 'react';

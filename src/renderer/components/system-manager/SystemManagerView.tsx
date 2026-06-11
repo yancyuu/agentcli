@@ -1,10 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import '@xterm/xterm/css/xterm.css';
-
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { Button } from '@renderer/components/ui/button';
@@ -15,12 +10,13 @@ import type {
   SystemManagerStatus,
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
-import { Loader2, RefreshCw, TerminalSquare } from 'lucide-react';
+import { ExternalLink, Loader2, RefreshCw, TerminalSquare } from 'lucide-react';
 
 import { FolderBrowser } from './FolderBrowser';
 
 interface SystemManagerViewProps {
   isPaneFocused?: boolean;
+  isActive?: boolean;
 }
 
 function formatPathForTitle(pathValue: string): string {
@@ -36,14 +32,8 @@ function joinPath(basePath: string, childPath: string): string {
 
 export const SystemManagerView = ({
   isPaneFocused: _isPaneFocused = false,
+  isActive: _isActive = true,
 }: SystemManagerViewProps): React.JSX.Element => {
-  const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const ptyIdRef = useRef<string | null>(null);
-  const autoStartedRef = useRef(false);
-  const startClaudeRef = useRef<((workDirOverride?: string) => Promise<void>) | null>(null);
-
   const [status, setStatus] = useState<SystemManagerStatus | null>(null);
   const [config, setConfig] = useState<SystemManagerConfig | null>(null);
   const [workDirInput, setWorkDirInput] = useState('');
@@ -51,93 +41,8 @@ export const SystemManagerView = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetchTeams = useStore((state) => state.fetchTeams);
-
-  const writeTerminalLine = useCallback((line: string) => {
-    terminalRef.current?.writeln(`\x1b[90m${line}\x1b[0m`);
-  }, []);
-
-  const fitTerminal = useCallback(() => {
-    try {
-      fitAddonRef.current?.fit();
-      if (ptyIdRef.current && terminalRef.current) {
-        api.terminal.resize(ptyIdRef.current, terminalRef.current.cols, terminalRef.current.rows);
-      }
-    } catch {
-      // xterm fit can throw when the element is not measurable yet.
-    }
-  }, []);
-
-  useEffect(() => {
-    const host = terminalHostRef.current;
-    if (!host) return;
-
-    const term = new Terminal({
-      cursorBlink: true,
-      convertEol: true,
-      fontFamily: 'JetBrains Mono, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.28,
-      theme: {
-        background: 'var(--color-surface)',
-        foreground: 'var(--color-text)',
-        cursor: 'var(--color-text)',
-        selectionBackground: 'var(--color-border-emphasis)',
-        black: 'var(--color-surface-sidebar)',
-        red: '#f87171',
-        green: '#86efac',
-        yellow: '#fde68a',
-        blue: 'var(--color-accent)',
-        magenta: '#d8b4fe',
-        cyan: '#818cf8',
-        white: 'var(--color-text)',
-      },
-    });
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
-    term.open(host);
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
-    fitTerminal();
-    term.writeln('\x1b[90m# Hermit 控制台 · 本地 Claude Code PTY\x1b[0m');
-    term.writeln('\x1b[90m# 点击 Start Claude 等价于在当前目录运行 claude\x1b[0m');
-    term.writeln('');
-
-    const dataDispose = api.terminal.onData((_event, ptyId, data) => {
-      if (ptyId === ptyIdRef.current) term.write(data);
-    });
-    const exitDispose = api.terminal.onExit((_event, ptyId, exitCode) => {
-      if (ptyId === ptyIdRef.current) {
-        setRunning(false);
-        ptyIdRef.current = null;
-        term.writeln(`\r\n\x1b[90m[claude exited with code ${exitCode}]\x1b[0m`);
-      }
-    });
-    const inputDispose = term.onData((data) => {
-      if (ptyIdRef.current) api.terminal.write(ptyIdRef.current, data);
-    });
-    const resizeObserver = new ResizeObserver(() => fitTerminal());
-    resizeObserver.observe(host);
-
-    return () => {
-      dataDispose();
-      exitDispose();
-      inputDispose.dispose();
-      resizeObserver.disconnect();
-      if (ptyIdRef.current) {
-        void api.terminal.kill(ptyIdRef.current).catch(() => {
-          // Component is unmounting; there is no safe UI surface for this lifecycle error.
-        });
-      }
-      term.dispose();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-      ptyIdRef.current = null;
-    };
-  }, [fitTerminal]);
 
   const load = useCallback(async (): Promise<SystemManagerConfig | null> => {
     setLoading(true);
@@ -151,28 +56,37 @@ export const SystemManagerView = ({
       setConfig(nextConfig);
       setWorkDirInput(nextConfig.selectedWorkDir);
       const candidateFolders = [
+        joinPath(nextConfig.selectedWorkDir, '.claude/commands'),
         nextConfig.workflowFolder,
         joinPath(nextConfig.selectedWorkDir, 'workflows'),
       ].filter((folder): folder is string => Boolean(folder));
-      let loadedWorkflow = false;
+      const seenFolders = new Set<string>();
+      const seenPrompts = new Set<string>();
+      const nextPrompts: WorkflowPromptSummary[] = [];
+      const nextWarnings: string[] = [];
       for (const folder of candidateFolders) {
+        if (seenFolders.has(folder)) continue;
+        seenFolders.add(folder);
         try {
           const workflowResult = await api.systemManager.listWorkflowPrompts(folder);
           setConfig((current) =>
             current ? { ...current, workflowFolder: workflowResult.folder } : current
           );
-          setWorkflowPrompts(workflowResult.prompts);
-          setWarnings(workflowResult.warnings);
-          loadedWorkflow = true;
-          break;
+          for (const prompt of workflowResult.prompts) {
+            const basename = prompt.filename.replace(/\.[^.]+$/, '');
+            const key = prompt.commandName ?? basename;
+            if (seenPrompts.has(key) || seenPrompts.has(basename)) continue;
+            seenPrompts.add(key);
+            seenPrompts.add(basename);
+            nextPrompts.push(prompt);
+          }
+          nextWarnings.push(...workflowResult.warnings);
         } catch {
           // Common commands are optional; missing folders should not interrupt opening the console.
         }
       }
-      if (!loadedWorkflow) {
-        setWorkflowPrompts([]);
-        setWarnings([]);
-      }
+      setWorkflowPrompts(nextPrompts);
+      setWarnings(nextWarnings);
       return nextConfig;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -182,36 +96,15 @@ export const SystemManagerView = ({
     }
   }, []);
 
-  const stopClaude = useCallback(async (): Promise<boolean> => {
-    const ptyId = ptyIdRef.current;
-    if (!ptyId) {
-      setRunning(false);
-      return true;
-    }
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-    try {
-      await api.terminal.kill(ptyId);
-      if (ptyIdRef.current === ptyId) {
-        ptyIdRef.current = null;
-        setRunning(false);
-        writeTerminalLine('[stopped]');
-      }
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      writeTerminalLine(`[failed to stop claude] ${message}`);
-      return false;
-    }
-  }, [writeTerminalLine]);
-
-  const startClaude = useCallback(
-    async (workDirOverride?: string) => {
+  const openClaudeInSystemTerminal = useCallback(
+    async (workDirOverride?: string, args?: string[]) => {
       setStarting(true);
       setError(null);
       try {
-        const stopped = await stopClaude();
-        if (!stopped) return;
         const effectiveWorkDir = workDirOverride ?? workDirInput;
         const nextConfig = await api.systemManager.updateConfig({
           selectedWorkDir: effectiveWorkDir,
@@ -219,61 +112,47 @@ export const SystemManagerView = ({
         setConfig(nextConfig);
         setWorkDirInput(nextConfig.selectedWorkDir);
         void fetchTeams();
-        terminalRef.current?.clear();
-        writeTerminalLine(`# cd ${nextConfig.selectedWorkDir}`);
-        writeTerminalLine('$ claude');
-        const ptyId = await api.terminal.spawn({
+        await api.terminal.openExternal({
+          command: 'claude',
+          args,
           cwd: nextConfig.selectedWorkDir,
-          cols: terminalRef.current?.cols ?? 120,
-          rows: terminalRef.current?.rows ?? 34,
         });
-        ptyIdRef.current = ptyId;
-        setRunning(true);
-        terminalRef.current?.focus();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError(message);
-        writeTerminalLine(`[failed to start claude] ${message}`);
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         setStarting(false);
       }
     },
-    [fetchTeams, stopClaude, workDirInput, writeTerminalLine]
+    [fetchTeams, workDirInput]
   );
 
-  useEffect(() => {
-    startClaudeRef.current = startClaude;
-  }, [startClaude]);
-
-  useEffect(() => {
-    void load().then((nextConfig) => {
-      if (nextConfig && !autoStartedRef.current) {
-        autoStartedRef.current = true;
-        void startClaudeRef.current?.(nextConfig.selectedWorkDir);
-      }
-    });
-  }, [load]);
-
   const refreshConsole = useCallback(async () => {
-    // Capture user's current input before load() overwrites it with server config
-    const userPath = workDirInput;
-    await load();
-    await startClaude(userPath || undefined);
-  }, [load, startClaude, workDirInput]);
+    const nextConfig = await load();
+    const effectiveWorkDir = workDirInput || nextConfig?.selectedWorkDir;
+    if (effectiveWorkDir && effectiveWorkDir !== nextConfig?.selectedWorkDir) {
+      const updatedConfig = await api.systemManager.updateConfig({
+        selectedWorkDir: effectiveWorkDir,
+      });
+      setConfig(updatedConfig);
+      setWorkDirInput(updatedConfig.selectedWorkDir);
+      void fetchTeams();
+    }
+  }, [fetchTeams, load, workDirInput]);
 
   const runWorkflowPrompt = useCallback(
     async (prompt: WorkflowPromptSummary) => {
-      if (!config?.workflowFolder) return;
-      if (!ptyIdRef.current) {
-        await startClaude();
+      if (prompt.commandName) {
+        await openClaudeInSystemTerminal(undefined, [prompt.commandName]);
+        return;
       }
-      const ptyId = ptyIdRef.current;
-      if (!ptyId) return;
-      const result = await api.systemManager.readWorkflowPrompt(config.workflowFolder, prompt.id);
-      writeTerminalLine(`$ # workflow: ${prompt.label}`);
-      api.terminal.write(ptyId, `${result.content}\r`);
+      const folder = prompt.folder ?? config?.workflowFolder;
+      if (!folder) return;
+      const result = await api.systemManager.readWorkflowPrompt(folder, prompt.id);
+      const content = result.content.trim();
+      const args = content.startsWith('/') ? content.split(/\s+/) : ['-p', content];
+      await openClaudeInSystemTerminal(undefined, args);
     },
-    [config?.workflowFolder, startClaude, writeTerminalLine]
+    [config?.workflowFolder, openClaudeInSystemTerminal]
   );
 
   const titlePath = useMemo(
@@ -309,58 +188,115 @@ export const SystemManagerView = ({
             onChange={(newPath) => {
               setWorkDirInput(newPath);
               if (newPath && newPath !== workDirInput) {
-                void startClaude(newPath);
+                void api.systemManager
+                  .updateConfig({ selectedWorkDir: newPath })
+                  .then((nextConfig) => {
+                    setConfig(nextConfig);
+                    setWorkDirInput(nextConfig.selectedWorkDir);
+                    void fetchTeams();
+                    void load();
+                  })
+                  .catch((err: unknown) =>
+                    setError(err instanceof Error ? err.message : String(err))
+                  );
               }
             }}
           />
           <div className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
-            {running ? 'claude running' : (status?.localStatus ?? 'starting')}
+            {status?.localStatus ?? 'ready'}
           </div>
           <Button
             size="sm"
             variant="outline"
             className="h-8 shrink-0 border-[var(--color-border)]"
             disabled={starting}
+            onClick={() => void openClaudeInSystemTerminal()}
+          >
+            {starting ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+            打开终端
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0 border-[var(--color-border)]"
+            disabled={loading}
             onClick={() => void refreshConsole()}
           >
-            {starting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
             刷新
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 bg-[var(--color-surface)] p-2">
-          <div
-            ref={terminalHostRef}
-            className="size-full overflow-hidden rounded-lg bg-[var(--color-surface)]"
-          />
-        </div>
-
-        {(workflowPrompts.length || warnings.length || error || loading) && (
-          <div className="border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-            {workflowPrompts.length ? (
-              <div className="flex flex-wrap gap-2">
-                {workflowPrompts.map((prompt) => (
-                  <button
-                    key={prompt.id}
-                    type="button"
-                    className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
-                    disabled={starting}
-                    onClick={() => void runWorkflowPrompt(prompt)}
-                  >
-                    {prompt.label}
-                  </button>
-                ))}
+        <div className="min-h-0 flex-1 bg-[var(--color-surface)] p-4">
+          <div className="flex size-full flex-col justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+            <div className="space-y-4">
+              <div>
+                <div className="font-mono text-sm text-[var(--color-text)]">Loop Console</div>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
+                  Admin Loop 不再嵌入终端。选择工作区后，点击“打开终端”会在系统默认终端中运行 Claude
+                  Code；点击下面的 Loop workflow 会在同一个工作区打开终端并执行对应斜杠命令。
+                </p>
               </div>
-            ) : null}
-            {warnings.length ? (
-              <div className="mt-2 text-xs text-amber-300">{warnings.join('；')}</div>
-            ) : null}
-            {error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
-            {loading ? (
-              <div className="mt-2 text-xs text-[var(--color-text-muted)]">加载控制台配置中...</div>
-            ) : null}
+              <div className="grid gap-2 text-xs text-[var(--color-text-muted)] sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  Automations：让循环有心跳
+                </div>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  Worktrees：并行不互相踩文件
+                </div>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  Skills / Plugins：把意图和工具外置
+                </div>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  Subagents：实现和验证分离
+                </div>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  State：状态落盘，循环可恢复
+                </div>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
+                  Human review：工程师保留判断力
+                </div>
+              </div>
+            </div>
+
+            {(workflowPrompts.length || warnings.length || error || loading) && (
+              <div className="mt-6 border-t border-[var(--color-border)] pt-4">
+                {workflowPrompts.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {workflowPrompts.map((prompt) => (
+                      <button
+                        key={prompt.id}
+                        type="button"
+                        className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)] disabled:opacity-60"
+                        title={prompt.description}
+                        disabled={starting}
+                        aria-label={`运行 ${prompt.label}${prompt.commandName ? ` (${prompt.commandName})` : ''}`}
+                        onClick={() => void runWorkflowPrompt(prompt)}
+                      >
+                        <span>{prompt.label}</span>
+                        {prompt.safety ? (
+                          <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">
+                            {' '}
+                            {prompt.safety}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {warnings.length ? (
+                  <div className="mt-2 text-xs text-amber-300">{warnings.join('；')}</div>
+                ) : null}
+                {error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
+                {loading ? (
+                  <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    加载 Admin Loop 配置中...
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

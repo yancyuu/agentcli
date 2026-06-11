@@ -38,6 +38,7 @@ describe('createTeam', () => {
     expect(manifest.schemaVersion).toBe(2);
     expect(manifest.bindProject).toBe('frontend-team');
     expect(manifest.harness).toBe('claudecode');
+    expect(manifest.workDir).toBe('/tmp/frontend');
     expect(manifest.collaboration).toBe(true);
 
     const teamJsonPath = path.join(tmpDir, 'teams', slug, 'team.json');
@@ -73,6 +74,42 @@ describe('createTeam', () => {
     expect(s2).toBe('alpha-2');
   });
 
+  it('preserves Chinese displayName while using ASCII bindProject as slug', async () => {
+    const { slug, manifest } = await svc.createTeam({
+      displayName: '产品经理团队',
+      bindProject: 'team-abcd',
+      harness: 'claudecode',
+      workDir: '/tmp/pm',
+    });
+
+    expect(slug).toBe('team-abcd');
+    expect(manifest.displayName).toBe('产品经理团队');
+    expect(manifest.bindProject).toBe('team-abcd');
+    expect(fs.existsSync(path.join(tmpDir, 'teams', 'team'))).toBe(false);
+  });
+
+  it('rejects invalid bindProject before creating a fallback team directory', async () => {
+    await expect(
+      svc.createTeam({
+        displayName: '产品经理团队',
+        bindProject: '产品经理团队',
+        harness: 'claudecode',
+        workDir: '/tmp/pm',
+      })
+    ).rejects.toThrow(/bindProject/);
+
+    await expect(
+      svc.createTeam({
+        displayName: 'Bad Project',
+        bindProject: 'Bad Project',
+        harness: 'claudecode',
+        workDir: '/tmp/bad',
+      })
+    ).rejects.toThrow(/bindProject/);
+
+    expect(fs.existsSync(path.join(tmpDir, 'teams', 'team'))).toBe(false);
+  });
+
   it('throws if displayName missing', async () => {
     await expect(svc.createTeam({ displayName: '', bindProject: 'p', harness: 'codex', workDir: '/tmp' }))
       .rejects.toThrow('displayName is required');
@@ -96,6 +133,33 @@ describe('listTeams / readTeamManifest', () => {
 
   it('throws for non-existent team', async () => {
     await expect(svc.readTeamManifest('no-such-team')).rejects.toThrow();
+  });
+
+
+  it('resolves legacy slug by bindProject', async () => {
+    const root = path.join(tmpDir, 'teams', 'team');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'team.json'),
+      JSON.stringify(
+        {
+          schemaVersion: 2,
+          slug: 'team',
+          displayName: '产品经理团队',
+          bindProject: 'pm-team-1234',
+          harness: 'claudecode',
+          workDir: '/tmp/pm',
+          collaboration: true,
+          rootPath: root,
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+
+    expect((await svc.readTeamManifest('team')).bindProject).toBe('pm-team-1234');
+    expect((await svc.readTeamManifest('pm-team-1234')).slug).toBe('team');
   });
 });
 
@@ -129,6 +193,32 @@ describe('deleteTeam', () => {
     const { slug, manifest } = await svc.createTeam({ displayName: 'del2', bindProject: 'p', harness: 'claudecode', workDir: '/tmp/d2' });
     await svc.deleteTeam(slug, { deleteFiles: true });
     expect(fs.existsSync(manifest.rootPath)).toBe(false);
+  });
+
+  it('deletes legacy local directory when called with bindProject', async () => {
+    const root = path.join(tmpDir, 'teams', 'team');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'team.json'),
+      JSON.stringify(
+        {
+          schemaVersion: 2,
+          slug: 'team',
+          displayName: '产品经理团队',
+          bindProject: 'pm-team-1234',
+          harness: 'claudecode',
+          workDir: '/tmp/pm',
+          collaboration: true,
+          rootPath: root,
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+
+    await svc.deleteTeam('pm-team-1234', { deleteFiles: true });
+    expect(fs.existsSync(root)).toBe(false);
   });
 });
 
@@ -184,6 +274,110 @@ describe('tasks CRUD', () => {
 
   it('createTask throws if title missing', async () => {
     await expect(svc.createTask(teamSlug, { title: '' })).rejects.toThrow('title is required');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('messages', () => {
+  it('resolves bindProject to the storage slug when appending and reading messages', async () => {
+    const root = path.join(tmpDir, 'teams', 'team');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'team.json'),
+      JSON.stringify(
+        {
+          schemaVersion: 2,
+          slug: 'team',
+          displayName: '产品经理团队',
+          bindProject: 'pm-team-1234',
+          harness: 'claudecode',
+          workDir: '/tmp/pm',
+          collaboration: true,
+          rootPath: root,
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+
+    await svc.appendMessage('pm-team-1234', {
+      from: 'user',
+      content: 'hello from bound project',
+    });
+
+    expect(fs.existsSync(path.join(tmpDir, 'teams', 'pm-team-1234'))).toBe(false);
+    const messages = await svc.readMessages('pm-team-1234');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('hello from bound project');
+  });
+
+  it('routes raw external platform session keys via allow lists instead of creating feishu team dirs', async () => {
+    const { slug } = await svc.createTeam({
+      displayName: 'hermit开发',
+      bindProject: 'hermit-dev',
+      harness: 'claudecode',
+      workDir: '/tmp/hermit',
+    });
+    await svc.updateTeam(slug, {
+      platformAllowFrom: { feishu: 'ou_user' },
+      platformAllowChat: { feishu: 'chat_A' },
+    });
+
+    await svc.appendMessage('feishu:chat_A:ou_user', {
+      from: 'agent',
+      content: 'routed from feishu',
+      meta: { sessionKey: 'feishu:chat_A:ou_user' },
+    });
+
+    expect(fs.existsSync(path.join(tmpDir, 'teams', 'feishu:chat_A:ou_user'))).toBe(false);
+    const messages = await svc.readMessages(slug);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('routed from feishu');
+  });
+
+  it('refuses to create message storage for unmapped raw external platform session keys', async () => {
+    await expect(
+      svc.appendMessage('feishu:chat_A:ou_user', {
+        from: 'agent',
+        content: 'should not create a feishu team directory',
+      })
+    ).rejects.toThrow(/外部平台 session_key/);
+
+    expect(fs.existsSync(path.join(tmpDir, 'teams', 'feishu:chat_A:ou_user'))).toBe(false);
+    await expect(svc.readMessages('feishu:chat_A:ou_user')).resolves.toEqual([]);
+  });
+
+  it('includes legacy feishu:* message directories that now map to a Hermit team', async () => {
+    const { slug } = await svc.createTeam({
+      displayName: 'hermit开发',
+      bindProject: 'hermit-dev',
+      harness: 'claudecode',
+      workDir: '/tmp/hermit',
+    });
+    await svc.updateTeam(slug, {
+      platformAllowFrom: { feishu: '*' },
+      platformAllowChat: { feishu: '*' },
+    });
+    await svc.appendMessage(slug, { from: 'user', content: 'current message' });
+
+    const legacyRoot = path.join(tmpDir, 'teams', 'feishu:chat_A:ou_user', 'messages');
+    fs.mkdirSync(legacyRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyRoot, 'group.jsonl'),
+      JSON.stringify({
+        id: 'legacy-1',
+        ts: '2026-01-01T00:00:00.000Z',
+        from: 'feishu:chat_A:ou_user',
+        to: 'user',
+        role: 'agent',
+        content: 'legacy message',
+        meta: { sessionKey: 'feishu:chat_A:ou_user' },
+      }) + '\n'
+    );
+
+    const messages = await svc.readMessages(slug);
+    expect(messages.map((message) => message.content)).toEqual(['legacy message', 'current message']);
   });
 });
 

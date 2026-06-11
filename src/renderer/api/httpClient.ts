@@ -21,6 +21,8 @@ import type {
   BoardTaskLogStreamSummary,
   CcSession,
   CcSessionDetail,
+  LoopSessionRequest,
+  LoopSessionResponse,
   ClaudeMdFileInfo,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
@@ -40,6 +42,7 @@ import type {
   HttpServerAPI,
   HttpServerStatus,
   KanbanColumnId,
+  LoopAssetsSnapshot,
   MachineProfile,
   MachineRuntimeProcess,
   MemberFullStats,
@@ -535,11 +538,11 @@ export class HttpAPIClient implements ElectronAPI {
         work_dir?: string;
         agent_type?: string;
       }
-    ): Promise<{ message: string; restart_required: boolean }> => {
-      const res = await this.post<{
+    ): Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }> => {
+      const res = await this.postLong<{
         ok: boolean;
-        data: { message: string; restart_required: boolean };
-      }>(`/api/projects/${encodeURIComponent(projectName)}/add-platform`, body);
+        data: { message: string; restart_required: boolean; restart_handled?: boolean };
+      }>(`/api/projects/${encodeURIComponent(projectName)}/add-platform`, body, 120_000);
       return res.data;
     },
   };
@@ -1098,6 +1101,20 @@ export class HttpAPIClient implements ElectronAPI {
       this.post<SystemManagerSummary>('/api/system-manager/ensure'),
     getData: async (teamName: string): Promise<TeamViewSnapshot> =>
       this.get<TeamViewSnapshot>(`/api/teams/${encodeURIComponent(teamName)}/data`, 30_000),
+    getLoopAssets: async (teamName: string): Promise<LoopAssetsSnapshot> =>
+      this.get<LoopAssetsSnapshot>(
+        `/api/teams/${encodeURIComponent(teamName)}/loop-assets`,
+        30_000
+      ),
+    createLoopSession: async (
+      teamName: string,
+      request: LoopSessionRequest
+    ): Promise<LoopSessionResponse> =>
+      this.postLong<LoopSessionResponse>(
+        `/api/teams/${encodeURIComponent(teamName)}/loop-session`,
+        request,
+        30_000
+      ),
     getTaskChangePresence: async (): Promise<
       Record<string, 'has_changes' | 'no_changes' | 'unknown'>
     > => {
@@ -1395,7 +1412,15 @@ export class HttpAPIClient implements ElectronAPI {
       teamName: string,
       config: TeamUpdateConfigRequest
     ): Promise<TeamConfig> => {
-      return this.put(`/api/teams/${encodeURIComponent(teamName)}/config`, config);
+      const result = await this.put<TeamConfig>(
+        `/api/teams/${encodeURIComponent(teamName)}/config`,
+        config,
+        120_000
+      );
+      if (result.ccSyncError) {
+        throw new Error(`配置已保存到本地，但同步到运行时失败：${result.ccSyncError}`);
+      }
+      return result;
     },
     addTaskComment: async (
       teamName: string,
@@ -2307,44 +2332,22 @@ export class HttpAPIClient implements ElectronAPI {
     getConfig: () => this.get('/api/system-manager/config'),
     updateConfig: (patch) => this.put('/api/system-manager/config', patch),
     listWorkflowPrompts: (folder) => this.post('/api/system-manager/workflows/list', { folder }),
-    readWorkflowPrompt: (_folder, id) => this.post('/api/system-manager/workflows/read', { id }),
+    readWorkflowPrompt: (folder, id) =>
+      this.post('/api/system-manager/workflows/read', { folder, id }),
   };
 
   // ---------------------------------------------------------------------------
-  // Terminal (HTTP/SSE-backed browser mode)
+  // Terminal (system/default terminal)
   // ---------------------------------------------------------------------------
 
   terminal: TerminalAPI = {
-    spawn: async (options = {}): Promise<string> => {
-      const result = await this.post<{ ptyId: string }>('/api/terminal/spawn', options);
-      return result.ptyId;
-    },
-    write: (ptyId: string, data: string): void => {
-      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/write`, { data });
-    },
-    resize: (ptyId: string, cols: number, rows: number): void => {
-      void this.post(`/api/terminal/${encodeURIComponent(ptyId)}/resize`, { cols, rows });
-    },
-    kill: async (ptyId: string): Promise<void> => {
-      await this.del(`/api/terminal/${encodeURIComponent(ptyId)}`);
-    },
-    openExternal: async (options: { command: string; args?: string[]; cwd?: string }): Promise<void> => {
+    openExternal: async (options: {
+      command: string;
+      args?: string[];
+      cwd?: string;
+    }): Promise<void> => {
       await this.post('/api/terminal/open-external', options);
     },
-    onData: (callback): (() => void) =>
-      this.addEventListener('terminal:data', (data: unknown) => {
-        const event = data as { ptyId?: string; data?: string };
-        if (event.ptyId && typeof event.data === 'string') {
-          callback(null, event.ptyId, event.data);
-        }
-      }),
-    onExit: (callback): (() => void) =>
-      this.addEventListener('terminal:exit', (data: unknown) => {
-        const event = data as { ptyId?: string; exitCode?: number };
-        if (event.ptyId && typeof event.exitCode === 'number') {
-          callback(null, event.ptyId, event.exitCode);
-        }
-      }),
   };
 
   // ---------------------------------------------------------------------------

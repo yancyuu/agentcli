@@ -210,7 +210,7 @@ export const AdvancedCliSection: React.FC<AdvancedCliSectionProps> = ({
               进程内子 agent
             </div>
             <p className="text-[11px] leading-relaxed text-text-muted">
-              成员统一在负责人会话内启动，不再依赖 tmux。成员仍会按顺序逐个启动。
+              成员统一在 Loop Lead 会话内启动，不再依赖 tmux。成员仍会按顺序逐个启动。
             </p>
           </div>
 

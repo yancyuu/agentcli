@@ -214,7 +214,7 @@ export const MemberDraftRow = ({
   const modelButtonAriaLabel = `${getTeamProviderLabel(effectiveProviderId)} 提供商，${modelButtonLabel}`;
   const canOpenLockedModelPanel = lockProviderModel && !isRemoved && Boolean(lockedModelAction);
   const modelTooltipText = forceInheritedModelSettings
-    ? '同步开启时，提供商、模型和推理强度会继承团队负责人设置。'
+    ? '同步开启时，提供商、模型和推理强度会继承 Loop Lead 设置。'
     : lockProviderModel
       ? (lockedModelAction?.description ?? modelLockReason)
       : undefined;

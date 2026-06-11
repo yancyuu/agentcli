@@ -24,6 +24,11 @@
   --color-text-secondary: #7a8190;
   --color-text-muted: #4f5564;
   --color-accent: #4ade80;
+  --color-accent-rgb: 74, 222, 128;
+  --color-accent-soft: rgba(74, 222, 128, 0.08);
+  --color-accent-muted: rgba(74, 222, 128, 0.14);
+  --color-accent-border: rgba(74, 222, 128, 0.32);
+  --color-accent-glow: rgba(74, 222, 128, 0.24);
   /* Accent — phosphor green */
   /* Scrollbar colors */
   --scrollbar-thumb: rgba(74, 222, 128, 0.12);
@@ -473,6 +478,11 @@
   --color-text-muted: #6d6b65;
   /* Warm muted text */
   --color-accent: #4f46e5;
+  --color-accent-rgb: 79, 70, 229;
+  --color-accent-soft: rgba(79, 70, 229, 0.08);
+  --color-accent-muted: rgba(79, 70, 229, 0.14);
+  --color-accent-border: rgba(79, 70, 229, 0.32);
+  --color-accent-glow: rgba(79, 70, 229, 0.22);
   /* Accent — indigo-600, visible on light surfaces */
   /* Assessment severity colors - darker for light backgrounds */
   --assess-good: #16a34a;
@@ -797,8 +807,15 @@ body {
   height: 100%;
   overflow: hidden;
   font-family:
-    'Agave', 'JetBrains Mono', 'Menlo', 'Monaco', 'Consolas',
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    'Agave',
+    'JetBrains Mono',
+    'Menlo',
+    'Monaco',
+    'Consolas',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-surface);

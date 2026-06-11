@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 
 import { useStore } from '@renderer/store';
-import { Loader2 } from 'lucide-react';
+import { Loader2, SlidersHorizontal } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
@@ -100,28 +100,39 @@ export const SettingsView = (): React.JSX.Element | null => {
 
   return (
     <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--color-surface)' }}>
-      {/* Clean container */}
+      {/* Control-console settings shell */}
       <div
-        className="mx-auto flex min-h-full max-w-3xl flex-col"
+        className="mx-auto flex min-h-full max-w-4xl flex-col px-6 py-6"
         style={{
           backgroundColor: 'var(--color-surface)',
         }}
       >
-        {/* Tabs area */}
         <div
-          className="border-b"
-          style={{
-            borderColor: 'var(--color-border-subtle)',
-          }}
+          className="bg-[var(--color-surface-raised)]/60 mb-5 overflow-hidden rounded-2xl border shadow-sm shadow-black/10"
+          style={{ borderColor: 'var(--color-border-subtle)' }}
         >
-          <SettingsTabs activeSection={activeSection} onSectionChange={setActiveSection} />
-          {error && (
-            <div className="px-4 pb-2 text-[10px] text-red-400">{error}</div>
-          )}
+          <div className="pointer-events-none h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
+          <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="shadow-[var(--color-accent-glow)]/20 flex size-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-accent-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] shadow-sm">
+                <SlidersHorizontal className="size-4" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-[var(--color-text)]">
+                  设置 Admin Loop
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                  配置 Hermit 运行时、外观、数字员工渠道和本地控制行为。
+                </p>
+              </div>
+            </div>
+            <SettingsTabs activeSection={activeSection} onSectionChange={setActiveSection} />
+          </div>
+          {error && <div className="px-4 pb-3 text-[10px] text-red-400">{error}</div>}
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto duration-200 animate-in fade-in slide-in-from-bottom-1">
           {activeSection === 'general' && (
             <GeneralSection
               safeConfig={safeConfig}

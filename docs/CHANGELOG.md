@@ -1,10 +1,26 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
-The format is based on Keep a Changelog and this project follows Semantic Versioning.
+本文件记录 openHermit 的用户可见变化。项目遵循 Semantic Versioning。
 
 ## [Unreleased]
+
+### Changed
+
+- 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/openhermit` v1.6.42 包事实。
+- 统一 README、文档索引、团队架构、跨团队协作和发布指南中的 Loop Engineering 叙述。
+- 明确 cc-connect Bridge 边界：Hermit 负责团队路由、渠道绑定、白名单和审计；平台 Bot 适配由 cc-connect 承载。
+- 明确团队工作区由 team、task、message 和 project workspace 组成，并记录 worktree 隔离是当前并行协作能力。
+- 明确跨团队协作当前是 Redis-backed dispatch，完整 offer / bid / lease / event Task Bus 是目标模型。
+- 更新 Feature Architecture Standard，使新功能默认面向 Fastify/Vite/Web 工作台，而不是 Electron 桌面假设。
+- 更新 Release Guide，聚焦 npm CLI package、GitHub Release，以及当前 Docker/GHCR workflow 对 `docker/Dockerfile` 的前置要求。
+
+### Added
+
+- 新增 `docs/README.md` 文档索引，集中列出当前产品事实、主要文档和写作边界。
+
+### Removed
+
+- 从当前能力文档中移除 Electron 桌面打包和内嵌 PTY 终端表述；这些只作为历史说明保留。
 
 ## [1.0.0] - 2026-03-19
 

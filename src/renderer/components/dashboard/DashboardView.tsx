@@ -45,10 +45,10 @@ export const DashboardView = (): React.JSX.Element => {
               一人公司优先
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-text">
-              Hermit：一人公司的 AI 团队控制台
+              Hermit：一人公司的 Loop Engineering 工作台
             </h1>
             <p className="mt-2 text-sm text-text-secondary">
-              几乎覆盖所有主流 Harness，把团队编排、消息协作、任务推进和运行状态放在同一个工作台。
+              几乎覆盖所有主流 Harness，把循环编排、指令协作、任务推进和运行状态放在同一个工作台。
             </p>
           </div>
           <div className="grid gap-4 px-6 py-5 md:grid-cols-3">
@@ -57,7 +57,7 @@ export const DashboardView = (): React.JSX.Element => {
                 <Workflow className="size-3.5" />
                 Harness 覆盖
               </div>
-              <p className="text-xs text-text-muted">几乎所有主流运行时都能接入统一团队控制台。</p>
+              <p className="text-xs text-text-muted">几乎所有主流运行时都能接入统一团队工作台。</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {HIGHLIGHT_HARNESSES.map((harness) => (
                   <span
@@ -75,7 +75,7 @@ export const DashboardView = (): React.JSX.Element => {
                 会话洞察
               </div>
               <p className="text-xs text-text-muted">
-                汇总本地会话、任务、消息和 Token 使用情况，帮助你判断团队执行状态。
+                汇总本地会话、Loop 任务、指令事件和 Token 使用情况，帮助你判断循环执行状态。
               </p>
               <div className="mt-3 rounded-md border border-border bg-surface-overlay px-2.5 py-2 text-[11px] text-text-muted">
                 会话记录 → 使用统计 → 身份识别 → 导出复盘

@@ -96,7 +96,7 @@ export const MemberStatsTab = ({
     );
   }
 
-  const totalTokens = stats.inputTokens + stats.outputTokens;
+  const totalTokens = stats.totalTokens;
   const totalToolCalls = Object.values(stats.toolUsage).reduce((sum, c) => sum + c, 0);
 
   return (

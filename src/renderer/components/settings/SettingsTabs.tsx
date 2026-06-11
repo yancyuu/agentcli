@@ -59,8 +59,14 @@ export const SettingsTabs = ({
 
   return (
     <TooltipProvider>
-      <div className="flex items-center" style={{ backgroundColor: 'var(--color-surface-raised)' }}>
-        {visibleTabs.map((tab, index) => {
+      <div
+        className="inline-flex items-center gap-1 rounded-xl border p-1 shadow-inner shadow-black/10"
+        style={{
+          backgroundColor: 'var(--color-surface-raised)',
+          borderColor: 'var(--color-border-subtle)',
+        }}
+      >
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeSection === tab.id;
 
@@ -68,33 +74,30 @@ export const SettingsTabs = ({
             <button
               key={tab.id}
               onClick={() => onSectionChange(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs transition-colors ${
+              className={`group relative flex h-8 w-[112px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs transition-all duration-200 ${
                 isActive
-                  ? 'font-medium'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                  ? 'shadow-[var(--color-accent-glow)]/20 font-medium text-[var(--color-accent)] shadow-sm'
+                  : 'text-[var(--color-text-muted)] hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-text-secondary)]'
               }`}
-              style={{
-                borderLeft: index > 0 ? '1px solid var(--color-border-subtle)' : undefined,
-                color: isActive ? '#818cf8' : undefined,
-              }}
+              style={
+                isActive
+                  ? {
+                      backgroundColor: 'var(--color-accent-muted)',
+                      border: '1px solid var(--color-accent-border)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
             >
-              <Icon className={`size-3 ${isActive ? 'opacity-90' : 'opacity-40'}`} />
+              <Icon
+                className={`size-3 transition-opacity ${isActive ? 'opacity-95' : 'opacity-45 group-hover:opacity-70'}`}
+              />
               {tab.label}
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`What is ${tab.label}?`}
-                    onClick={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.stopPropagation();
-                      }
-                    }}
-                    className="ml-0.5 inline-flex items-center justify-center rounded-full text-[var(--color-text-muted)] opacity-0 transition-opacity hover:opacity-100"
+                    aria-hidden="true"
+                    className="ml-0.5 inline-flex items-center justify-center rounded-full text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-accent)] group-hover:opacity-100 group-focus-visible:opacity-100"
                   >
                     <Info className="size-2.5" />
                   </span>

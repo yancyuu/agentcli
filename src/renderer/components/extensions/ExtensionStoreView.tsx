@@ -104,9 +104,9 @@ function isCodexSnapshotPending(
 const EXTENSION_SUB_TABS = [
   {
     value: 'plugins' as const,
-    label: '插件',
+    label: 'Loop 扩展',
     icon: Puzzle,
-    description: 'Claude Code 私有扩展，增强运行时的能力与集成。',
+    description: '为 Agent loop 注入工具、Skills、MCP 和连接器。',
   },
 ] as const;
 
@@ -241,13 +241,36 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         <div className="bg-surface/70 mx-4 mt-3 flex items-start gap-3 rounded-md border border-border px-4 py-3">
           <Info className="mt-0.5 size-4 shrink-0 text-text-secondary" />
           <div>
-            <p className="text-sm font-medium text-text">正在检查扩展运行时可用性</p>
+            <p className="text-sm font-medium text-text">正在检查 Loop 扩展运行时可用性</p>
             <p className="mt-0.5 text-xs text-text-muted">
-              扩展需要配置好的运行时来管理插件和提供商连接。
+              Loop 扩展需要配置好的运行时来管理工具、Skills 和提供商连接。
             </p>
           </div>
         </div>
       );
+    }
+
+    if (shouldShowMultimodelProviderCards) {
+      const loadingProviders = visibleProviders.filter(
+        (provider) =>
+          isProviderCapabilityCardLoading(
+            provider,
+            Boolean(cliProviderStatusLoading?.[provider.providerId])
+          ) || isCodexSnapshotPending(provider, codexSnapshotPending)
+      );
+      if (loadingProviders.length > 0) {
+        return (
+          <div className="mx-4 mt-3 grid gap-2 md:grid-cols-2">
+            {loadingProviders.map((provider) => (
+              <ProviderCapabilityCardSkeleton
+                key={provider.providerId}
+                providerId={provider.providerId}
+                displayName={provider.displayName}
+              />
+            ))}
+          </div>
+        );
+      }
     }
 
     if (!effectiveCliStatus.installed) {

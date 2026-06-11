@@ -11,7 +11,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import * as path from 'node:path';
 
-import { getProjectsBasePath, encodePath } from '@main/utils/pathDecoder';
+import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +28,7 @@ export interface LocalSessionSummary {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  totalTokens: number;
   model: string;
   active: boolean;
   live: boolean;
@@ -58,6 +59,9 @@ export interface LocalSessionDetail {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +190,11 @@ async function* walkJsonl(dir: string): AsyncGenerator<string> {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walkJsonl(full);
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl') && !entry.name.startsWith('agent_')) {
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith('.jsonl') &&
+      !entry.name.startsWith('agent_')
+    ) {
       yield full;
     }
   }
@@ -251,6 +259,7 @@ async function scanSummaryLines(
     } else if (obj.type === 'user' || obj.type === 'assistant') {
       role = obj.type as string;
       content = obj.content;
+      usage = obj.usage as Record<string, unknown> | undefined;
       ts = obj.timestamp as string | undefined;
     }
 
@@ -297,16 +306,81 @@ async function scanSummaryLines(
 
 export class LocalSessionScanner {
   private summaryCache = new Map<string, SummaryCacheEntry>();
+  private sessionPathByWorkDirAndId = new Map<string, string>();
+
+  private sessionPathKey(workDir: string, sessionId: string): string {
+    return `${workDir}\0${sessionId}`;
+  }
 
   /**
-   * Resolve the JSONL directory for a given workDir.
-   * workDir is the absolute filesystem path (e.g., "/Users/name/project").
-   * The JSONL files live at ~/.claude/projects/{encoded-workDir}/
+   * Resolve possible JSONL directories for a given workDir.
+   * workDir is usually the absolute filesystem path (e.g., "/Users/name/project").
+   * The JSONL files live at ~/.claude/projects/{encoded-workDir}/, but Claude
+   * installations can use portable/legacy encodings, so reuse path candidates.
    */
-  private resolveJsonlDir(workDir: string): string {
+  private async resolveJsonlDirs(workDir: string): Promise<string[]> {
     const projectsBase = getProjectsBasePath();
-    const encoded = encodePath(workDir);
-    return path.join(projectsBase, encoded);
+    const candidateNames = getProjectDirNameCandidates(workDir).filter(
+      (candidate) => !path.isAbsolute(candidate)
+    );
+    const candidateDirs = Array.from(
+      new Set(candidateNames.map((candidate) => path.join(projectsBase, candidate)))
+    );
+
+    const existing: string[] = [];
+    for (const dir of candidateDirs) {
+      try {
+        if ((await stat(dir)).isDirectory()) existing.push(dir);
+      } catch {
+        // ignore missing candidate dirs
+      }
+    }
+
+    return existing.length > 0 ? existing : candidateDirs.slice(0, 1);
+  }
+
+  private async findSessionFile(
+    workDir: string,
+    sessionId: string
+  ): Promise<{ filePath: string; fileStat: Awaited<ReturnType<typeof stat>> } | null> {
+    const indexedPath = this.sessionPathByWorkDirAndId.get(this.sessionPathKey(workDir, sessionId));
+    if (indexedPath) {
+      try {
+        return { filePath: indexedPath, fileStat: await stat(indexedPath) };
+      } catch {
+        this.sessionPathByWorkDirAndId.delete(this.sessionPathKey(workDir, sessionId));
+      }
+    }
+
+    const jsonlDirs = await this.resolveJsonlDirs(workDir);
+    for (const jsonlDir of jsonlDirs) {
+      const directPath = path.join(jsonlDir, `${sessionId}.jsonl`);
+      try {
+        const fileStat = await stat(directPath);
+        this.sessionPathByWorkDirAndId.set(this.sessionPathKey(workDir, sessionId), directPath);
+        return { filePath: directPath, fileStat };
+      } catch {
+        // fall through to recursive lookup
+      }
+    }
+
+    for (const jsonlDir of jsonlDirs) {
+      for await (const candidatePath of walkJsonl(jsonlDir)) {
+        if (path.basename(candidatePath, '.jsonl') !== sessionId) continue;
+        try {
+          const fileStat = await stat(candidatePath);
+          this.sessionPathByWorkDirAndId.set(
+            this.sessionPathKey(workDir, sessionId),
+            candidatePath
+          );
+          return { filePath: candidatePath, fileStat };
+        } catch {
+          // stale file from the directory walk; keep searching
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -314,63 +388,72 @@ export class LocalSessionScanner {
    * Uses file stat caching to skip unchanged files on subsequent calls.
    */
   async scanSummaries(workDir: string, projectId: string): Promise<LocalSessionSummary[]> {
-    const jsonlDir = this.resolveJsonlDir(workDir);
+    const jsonlDirs = await this.resolveJsonlDirs(workDir);
     const summaries: LocalSessionSummary[] = [];
     const now = Date.now();
 
-    for await (const filePath of walkJsonl(jsonlDir)) {
-      let fileStat;
-      try {
-        fileStat = await stat(filePath);
-      } catch {
-        continue;
+    for (const jsonlDir of jsonlDirs) {
+      for await (const filePath of walkJsonl(jsonlDir)) {
+        let fileStat;
+        try {
+          fileStat = await stat(filePath);
+        } catch {
+          continue;
+        }
+
+        const sessionId = path.basename(filePath, '.jsonl');
+        this.sessionPathByWorkDirAndId.set(this.sessionPathKey(workDir, sessionId), filePath);
+
+        // Check cache
+        const cached = this.summaryCache.get(filePath);
+        if (cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs) {
+          summaries.push(cached.summary);
+          continue;
+        }
+
+        const partial = await scanSummaryLines(filePath, sessionId, projectId);
+        if (!partial) continue;
+
+        const mtimeMs = fileStat.mtimeMs;
+        const active = now - mtimeMs < ACTIVE_THRESHOLD_MS;
+        const live = active && partial.lastRole === 'assistant';
+
+        // For a more accurate messageCount and token totals, we need the full file.
+        // But the first SUMMARY_SCAN_LINES is a good approximation for the list view.
+        // We'll mark the count as approximate if we stopped early.
+        const summary: LocalSessionSummary = {
+          id: sessionId,
+          title: partial.title || sessionId,
+          projectId,
+          messageCount: partial.messageCount,
+          userMessageCount: partial.userMessageCount,
+          assistantMessageCount: partial.assistantMessageCount,
+          inputTokens: partial.inputTokens,
+          outputTokens: partial.outputTokens,
+          cacheReadTokens: partial.cacheReadTokens,
+          cacheCreationTokens: partial.cacheCreationTokens,
+          totalTokens:
+            partial.inputTokens +
+            partial.outputTokens +
+            partial.cacheReadTokens +
+            partial.cacheCreationTokens,
+          model: partial.model,
+          active,
+          live,
+          startTime: partial.startTime,
+          endTime: partial.endTime,
+          createdAt: fileStat.birthtime?.toISOString() ?? new Date(mtimeMs).toISOString(),
+          updatedAt: new Date(mtimeMs).toISOString(),
+        };
+
+        this.summaryCache.set(filePath, {
+          size: fileStat.size,
+          mtimeMs,
+          summary,
+        });
+
+        summaries.push(summary);
       }
-
-      // Check cache
-      const cached = this.summaryCache.get(filePath);
-      if (cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs) {
-        summaries.push(cached.summary);
-        continue;
-      }
-
-      const sessionId = path.basename(filePath, '.jsonl');
-      const partial = await scanSummaryLines(filePath, sessionId, projectId);
-      if (!partial) continue;
-
-      const mtimeMs = fileStat.mtimeMs;
-      const active = now - mtimeMs < ACTIVE_THRESHOLD_MS;
-      const live = active && partial.lastRole === 'assistant';
-
-      // For a more accurate messageCount and token totals, we need the full file.
-      // But the first SUMMARY_SCAN_LINES is a good approximation for the list view.
-      // We'll mark the count as approximate if we stopped early.
-      const summary: LocalSessionSummary = {
-        id: sessionId,
-        title: partial.title || sessionId,
-        projectId,
-        messageCount: partial.messageCount,
-        userMessageCount: partial.userMessageCount,
-        assistantMessageCount: partial.assistantMessageCount,
-        inputTokens: partial.inputTokens,
-        outputTokens: partial.outputTokens,
-        cacheReadTokens: partial.cacheReadTokens,
-        cacheCreationTokens: partial.cacheCreationTokens,
-        model: partial.model,
-        active,
-        live,
-        startTime: partial.startTime,
-        endTime: partial.endTime,
-        createdAt: fileStat.birthtime?.toISOString() ?? new Date(mtimeMs).toISOString(),
-        updatedAt: new Date(mtimeMs).toISOString(),
-      };
-
-      this.summaryCache.set(filePath, {
-        size: fileStat.size,
-        mtimeMs,
-        summary,
-      });
-
-      summaries.push(summary);
     }
 
     // Sort by endTime descending (most recent first)
@@ -394,16 +477,9 @@ export class LocalSessionScanner {
     sessionId: string,
     options?: { offset?: number; limit?: number }
   ): Promise<LocalSessionDetail | null> {
-    const jsonlDir = this.resolveJsonlDir(workDir);
-    const filePath = path.join(jsonlDir, `${sessionId}.jsonl`);
-
-    // Check file exists
-    let fileStat;
-    try {
-      fileStat = await stat(filePath);
-    } catch {
-      return null;
-    }
+    const resolvedFile = await this.findSessionFile(workDir, sessionId);
+    if (!resolvedFile) return null;
+    const { filePath, fileStat } = resolvedFile;
 
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? 200;
@@ -413,6 +489,8 @@ export class LocalSessionScanner {
     let model = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheCreationTokens = 0;
     let firstTs: string | null = null;
     let lastTs: string | null = null;
 
@@ -446,6 +524,7 @@ export class LocalSessionScanner {
       } else if (obj.type === 'user' || obj.type === 'assistant') {
         role = obj.type as string;
         content = obj.content;
+        usage = obj.usage as Record<string, unknown> | undefined;
         ts = obj.timestamp as string | undefined;
       }
 
@@ -467,6 +546,8 @@ export class LocalSessionScanner {
       if (role === 'assistant' && usage && typeof usage === 'object') {
         inputTokens += Number(usage.input_tokens ?? 0) || 0;
         outputTokens += Number(usage.output_tokens ?? 0) || 0;
+        cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0) || 0;
+        cacheCreationTokens += Number(usage.cache_creation_input_tokens ?? 0) || 0;
       }
 
       // Collect messages within the page range
@@ -482,7 +563,7 @@ export class LocalSessionScanner {
     if (totalMessages === 0) return null;
 
     const now = Date.now();
-    const mtimeMs = fileStat.mtimeMs;
+    const mtimeMs = Number(fileStat.mtimeMs);
     const active = now - mtimeMs < ACTIVE_THRESHOLD_MS;
 
     return {
@@ -500,6 +581,9 @@ export class LocalSessionScanner {
       model,
       inputTokens,
       outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
     };
   }
 
@@ -508,5 +592,6 @@ export class LocalSessionScanner {
    */
   clearCache(): void {
     this.summaryCache.clear();
+    this.sessionPathByWorkDirAndId.clear();
   }
 }

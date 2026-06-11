@@ -165,7 +165,7 @@ describe('MemberMessagesTab', () => {
     expect(getRenderedKinds()).toEqual(['task_comment_notification', 'message']);
 
     const messagesButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Messages'
+      (button) => button.textContent?.trim() === 'Loop events'
     );
     expect(messagesButton).not.toBeUndefined();
 
@@ -283,7 +283,7 @@ describe('MemberMessagesTab', () => {
 
     expect(getMessagesPage).not.toHaveBeenCalled();
     expect(host.textContent).toContain('No loaded activity for this member yet');
-    expect(host.textContent).toContain('Load older messages');
+    expect(host.textContent).toContain('Load older Loop events');
 
     await act(async () => {
       root.unmount();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
@@ -13,7 +13,8 @@ interface Props {
   projectName: string;
   workDir: string;
   agentType: string;
-  onComplete: () => void;
+  initialValues?: Record<string, unknown>;
+  onComplete: (options?: { restartHandled?: boolean }) => void;
   onCancel: () => void;
 }
 
@@ -23,14 +24,18 @@ export default function PlatformManualForm({
   projectName,
   workDir,
   agentType,
+  initialValues = {},
   onComplete,
   onCancel,
 }: Props) {
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [values, setValues] = useState<Record<string, unknown>>(initialValues);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setValues(initialValues);
+  }, [initialValues, platformType]);
 
   const basicFields = meta.fields.filter((f) => f.group !== 'advanced');
   const advancedFields = meta.fields.filter((f) => f.group === 'advanced');
@@ -52,23 +57,17 @@ export default function PlatformManualForm({
           opts[f.key] = v;
         }
       }
-      await api.ccSetup.addPlatform(projectName, {
+      const result = await api.ccSetup.addPlatform(projectName, {
         type: platformType,
         options: opts,
         work_dir: workDir,
         agent_type: agentType,
       });
-      // Restart CC Connect to activate the new platform binding
-      setRestarting(true);
-      try {
-        await api.ccSettings.restart();
-      } catch { /* best effort */ }
-      onComplete();
+      onComplete({ restartHandled: result.restart_handled === true });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
-      setRestarting(false);
     }
   };
 

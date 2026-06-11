@@ -453,7 +453,6 @@ export const TeamListView = (): React.JSX.Element => {
       });
     }
 
-    const aliveSet = new Set(aliveTeams);
     const matchesCurrentProject = currentProjectPath
       ? (team: TeamSummary): boolean => teamMatchesProjectSelection(team, currentProjectPath)
       : null;
@@ -464,24 +463,21 @@ export const TeamListView = (): React.JSX.Element => {
       const managerB = b.teamName === SYSTEM_MANAGER_TEAM_NAME ? 0 : 1;
       if (managerA !== managerB) return managerA - managerB;
 
-      // 1. Alive (running) teams first
-      const aliveA = aliveSet.has(a.teamName) ? 0 : 1;
-      const aliveB = aliveSet.has(b.teamName) ? 0 : 1;
-      if (aliveA !== aliveB) return aliveA - aliveB;
-
-      // 2. Teams related to the selected project are prioritized next
+      // 1. Teams related to the selected project are prioritized next.
       if (matchesCurrentProject) {
         const projectA = matchesCurrentProject(a) ? 0 : 1;
         const projectB = matchesCurrentProject(b) ? 0 : 1;
         if (projectA !== projectB) return projectA - projectB;
       }
 
-      // 3. Most recently active teams first (stable secondary sort)
+      // 2. Most recently active teams first.
       const tsA = a.lastActivity ? new Date(a.lastActivity).getTime() : 0;
       const tsB = b.lastActivity ? new Date(b.lastActivity).getTime() : 0;
       if (tsA !== tsB) return tsB - tsA;
 
-      // 4. Fallback: alphabetical by team name for deterministic order
+      // 3. Fallback: alphabetical by team name for deterministic order.
+      // Runtime liveness is intentionally not part of ordering: aliveTeams is
+      // loaded asynchronously after mount, and sorting by it makes cards jump on refresh.
       return a.teamName.localeCompare(b.teamName);
     });
 
@@ -975,7 +971,7 @@ export const TeamListView = (): React.JSX.Element => {
                     {template.members.map((member) => (
                       <span
                         key={member.name}
-                        className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300"
+                        className="rounded bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]"
                       >
                         {member.name}
                         {member.role ? ` · ${formatTeamRoleLabel(member.role)}` : ''}
@@ -1014,10 +1010,10 @@ export const TeamListView = (): React.JSX.Element => {
           <Button
             variant="outline"
             size="sm"
-            className="border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10"
+            className="border-[var(--color-accent-border)] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
             onClick={() => void openSystemManager()}
           >
-            控制台
+            Admin Loop
           </Button>
           <Button
             variant="outline"
@@ -1166,14 +1162,12 @@ export const TeamListView = (): React.JSX.Element => {
                         {team.displayName}
                       </h3>
                       {isSystemManager ? (
-                        <span className="shrink-0 rounded bg-cyan-500/15 px-1.5 py-px text-[9px] font-medium text-cyan-400">
+                        <span className="shrink-0 rounded bg-[var(--color-accent-soft)] px-1.5 py-px text-[9px] font-medium text-[var(--color-accent)]">
                           SYS
                         </span>
                       ) : null}
                       <StatusBadge status={status} />
-                      {team.pendingDelete || team.restartRequired ? (
-                        <PendingDeleteBadge />
-                      ) : null}
+                      {team.pendingDelete || team.restartRequired ? <PendingDeleteBadge /> : null}
                       {team.projectPath &&
                         (() => {
                           const branch = branchByPath[normalizePath(team.projectPath)];
@@ -1195,7 +1189,7 @@ export const TeamListView = (): React.JSX.Element => {
                           <TooltipTrigger asChild>
                             <button
                               type="button"
-                              className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-60 hover:!opacity-100"
+                              className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] hover:!opacity-100 group-hover:opacity-60"
                               onClick={(e) => handleCopyTeam(team.teamName, e)}
                             >
                               <Copy size={13} />
@@ -1211,7 +1205,7 @@ export const TeamListView = (): React.JSX.Element => {
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-60 hover:!opacity-100"
+                                className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 hover:!opacity-100 group-hover:opacity-60"
                                 onClick={(e) =>
                                   handleDeleteTeam(team.teamName, !!team.pendingCreate, e)
                                 }
@@ -1234,13 +1228,19 @@ export const TeamListView = (): React.JSX.Element => {
                   <div className="mt-2 flex items-center gap-1.5 pl-[42px] text-[10px] tabular-nums">
                     {team.stats && team.stats.sessions > 0 ? (
                       <>
-                        <span className="text-indigo-400">{team.stats.sessions} sessions</span>
+                        <span className="text-[var(--color-accent)]">
+                          {team.stats.sessions} sessions
+                        </span>
                         <span className="text-[var(--color-text-muted)] opacity-30">·</span>
-                        <span className="text-emerald-400">{formatTokensCompact(team.stats.tokens)}</span>
+                        <span className="text-emerald-400">
+                          {formatTokensCompact(team.stats.tokens)}
+                        </span>
                         {team.stats.durationMs > 0 && (
                           <>
                             <span className="text-[var(--color-text-muted)] opacity-30">·</span>
-                            <span className="text-amber-400">{formatDurationShort(team.stats.durationMs)}</span>
+                            <span className="text-amber-400">
+                              {formatDurationShort(team.stats.durationMs)}
+                            </span>
                           </>
                         )}
                       </>
@@ -1250,7 +1250,9 @@ export const TeamListView = (): React.JSX.Element => {
                     {team.lastActivity && (
                       <>
                         <span className="text-[var(--color-text-muted)] opacity-30">·</span>
-                        <span className="text-[var(--color-text-muted)]">{formatRelativeTime(team.lastActivity)}</span>
+                        <span className="text-[var(--color-text-muted)]">
+                          {formatRelativeTime(team.lastActivity)}
+                        </span>
                       </>
                     )}
                   </div>

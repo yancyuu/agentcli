@@ -44,6 +44,9 @@ export type * from './terminal';
 // Re-export System Manager types
 export type * from './systemManager';
 
+// Re-export Loop Assets types
+export type * from './loopAssets';
+
 // Re-export Editor types
 export type * from './editor';
 

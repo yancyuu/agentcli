@@ -27,12 +27,12 @@ export const SettingsToggle = ({
       aria-checked={enabled}
       disabled={disabled}
       onClick={handleClick}
-      className="relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] active:scale-95"
+      className="relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-border)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] active:scale-95"
       style={{
-        backgroundColor: enabled ? '#6366f1' : '#3f3f46',
+        backgroundColor: enabled ? 'var(--color-accent)' : '#3f3f46',
         opacity: disabled ? 0.4 : 1,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        boxShadow: enabled ? '0 0 8px rgba(99,102,241,0.3)' : 'none',
+        boxShadow: enabled ? '0 0 10px var(--color-accent-glow)' : 'none',
       }}
     >
       <span

@@ -118,7 +118,7 @@ export const MessagesFilterPopover = ({
               variant="ghost"
               size="sm"
               className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              aria-label="筛选消息"
+              aria-label="筛选动态"
             >
               <Filter size={14} />
               {activeCount > 0 && (
@@ -129,7 +129,7 @@ export const MessagesFilterPopover = ({
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="bottom">筛选消息</TooltipContent>
+        <TooltipContent side="bottom">筛选动态</TooltipContent>
       </Tooltip>
       <PopoverContent align="end" className="flex max-h-[70vh] w-72 flex-col p-0">
         {/* Scrollable filter sections */}

@@ -120,6 +120,8 @@ interface MessagesPanelProps {
   inlineScrollContainerRef?: RefObject<HTMLDivElement | null>;
   /** Hide layout-switch controls when the parent owns placement. */
   showPositionControls?: boolean;
+  /** Override the inline section title when embedded in a parent surface. */
+  sectionTitle?: string;
 }
 
 export function reconcilePendingRepliesByMember(
@@ -199,6 +201,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   onTaskIdClick,
   inlineScrollContainerRef,
   showPositionControls = true,
+  sectionTitle,
 }: MessagesPanelProps): React.JSX.Element {
   const {
     sendTeamMessage,
@@ -941,7 +944,7 @@ export const MessagesPanel = memo(function MessagesPanel({
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          {messagesCollapsed ? '展开全部消息' : '折叠全部消息'}
+          {messagesCollapsed ? '展开全部动态' : '折叠全部动态'}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -962,7 +965,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         onSend={handleSend}
         onDispatchTask={handleDispatchTaskToTeam}
       />
-      {participantFilterBar}
+      {showPositionControls ? participantFilterBar : null}
       <StatusBlock
         members={members}
         tasks={tasks}
@@ -1009,7 +1012,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               disabled={loadingOlderMessages}
               onClick={() => void loadOlderMessages()}
             >
-              加载更早消息
+              加载更早动态
             </Button>
             <span className="text-[10px] text-[var(--color-text-muted)]">
               已加载 {loadedMessageCount} 条
@@ -1042,7 +1045,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         {/* Header */}
         <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-sidebar)] px-3 py-2">
           <MessageSquare size={14} className="shrink-0 text-[var(--color-text-muted)]" />
-          <span className="text-sm font-medium text-[var(--color-text)]">消息</span>
+          <span className="text-sm font-medium text-[var(--color-text)]">Loop 动态</span>
           {filteredMessages.length > 0 && (
             <Badge
               variant="secondary"
@@ -1058,7 +1061,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                   variant="secondary"
                   className="bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-indigo-600 dark:text-indigo-400"
                 >
-                  {messagesUnreadCount} 条新消息
+                  {messagesUnreadCount} 条新动态
                 </Badge>
               </TooltipTrigger>
               <TooltipContent side="bottom">{messagesUnreadCount} 条未读</TooltipContent>
@@ -1086,13 +1089,13 @@ export const MessagesPanel = memo(function MessagesPanel({
                   size="sm"
                   className="size-7 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                   onClick={() => setMessagesCollapsed((v) => !v)}
-                  aria-label={messagesCollapsed ? '展开全部消息' : '折叠全部消息'}
+                  aria-label={messagesCollapsed ? '展开全部动态' : '折叠全部动态'}
                 >
                   {messagesCollapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {messagesCollapsed ? '展开全部消息' : '折叠全部消息'}
+                {messagesCollapsed ? '展开全部动态' : '折叠全部动态'}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -1102,13 +1105,13 @@ export const MessagesPanel = memo(function MessagesPanel({
                   size="sm"
                   className="size-7 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                   onClick={() => setMessagesSearchBarVisible((v) => !v)}
-                  aria-label={messagesSearchBarVisible ? '隐藏消息搜索' : '显示消息搜索'}
+                  aria-label={messagesSearchBarVisible ? '隐藏动态搜索' : '显示动态搜索'}
                 >
                   {messagesSearchBarVisible ? <X size={14} /> : <Search size={14} />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {messagesSearchBarVisible ? '隐藏搜索' : '搜索消息'}
+                {messagesSearchBarVisible ? '隐藏搜索' : '搜索动态'}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -1118,7 +1121,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                   size="sm"
                   className="size-7 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                   onClick={moveToInline}
-                  aria-label="将消息移到页面内面板"
+                  aria-label="将动态移到页面内面板"
                 >
                   <PanelLeftClose size={14} />
                 </Button>
@@ -1157,7 +1160,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               onSend={handleSend}
               onDispatchTask={handleDispatchTaskToTeam}
             />
-            {participantFilterBar}
+            {showPositionControls ? participantFilterBar : null}
             <StatusBlock
               members={members}
               tasks={tasks}
@@ -1205,7 +1208,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                   disabled={loadingOlderMessages}
                   onClick={() => void loadOlderMessages()}
                 >
-                  加载更早消息
+                  加载更早动态
                 </Button>
                 <span className="text-[10px] text-[var(--color-text-muted)]">
                   已加载 {loadedMessageCount} 条
@@ -1277,7 +1280,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               </div>
               <div className="flex h-full items-center gap-1.5">
                 <MessageSquare size={13} className="shrink-0 text-[var(--color-text-muted)]" />
-                <span className="text-[13px] font-medium text-[var(--color-text)]">消息</span>
+                <span className="text-[13px] font-medium text-[var(--color-text)]">Loop 动态</span>
                 {filteredMessages.length > 0 && (
                   <Badge
                     variant="secondary"
@@ -1293,7 +1296,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         variant="secondary"
                         className="bg-indigo-500/20 px-1 py-0 text-[9px] font-normal leading-none text-indigo-600 dark:text-indigo-400"
                       >
-                        {messagesUnreadCount} 条新消息
+                        {messagesUnreadCount} 条新动态
                       </Badge>
                     </TooltipTrigger>
                     <TooltipContent side="top">{messagesUnreadCount} 条未读</TooltipContent>
@@ -1311,7 +1314,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                           size="sm"
                           className="size-[22px] p-0 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300"
                           onClick={handleMarkAllRead}
-                          aria-label="将全部消息标为已读"
+                          aria-label="将全部动态标为已读"
                         >
                           <CheckCheck size={13} />
                         </Button>
@@ -1326,7 +1329,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         size="sm"
                         className="size-[22px] p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                         onClick={() => setMessagesCollapsed((value) => !value)}
-                        aria-label={messagesCollapsed ? '展开全部消息' : '折叠全部消息'}
+                        aria-label={messagesCollapsed ? '展开全部动态' : '折叠全部动态'}
                       >
                         {messagesCollapsed ? (
                           <ChevronsUpDown size={14} />
@@ -1336,7 +1339,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {messagesCollapsed ? '展开全部消息' : '折叠全部消息'}
+                      {messagesCollapsed ? '展开全部动态' : '折叠全部动态'}
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip>
@@ -1346,13 +1349,13 @@ export const MessagesPanel = memo(function MessagesPanel({
                         size="sm"
                         className="size-[22px] p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                         onClick={() => setMessagesSearchBarVisible((value) => !value)}
-                        aria-label={messagesSearchBarVisible ? '隐藏消息搜索' : '显示消息搜索'}
+                        aria-label={messagesSearchBarVisible ? '隐藏动态搜索' : '显示动态搜索'}
                       >
                         {messagesSearchBarVisible ? <X size={14} /> : <Search size={14} />}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {messagesSearchBarVisible ? '隐藏搜索' : '搜索消息'}
+                      {messagesSearchBarVisible ? '隐藏搜索' : '搜索动态'}
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip>
@@ -1363,7 +1366,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         className="size-[22px] p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                         onClick={toggleBottomSheetExpansion}
                         aria-label={
-                          isBottomSheetCollapsed ? '展开底部消息面板' : '折叠底部消息面板'
+                          isBottomSheetCollapsed ? '展开底部动态面板' : '折叠底部动态面板'
                         }
                       >
                         {isBottomSheetCollapsed ? (
@@ -1384,7 +1387,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         size="sm"
                         className="size-[22px] p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                         onClick={moveToInline}
-                        aria-label="将消息移到页面内面板"
+                        aria-label="将动态移到页面内面板"
                       >
                         <PanelBottom size={14} />
                       </Button>
@@ -1398,7 +1401,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         size="sm"
                         className="size-[22px] p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                         onClick={moveToSidebar}
-                        aria-label="将消息移到侧边栏"
+                        aria-label="将动态移到侧边栏"
                       >
                         <PanelLeft size={14} />
                       </Button>
@@ -1443,7 +1446,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     onSend={handleSend}
                     onDispatchTask={handleDispatchTaskToTeam}
                   />
-                  {participantFilterBar}
+                  {showPositionControls ? participantFilterBar : null}
                 </div>
               </div>
               <div className="shrink-0 px-3 pt-2">
@@ -1495,7 +1498,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                         disabled={loadingOlderMessages}
                         onClick={() => void loadOlderMessages()}
                       >
-                        加载更早消息
+                        加载更早动态
                       </Button>
                       <span className="text-[10px] text-[var(--color-text-muted)]">
                         已加载 {loadedMessageCount} 条
@@ -1530,7 +1533,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   return (
     <CollapsibleTeamSection
       sectionId="messages"
-      title="消息"
+      title={sectionTitle ?? '动态'}
       icon={<MessageSquare size={14} />}
       badge={filteredMessages.length}
       secondaryBadge={
@@ -1568,7 +1571,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     e.stopPropagation();
                     moveToBottomSheet();
                   }}
-                  aria-label="将消息移到底部面板"
+                  aria-label="将动态移到底部面板"
                 >
                   <PanelBottom size={14} />
                 </Button>
@@ -1585,7 +1588,7 @@ export const MessagesPanel = memo(function MessagesPanel({
                     e.stopPropagation();
                     moveToSidebar();
                   }}
-                  aria-label="将消息移到侧边栏"
+                  aria-label="将动态移到侧边栏"
                 >
                   <PanelLeft size={14} />
                 </Button>

@@ -1,13 +1,8 @@
-name: Deploy README to GitHub Pages
+name: Deploy Agent Runbook to GitHub Pages
 
 on:
   push:
     branches: [main]
-    paths:
-      - README.md
-      - docs/screenshots/openhermit/**
-      - resources/icons/**
-      - .github/workflows/pages.yml
   workflow_dispatch:
 
 permissions:
@@ -16,136 +11,33 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages-readme
+  group: github-pages
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - name: Generate landing page
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build agent runbook
+        run: node scripts/build-pages.mjs
+
+      - name: Verify generated site
         run: |
-          mkdir -p _site/docs/screenshots
+          test -s _site/index.html
+          test -s _site/agent-manual.md
+          test -s _site/llms.txt
+          test -f _site/docs/screenshots/openhermit/team-list.png
+          grep -q "openHermit Agent Runbook" _site/index.html
+          grep -q "Feishu/Lark CLI team isolation" _site/agent-manual.md
 
-          cat > _site/index.html << 'HTMLEOF'
-          <!DOCTYPE html>
-          <html lang="zh-CN">
-          <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>openHermit — AI Agent 团队工作台</title>
-            <meta name="description" content="超级个体的 AI 基础设施。一个人，一块看板，一支军队。" />
-            <meta property="og:title" content="openHermit — AI Agent 团队工作台" />
-            <meta property="og:description" content="超级个体的 AI 基础设施。用代码重构公司形态，让 AI Agent 团队自主协作。" />
-            <meta property="og:image" content="docs/screenshots/openhermit/team-detail.png" />
-            <meta property="og:type" content="website" />
-            <link rel="icon" href="resources/icons/png/1024x1024.png" />
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Noto Sans SC', sans-serif;
-                background: #0a0a0a;
-                color: #e5e5e5;
-                line-height: 1.7;
-                padding: 2rem 1rem;
-                max-width: 960px;
-                margin: 0 auto;
-              }
-              a { color: #60a5fa; text-decoration: none; }
-              a:hover { text-decoration: underline; }
-              img { max-width: 100%; height: auto; border-radius: 8px; }
-              h1 { font-size: 2.5rem; margin: 1.5rem 0; text-align: center; }
-              h2 { font-size: 1.5rem; margin: 2rem 0 1rem; border-bottom: 1px solid #333; padding-bottom: 0.5rem; }
-              h3 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; }
-              p, li { margin: 0.5rem 0; }
-              code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-              pre { background: #1a1a1a; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
-              pre code { background: none; padding: 0; }
-              table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-              th, td { border: 1px solid #333; padding: 0.5rem 1rem; text-align: left; }
-              th { background: #1a1a1a; }
-              .hero { text-align: center; margin: 2rem 0; }
-              .hero img.hero-shot { border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); margin-top: 1rem; }
-              .screenshots { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
-              .screenshots img { width: 100%; border-radius: 8px; }
-              .badge-row { text-align: center; margin: 1rem 0; }
-              .badge-row img { height: 24px; border-radius: 0; display: inline-block; vertical-align: middle; margin: 0 4px; }
-              .cta { text-align: center; margin: 2rem 0; }
-              .cta a {
-                display: inline-block; padding: 0.75rem 2rem; background: #fff; color: #0a0a0a;
-                border-radius: 8px; font-weight: 600; font-size: 1.1rem; margin: 0.5rem;
-              }
-              .cta a.secondary { background: transparent; color: #60a5fa; border: 1px solid #60a5fa; }
-              @media (max-width: 640px) {
-                .screenshots { grid-template-columns: 1fr; }
-                h1 { font-size: 1.8rem; }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="hero">
-              <img src="resources/icons/png/1024x1024.png" alt="openHermit" width="96" />
-              <h1>openHermit</h1>
-              <p><strong>超级个体的 AI 基础设施</strong><br/>一个人，一块看板，一支军队。</p>
-              <div class="badge-row">
-                <img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=version&color=black" alt="版本" />
-                <img src="https://img.shields.io/badge/license-AGPL--3.0-black?style=flat-square" alt="许可证" />
-                <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black?style=flat-square" alt="平台" />
-              </div>
-              <img class="hero-shot" src="docs/screenshots/openhermit/team-detail.png" alt="openHermit 看板总览" />
-            </div>
-
-            <div class="cta">
-              <a href="https://github.com/yancyuu/Hermit">GitHub 仓库</a>
-              <a href="https://github.com/yancyuu/Hermit/releases/latest" class="secondary">下载最新版</a>
-            </div>
-
-            <h2>为什么需要 openHermit？</h2>
-            <p>用管理机器的方式管理 Agent，而不是用管理人的方式。任务流是一张 DAG，每个节点代表一种确定的状态。Agent 不拥有固定岗位，只有当任务状态流转到 Ready 时，上下文和能力才会动态注入。</p>
-
-            <h2>产品截图</h2>
-            <div class="screenshots">
-              <img src="docs/screenshots/openhermit/team-list.png" alt="团队列表" />
-              <img src="docs/screenshots/openhermit/team-detail.png" alt="团队详情" />
-              <img src="docs/screenshots/openhermit/harness-settings.png" alt="运行时配置" />
-              <img src="docs/screenshots/openhermit/channel-binding.png" alt="渠道绑定" />
-            </div>
-
-            <h2>极速部署</h2>
-            <pre><code>npx @yancyyu/openhermit@latest</code></pre>
-            <p>启动后打开 <a href="http://127.0.0.1:5680">http://127.0.0.1:5680</a></p>
-
-            <h2>支持的运行时</h2>
-            <table>
-              <tr><td><code>claudecode</code></td><td>Anthropic Claude Code</td><td><code>devin</code></td><td>Cognition Devin</td></tr>
-              <tr><td><code>codex</code></td><td>OpenAI Codex CLI</td><td><code>opencode</code></td><td>OpenCode CLI</td></tr>
-              <tr><td><code>cursor</code></td><td>Cursor IDE Agent</td><td><code>qoder</code></td><td>Qoder CLI</td></tr>
-              <tr><td><code>gemini</code></td><td>Google Gemini CLI</td><td><code>kimi</code></td><td>Moonshot Kimi</td></tr>
-            </table>
-
-            <h2>技术栈</h2>
-            <table>
-              <tr><td>前端</td><td>React 19 · TypeScript 5 · Tailwind CSS 3 · Zustand 4</td></tr>
-              <tr><td>后端</td><td>Fastify (Node.js)</td></tr>
-              <tr><td>桌面</td><td>Electron 40</td></tr>
-              <tr><td>协议</td><td>MCP over HTTP (SSE + JSON-RPC)</td></tr>
-            </table>
-
-            <p style="text-align:center; margin-top:3rem; color:#666;">
-              100% 免费开源 · AGPL-3.0 · 本地优先 · 零信任架构
-            </p>
-          </body>
-          </html>
-          HTMLEOF
-
-      - name: Copy assets
-        run: |
-          cp -r docs/screenshots/openhermit _site/docs/screenshots/openhermit
-          cp -r resources _site/resources
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
@@ -156,5 +48,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4

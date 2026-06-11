@@ -9,6 +9,11 @@ import type {
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
 
+import {
+  getBuiltinWorkflowByFilename,
+  type BuiltinWorkflowDefinition,
+} from './BuiltinWorkflowSeeder';
+
 const SUPPORTED_EXTENSIONS = new Set(['.md', '.txt', '.prompt', '.workflow']);
 const MAX_PROMPT_BYTES = 256 * 1024;
 
@@ -27,17 +32,44 @@ function labelFromFilename(filename: string): string {
   return path.basename(filename, path.extname(filename)).replace(/[-_]+/g, ' ').trim() || filename;
 }
 
+function isClaudeCommandFolder(folder: string): boolean {
+  return folder.endsWith(path.join('.claude', 'commands'));
+}
+
+function commandNameFromFilename(filename: string): `/${string}` {
+  const basename = path.basename(filename, path.extname(filename));
+  return `/${basename}`;
+}
+
+function applyBuiltinMetadata(
+  summary: WorkflowPromptSummary,
+  builtin: BuiltinWorkflowDefinition | undefined
+): WorkflowPromptSummary {
+  if (!builtin) return summary;
+  return {
+    ...summary,
+    label: builtin.label,
+    commandName: builtin.commandName,
+    description: builtin.description,
+    category: builtin.category,
+    safety: builtin.safety,
+    builtin: true,
+    order: builtin.order,
+  };
+}
+
 export class WorkflowPromptService {
   async list(folderInput: string): Promise<WorkflowPromptListResponse> {
     const folder = path.resolve(expandHome(folderInput));
     const folderStat = await stat(folder);
     if (!folderStat.isDirectory()) {
-      throw new Error(`workflow folder 不是有效目录: ${folder}`);
+      throw new Error(`Loop command folder 不是有效目录: ${folder}`);
     }
 
     const warnings: string[] = [];
     const prompts: WorkflowPromptSummary[] = [];
     const entries = await readdir(folder, { withFileTypes: true });
+    const commandFolder = isClaudeCommandFolder(folder);
 
     for (const entry of entries) {
       if (!entry.isFile() || entry.name.startsWith('.')) continue;
@@ -49,17 +81,30 @@ export class WorkflowPromptService {
         warnings.push(`${entry.name} 超过 256 KiB，已跳过`);
         continue;
       }
-      prompts.push({
+
+      const commandName = commandFolder ? commandNameFromFilename(entry.name) : undefined;
+      const builtin = commandFolder ? getBuiltinWorkflowByFilename(entry.name) : undefined;
+      const summary: WorkflowPromptSummary = {
         id: promptId(filePath),
         label: labelFromFilename(entry.name),
         filename: entry.name,
         path: filePath,
+        folder,
         sizeBytes: fileStat.size,
         updatedAt: fileStat.mtime.toISOString(),
-      });
+        source: commandFolder ? 'claude-command' : 'workflow-folder',
+        commandName,
+        safety: commandFolder ? 'unknown' : undefined,
+      };
+      prompts.push(applyBuiltinMetadata(summary, builtin));
     }
 
-    prompts.sort((a, b) => a.filename.localeCompare(b.filename));
+    prompts.sort((a, b) => {
+      const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
+      const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.filename.localeCompare(b.filename);
+    });
     return { folder, prompts, warnings };
   }
 
@@ -67,7 +112,7 @@ export class WorkflowPromptService {
     const list = await this.list(folderInput);
     const prompt = list.prompts.find((item) => item.id === id || item.filename === id);
     if (!prompt) {
-      throw new Error(`未找到 workflow: ${id}`);
+      throw new Error(`未找到 Loop workflow: ${id}`);
     }
     const content = await readFile(prompt.path, 'utf-8');
     return { prompt, content };

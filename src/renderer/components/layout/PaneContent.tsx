@@ -30,8 +30,12 @@ interface PaneContentProps {
 export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JSX.Element => {
   const activeTabId = pane.activeTabId;
 
-  // Show the team workspace by default so startup avoids dashboard background scans.
-  const showDefaultTeams = !activeTabId && pane.tabs.length === 0;
+  // Show the team workspace by default only for the implicit root route.
+  // Explicit routes like /teams are restored into a real tab by App; rendering
+  // the fallback at the same time mounts TeamListView twice during refresh and
+  // creates visible layout/splash jitter.
+  const isImplicitRootRoute = window.location.pathname === '/' || window.location.pathname === '';
+  const showDefaultTeams = isImplicitRootRoute && !activeTabId && pane.tabs.length === 0;
 
   return (
     <div className="relative flex flex-1 overflow-hidden">
@@ -55,7 +59,7 @@ export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JS
             {tab.type === 'teams' && <TeamListView />}
             {tab.type === 'team' && tab.teamName === SYSTEM_MANAGER_TEAM_NAME && (
               <TabUIProvider tabId={tab.id}>
-                <SystemManagerView isPaneFocused={isPaneFocused} />
+                <SystemManagerView isPaneFocused={isPaneFocused} isActive={isActive} />
               </TabUIProvider>
             )}
             {tab.type === 'team' && tab.teamName !== SYSTEM_MANAGER_TEAM_NAME && (

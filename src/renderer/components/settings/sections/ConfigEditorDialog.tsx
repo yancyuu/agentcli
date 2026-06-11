@@ -346,7 +346,7 @@ const SaveStatusBadge = ({
     return (
       <span
         className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
-        style={{ backgroundColor: 'rgba(129, 140, 248, 0.15)', color: '#818cf8' }}
+        style={{ backgroundColor: 'var(--color-accent-muted)', color: 'var(--color-accent)' }}
       >
         <Loader2 className="size-3 animate-spin" />
         保存中...

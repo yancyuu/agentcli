@@ -100,7 +100,7 @@ function parseQualifiedRecipient(
 }
 
 function buildLeadSourceTooltip(message: InboxMessage, leadLabel: string): string {
-  const parts = [`发送者：${leadLabel}`, `消息来源：${message.source ?? 'unknown'}`];
+  const parts = [`发送者：${leadLabel}`, `动态来源：${message.source ?? 'unknown'}`];
   if (message.leadSessionId) {
     parts.push(`Session：${message.leadSessionId}`);
   }
@@ -1238,7 +1238,7 @@ export const ActivityItem = memo(
                   {onExpand && expandItemKey && (
                     <button
                       type="button"
-                      aria-label="展开消息"
+                      aria-label="展开动态"
                       className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
@@ -1321,7 +1321,7 @@ export const ActivityItem = memo(
                   {onExpand && expandItemKey && (
                     <button
                       type="button"
-                      aria-label="展开消息"
+                      aria-label="展开动态"
                       className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                       style={{ color: CARD_ICON_MUTED }}
                       onClick={(e) => {
@@ -1405,7 +1405,7 @@ export const ActivityItem = memo(
                 {onExpand && expandItemKey && (
                   <button
                     type="button"
-                    aria-label="展开消息"
+                    aria-label="展开动态"
                     className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 group-hover:opacity-100"
                     style={{ color: CARD_ICON_MUTED }}
                     onClick={(e) => {
@@ -1530,7 +1530,7 @@ export const ActivityItem = memo(
                           <Reply size={14} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top">回复消息</TooltipContent>
+                      <TooltipContent side="top">回复动态</TooltipContent>
                     </Tooltip>
                   ) : null}
                   {onCreateTask ? (
@@ -1548,7 +1548,7 @@ export const ActivityItem = memo(
                           <ListPlus size={14} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top">从消息创建任务</TooltipContent>
+                      <TooltipContent side="top">从动态创建任务</TooltipContent>
                     </Tooltip>
                   ) : null}
                   <CopyButton text={displayText} inline />

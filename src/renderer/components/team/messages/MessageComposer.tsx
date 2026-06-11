@@ -19,6 +19,7 @@ import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { nameColorSet } from '@renderer/utils/projectColor';
+import { getLoopShortcutSuggestions } from '@renderer/utils/loopShortcutSuggestions';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';
 import { buildSlashCommandSuggestions } from '@renderer/utils/skillCommandSuggestions';
 import {
@@ -166,16 +167,15 @@ export const MessageComposer = ({
   const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
   const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
   const projectSkills = projectPath ? (skillsProjectCatalogByProjectPath[projectPath] ?? []) : [];
-  const slashCommandSuggestions = useMemo<MentionSuggestion[]>(
-    () =>
-      buildSlashCommandSuggestions(
-        getSuggestedSlashCommandsForProvider(leadProviderId),
-        projectSkills,
-        skillsUserCatalog,
-        leadProviderId
-      ),
-    [leadProviderId, projectSkills, skillsUserCatalog]
-  );
+  const slashCommandSuggestions = useMemo<MentionSuggestion[]>(() => {
+    const baseSuggestions = buildSlashCommandSuggestions(
+      getSuggestedSlashCommandsForProvider(leadProviderId),
+      projectSkills,
+      skillsUserCatalog,
+      leadProviderId
+    );
+    return [...getLoopShortcutSuggestions(), ...baseSuggestions];
+  }, [leadProviderId, projectSkills, skillsUserCatalog]);
 
   const trimmed = stripEncodedTaskReferenceMetadata(draft.text).trim();
   const standaloneSlashCommand = useMemo(() => parseStandaloneSlashCommand(trimmed), [trimmed]);
@@ -192,17 +192,17 @@ export const MessageComposer = ({
   const canAttach = supportsAttachments && draft.canAddMore;
   const attachmentRestrictionReason = !supportsAttachments
     ? !isLeadRecipient
-      ? '文件只能发送给团队负责人'
-      : '团队在线时才能添加文件'
+      ? '文件只能发送给 Loop Lead'
+      : 'Loop runtime 在线时才能添加文件'
     : undefined;
   const attachmentsBlocked = draft.attachments.length > 0 && !supportsAttachments;
   const slashCommandRestrictionReason = standaloneSlashCommand
     ? draft.attachments.length > 0
-      ? '斜杠命令需要团队负责人在线，且不能与附件同时发送'
+      ? '斜杠命令需要 Loop Lead 在线，且不能与附件同时发送'
       : !isLeadRecipient
-        ? '斜杠命令只能发送给团队负责人'
+        ? '斜杠命令只能发送给 Loop Lead'
         : !isTeamAlive
-          ? '斜杠命令需要团队负责人在线'
+          ? '斜杠命令需要 Loop Lead 在线'
           : null
     : null;
   const teamDispatch = useMemo(() => {
@@ -286,9 +286,7 @@ export const MessageComposer = ({
   );
 
   const showFileRestrictionError = useCallback(() => {
-    setFileRestrictionError(
-      attachmentRestrictionReason ?? 'Files can only be sent to the team lead'
-    );
+    setFileRestrictionError(attachmentRestrictionReason ?? '文件只能发送给 Loop Lead');
     window.clearTimeout(fileRestrictionTimerRef.current);
     fileRestrictionTimerRef.current = window.setTimeout(() => {
       setFileRestrictionError(null);
@@ -371,6 +369,11 @@ export const MessageComposer = ({
     </span>
   ) : sendWarning ? (
     <OpenCodeDeliveryWarning warning={sendWarning} debugDetails={sendDebugDetails} />
+  ) : teamDispatch ? (
+    <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300">
+      <Send size={10} className="shrink-0" />
+      将创建跨团队任务：{teamDispatch.slug}
+    </span>
   ) : lastResult?.deduplicated ? (
     <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
       <Check size={10} className="shrink-0" />
@@ -423,7 +426,7 @@ export const MessageComposer = ({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {!isTeamAlive
-                    ? '团队在线时才能添加文件'
+                    ? 'Loop runtime 在线时才能添加文件'
                     : !draft.canAddMore
                       ? '已达到附件上限'
                       : '添加文件（支持粘贴或拖拽）'}
@@ -435,7 +438,7 @@ export const MessageComposer = ({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {!isTeamAlive && !isProvisioning && (
               <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
-                团队离线
+                Loop runtime 离线
               </span>
             )}
 
@@ -570,7 +573,7 @@ export const MessageComposer = ({
             error={draft.attachmentError ?? fileRestrictionError}
             onDismissError={draft.clearAttachmentError}
             disabled={attachmentsBlocked}
-            disabledHint="仅在团队在线且接收人为团队负责人时支持附件。请移除附件或切换接收人。"
+            disabledHint="仅在 Loop runtime 在线且接收人为 Loop Lead 时支持附件。请移除附件或切换接收人。"
           />
         ) : null}
       </div>
@@ -586,8 +589,8 @@ export const MessageComposer = ({
           id={`compose-${teamName}`}
           placeholder={
             isProvisioning
-              ? '团队正在启动中... 消息将排队并在稍后投递到收件箱。'
-              : '输入消息...（回车发送，Shift+Enter 换行）'
+              ? 'Loop runtime 正在启动中... 指令将排队并在稍后执行。'
+              : '输入 Loop 指令...（回车发送，Shift+Enter 换行）'
           }
           value={draft.text}
           onValueChange={draft.setText}
@@ -602,12 +605,18 @@ export const MessageComposer = ({
           onModEnter={handleSend}
           dismissMentionsRef={dismissMentionsRef}
           extraTips={useMemo(() => {
-            const commands = slashCommandSuggestions
-              .filter((s) => s.type === 'command')
+            const commands = Array.from(
+              new Set(
+                slashCommandSuggestions
+                  .filter((s) => s.type === 'command' && s.command)
+                  .map((s) => s.command)
+              )
+            )
               .slice(0, 6)
-              .map((s) => s.command)
               .join('、');
-            return [`Tips：你可以输入 "/" 来运行命令，如 ${commands} 等。`];
+            return [
+              `Tips：你可以输入 "/" 来运行命令，如 ${commands} 等；输入 "/loop" 可选择常用 Loop 模板。`,
+            ];
           }, [slashCommandSuggestions])}
           surfaceClassName="message-composer-shell message-composer-orbit-surface bg-[var(--color-surface-raised)]"
           surfaceDecoration="orbit-border"
@@ -645,14 +654,14 @@ export const MessageComposer = ({
                       onClick={handleSend}
                     >
                       <Send size={12} />
-                      发送
+                      下发
                     </button>
                   </span>
                 </TooltipTrigger>
                 {slashCommandRestrictionReason ? (
                   <TooltipContent side="top">{slashCommandRestrictionReason}</TooltipContent>
                 ) : isProvisioning && !sending ? (
-                  <TooltipContent side="top">团队启动期间暂不可发送</TooltipContent>
+                  <TooltipContent side="top">Loop runtime 启动期间暂不可下发</TooltipContent>
                 ) : null}
               </Tooltip>
             </div>

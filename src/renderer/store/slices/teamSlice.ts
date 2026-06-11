@@ -4461,8 +4461,29 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         );
       }
 
-      // Just create the team config — no provisioning, no launching.
-      await unwrapIpc('team:create', () => api.teams.createTeam(request));
+      const floor = nowIso();
+      set((state) => {
+        const previousRuntimeRunId = state.currentRuntimeRunIdByTeam[request.teamName];
+        return {
+          currentRuntimeRunIdByTeam:
+            omitTeamKey(state.currentRuntimeRunIdByTeam, request.teamName) ??
+            state.currentRuntimeRunIdByTeam,
+          ignoredRuntimeRunIds: previousRuntimeRunId
+            ? { ...state.ignoredRuntimeRunIds, [previousRuntimeRunId]: request.teamName }
+            : state.ignoredRuntimeRunIds,
+          provisioningStartedAtFloorByTeam: {
+            ...state.provisioningStartedAtFloorByTeam,
+            [request.teamName]: floor,
+          },
+          activeToolsByTeam:
+            omitTeamKey(state.activeToolsByTeam, request.teamName) ?? state.activeToolsByTeam,
+          finishedVisibleByTeam:
+            omitTeamKey(state.finishedVisibleByTeam, request.teamName) ??
+            state.finishedVisibleByTeam,
+          toolHistoryByTeam:
+            omitTeamKey(state.toolHistoryByTeam, request.teamName) ?? state.toolHistoryByTeam,
+        };
+      });
 
       // Persist per-team launch params (model, effort, limit context)
       const baseModel = extractBaseModel(request.model, request.providerId);
@@ -4475,6 +4496,12 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         limitContext: request.limitContext ?? false,
       };
       saveLaunchParams(request.teamName, params);
+      set((state) => ({
+        launchParamsByTeam: {
+          ...state.launchParamsByTeam,
+          [request.teamName]: params,
+        },
+      }));
 
       // Initialize per-team tool approval settings based on skipPermissions flag
       const initialSettings: ToolApprovalSettings =
@@ -4482,6 +4509,18 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           ? DEFAULT_TOOL_APPROVAL_SETTINGS
           : { ...DEFAULT_TOOL_APPROVAL_SETTINGS, autoAllowAll: true };
       saveToolApprovalSettingsForTeam(request.teamName, initialSettings);
+
+      const response = await unwrapIpc('team:create', () => api.teams.createTeam(request));
+      const runId =
+        typeof response === 'object' && response && 'runId' in response
+          ? String(response.runId)
+          : request.teamName;
+      set((state) => ({
+        currentRuntimeRunIdByTeam: {
+          ...state.currentRuntimeRunIdByTeam,
+          [request.teamName]: runId,
+        },
+      }));
 
       // Refresh team list to pick up the new team
       void get().fetchTeams();

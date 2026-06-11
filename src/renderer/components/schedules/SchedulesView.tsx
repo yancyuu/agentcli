@@ -14,13 +14,7 @@ import { CcCronScheduleDialog } from '../team/schedule/CcCronScheduleDialog';
 import type { Schedule } from '@shared/types';
 
 export const SchedulesView = (): React.JSX.Element => {
-  const {
-    schedules,
-    schedulesLoading,
-    fetchSchedules,
-    openTeamTab,
-    teamByName,
-  } = useStore(
+  const { schedules, schedulesLoading, fetchSchedules, openTeamTab, teamByName } = useStore(
     useShallow((s) => ({
       schedules: s.schedules,
       schedulesLoading: s.schedulesLoading,
@@ -93,14 +87,20 @@ export const SchedulesView = (): React.JSX.Element => {
   return (
     <div className="flex h-full flex-col bg-[var(--color-surface)]">
       {/* Minimal header */}
-      <div className="flex shrink-0 items-center justify-between px-4 pt-4 pb-2">
+      <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-4">
         <div className="flex items-center gap-2">
-          <h1 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
+          <h1
+            className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
             <span className="text-cyan-400/40">#</span>
-            定时任务
+            定时 Loop
           </h1>
           {schedules.length > 0 && (
-            <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ color: 'var(--color-text-muted)', background: 'rgba(148,163,184,0.06)' }}>
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px]"
+              style={{ color: 'var(--color-text-muted)', background: 'rgba(148,163,184,0.06)' }}
+            >
               {schedules.filter((s) => s.status === 'active').length} 运行中
             </span>
           )}
@@ -112,18 +112,26 @@ export const SchedulesView = (): React.JSX.Element => {
       </div>
 
       {/* Content — fills remaining space */}
-      <div className="flex-1 min-h-0 overflow-auto px-2 pb-4">
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
         {schedulesLoading && schedules.length === 0 ? (
           <div className="flex items-center justify-center py-24 text-sm text-[var(--color-text-muted)]">
             正在加载计划...
           </div>
         ) : schedules.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--color-border)] py-20 text-center">
-            <Calendar className="size-6" style={{ color: 'var(--color-text-muted)', opacity: 0.4 }} />
+            <Calendar
+              className="size-6"
+              style={{ color: 'var(--color-text-muted)', opacity: 0.4 }}
+            />
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              暂无定时任务。在团队中创建计划即可自动运行。
+              暂无定时 Loop。在 Loop workspace 中创建计划即可自动运行。
             </p>
-            <Button size="sm" variant="ghost" className="mt-1 gap-1.5 text-xs" onClick={handleCreate}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-1 gap-1.5 text-xs"
+              onClick={handleCreate}
+            >
               <Plus className="size-3.5" />
               创建计划
             </Button>

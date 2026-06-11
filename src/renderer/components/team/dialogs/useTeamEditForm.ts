@@ -5,6 +5,12 @@ import { useStore } from '@renderer/store';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { useShallow } from 'zustand/react/shallow';
 
+import {
+  buildFeishuLarkAllowUpdatePayload,
+  getFeishuLarkAllowValue,
+  readStringRecord,
+} from './platformAllowUtils';
+
 import type { GlobalProvider } from '@shared/types';
 import type { CcAgentType } from '@shared/types/ccConnect';
 
@@ -102,19 +108,9 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
             )
           : [],
       platformAllowFrom:
-        cfg?.platformAllowFrom ??
-        (typeof rawSettings.platform_allow_from === 'object' &&
-        rawSettings.platform_allow_from !== null &&
-        !Array.isArray(rawSettings.platform_allow_from)
-          ? (rawSettings.platform_allow_from as Record<string, string>)
-          : {}),
+        cfg?.platformAllowFrom ?? readStringRecord(rawSettings.platform_allow_from),
       platformAllowChat:
-        cfg?.platformAllowChat ??
-        (typeof (rawSettings as Record<string, unknown>).platform_allow_chat === 'object' &&
-        (rawSettings as Record<string, unknown>).platform_allow_chat !== null &&
-        !Array.isArray((rawSettings as Record<string, unknown>).platform_allow_chat)
-          ? ((rawSettings as Record<string, unknown>).platform_allow_chat as Record<string, string>)
-          : {}),
+        cfg?.platformAllowChat ?? readStringRecord(rawSettings.platform_allow_chat),
       providerRefs: data?.providerRefs ?? [],
       globalProviders: data?.globalProviders ?? [],
       showContextIndicator:
@@ -142,8 +138,12 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
   const [disabledCommandsInput, setDisabledCommandsInput] = useState(
     defaults.disabledCommands.join(', ')
   );
-  const [feishuAllowFrom, setFeishuAllowFrom] = useState(defaults.platformAllowFrom.feishu ?? '*');
-  const [feishuAllowChat, setFeishuAllowChat] = useState(defaults.platformAllowChat.feishu ?? '*');
+  const [feishuAllowFrom, setFeishuAllowFrom] = useState(
+    getFeishuLarkAllowValue(defaults.platformAllowFrom)
+  );
+  const [feishuAllowChat, setFeishuAllowChat] = useState(
+    getFeishuLarkAllowValue(defaults.platformAllowChat)
+  );
   const [providerRef, setProviderRef] = useState(defaults.providerRefs[0] ?? '');
   const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
   const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
@@ -179,8 +179,8 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
     setLanguage(d.language);
     setManagedSources(d.managedSources);
     setDisabledCommandsInput(d.disabledCommands.join(', '));
-    setFeishuAllowFrom(d.platformAllowFrom.feishu ?? '*');
-    setFeishuAllowChat(d.platformAllowChat.feishu ?? '*');
+    setFeishuAllowFrom(getFeishuLarkAllowValue(d.platformAllowFrom));
+    setFeishuAllowChat(getFeishuLarkAllowValue(d.platformAllowChat));
     setProviderRef(d.providerRefs[0] ?? '');
     setShowContextIndicator(d.showContextIndicator);
     setReplyFooter(d.replyFooter);
@@ -214,8 +214,14 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
       .split(',')
       .map((e) => e.trim())
       .filter((e) => e.length > 0);
-    const feishu = feishuAllowFrom.trim();
-    const feishuChat = feishuAllowChat.trim();
+    const platformAllowFrom = buildFeishuLarkAllowUpdatePayload(
+      defaultsRef.current.platformAllowFrom,
+      feishuAllowFrom
+    );
+    const platformAllowChat = buildFeishuLarkAllowUpdatePayload(
+      defaultsRef.current.platformAllowChat,
+      feishuAllowChat
+    );
 
     setSavePhase('saving');
     setError(null);
@@ -235,8 +241,8 @@ export function useTeamEditForm(teamName: string, open: boolean): UseTeamEditFor
           language: language.trim() || undefined,
           managedSources: managedSources.trim() || undefined,
           disabledCommands,
-          platformAllowFrom: feishu ? { feishu } : {},
-          platformAllowChat: feishuChat ? { feishu: feishuChat } : {},
+          platformAllowFrom,
+          platformAllowChat,
           providerRefs: providerRef ? [providerRef] : [],
         });
 

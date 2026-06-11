@@ -30,7 +30,7 @@ function actorLabel(summary: BoardTaskExactLogSummary): string {
     return summary.actor.memberName;
   }
   if (summary.actor.role === 'lead' || summary.actor.isSidechain === false) {
-    return '负责人会话';
+    return 'Loop Lead 会话';
   }
   return '未知参与者';
 }
@@ -40,7 +40,7 @@ function describeSummary(summary: BoardTaskExactLogSummary): string {
 }
 
 function anchorKindLabel(summary: BoardTaskExactLogSummary): string {
-  return summary.anchorKind === 'tool' ? '工具' : '消息';
+  return summary.anchorKind === 'tool' ? '工具' : '动态';
 }
 
 function describeDetailState(state: ExactTaskLogDetailState | undefined): string | null {

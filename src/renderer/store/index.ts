@@ -1422,7 +1422,7 @@ export function initializeNotificationListeners(): () => void {
           useStore.setState({ cliInstallerState: 'verifying', cliInstallerDetail: detail });
           break;
         case 'installing': {
-          // Accumulate log lines and raw chunks for xterm.js rendering
+          // Accumulate log lines and raw chunks for terminal-style rendering
           const prevLogs = useStore.getState().cliInstallerLogs;
           const prevRaw = useStore.getState().cliInstallerRawChunks;
           const newLogs = detail ? [...prevLogs, detail].slice(-50) : prevLogs;

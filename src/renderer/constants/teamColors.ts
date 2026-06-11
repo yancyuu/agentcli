@@ -24,11 +24,11 @@ export interface TeamColorSet {
 
 const TEAMMATE_COLORS: Record<string, TeamColorSet> = {
   blue: {
-    border: '#6366f1',
-    badge: 'rgba(99, 102, 241, 0.15)',
-    badgeLight: 'rgba(99, 102, 241, 0.12)',
-    text: '#818cf8',
-    textLight: '#4f46e5',
+    border: '#3b82f6',
+    badge: 'rgba(59, 130, 246, 0.15)',
+    badgeLight: 'rgba(59, 130, 246, 0.12)',
+    text: '#60a5fa',
+    textLight: '#2563eb',
   },
   saffron: {
     border: '#eab308',

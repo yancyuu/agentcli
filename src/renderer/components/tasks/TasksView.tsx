@@ -3,7 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
-import { CheckCircle2, ClipboardList, PlayCircle, Calendar, Columns3, RefreshCw } from 'lucide-react';
+import {
+  CheckCircle2,
+  ClipboardList,
+  PlayCircle,
+  Calendar,
+  Columns3,
+  RefreshCw,
+} from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { KanbanColumn } from '../team/kanban/KanbanColumn';
@@ -15,8 +22,8 @@ type TasksSubTab = 'overview' | 'schedules';
 type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'overview', label: '任务总览', icon: <Columns3 size={13} /> },
-  { id: 'schedules', label: '定时任务', icon: <Calendar size={13} /> },
+  { id: 'overview', label: 'Loop 任务总览', icon: <Columns3 size={13} /> },
+  { id: 'schedules', label: '定时 Loop', icon: <Calendar size={13} /> },
 ];
 
 const COLUMNS: {
@@ -174,7 +181,7 @@ const TaskOverviewPool = (): React.JSX.Element => {
   if (globalTasksLoading && !globalTasksInitialized) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
-        加载团队任务…
+        加载 Loop 任务…
       </div>
     );
   }
@@ -191,7 +198,7 @@ const TaskOverviewPool = (): React.JSX.Element => {
           onChange={(e) => setTeamFilter(e.target.value)}
           className={selectCls}
         >
-          <option value="all">全部团队</option>
+          <option value="all">全部 Loop workspace</option>
           {teamOptions.map(([teamName, displayName]) => (
             <option key={teamName} value={teamName}>
               {displayName}
@@ -302,7 +309,10 @@ const GlobalOverviewTaskCard = ({
         <span className="mt-0.5 shrink-0 text-[9px] tabular-nums text-[var(--color-text-muted)] opacity-50">
           #{task.displayId ?? deriveTaskDisplayId(task.id)}
         </span>
-        <h5 className="min-w-0 flex-1 line-clamp-2 text-[11px] font-medium" style={{ color: 'var(--color-text)' }}>
+        <h5
+          className="line-clamp-2 min-w-0 flex-1 text-[11px] font-medium"
+          style={{ color: 'var(--color-text)' }}
+        >
           {task.subject}
         </h5>
       </div>
@@ -311,7 +321,10 @@ const GlobalOverviewTaskCard = ({
           {dispatchFrom} → {dispatchTo}
         </span>
       ) : null}
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+      <div
+        className="mt-1.5 flex items-center gap-1.5 text-[10px]"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
         <span>{task.teamDisplayName}</span>
         <span style={{ opacity: 0.3 }}>·</span>
         <span>{ownerLabel}</span>

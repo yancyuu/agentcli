@@ -12,9 +12,9 @@ import {
 import { Textarea } from '@renderer/components/ui/textarea';
 import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import appIcon from '@renderer/favicon.png';
-import { Check, FileEdit, Loader2, RotateCcw, X } from 'lucide-react';
+import { Check, FileEdit, Info, Loader2, RotateCcw, ServerCog, X } from 'lucide-react';
 
-import { SettingsSectionHeader } from '../components';
+import { SettingsSectionCard } from '../components';
 
 interface CcConnectConfigRawDialogProps {
   open: boolean;
@@ -105,8 +105,7 @@ const CcConnectConfigRawDialog = ({
             </div>
           )}
           <p className="text-xs text-[var(--color-text-muted)]">
-            保存后将直接覆盖 Hermit 管理的配置文件。若修改了端口或
-            token，请点击”重启服务”生效。
+            保存后将直接覆盖 Hermit 管理的配置文件。若修改了端口或 token，请点击”重启服务”生效。
           </p>
         </div>
         <DialogFooter>
@@ -133,13 +132,20 @@ interface AdvancedSectionProps {
 }
 
 export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => {
-  const [version, setVersion] = useState<string>('');
+  const [version, setVersion] = useState<string>(__APP_VERSION__);
   const [ccConfigOpen, setCcConfigOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getAppVersion().then(setVersion).catch(console.error);
+    api
+      .getAppVersion()
+      .then((nextVersion) => {
+        if (typeof nextVersion === 'string' && nextVersion.trim()) {
+          setVersion(nextVersion);
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const handleRestart = useCallback(async () => {
@@ -158,61 +164,74 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
   }, []);
 
   return (
-    <div>
-      <SettingsSectionHeader title="服务配置" />
-      <div className="flex flex-wrap gap-2 py-2">
-        <button
-          onClick={() => setCcConfigOpen(true)}
-          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-indigo-500/5"
-          style={{
-            borderColor: 'rgba(99, 102, 241, 0.3)',
-            color: '#818cf8',
-          }}
-        >
-          <FileEdit className="size-4" />
-          编辑 配置
-        </button>
-        <button
-          onClick={() => void handleRestart()}
-          disabled={restarting}
-          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-all duration-150 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text-muted)',
-          }}
-        >
-          {restarting ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RotateCcw className="size-4" />
-          )}
-          重启服务
-        </button>
-      </div>
-      {restartMsg && (
-        <p
-          className="mb-2 text-xs"
-          style={{ color: restartMsg.includes('失败') ? '#f87171' : '#4ade80' }}
-        >
-          {restartMsg}
-        </p>
-      )}
-
-      <SettingsSectionHeader title="关于" />
-      <div className="flex items-start gap-4 py-3">
-        <img src={appIcon} alt="应用图标" className="size-10 rounded-lg" />
-        <div>
-          <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-            Hermit
-          </p>
-          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Version {version || '...'}
-          </p>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-            本地优先的 AI Agent 团队工作台。支持多模型供应商接入、自主任务管理和跨团队协作。
-          </p>
+    <div className="space-y-5">
+      <SettingsSectionCard
+        title="服务配置"
+        description="编辑 Hermit 运行配置，或在配置变更后重启本地服务。"
+        icon={<ServerCog className="size-3.5" />}
+      >
+        <div className="flex flex-wrap gap-2 px-3 py-3">
+          <button
+            onClick={() => setCcConfigOpen(true)}
+            className="flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-150 hover:bg-[var(--color-accent-soft)]"
+            style={{
+              borderColor: 'var(--color-accent-border)',
+              color: 'var(--color-accent)',
+            }}
+          >
+            <FileEdit className="size-3.5" />
+            编辑配置
+          </button>
+          <button
+            onClick={() => void handleRestart()}
+            disabled={restarting}
+            className="flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-150 hover:bg-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              borderColor: 'var(--color-border-subtle)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            {restarting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RotateCcw className="size-3.5" />
+            )}
+            重启服务
+          </button>
         </div>
-      </div>
+        {restartMsg && (
+          <p
+            className="px-3 pb-3 text-xs"
+            style={{ color: restartMsg.includes('失败') ? '#f87171' : 'var(--color-accent)' }}
+          >
+            {restartMsg}
+          </p>
+        )}
+      </SettingsSectionCard>
+
+      <SettingsSectionCard
+        title="关于"
+        description="当前应用版本和产品信息。"
+        icon={<Info className="size-3.5" />}
+      >
+        <div className="flex items-start gap-4 px-3 py-3">
+          <img src={appIcon} alt="应用图标" className="size-10 rounded-lg" />
+          <div>
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Hermit
+            </p>
+            <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Version {version || '...'}
+            </p>
+            <p
+              className="mt-2 text-xs leading-relaxed"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              本地优先的 AI Agent 团队工作台。支持多模型供应商接入、自主任务管理和跨团队协作。
+            </p>
+          </div>
+        </div>
+      </SettingsSectionCard>
 
       <CcConnectConfigRawDialog open={ccConfigOpen} onClose={() => setCcConfigOpen(false)} />
     </div>

@@ -18,6 +18,7 @@ import {
   Calendar,
   FileText,
   LayoutDashboard,
+  MessageSquare,
   Network,
   Pin,
   Puzzle,
@@ -56,6 +57,7 @@ const TAB_ICONS = {
   schedules: Calendar,
   tasks: Calendar,
   graph: Network,
+  chat: MessageSquare,
 } as const;
 
 export const SortableTab = ({

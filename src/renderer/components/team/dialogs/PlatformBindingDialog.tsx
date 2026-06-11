@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
 import {
@@ -92,11 +92,17 @@ const PLATFORM_OPTIONS: PlatformOption[] = [
 
 type BindingStep = 'platform' | 'qr' | 'form';
 
+export interface PlatformBindingCompleteOptions {
+  restartHandled?: boolean;
+}
+
 interface PlatformBindingContentProps {
   projectName: string;
   workDir: string;
   agentType: string;
-  onComplete: () => void;
+  platformAllowFrom?: Record<string, string>;
+  platformAllowChat?: Record<string, string>;
+  onComplete: (options?: PlatformBindingCompleteOptions) => void;
   onCancel: () => void;
 }
 
@@ -104,6 +110,8 @@ export function PlatformBindingContent({
   projectName,
   workDir,
   agentType,
+  platformAllowFrom = {},
+  platformAllowChat = {},
   onComplete,
   onCancel,
 }: PlatformBindingContentProps): React.JSX.Element {
@@ -119,6 +127,26 @@ export function PlatformBindingContent({
     setSelectedPlatform(key);
     setStep(isQRPlatform(key) ? 'qr' : 'form');
   };
+
+  const initialFormValues = useMemo((): Record<string, unknown> => {
+    const meta = platformMeta[selectedPlatform];
+    const values: Record<string, unknown> = {};
+    const allowFrom =
+      selectedPlatform === 'lark'
+        ? (platformAllowFrom.lark ?? platformAllowFrom.feishu)
+        : platformAllowFrom[selectedPlatform];
+    const allowChat =
+      selectedPlatform === 'lark'
+        ? (platformAllowChat.lark ?? platformAllowChat.feishu)
+        : platformAllowChat[selectedPlatform];
+    if (allowFrom && meta?.fields.some((field) => field.key === 'allow_from')) {
+      values.allow_from = allowFrom;
+    }
+    if (allowChat && meta?.fields.some((field) => field.key === 'allow_chat')) {
+      values.allow_chat = allowChat;
+    }
+    return values;
+  }, [platformAllowChat, platformAllowFrom, selectedPlatform]);
 
   if (
     step === 'qr' &&
@@ -144,6 +172,7 @@ export function PlatformBindingContent({
         projectName={projectName}
         workDir={workDir}
         agentType={agentType}
+        initialValues={initialFormValues}
         onComplete={onComplete}
         onCancel={() => setStep('platform')}
       />
@@ -152,10 +181,11 @@ export function PlatformBindingContent({
 
   return (
     <div className="space-y-3 py-2">
-      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
-        绑定渠道是可选项，用于将数字员工暴露到飞书、微信等外部平台；不绑定也可以在本机直接运行。
-        <br />
-        <span className="text-amber-500">⚠️ 绑定新渠道后需要重启服务，将短暂中断所有正在运行的会话。</span>
+      <div className="bg-[var(--color-surface-raised)]/60 relative overflow-hidden rounded-xl border border-[var(--color-border-subtle)] px-3 py-2.5 text-xs text-[var(--color-text-muted)] shadow-sm shadow-black/10">
+        <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
+        <p>
+          绑定渠道是可选项，用于将数字员工暴露到飞书、微信等外部平台；不绑定也可以在本机直接运行。
+        </p>
       </div>
       <div className="grid max-h-80 grid-cols-2 gap-2 overflow-y-auto">
         {PLATFORM_OPTIONS.map(({ key, label, color, icon }) => (
@@ -163,14 +193,18 @@ export function PlatformBindingContent({
             key={key}
             type="button"
             onClick={() => handlePlatformSelect(key)}
-            className="flex items-center gap-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 text-left transition-all hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-accent)]/5"
+            className="group flex items-center gap-2.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3 text-left shadow-sm shadow-black/5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-accent-border)] hover:bg-[var(--color-accent-soft)] hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
           >
-            <div className={`h-9 w-9 rounded-lg ${color} flex shrink-0 items-center justify-center`}>
+            <div
+              className={`h-9 w-9 rounded-lg ${color} flex shrink-0 items-center justify-center`}
+            >
               {icon === 'qr' ? <Smartphone size={16} /> : <Settings2 size={16} />}
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-[var(--color-text)]">{label}</div>
-              <div className="text-[11px] text-[var(--color-text-muted)]">{icon === 'qr' ? '扫码绑定' : '手动配置'}</div>
+              <div className="text-[11px] text-[var(--color-text-muted)]">
+                {icon === 'qr' ? '扫码绑定' : '手动配置'}
+              </div>
             </div>
           </button>
         ))}
@@ -195,6 +229,8 @@ export function PlatformBindingDialog({
   projectName,
   workDir,
   agentType,
+  platformAllowFrom,
+  platformAllowChat,
   onComplete,
   onCancel,
 }: PlatformBindingDialogProps): React.JSX.Element {
@@ -204,7 +240,7 @@ export function PlatformBindingDialog({
         <DialogHeader>
           <DialogTitle className="text-sm">绑定渠道</DialogTitle>
           <DialogDescription className="text-xs">
-            可选：为当前数字员工选择外部平台渠道，绑定后通过 Hermit 对外接收消息。
+            可选：为当前数字员工选择外部平台渠道，绑定后通过 Hermit 对外接收 Loop 指令。
           </DialogDescription>
         </DialogHeader>
         <PlatformBindingContent
@@ -212,6 +248,8 @@ export function PlatformBindingDialog({
           projectName={projectName}
           workDir={workDir}
           agentType={agentType}
+          platformAllowFrom={platformAllowFrom}
+          platformAllowChat={platformAllowChat}
           onComplete={onComplete}
           onCancel={onCancel}
         />

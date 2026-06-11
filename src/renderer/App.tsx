@@ -215,6 +215,7 @@ declare global {
 const SPLASH_MIN_DURATION_MS = 2800;
 const SPLASH_ENHANCED_HOLD_MS = 800;
 const SPLASH_FADE_MS = 480;
+const SPLASH_ROUTE_RESTORE_FADE_MS = 120;
 const SPLASH_REDUCED_MIN_DURATION_MS = 600;
 const SPLASH_REDUCED_HOLD_MS = 200;
 const SPLASH_REDUCED_FADE_MS = 180;
@@ -240,9 +241,22 @@ export const App = (): React.JSX.Element => {
       const enhancedStartedAt = window.__claudeTeamsSplashEnhancedStartedAt ?? performance.now();
       const elapsed = performance.now() - startedAt;
       const enhancedElapsed = performance.now() - enhancedStartedAt;
-      const minDuration = reducedMotion ? SPLASH_REDUCED_MIN_DURATION_MS : SPLASH_MIN_DURATION_MS;
-      const enhancedHold = reducedMotion ? SPLASH_REDUCED_HOLD_MS : SPLASH_ENHANCED_HOLD_MS;
-      const fadeDuration = reducedMotion ? SPLASH_REDUCED_FADE_MS : SPLASH_FADE_MS;
+      const routeRestored = window.location.pathname !== '/' && window.location.pathname !== '';
+      const minDuration = routeRestored
+        ? 0
+        : reducedMotion
+          ? SPLASH_REDUCED_MIN_DURATION_MS
+          : SPLASH_MIN_DURATION_MS;
+      const enhancedHold = routeRestored
+        ? 0
+        : reducedMotion
+          ? SPLASH_REDUCED_HOLD_MS
+          : SPLASH_ENHANCED_HOLD_MS;
+      const fadeDuration = routeRestored
+        ? SPLASH_ROUTE_RESTORE_FADE_MS
+        : reducedMotion
+          ? SPLASH_REDUCED_FADE_MS
+          : SPLASH_FADE_MS;
       const avatarReadyMaxWait = reducedMotion
         ? SPLASH_REDUCED_AVATAR_READY_MAX_WAIT_MS
         : SPLASH_AVATAR_READY_MAX_WAIT_MS;

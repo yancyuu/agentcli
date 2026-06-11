@@ -94,6 +94,7 @@ import type {
   ToolApprovalSettings,
   UpdateKanbanPatch,
 } from './team';
+import type { LoopAssetsSnapshot } from './loopAssets';
 import type { SystemManagerAPI } from './systemManager';
 import type { TerminalAPI } from './terminal';
 import type { WaterfallData } from './visualization';
@@ -524,6 +525,18 @@ export interface CcSessionDetail {
   history: CcSessionMessage[];
 }
 
+export interface LoopSessionRequest {
+  sessionName?: string;
+  message?: string;
+  reuse?: boolean;
+}
+
+export interface LoopSessionResponse {
+  session: CcSession;
+  reused: boolean;
+  messageSent: boolean;
+}
+
 export type ConversationTelemetryExportFormat = 'csv' | 'json' | 'markdown' | 'plaintext';
 
 export type ConversationTelemetryIncludeContent = 'none' | 'summary' | 'full';
@@ -577,7 +590,12 @@ export interface ConversationTelemetryRow {
     endTime?: string;
     active?: boolean;
     live?: boolean;
-    matchStatus: 'matched' | 'missing-agent-session-id' | 'jsonl-not-found' | 'ambiguous' | 'local-only';
+    matchStatus:
+      | 'matched'
+      | 'missing-agent-session-id'
+      | 'jsonl-not-found'
+      | 'ambiguous'
+      | 'local-only';
   };
   identity: {
     platform: string;
@@ -641,6 +659,11 @@ export interface TeamsAPI {
   list: () => Promise<TeamSummary[]>;
   ensureSystemManager: () => Promise<SystemManagerSummary>;
   getData: (teamName: string) => Promise<TeamViewSnapshot>;
+  getLoopAssets: (teamName: string) => Promise<LoopAssetsSnapshot>;
+  createLoopSession: (
+    teamName: string,
+    request: LoopSessionRequest
+  ) => Promise<LoopSessionResponse>;
   getTaskChangePresence: (teamName: string) => Promise<Record<string, TaskChangePresenceState>>;
   setChangePresenceTracking: (teamName: string, enabled: boolean) => Promise<void>;
   setToolActivityTracking: (teamName: string, enabled: boolean) => Promise<void>;
@@ -1199,7 +1222,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
         work_dir?: string;
         agent_type?: string;
       }
-    ) => Promise<{ message: string; restart_required: boolean }>;
+    ) => Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }>;
   };
 
   // Cross-Team Communication API
@@ -1215,7 +1238,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
   // System Manager / Control Console API
   systemManager: SystemManagerAPI;
 
-  // Embedded Terminal API (xterm.js + node-pty)
+  // System terminal API
   terminal: TerminalAPI;
 
   // Project file operations (editor-independent)

@@ -1193,7 +1193,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     const parts: string[] = [];
     if (providerChangeForcesFreshLeadContext && previousProviderId) {
       parts.push(
-        `提供商已从 ${getProviderLabel(previousProviderId)} 更改为 ${getProviderLabel(selectedProviderId)}。之前的负责人会话不会恢复，负责人会以全新上下文启动。`
+        `提供商已从 ${getProviderLabel(previousProviderId)} 更改为 ${getProviderLabel(selectedProviderId)}。之前的 Loop Lead 会话不会恢复，Loop Lead 会以全新上下文启动。`
       );
     }
     const runtimeChange = runtimeChangeNoteByKey.get('lead');
@@ -1596,7 +1596,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     if (!isLaunchMode) return [];
 
     const summary: string[] = [];
-    if (promptDraft.value.trim()) summary.push('负责人提示词');
+    if (promptDraft.value.trim()) summary.push('Loop Lead 指令');
     const worktreeMemberCount = effectiveMemberDrafts.filter(
       (member) => !member.removedAt && member.isolation === 'worktree'
     ).length;
@@ -1646,7 +1646,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     if (!effectiveCwd) errors.push('必须填写工作目录');
     if (isSchedule) {
       if (!effectiveTeamName) errors.push('必须选择团队');
-      if (!promptDraft.value.trim()) errors.push('必须填写提示词');
+      if (!promptDraft.value.trim()) errors.push('必须填写 Loop 指令');
       if (!cronExpression.trim()) errors.push('必须填写 Cron 表达式');
     }
     return errors;
@@ -2052,7 +2052,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       </>
     ) : (
       <>
-        通过 Agent CLI 启动数字员工 <span className="font-mono font-medium">{effectiveTeamName}</span>。
+        通过 Agent CLI 启动数字员工{' '}
+        <span className="font-mono font-medium">{effectiveTeamName}</span>。
       </>
     )
   ) : isEditing ? (
@@ -2202,7 +2203,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                   <p>
-                    团队负责人会启动一个新会话，不再恢复之前的上下文。已积累的会话记忆和对话历史将不可用。
+                    Loop Lead
+                    会启动一个新会话，不再恢复之前的上下文。已积累的会话记忆和运行历史将不可用。
                   </p>
                 </div>
               </div>
@@ -2392,9 +2394,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
               <div className="mb-2">
-                <p className="text-xs font-medium text-[var(--color-text)]">团队运行时</p>
+                <p className="text-xs font-medium text-[var(--color-text)]">Loop runtime</p>
                 <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                  Provider 作用于整个团队；成员只选择模型，默认继承这里的 provider。
+                  Provider 作用于整个循环；成员只选择模型，默认继承这里的 provider。
                 </p>
               </div>
               <TeamModelSelector
@@ -2469,7 +2471,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       inheritModelSettingsByDefault
                       lockProviderModel={syncModelsWithLead}
                       forceInheritedModelSettings={syncModelsWithLead}
-                      modelLockReason="该成员当前与团队负责人模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。"
+                      modelLockReason="该成员当前与 Loop Lead 模型保持同步。关闭同步后可单独设置提供商、模型或推理强度。"
                       providerId={selectedProviderId}
                       model={selectedModel}
                       effort={(selectedEffort as EffortLevel) || undefined}
@@ -2495,7 +2497,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
                   <div className="space-y-1.5">
                     <Label htmlFor="dialog-prompt" className="label-optional">
-                      给团队负责人的提示（可选）
+                      给 Loop Lead 的启动指令（可选）
                     </Label>
                     <MentionableTextarea
                       id="dialog-prompt"
@@ -2509,7 +2511,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       chips={chipDraft.chips}
                       onChipRemove={chipDraft.removeChip}
                       onFileChipInsert={chipDraft.addChip}
-                      placeholder="填写给团队负责人的说明..."
+                      placeholder="填写给 Loop Lead 的循环目标、约束或启动说明..."
                       footerRight={
                         promptDraft.isSaved ? (
                           <span className="text-[10px] text-[var(--color-text-muted)]">已保存</span>
@@ -2541,7 +2543,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                           <p>
                             提供商已从 {getProviderLabel(previousProviderId!)} 更改为{' '}
                             {getProviderLabel(selectedProviderId)}
-                            。之前的负责人会话不会恢复，负责人会以全新上下文启动，以正确应用新的运行时。
+                            。之前的 Loop Lead 会话不会恢复，Loop Lead
+                            会以全新上下文启动，以正确应用新的运行时。
                           </p>
                         </div>
                       </div>
@@ -2572,7 +2575,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                         <div className="flex items-start gap-2">
                           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                           <p>
-                            团队负责人会启动一个新会话，不再恢复之前的上下文。已积累的会话记忆和对话历史将不可用。
+                            Loop Lead
+                            会启动一个新会话，不再恢复之前的上下文。已积累的会话记忆和运行历史将不可用。
                           </p>
                         </div>
                       </div>
@@ -2594,7 +2598,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             ) : (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="dialog-prompt">提示词</Label>
+                  <Label htmlFor="dialog-prompt">定时 Loop 指令</Label>
                   <MentionableTextarea
                     id="dialog-prompt"
                     className="min-h-[100px] text-xs"
@@ -2607,7 +2611,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     chips={chipDraft.chips}
                     onChipRemove={chipDraft.removeChip}
                     onFileChipInsert={chipDraft.addChip}
-                    placeholder="填写定时执行时给 Claude 的说明..."
+                    placeholder="填写定时触发后交给 Loop Lead 的循环指令..."
                     footerRight={
                       promptDraft.isSaved ? (
                         <span className="text-[10px] text-[var(--color-text-muted)]">已保存</span>
@@ -2615,7 +2619,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     }
                   />
                   <p className="text-[11px] text-[var(--color-text-muted)]">
-                    该提示词会传递给 <code className="font-mono">claude -p</code> 用于 one-shot
+                    该 Loop 指令会传递给 <code className="font-mono">claude -p</code> 用于 one-shot
                     execution
                   </p>
                 </div>

@@ -88,8 +88,10 @@ export const LeadModelRow = ({
             loading="lazy"
           />
           <div className="flex h-8 min-w-0 items-center gap-3">
-            <span className="truncate text-sm font-medium text-[var(--color-text)]">负责人</span>
-            <span className="shrink-0 text-xs text-[var(--color-text-secondary)]">团队负责人</span>
+            <span className="truncate text-sm font-medium text-[var(--color-text)]">Loop Lead</span>
+            <span className="shrink-0 text-xs text-[var(--color-text-secondary)]">
+              运行时负责人
+            </span>
           </div>
         </div>
       </div>
@@ -173,7 +175,7 @@ export const LeadModelRow = ({
           <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
             <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
             <p className="text-[11px] leading-relaxed text-sky-300">
-              这些设置控制团队负责人，并作为未单独覆盖设置的成员默认运行时。
+              这些设置控制 Loop Lead，并作为未单独覆盖设置的成员默认运行时。
             </p>
           </div>
         </div>

@@ -12,11 +12,11 @@
  *   └─ tasks/board.json       # 任务看板
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
+import { resolveExternalPlatformSessionTeamSlug } from '@main/utils/externalPlatformSessionRouting';
 import { createLogger } from '@shared/utils/logger';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const logger = createLogger('TeamWorkspace');
 
@@ -33,7 +33,7 @@ export interface TeamManifest {
   bindProject: string;
   /** agent 类型，用于 MCP 配置注入等 harness 特定逻辑 */
   harness: string;
-  /** agent 工作目录（cc-connect project work_dir） */
+  /** agent runtime 工作目录（cc-connect project work_dir） */
   workDir: string;
   color?: string;
   description?: string;
@@ -136,12 +136,28 @@ export function toSlug(input: string, fallback = 'team'): string {
   return ascii || fallback;
 }
 
+export function isValidBindProject(value: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]*$/.test(value);
+}
+
+function assertValidBindProject(value: string): void {
+  if (!isValidBindProject(value)) {
+    throw new Error(
+      'bindProject must contain only lowercase ASCII letters, digits, hyphens, and underscores, and start with a letter or digit'
+    );
+  }
+}
+
 export function teamsRoot(): string {
   return path.join(hermitHome(), 'teams');
 }
 
 export function teamRoot(teamSlug: string): string {
   return path.join(teamsRoot(), teamSlug);
+}
+
+function isExternalPlatformSlug(teamSlug: string): boolean {
+  return /^(feishu|lark|weixin|telegram|discord|slack):/.test(teamSlug);
 }
 
 export function groupSessionKey(teamSlug: string): string {
@@ -179,16 +195,46 @@ async function writeJson(p: string, data: unknown): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export class TeamWorkspaceService {
+  private async readTeamManifestByStorageSlug(storageSlug: string): Promise<TeamManifest> {
+    const root = teamRoot(storageSlug);
+    const manifest = await readJson<TeamManifest | null>(path.join(root, 'team.json'), null);
+    if (!manifest) {
+      if (!(await pathExists(root))) {
+        throw new Error(`团队 "${storageSlug}" 不存在 (${root})`);
+      }
+      const stat = await fs.promises.stat(root).catch(() => null);
+      return {
+        schemaVersion: 2,
+        slug: storageSlug,
+        displayName: storageSlug,
+        bindProject: storageSlug,
+        harness: 'claudecode',
+        workDir: '',
+        collaboration: true,
+        rootPath: root,
+        createdAt: (stat?.birthtime ?? stat?.mtime ?? new Date()).toISOString(),
+      };
+    }
+    return manifest;
+  }
+
   private async resolveStorageSlug(teamSlug: string): Promise<string> {
     if (await pathExists(path.join(teamRoot(teamSlug), 'team.json'))) {
       return teamSlug;
     }
-    const match = (await this.listTeams()).find((manifest) => manifest.bindProject === teamSlug);
-    return match?.slug ?? teamSlug;
+    const teams = await this.listTeams();
+    const directMatch = teams.find((manifest) => manifest.bindProject === teamSlug);
+    if (directMatch) return directMatch.slug;
+    if (isExternalPlatformSlug(teamSlug)) {
+      const platformMatch = resolveExternalPlatformSessionTeamSlug(teamSlug, teams);
+      if (platformMatch) return platformMatch;
+    }
+    return teamSlug;
   }
 
-  private async createUniqueStorageSlug(displayName: string): Promise<string> {
-    const baseSlug = toSlug(displayName);
+  private async createUniqueStorageSlug(bindProject: string): Promise<string> {
+    assertValidBindProject(bindProject);
+    const baseSlug = bindProject;
     let slug = baseSlug;
     let suffix = 2;
     while (await pathExists(path.join(teamRoot(slug), 'team.json'))) {
@@ -201,11 +247,14 @@ export class TeamWorkspaceService {
   async createTeam(
     input: CreateTeamInput
   ): Promise<{ slug: string; root: string; manifest: TeamManifest }> {
-    if (!input.displayName) throw new Error('displayName is required');
-    if (!input.bindProject) throw new Error('bindProject is required');
+    const displayName = input.displayName.trim();
+    const bindProject = input.bindProject.trim();
+    if (!displayName) throw new Error('displayName is required');
+    if (!bindProject) throw new Error('bindProject is required');
     if (!input.workDir) throw new Error('workDir is required');
+    assertValidBindProject(bindProject);
 
-    const slug = await this.createUniqueStorageSlug(input.bindProject);
+    const slug = await this.createUniqueStorageSlug(bindProject);
     const root = teamRoot(slug);
 
     await fs.promises.mkdir(root, { recursive: true });
@@ -215,8 +264,8 @@ export class TeamWorkspaceService {
     const manifest: TeamManifest = {
       schemaVersion: 2,
       slug,
-      displayName: input.displayName,
-      bindProject: input.bindProject,
+      displayName,
+      bindProject,
       harness: input.harness,
       workDir: input.workDir,
       color: input.color,
@@ -230,43 +279,17 @@ export class TeamWorkspaceService {
     };
 
     await writeJson(path.join(root, 'team.json'), manifest);
-    logger.info(`created team ${slug} → cc-project:${input.bindProject}`);
+    logger.info(`created team ${slug} → cc-project:${bindProject}`);
     return { slug, root, manifest };
   }
 
   async readTeamManifest(teamSlug: string): Promise<TeamManifest> {
-    const root = teamRoot(teamSlug);
-    const manifest = await readJson<TeamManifest | null>(path.join(root, 'team.json'), null);
-    if (!manifest) {
-      if (!(await pathExists(root))) {
-        throw new Error(`团队 "${teamSlug}" 不存在 (${root})`);
-      }
-      const stat = await fs.promises.stat(root).catch(() => null);
-      return {
-        schemaVersion: 2,
-        slug: teamSlug,
-        displayName: teamSlug,
-        bindProject: teamSlug,
-        harness: 'claudecode',
-        workDir: '',
-        collaboration: true,
-        rootPath: root,
-        createdAt: (stat?.birthtime ?? stat?.mtime ?? new Date()).toISOString(),
-      };
-    }
-    return manifest;
+    const storageSlug = await this.resolveStorageSlug(teamSlug);
+    return this.readTeamManifestByStorageSlug(storageSlug);
   }
 
   async readTeamManifestByProject(projectName: string): Promise<TeamManifest> {
-    try {
-      return await this.readTeamManifest(projectName);
-    } catch {
-      const match = (await this.listTeams()).find(
-        (manifest) => manifest.bindProject === projectName
-      );
-      if (match) return match;
-      throw new Error(`团队 "${projectName}" 不存在 (${teamsRoot()})`);
-    }
+    return this.readTeamManifest(projectName);
   }
 
   async listTeams(): Promise<TeamManifest[]> {
@@ -278,7 +301,7 @@ export class TeamWorkspaceService {
       if (!e.isDirectory()) continue;
       if (e.name.startsWith('.')) continue;
       try {
-        out.push(await this.readTeamManifest(e.name));
+        out.push(await this.readTeamManifestByStorageSlug(e.name));
       } catch {
         // skip broken dirs
       }
@@ -326,16 +349,20 @@ export class TeamWorkspaceService {
     if (opts.deleteFiles) {
       await fs.promises.rm(root, { recursive: true, force: true });
     } else {
-      const archive = path.join(teamsRoot(), `.archived-${teamSlug}-${Date.now()}`);
+      const archive = path.join(teamsRoot(), `.archived-${manifest.slug}-${Date.now()}`);
       await fs.promises.rename(root, archive);
     }
-    logger.info(`deleted team ${teamSlug} (deleteFiles=${opts.deleteFiles ?? false})`);
+    logger.info(`deleted team ${manifest.slug} (deleteFiles=${opts.deleteFiles ?? false})`);
   }
 
   // ---- 消息记录 ----
 
   async appendMessage(teamSlug: string, msg: AppendGroupMessageInput): Promise<GroupMessage> {
-    const file = path.join(teamRoot(teamSlug), 'messages', 'group.jsonl');
+    const storageSlug = await this.resolveStorageSlug(teamSlug);
+    if (storageSlug === teamSlug && isExternalPlatformSlug(teamSlug)) {
+      throw new Error(`外部平台 session_key 不能作为 Hermit team slug 写入消息: ${teamSlug}`);
+    }
+    const file = path.join(teamRoot(storageSlug), 'messages', 'group.jsonl');
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
     const entry: GroupMessage = {
       id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -350,9 +377,7 @@ export class TeamWorkspaceService {
     return entry;
   }
 
-  async readMessages(teamSlug: string, opts: { limit?: number } = {}): Promise<GroupMessage[]> {
-    const limit = opts.limit ?? 200;
-    const file = path.join(teamRoot(teamSlug), 'messages', 'group.jsonl');
+  private async readGroupMessageFile(file: string): Promise<GroupMessage[]> {
     let raw: string;
     try {
       raw = await fs.promises.readFile(file, 'utf8');
@@ -369,6 +394,33 @@ export class TeamWorkspaceService {
         /* skip */
       }
     }
+    return all;
+  }
+
+  private async findLegacyExternalMessageFiles(storageSlug: string): Promise<string[]> {
+    const dir = teamsRoot();
+    if (!(await pathExists(dir))) return [];
+    const manifests = await this.listTeams();
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory() && isExternalPlatformSlug(entry.name))
+      .filter(
+        (entry) => resolveExternalPlatformSessionTeamSlug(entry.name, manifests) === storageSlug
+      )
+      .map((entry) => path.join(dir, entry.name, 'messages', 'group.jsonl'));
+  }
+
+  async readMessages(teamSlug: string, opts: { limit?: number } = {}): Promise<GroupMessage[]> {
+    const limit = opts.limit ?? 200;
+    const storageSlug = await this.resolveStorageSlug(teamSlug);
+    if (storageSlug === teamSlug && isExternalPlatformSlug(teamSlug)) return [];
+
+    const files = [
+      path.join(teamRoot(storageSlug), 'messages', 'group.jsonl'),
+      ...(await this.findLegacyExternalMessageFiles(storageSlug)),
+    ];
+    const all = (await Promise.all(files.map((file) => this.readGroupMessageFile(file)))).flat();
+    all.sort((a, b) => a.ts.localeCompare(b.ts));
     return all.length <= limit ? all : all.slice(all.length - limit);
   }
 

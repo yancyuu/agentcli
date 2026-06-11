@@ -6,7 +6,7 @@
  * 改进：
  * - 分组：live 会话在上，inactive 在下
  * - 运行中和历史会话统一展示在团队详情中
- * - 点击会话行可展开最近历史消息
+ * - 点击会话行可展开最近历史动态
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -30,6 +30,14 @@ import type { CcSession, CcSessionDetail } from '@shared/types';
 
 const SESSION_DETAIL_PAGE_SIZE = 12;
 const HISTORICAL_SESSION_PAGE_SIZE = 10;
+
+function formatSessionDetailError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/session not found/i.test(message)) {
+    return '会话文件已不存在，请刷新会话列表';
+  }
+  return message || '加载会话历史失败';
+}
 
 interface CcSessionsSectionProps {
   teamName: string;
@@ -294,7 +302,7 @@ function CcSessionRow({
       .catch((err) => {
         if (!cancelled) {
           setDetail(null);
-          setDetailError(err instanceof Error ? err.message : '加载会话历史失败');
+          setDetailError(formatSessionDetailError(err));
         }
       })
       .finally(() => {
@@ -384,7 +392,6 @@ function CcSessionRow({
         </div>
       </button>
 
-
       {isExpanded && (
         <div className="px-3 pb-3">
           {loadingDetail && !detail && (
@@ -408,7 +415,9 @@ function CcSessionRow({
           {detail && (
             <div className="rounded-lg bg-[var(--color-surface)] p-2">
               {detail.history.length === 0 ? (
-                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">暂无消息</div>
+                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">
+                  暂无 Loop 动态
+                </div>
               ) : (
                 <>
                   <div className="mb-2 flex items-center justify-between px-1 text-[10px] text-[var(--color-text-muted)]">
@@ -492,14 +501,14 @@ function buildSessionRecordMarkdown(session: CcSession, detail: CcSessionDetail)
     `- Status: ${detail.live ? 'live' : detail.active ? 'active' : 'inactive'}`,
     `- Created: ${detail.createdAt || session.createdAt}`,
     `- Updated: ${detail.updatedAt || session.updatedAt}`,
-    `- Messages: ${detail.historyCount}`,
+    `- Loop events: ${detail.historyCount}`,
     '',
-    '## Messages',
+    '## Loop events',
     '',
   ];
 
   if (detail.history.length === 0) {
-    lines.push('_No messages._', '');
+    lines.push('_No Loop events._', '');
     return lines.join('\n');
   }
 

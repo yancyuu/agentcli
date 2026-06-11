@@ -87,7 +87,8 @@ export interface Tab {
     | 'extensions'
     | 'schedules'
     | 'tasks'
-    | 'graph';
+    | 'graph'
+    | 'chat';
 
   /** Session ID (required when type === 'session') */
   sessionId?: string;

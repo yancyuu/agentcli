@@ -49,7 +49,7 @@ import {
   CROSS_TEAM_SOURCE,
   formatCrossTeamText,
 } from '@shared/constants/crossTeam';
-import type { CcAgentType, CcProjectPlatform } from '../shared/types/ccConnect';
+import type { CcAgentType, CcProjectPlatform, CcSessionListItem } from '../shared/types/ccConnect';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { TeamProvisioningService } from './services/teams-mvp';
@@ -57,9 +57,11 @@ import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
 import { resolveCcProjectName } from './utils/teamProjectResolution';
 import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
 import { SystemManagerConfigService } from './services/system-manager/SystemManagerConfigService';
-import { SystemManagerPtyService } from './services/system-manager/SystemManagerPtyService';
 import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
-import { seedBuiltinWorkflows, ensureGlobalWorkflows } from './services/system-manager/BuiltinWorkflowSeeder';
+import {
+  ensureGlobalWorkflows,
+  seedBuiltinWorkflows,
+} from './services/system-manager/BuiltinWorkflowSeeder';
 import {
   SYSTEM_MANAGER_BIND_PROJECT,
   SYSTEM_MANAGER_DISPLAY_NAME,
@@ -79,6 +81,17 @@ import {
   shouldIncludeContent,
 } from './services/session-intelligence/ConversationTelemetryService';
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
+import { mergeLocalAndCcSessions } from './services/session-intelligence/teamSessionListMapper';
+import type { CcSession } from '@shared/types/api';
+import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
+import {
+  scanProjectStats,
+  type ProjectUsageStats,
+} from './services/session-intelligence/SessionUsageParser';
+import {
+  isExternalPlatformSessionKey,
+  resolveExternalPlatformSessionTeamSlug,
+} from './utils/externalPlatformSessionRouting';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
@@ -103,7 +116,7 @@ const CC_AGENT_TYPES: readonly CcAgentType[] = [
   'tmux',
 ];
 const SYSTEM_MANAGER_DESCRIPTION =
-  '项目级 Claude Code 控制台，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
+  '项目级 Claude Code Admin Loop，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
 
 function toCcAgentType(value: string | undefined): CcAgentType {
   return CC_AGENT_TYPES.includes(value as CcAgentType) ? (value as CcAgentType) : 'claudecode';
@@ -189,9 +202,10 @@ function loadConfig(): HermitConfig {
       merged = { ...defaults, ...raw };
     }
   } catch (err) {
-    const msg = err instanceof SyntaxError
-      ? `${HERMIT_CONFIG_FILE} 格式错误: ${err.message}。将使用默认配置并覆盖修复。`
-      : `读取 ${HERMIT_CONFIG_FILE} 失败: ${err instanceof Error ? err.message : String(err)}`;
+    const msg =
+      err instanceof SyntaxError
+        ? `${HERMIT_CONFIG_FILE} 格式错误: ${err.message}。将使用默认配置并覆盖修复。`
+        : `读取 ${HERMIT_CONFIG_FILE} 失败: ${err instanceof Error ? err.message : String(err)}`;
     console.warn(`[Hermit] ${msg}`);
     // Auto-heal: rewrite the config file with valid defaults + any readable env overrides
     mkdirSync(HERMIT_HOME, { recursive: true });
@@ -230,7 +244,9 @@ function writeHermitConfigRaw(content: string): HermitConfig {
     parsed = JSON.parse(content);
   } catch (err) {
     if (err instanceof SyntaxError) {
-      throw new Error(`配置文件 JSON 格式错误: ${err.message}。请检查是否有尾逗号、单引号或注释等非法 JSON 语法。`);
+      throw new Error(
+        `配置文件 JSON 格式错误: ${err.message}。请检查是否有尾逗号、单引号或注释等非法 JSON 语法。`
+      );
     }
     throw err;
   }
@@ -255,13 +271,11 @@ const bridge = new CcConnectBridge({
   bridgeUrl: runtimeConfig.ccBridgeUrl,
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
-const svc = new TeamProvisioningService(cc, bridge);
+const svc = new TeamProvisioningService(cc, bridge, undefined, {
+  restartCcConnect: restartCcConnectAndReconnectBridge,
+});
 const systemManagerConfig = new SystemManagerConfigService(REPO_ROOT);
-const systemManagerPty = new SystemManagerPtyService();
 const workflowPromptService = new WorkflowPromptService();
-
-systemManagerPty.on('data', (event) => broadcastSse('terminal:data', event));
-systemManagerPty.on('exit', (event) => broadcastSse('terminal:exit', event));
 
 async function getSystemManagerWorkDir(): Promise<string> {
   try {
@@ -355,37 +369,75 @@ const conversationTelemetry = new ConversationTelemetryService({
   readTeamManifest: (teamName) => svc.readTeamManifest(teamName),
 });
 const localSessionScanner = new LocalSessionScanner();
-
-async function computeTeamStats(
-  workDir: string
-): Promise<{ sessions: number; messages: number; tokens: number; durationMs: number } | undefined> {
-  if (!workDir) return undefined;
-  try {
-    const sessions = await localSessionScanner.scanSummaries(workDir, '');
-    if (sessions.length === 0) return undefined;
-    let tokens = 0;
-    let messages = 0;
-    let earliest: string | null = null;
-    let latest: string | null = null;
-    for (const s of sessions) {
-      tokens += s.inputTokens + s.outputTokens;
-      messages += s.messageCount;
-      if (s.startTime && (!earliest || s.startTime < earliest)) earliest = s.startTime;
-      if (s.endTime && (!latest || s.endTime > latest)) latest = s.endTime;
-    }
-    let durationMs = 0;
-    if (earliest && latest) {
-      durationMs = Date.parse(latest) - Date.parse(earliest);
-      if (durationMs < 0) durationMs = 0;
-    }
-    return { sessions: sessions.length, messages, tokens, durationMs };
-  } catch {
-    return undefined;
+const loopAssetsScanner = new LoopAssetsScannerService();
+const TEAM_STATS_CACHE_TTL_MS = 30_000;
+const teamStatsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    value: ProjectUsageStats | null;
+    promise?: Promise<ProjectUsageStats | null>;
   }
+>();
+
+function getProjectStatsSnapshot(workDir: string): ProjectUsageStats | null {
+  const normalizedWorkDir = workDir.trim();
+  if (!normalizedWorkDir) return null;
+
+  const now = Date.now();
+  const cached = teamStatsCache.get(normalizedWorkDir);
+  if (cached && cached.expiresAt > now) return cached.value;
+  if (cached?.promise) return cached.value;
+
+  const promise = scanProjectStats(normalizedWorkDir)
+    .catch((err) => {
+      app.log.warn({ err, workDir: normalizedWorkDir }, 'scan project stats failed');
+      return null;
+    })
+    .then((value) => {
+      teamStatsCache.set(normalizedWorkDir, {
+        expiresAt: Date.now() + TEAM_STATS_CACHE_TTL_MS,
+        value,
+      });
+      return value;
+    });
+
+  teamStatsCache.set(normalizedWorkDir, {
+    expiresAt: now + TEAM_STATS_CACHE_TTL_MS,
+    value: cached?.value ?? null,
+    promise,
+  });
+  void promise;
+  return cached?.value ?? null;
 }
 
 async function resolveRouteCcProjectName(teamName: string): Promise<string> {
-  return resolveCcProjectName(teamName, (name) => svc.readTeamManifest(name));
+  return resolveCcProjectName(teamName, (name) => svc.readTeamManifestByProject(name));
+}
+
+async function restartCcConnectAndReconnectBridge(): Promise<void> {
+  await cc.restart();
+
+  // Wait for cc-connect management API to come back (restart only signals, process respawns async).
+  let managementReady = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      await cc.listProjects();
+      managementReady = true;
+      break;
+    } catch {
+      /* not back yet */
+    }
+  }
+  if (!managementReady) {
+    throw new Error('cc-connect did not come back within 30s');
+  }
+
+  // After cc-connect restarts, force Hermit's Bridge adapter to reconnect and re-register.
+  // Otherwise Feishu/Lark may show connected in cc-connect but Hermit is not listening yet.
+  bridge.reconnect();
+  await waitForHarnessBridgeConnected(15_000);
 }
 
 const collabBoard = new CollaborationBoardService();
@@ -394,6 +446,9 @@ const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 // Broadcast collab board changes via SSE
 taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
   broadcastSse('collab-change', { dispatchId, status, fromTeam, toTeam });
+};
+taskDispatch.onRuntimeStart = async ({ teamName, text }) => {
+  await sendHarnessMessageViaBridge({ teamName, text });
 };
 
 async function readSavedTaskBusConfig(): Promise<TaskBusConfig | null> {
@@ -470,6 +525,33 @@ function normalizePlatformAllowFrom(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
+function hasPlatformAllowDeleteMarker(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  return Object.entries(value as Record<string, unknown>).some(
+    ([platform, allowFrom]) =>
+      platform.trim().length > 0 && (typeof allowFrom !== 'string' || allowFrom.trim().length === 0)
+  );
+}
+
+function normalizePlatformAllowUpdate(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = normalizePlatformAllowFrom(value);
+  if (Object.keys(normalized).length > 0) {
+    if (normalized.lark !== undefined) delete normalized.feishu;
+    return normalized;
+  }
+  return Object.keys(value).length === 0 || hasPlatformAllowDeleteMarker(value) ? {} : undefined;
+}
+
+function isCcProjectNotFoundError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /project not found:/i.test(message);
+}
+
 // ===========================================================================
 // SSE 客户端管理器 — 广播 bridge 事件到所有连接的前端客户端
 // ===========================================================================
@@ -493,9 +575,10 @@ bridge.start();
 
 bridge.on('reply', (msg) => {
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
-  const teamName = resolveTeamFromSessionKey(sessionKey) ?? sessionKey;
 
   void (async () => {
+    const teamName = await resolveTeamFromBridgeMessageWithRetry(msg);
+    if (!teamName) return;
     // 先落盘再广播，否则前端可能在 appendFile 完成前刷新到旧 feed。
     await svc.appendMessage(teamName, {
       from: teamName,
@@ -506,19 +589,20 @@ bridge.on('reply', (msg) => {
     });
     broadcastSse('team-change', { type: 'inbox', teamName });
   })().catch((err) => {
-    app.log.warn({ err, teamName, sessionKey }, 'bridge reply persistence failed');
+    app.log.warn({ err, sessionKey }, 'bridge reply persistence failed');
   });
 });
 
 bridge.on('reply_stream', (msg) => {
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
-  const teamName = resolveTeamFromSessionKey(sessionKey) ?? sessionKey;
   const done = (msg as { done?: boolean }).done ?? false;
 
-  if (done) {
-    // 流式结束，存储完整回复
-    const fullText = (msg as { full_text?: string }).full_text ?? '';
-    void (async () => {
+  void (async () => {
+    const teamName = await resolveTeamFromBridgeMessageWithRetry(msg);
+    if (!teamName) return;
+    if (done) {
+      // 流式结束，存储完整回复
+      const fullText = (msg as { full_text?: string }).full_text ?? '';
       if (fullText) {
         await svc.appendMessage(teamName, {
           from: teamName,
@@ -529,43 +613,148 @@ bridge.on('reply_stream', (msg) => {
         });
       }
       broadcastSse('team-change', { type: 'inbox', teamName });
-    })().catch((err) => {
-      app.log.warn({ err, teamName, sessionKey }, 'bridge stream reply persistence failed');
-    });
-  } else {
+      return;
+    }
     broadcastSse('team-change', { type: 'lead-message', teamName });
-  }
+  })().catch((err) => {
+    app.log.warn({ err, sessionKey }, 'bridge stream reply persistence failed');
+  });
 });
 
 bridge.on('message', (msg) => {
   const type = (msg as { type?: string }).type ?? '';
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
   if (!sessionKey) return; // 无 session_key 的控制帧（pong 等）不广播
-  const teamName = resolveTeamFromSessionKey(sessionKey);
-  if (!teamName) return;
-  // typing_start/stop → lead-message；其他 → inbox
-  const eventType = type === 'typing_start' || type === 'typing_stop' ? 'lead-message' : 'inbox';
-  broadcastSse('team-change', { type: eventType, teamName });
+
+  void (async () => {
+    const teamName = await resolveTeamFromBridgeMessageWithRetry(msg);
+    if (!teamName) return;
+    // typing_start/stop → lead-message；其他 → inbox
+    const eventType = type === 'typing_start' || type === 'typing_stop' ? 'lead-message' : 'inbox';
+    broadcastSse('team-change', { type: eventType, teamName });
+  })().catch((err) => {
+    app.log.warn({ err, sessionKey, type }, 'bridge message routing failed');
+  });
 });
 
+const BRIDGE_SESSION_TEAM_CACHE_TTL_MS = 60_000;
+const EXTERNAL_PLATFORM_ROUTE_RETRY_COUNT = 6;
+const EXTERNAL_PLATFORM_ROUTE_RETRY_DELAY_MS = 1_000;
+const bridgeSessionTeamCache = new Map<string, { teamName: string; expiresAt: number }>();
+
 /**
- * 从 session_key 解析 teamName。
+ * 从 bridge message/session_key 解析 Hermit team slug。
+ *
+ * cc-connect 的外部平台 session_key 通常是 `feishu:{chat}:{user}`，不能当作
+ * Hermit teamName 使用；否则消息会落到 `~/.hermit/teams/feishu:*` 这类错误目录。
+ */
+async function resolveTeamFromBridgeMessage(msg: unknown): Promise<string | null> {
+  const sessionKey = (msg as { session_key?: string }).session_key ?? '';
+  if (!sessionKey) return null;
+
+  const explicitProject = getBridgeMessageProject(msg);
+  if (explicitProject) {
+    const teamName = await resolveTeamSlugFromCcProject(explicitProject);
+    if (teamName) {
+      cacheBridgeSessionTeam(sessionKey, teamName);
+      return teamName;
+    }
+  }
+
+  const parsedTeamName = parseHermitTeamFromSessionKey(sessionKey);
+  if (parsedTeamName) return resolveTeamSlugFromTeamName(parsedTeamName);
+
+  const cached = bridgeSessionTeamCache.get(sessionKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.teamName;
+
+  if (isExternalPlatformSessionKey(sessionKey)) {
+    const teamName = await resolveTeamSlugFromCcSessions(sessionKey);
+    if (teamName) {
+      cacheBridgeSessionTeam(sessionKey, teamName);
+      return teamName;
+    }
+    return null;
+  }
+
+  return resolveTeamSlugFromTeamName(sessionKey);
+}
+
+async function resolveTeamFromBridgeMessageWithRetry(msg: unknown): Promise<string | null> {
+  const sessionKey = (msg as { session_key?: string }).session_key ?? '';
+  if (!isExternalPlatformSessionKey(sessionKey)) return resolveTeamFromBridgeMessage(msg);
+
+  for (let attempt = 0; attempt <= EXTERNAL_PLATFORM_ROUTE_RETRY_COUNT; attempt++) {
+    const teamName = await resolveTeamFromBridgeMessage(msg);
+    if (teamName) return teamName;
+    if (attempt < EXTERNAL_PLATFORM_ROUTE_RETRY_COUNT) {
+      await new Promise((resolve) => setTimeout(resolve, EXTERNAL_PLATFORM_ROUTE_RETRY_DELAY_MS));
+    }
+  }
+
+  app.log.warn(
+    { sessionKey },
+    'external platform bridge message could not be mapped to a Hermit team slug'
+  );
+  return null;
+}
+
+function getBridgeMessageProject(msg: unknown): string {
+  const raw = msg as { project?: unknown; project_name?: unknown };
+  const value = typeof raw.project === 'string' ? raw.project : raw.project_name;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function cacheBridgeSessionTeam(sessionKey: string, teamName: string): void {
+  bridgeSessionTeamCache.set(sessionKey, {
+    teamName,
+    expiresAt: Date.now() + BRIDGE_SESSION_TEAM_CACHE_TTL_MS,
+  });
+}
+
+async function resolveTeamSlugFromCcProject(projectName: string): Promise<string | null> {
+  try {
+    const manifest = await svc.readTeamManifestByProject(projectName);
+    return manifest.slug || projectName;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveTeamSlugFromTeamName(teamName: string): Promise<string | null> {
+  try {
+    const manifest = await svc.readTeamManifest(teamName);
+    return manifest.slug || teamName;
+  } catch {
+    return teamName;
+  }
+}
+
+async function resolveTeamSlugFromCcSessions(sessionKey: string): Promise<string | null> {
+  const projects = await cc.listProjects().catch(() => []);
+  for (const project of projects) {
+    const sessions = await cc.listSessions(project.name).catch(() => []);
+    if (!sessions.some((session) => session.session_key === sessionKey)) continue;
+    return resolveTeamSlugFromCcProject(project.name);
+  }
+
+  const manifests = await svc.listTeams().catch(() => []);
+  return resolveExternalPlatformSessionTeamSlug(sessionKey, manifests);
+}
+
+/**
+ * 解析 Hermit 自己生成的 session_key。
  * 约定格式:
  *   hermit:{teamName}:session  (老格式)
  *   hermit:{teamName}:lead     (新格式)
  *   bridge:hermit-{team}:{member}
- *   {teamName}                 (直接就是 teamName)
  */
-function resolveTeamFromSessionKey(sessionKey: string): string | null {
+function parseHermitTeamFromSessionKey(sessionKey: string): string | null {
   if (!sessionKey) return null;
-  // hermit:{teamName}:xxx
   const hermitMatch = sessionKey.match(/^hermit:([^:]+):/);
   if (hermitMatch) return hermitMatch[1];
-  // bridge:hermit-{team}:{member}
   const bridgeMatch = sessionKey.match(/^bridge:hermit-([^:]+):/);
   if (bridgeMatch) return bridgeMatch[1];
-  // 否则当成 teamName 本身
-  return sessionKey;
+  return null;
 }
 
 const app = Fastify({
@@ -591,9 +780,22 @@ const allowedCorsOrigins = configuredCorsOrigins?.length
     ];
 const allowedOriginSet = new Set(allowedCorsOrigins);
 
+function isLoopbackBrowserOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isTrustedBrowserOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
-  return allowedOriginSet.has(origin);
+  if (allowedOriginSet.has(origin)) return true;
+  return isLoopbackBrowserOrigin(origin);
 }
 
 function assertTrustedBrowserOrigin(request: import('fastify').FastifyRequest): void {
@@ -661,17 +863,15 @@ async function proxyToCcConnect(
     );
     return reply.code(upstream.status).send({
       ok: false,
-      error: `cc-connect 端点 ${subPath} 返回了非 JSON 响应 (HTTP ${upstream.status})。` +
+      error:
+        `cc-connect 端点 ${subPath} 返回了非 JSON 响应 (HTTP ${upstream.status})。` +
         '请检查 cc-connect 是否正在运行且支持该端点。',
     });
   }
 
   return reply
     .code(upstream.status)
-    .header(
-      'Content-Type',
-      contentType || 'application/json; charset=utf-8'
-    )
+    .header('Content-Type', contentType || 'application/json; charset=utf-8')
     .send(body);
 }
 
@@ -991,18 +1191,8 @@ app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request)
 // restart / reload cc-connect
 app.post('/api/cc-restart', async () => {
   try {
-    await cc.restart();
-    // Wait for cc-connect to come back (restart only signals, process respawns async)
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        await cc.listProjects();
-        return { ok: true };
-      } catch {
-        /* not back yet */
-      }
-    }
-    return reply500(new Error('cc-connect did not come back within 30s'));
+    await restartCcConnectAndReconnectBridge();
+    return { ok: true };
   } catch (err) {
     return reply500(err);
   }
@@ -1021,7 +1211,7 @@ app.post('/api/cc-reload', async () => {
 // Teams — cc-connect projects 即团队，本地 ~/.hermit/teams/ 仅存 tasks + 额外元数据
 // ===========================================================================
 
-// POST /api/system-manager/ensure → 确保项目级控制台存在
+// POST /api/system-manager/ensure → 确保项目级 Admin Loop存在
 app.post('/api/system-manager/ensure', async (_request, reply) => {
   try {
     return await ensureSystemManager();
@@ -1041,9 +1231,10 @@ app.get('/api/system-manager/status', async (_request, reply) => {
 app.get('/api/system-manager/config', async (_request, reply) => {
   try {
     const config = await systemManagerConfig.getConfig();
-    // Seed builtin commands into workspace's .claude/commands/ if missing
+    // Seed builtin commands into workspace's .claude/commands/ if missing.
+    // Await so the control console can list quick workflow buttons immediately.
     if (config.selectedWorkDir) {
-      void seedBuiltinWorkflows(config.selectedWorkDir);
+      await seedBuiltinWorkflows(config.selectedWorkDir);
     }
     return config;
   } catch (err) {
@@ -1057,6 +1248,7 @@ app.put<{ Body: { selectedWorkDir?: string; workflowFolder?: string | null } }>(
     try {
       const config = await systemManagerConfig.updateConfig(request.body ?? {});
       await syncSystemManagerManifestWorkDir(config.selectedWorkDir);
+      await seedBuiltinWorkflows(config.selectedWorkDir);
       return config;
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1076,122 +1268,150 @@ app.post<{ Body: { folder?: string } }>(
       const result = await workflowPromptService.list(folder);
       await systemManagerConfig.updateConfig({ workflowFolder: result.folder });
       return result;
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith('Forbidden origin:')) {
+        return reply.code(403).send({ error: message });
+      }
       return { folder: '', prompts: [], warnings: [] };
     }
   }
 );
 
-app.post<{ Body: { id?: string } }>(
+app.post<{ Body: { folder?: string; id?: string } }>(
   '/api/system-manager/workflows/read',
   async (request, reply) => {
     try {
       assertTrustedBrowserOrigin(request);
       const config = await systemManagerConfig.getConfig();
-      if (!config.workflowFolder)
-        return reply.code(400).send({ error: 'workflowFolder is not configured' });
+      const folder =
+        typeof request.body?.folder === 'string' && request.body.folder.trim().length > 0
+          ? request.body.folder
+          : config.workflowFolder;
+      if (!folder) return reply.code(400).send({ error: 'workflowFolder is not configured' });
       const id = typeof request.body?.id === 'string' ? request.body.id : '';
-      return await workflowPromptService.read(config.workflowFolder, id);
+      return await workflowPromptService.read(folder, id);
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   }
 );
 
-app.post<{ Body: { command?: string; args?: string[]; cwd?: string; cols?: number; rows?: number } }>(
-  '/api/terminal/spawn',
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function appleScriptStringLiteral(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => `"${escapeAppleScriptString(line)}"`)
+    .join(' & linefeed & ');
+}
+
+function execFileAsync(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    void import('node:child_process')
+      .then(({ execFile }) => {
+        execFile(file, args, (error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      })
+      .catch(reject);
+  });
+}
+
+function spawnDetached(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    void import('node:child_process')
+      .then(({ spawn }) => {
+        const child = spawn(file, args, { detached: true, stdio: 'ignore' });
+        child.once('error', reject);
+        child.once('spawn', () => {
+          child.unref();
+          resolve();
+        });
+      })
+      .catch(reject);
+  });
+}
+
+function cmdQuote(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+// Launches commands in an external/system terminal only; no embedded terminal mode.
+async function openCommandInSystemTerminal(
+  shellLine: string,
+  windowsShellLine: string
+): Promise<void> {
+  if (process.platform === 'darwin') {
+    const script = `tell application "Terminal"\ndo script ${appleScriptStringLiteral(shellLine)}\nactivate\nend tell`;
+    await execFileAsync('osascript', ['-e', script]);
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    await spawnDetached('cmd.exe', ['/c', 'start', '', 'cmd.exe', '/k', windowsShellLine]);
+    return;
+  }
+
+  const candidates = [
+    ...(process.env.TERMINAL
+      ? [{ file: process.env.TERMINAL, args: ['-e', 'sh', '-lc', shellLine] }]
+      : []),
+    { file: 'x-terminal-emulator', args: ['-e', 'sh', '-lc', shellLine] },
+    { file: 'gnome-terminal', args: ['--', 'sh', '-lc', shellLine] },
+    { file: 'konsole', args: ['-e', 'sh', '-lc', shellLine] },
+    { file: 'xfce4-terminal', args: ['-e', 'sh', '-lc', shellLine] },
+    { file: 'alacritty', args: ['-e', 'sh', '-lc', shellLine] },
+    { file: 'kitty', args: ['sh', '-lc', shellLine] },
+    { file: 'wezterm', args: ['start', '--', 'sh', '-lc', shellLine] },
+  ];
+
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await spawnDetached(candidate.file, candidate.args);
+      return;
+    } catch (err) {
+      errors.push(`${candidate.file}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  throw new Error(`No system terminal launcher succeeded. ${errors.join('; ')}`);
+}
+
+// POST /api/terminal/open-external — open command in an external/system terminal
+app.post<{ Body: { command: string; args?: string[]; cwd?: string } }>(
+  '/api/terminal/open-external',
   async (request, reply) => {
     try {
       assertTrustedBrowserOrigin(request);
-      const requestedCwd = typeof request.body?.cwd === 'string' ? request.body.cwd.trim() : '';
-      const command = typeof request.body?.command === 'string' ? request.body.command : 'claude';
-      const args = Array.isArray(request.body?.args) ? request.body.args : [];
-
-      // Use requested cwd if provided; otherwise fall back to system manager config
-      let cwd: string;
-      if (requestedCwd) {
-        cwd = requestedCwd;
-        // Update system manager config to track the work dir
-        await systemManagerConfig.updateConfig({ selectedWorkDir: cwd });
-        await syncSystemManagerManifestWorkDir(cwd);
-      } else {
-        const config = await systemManagerConfig.getConfig();
-        cwd = config.selectedWorkDir;
-      }
-
-      const ptyId = await systemManagerPty.spawn({
-        command,
-        args,
-        cwd,
-        cols: request.body?.cols,
-        rows: request.body?.rows,
-      });
-      return { ptyId };
+      const { command, args = [], cwd } = request.body ?? {};
+      if (!command) return reply.code(400).send({ error: 'command is required' });
+      const normalizedArgs = Array.isArray(args)
+        ? args.filter((arg) => typeof arg === 'string')
+        : [];
+      const cmd = [command, ...normalizedArgs].map(shellQuote).join(' ');
+      const shellLine = cwd ? `cd ${shellQuote(cwd)} && ${cmd}` : cmd;
+      const windowsCmd = [command, ...normalizedArgs].map(cmdQuote).join(' ');
+      const windowsShellLine = cwd ? `cd /d ${cmdQuote(cwd)} && ${windowsCmd}` : windowsCmd;
+      await openCommandInSystemTerminal(shellLine, windowsShellLine);
+      return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply
         .code(message.startsWith('Forbidden origin:') ? 403 : 500)
         .send({ error: message });
-    }
-  }
-);
-
-app.post<{ Params: { ptyId: string }; Body: { data?: string } }>(
-  '/api/terminal/:ptyId/write',
-  async (request, reply) => {
-    try {
-      assertTrustedBrowserOrigin(request);
-      systemManagerPty.write(request.params.ptyId, request.body?.data ?? '');
-      return { ok: true };
-    } catch (err) {
-      return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-);
-
-app.post<{ Params: { ptyId: string }; Body: { cols?: number; rows?: number } }>(
-  '/api/terminal/:ptyId/resize',
-  async (request, reply) => {
-    try {
-      assertTrustedBrowserOrigin(request);
-      systemManagerPty.resize(
-        request.params.ptyId,
-        request.body?.cols ?? 120,
-        request.body?.rows ?? 34
-      );
-      return { ok: true };
-    } catch (err) {
-      return reply.code(403).send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-);
-
-app.delete<{ Params: { ptyId: string } }>('/api/terminal/:ptyId', async (request, reply) => {
-  try {
-    assertTrustedBrowserOrigin(request);
-    await systemManagerPty.kill(request.params.ptyId);
-    return { ok: true };
-  } catch (err) {
-    return reply.code(403).send({ error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-// POST /api/terminal/open-external — open command in system Terminal.app
-app.post<{ Body: { command: string; args?: string[]; cwd?: string } }>(
-  '/api/terminal/open-external',
-  async (request, reply) => {
-    try {
-      const { command, args = [], cwd } = request.body ?? {};
-      if (!command) return reply.code(400).send({ error: 'command is required' });
-      const cmd = [command, ...args].join(' ');
-      const script = cwd
-        ? `tell application "Terminal"\ndo script "cd ${cwd.replace(/"/g, '\\"')} && ${cmd.replace(/"/g, '\\"')}"\nactivate\nend tell`
-        : `tell application "Terminal"\ndo script "${cmd.replace(/"/g, '\\"')}"\nactivate\nend tell`;
-      const { execFile } = await import('node:child_process');
-      execFile('osascript', ['-e', script]);
-      return { ok: true };
-    } catch (err) {
-      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   }
 );
@@ -1221,21 +1441,19 @@ app.get('/api/teams', async () => {
         .map(async (meta) => {
           const bindProject = meta.bindProject || meta.slug;
           const project = projectByName.get(bindProject);
-          const isOnline = Array.isArray(project?.platforms) && project.platforms.length > 0;
+          const detail = project ? await cc.getProject(bindProject).catch(() => null) : null;
+          const isOnline =
+            Array.isArray(detail?.platforms) && detail.platforms.some((pl) => pl.connected);
           let workDir = (meta.workDir || '').trim();
-          if (!workDir && project) {
-            try {
-              const detail = await cc.getProject(bindProject);
-              if (typeof detail.work_dir === 'string' && detail.work_dir.trim()) {
-                workDir = detail.work_dir.trim();
-              }
-            } catch {
-              // ignore detail read failure, keep manifest/default path
-            }
+          let projectPath = (meta.workDir || '').trim();
+          if (!workDir && typeof detail?.work_dir === 'string' && detail.work_dir.trim()) {
+            workDir = detail.work_dir.trim();
+            if (!projectPath) projectPath = workDir;
           }
-          const harness = toCcAgentType(project?.agent_type || meta.harness);
+          const harness = toCcAgentType(detail?.agent_type || project?.agent_type || meta.harness);
           const color = meta.color || 'blue';
           const displayName = meta.displayName || meta.slug;
+          const usageStats = workDir ? getProjectStatsSnapshot(workDir) : null;
 
           return {
             teamName: meta.slug,
@@ -1250,12 +1468,19 @@ app.get('/api/teams', async () => {
             harness,
             bindProject,
             workDir,
-            projectPath: workDir || undefined,
+            projectPath: projectPath || undefined,
             sessionsCount: project?.sessions_count ?? 0,
             heartbeatEnabled: project?.heartbeat_enabled ?? false,
             pendingDelete: meta.pendingDelete === true,
             restartRequired: meta.restartRequired === true,
-            stats: await computeTeamStats(workDir),
+            stats: usageStats
+              ? {
+                  sessions: usageStats.sessions,
+                  messages: usageStats.messages,
+                  tokens: usageStats.totalTokens,
+                  durationMs: usageStats.durationMs,
+                }
+              : undefined,
           };
         })
     );
@@ -1450,7 +1675,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         disabledCommands: resolvedDisabledCommands,
         platformAllowFrom: resolvedPlatformAllowFrom,
         platformAllowChat: resolvedPlatformAllowChat,
-        projectPath: p.work_dir ?? workDir,
+        projectPath: workDir || p.work_dir,
         members: [{ name: displayName, role: 'lead' }],
       },
       tasks: teamTasks,
@@ -1508,6 +1733,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         managedSources,
         disabledCommands,
         platformAllowFrom,
+        platformAllowChat,
         projectPath: workDir,
         members: [{ name: displayName, role: 'lead' }],
       },
@@ -1544,6 +1770,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
         reply_footer: replyFooter,
         inject_sender: injectSender,
         platform_allow_from: platformAllowFrom,
+        platform_allow_chat: platformAllowChat,
       },
       activeSessions: [],
     };
@@ -1569,21 +1796,39 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   async (request, reply) => {
     const teamName = request.params.name;
     if (isReservedSystemTeamName(teamName)) {
-      return reply.code(403).send({ error: '控制台不可删除' });
+      return reply.code(403).send({ error: 'Admin Loop 不可删除' });
     }
     try {
       let restartRequired = false;
+      let ccProjectName = teamName;
+      let localTeamName = teamName;
       try {
-        const result = await cc.deleteProject(teamName);
+        const manifest = await svc.readTeamManifestByProject(teamName);
+        ccProjectName = manifest.bindProject || teamName;
+        localTeamName = manifest.slug || teamName;
+      } catch {
+        // Team may only exist in cc-connect or local metadata may already be gone.
+      }
+      if (isReservedSystemTeamName(ccProjectName) || isReservedSystemTeamName(localTeamName)) {
+        return reply.code(403).send({ error: 'Admin Loop 不可删除' });
+      }
+      try {
+        const result = await cc.deleteProject(ccProjectName);
         restartRequired = result.restart_required === true;
       } catch (err) {
-        request.log.warn({ err, teamName }, 'delete cc-connect project failed or project missing');
+        request.log.warn(
+          { err, teamName, ccProjectName },
+          'delete cc-connect project failed or project missing'
+        );
       }
 
       try {
-        await svc.deleteTeam(teamName, { deleteFiles: request.query.deleteFiles === 'true' });
+        await svc.deleteTeam(localTeamName, { deleteFiles: request.query.deleteFiles === 'true' });
       } catch (err) {
-        request.log.warn({ err, teamName }, 'delete local team metadata failed or already missing');
+        request.log.warn(
+          { err, teamName, localTeamName },
+          'delete local team metadata failed or already missing'
+        );
       }
 
       return { ok: true, restartRequired };
@@ -1596,7 +1841,7 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
 // ===========================================================================
 // Tasks — 存储在 ~/.hermit/teams/:name/tasks/board.json
 // 双向映射：TeamTask(pending/in_progress/completed) ↔ Task(todo/doing/done)
-// assignee 变化时触发 Task Dispatcher（Bridge 推消息给目标团队 agent）
+// 任务创建/指派只更新看板；只有显式点击开始才投递给 runtime/目标团队。
 // ===========================================================================
 
 /** TeamTask status → internal Task status */
@@ -1648,36 +1893,6 @@ function activeTasks<T extends { result?: string | null }>(tasks: T[]): T[] {
   return tasks.filter((task) => !isSoftDeletedTask(task));
 }
 
-function mapCcSessionDetail(detail: {
-  id: string;
-  name: string;
-  session_key: string;
-  agent_session_id?: string;
-  agent_type: string;
-  active: boolean;
-  live: boolean;
-  history_count: number;
-  created_at: string;
-  updated_at: string;
-  platform: string;
-  history: { role: 'user' | 'assistant'; content: string; timestamp: string }[];
-}) {
-  return {
-    id: detail.id,
-    name: detail.name,
-    sessionKey: detail.session_key,
-    agentSessionId: detail.agent_session_id,
-    agentType: detail.agent_type,
-    active: detail.active,
-    live: detail.live,
-    historyCount: detail.history_count,
-    createdAt: detail.created_at,
-    updatedAt: detail.updated_at,
-    platform: detail.platform,
-    history: detail.history ?? [],
-  };
-}
-
 app.get<{ Params: { name: string } }>('/api/teams/:name/tasks', async (request) => {
   try {
     const tasks = activeTasks(await svc.readTasks(request.params.name));
@@ -1700,11 +1915,6 @@ app.post<{ Params: { name: string }; Body: Record<string, unknown> }>(
       assignee: (body.owner ?? body.assignee) as string | null | undefined,
       status: body.status ? toTaskStatus(body.status as string) : 'todo',
     });
-    if (task.assignee) {
-      svc
-        .dispatchTask(request.params.name, task)
-        .catch((err) => request.log.warn({ err }, 'dispatchTask failed'));
-    }
     return toTeamTask(task);
   }
 );
@@ -1722,11 +1932,6 @@ app.patch<{ Params: { name: string; id: string }; Body: Record<string, unknown> 
     if (body.assignee !== undefined) patch.assignee = body.assignee;
     if (body.result !== undefined) patch.result = body.result;
     const task = await svc.patchTask(request.params.name, request.params.id, patch);
-    if (patch.assignee && task.assignee) {
-      svc
-        .dispatchTask(request.params.name, task)
-        .catch((err) => request.log.warn({ err }, 'dispatchTask failed'));
-    }
     return toTeamTask(task);
   }
 );
@@ -1867,7 +2072,133 @@ app.get('/api/harnesses', async () => {
     }));
   } catch {
     // cc-connect 不可达时返回完整枚举列表
-    return CC_AGENT_TYPES.map((type) => ({ type, inUse: false }));
+    return CC_AGENT_TYPES.map((type) => ({
+      type,
+      inUse: false,
+    }));
+  }
+});
+
+function mapCcSessionListItem(session: CcSessionListItem, projectId: string): CcSession {
+  return {
+    id: session.agent_session_id || session.id,
+    title: session.name || session.session_key,
+    projectId,
+    sessionKey: session.session_key,
+    platform: session.platform,
+    userName: session.user_name ?? null,
+    chatName: session.chat_name ?? null,
+    active: session.active,
+    live: session.live,
+    historyCount: session.history_count,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
+    lastMessage: session.last_message
+      ? {
+          role: session.last_message.role,
+          content: session.last_message.content,
+          timestamp: session.last_message.timestamp,
+        }
+      : null,
+  };
+}
+
+app.get<{ Params: { name: string } }>('/api/teams/:name/loop-assets', async (request, reply) => {
+  try {
+    const name = request.params.name;
+    const manifest = await svc.readTeamManifest(name);
+    let bindProject = manifest.bindProject || name;
+    let workDir = manifest.workDir || '';
+    let platforms: { type: string; connected?: boolean }[] = [];
+
+    try {
+      bindProject = await resolveRouteCcProjectName(name);
+      const project = await cc.getProject(bindProject).catch(() => null);
+      if (!workDir && project?.work_dir) workDir = project.work_dir;
+      platforms = Array.isArray(project?.platforms)
+        ? project.platforms.map((platform) => ({
+            type: platform.type,
+            connected: platform.connected,
+          }))
+        : [];
+    } catch {
+      /* Local manifest data is enough for a best-effort scan. */
+    }
+
+    const [tasks, messages] = await Promise.all([
+      svc.readTasks(name).catch(() => []),
+      svc.readMessages(name).catch(() => []),
+    ]);
+
+    return await loopAssetsScanner.scanTeam({
+      teamName: name,
+      displayName: manifest.displayName,
+      bindProject,
+      workDir,
+      teamRoot: manifest.rootPath,
+      memberCount: 1,
+      taskCount: activeTasks(tasks).length,
+      messageCount: messages.length,
+      platforms,
+    });
+  } catch (err) {
+    return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post<{
+  Params: { name: string };
+  Body: { sessionName?: unknown; message?: unknown; reuse?: unknown };
+}>('/api/teams/:name/loop-session', async (request, reply) => {
+  try {
+    const teamName = request.params.name;
+    const requestedSessionName =
+      typeof request.body?.sessionName === 'string' ? request.body.sessionName.trim() : '';
+    const sessionName =
+      requestedSessionName || `Loop ${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const reuse = request.body?.reuse === true;
+
+    const bindProject = await resolveRouteCcProjectName(teamName);
+    const sessionKey = `${buildFallbackSessionKey(teamName)}:${Date.now().toString(36)}`;
+    const sessions = reuse ? await cc.listSessions(bindProject).catch(() => []) : [];
+    let session = reuse ? sessions.find((item) => item.name === sessionName) : undefined;
+    const reused = Boolean(session);
+    if (!session) {
+      const created = await cc.createSession(bindProject, sessionName, sessionKey);
+      session = {
+        id: created.id,
+        name: created.name || sessionName,
+        session_key: created.session_key || sessionKey,
+        agent_session_id: created.agent_session_id,
+        agent_type: created.agent_type,
+        active: created.active,
+        live: created.live,
+        history_count: created.history_count,
+        created_at: created.created_at,
+        updated_at: created.updated_at,
+        last_message: null,
+        platform: created.platform,
+      };
+    }
+
+    const message = typeof request.body?.message === 'string' ? request.body.message.trim() : '';
+    let messageSent = false;
+    if (message) {
+      await sendHarnessMessageViaBridge({
+        teamName,
+        text: message,
+        sessionKey: session.session_key,
+      });
+      messageSent = true;
+    }
+
+    return {
+      session: mapCcSessionListItem(session, teamName),
+      reused,
+      messageSent,
+    };
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -1885,12 +2216,12 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
       const body = request.body ?? {};
       let manifest: TeamManifest | null = null;
       try {
-        manifest = await svc.readTeamManifest(name);
+        manifest = await svc.readTeamManifestByProject(name);
       } catch {
         // Team may only exist in cc-connect.
       }
       const bindProject = manifest?.bindProject ?? name;
-      const workDir = body.cwd ?? manifest?.workDir ?? '';
+      let workDir = body.cwd ?? manifest?.workDir ?? '';
       const harness = manifest?.harness ?? 'claudecode';
       const platformType = manifest?.platform ?? 'bridge';
       const platformOptions = manifest?.platformOptions ?? {};
@@ -1918,14 +2249,21 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
               platformOptions as Record<string, string>
             );
             projectExists = true;
-          } catch { /* CC Connect project creation is best-effort */ }
+          } catch {
+            /* CC Connect project creation is best-effort */
+          }
         }
         // Restart cc-connect to (re-)activate platform connections.
         // Covers: newly created project, existing project with disconnected platform,
         // Feishu/Lark IM that lost connection after cc-connect restart, etc.
         try {
-          await cc.restart();
-        } catch { /* restart is best-effort */ }
+          await restartCcConnectAndReconnectBridge();
+        } catch (err) {
+          request.log.warn(
+            { err, bindProject },
+            'cc-connect restart/bridge reconnect failed during team launch'
+          );
+        }
       }
 
       return {
@@ -1945,7 +2283,9 @@ app.post<{ Params: { name: string } }>('/api/teams/:name/stop', async (request) 
   // Stop = delete project from cc-connect (best-effort, no restart)
   try {
     await cc.deleteProject(bindProject);
-  } catch { /* project may not exist in cc-connect */ }
+  } catch {
+    /* project may not exist in cc-connect */
+  }
   // Keep local team metadata intact by not deleting it
   // The team will show as offline (isAlive: false) on next data fetch
   return { ok: true };
@@ -2072,14 +2412,25 @@ app.post<{
   Body: { type: string; options?: Record<string, unknown>; work_dir?: string; agent_type?: string };
 }>('/api/projects/:name/add-platform', async (request, reply) => {
   try {
+    const existingProject = await cc.getProject(request.params.name).catch(() => null);
     const result = await cc.createProject(
       request.params.name,
-      request.body.agent_type ?? 'claudecode',
-      request.body.work_dir ?? '',
+      request.body.agent_type ?? existingProject?.agent_type ?? 'claudecode',
+      request.body.work_dir ?? existingProject?.work_dir ?? '',
       request.body.type,
       (request.body.options ?? {}) as Record<string, string>
     );
-    return result;
+
+    if (result.restart_required) {
+      // Adding Feishu/Lark/other platform engines only writes cc-connect config; a restart is
+      // required before cc-connect listens to the new long-connection and Hermit must reconnect
+      // its Bridge adapter after that restart. Do it here so callers cannot accidentally leave
+      // cc-connect showing “connected” while Hermit is not listening.
+      await restartCcConnectAndReconnectBridge();
+      return { ok: true, data: { ...result, restart_required: false, restart_handled: true } };
+    }
+
+    return { ok: true, data: { ...result, restart_handled: false } };
   } catch (err) {
     return reply500(err);
   }
@@ -2275,6 +2626,18 @@ async function executeMcpTool(
   }
 
   if (toolName === 'claim_task') {
+    const tasks = await svc.readTasks(args.team_slug);
+    const existingTask = tasks.find((task) => task.id === args.task_id);
+    if (
+      existingTask?.dispatchMeta &&
+      existingTask.status === 'todo' &&
+      ['received', 'pending_accept'].includes(existingTask.dispatchMeta.status)
+    ) {
+      return text({
+        ok: false,
+        error: 'Cross-team tasks must be started from the target team TODO board by clicking 启动.',
+      });
+    }
     const task = await svc.patchTask(args.team_slug, args.task_id, { status: 'doing' });
     return text(task);
   }
@@ -2410,8 +2773,10 @@ app.post<{
 // Hermit 主仓 UI 首屏强依赖的几个 stub(占位实现)
 // ===========================================================================
 
-// hermit getAppVersion 期望返回字符串(不是数组),通配 stub 给的 [] 会让 JSON.parse 后类型对不上
-app.get('/api/version', async () => pkg.version);
+// hermit getAppVersion 期望返回 JSON 字符串；Fastify 直接 send(string) 会按 text/plain 返回。
+app.get('/api/version', async (_request, reply) =>
+  reply.type('application/json').send(JSON.stringify(pkg.version))
+);
 
 // GET /api/update/check — 检查是否有新版本
 const updateService = new UpdateService();
@@ -2553,9 +2918,10 @@ function readAppConfig() {
       return mergeConfigDefaults(DEFAULT_APP_CONFIG, raw);
     }
   } catch (err) {
-    const msg = err instanceof SyntaxError
-      ? `${HERMIT_APP_CONFIG_FILE} 格式错误: ${err.message}。将使用默认配置并覆盖修复。`
-      : `读取 ${HERMIT_APP_CONFIG_FILE} 失败`;
+    const msg =
+      err instanceof SyntaxError
+        ? `${HERMIT_APP_CONFIG_FILE} 格式错误: ${err.message}。将使用默认配置并覆盖修复。`
+        : `读取 ${HERMIT_APP_CONFIG_FILE} 失败`;
     app.log.warn({ err }, msg);
     // Auto-heal: rewrite with valid defaults
     try {
@@ -2690,13 +3056,14 @@ async function sendHarnessMessageViaBridge(params: {
   await waitForHarnessBridgeConnected();
 
   const sessionKey = params.sessionKey?.trim() || buildFallbackSessionKey(params.teamName);
+  const projectName = await resolveRouteCcProjectName(params.teamName);
   bridge.sendUserMessage({
     sessionKey,
     userId: 'hermit-user',
     userName: 'User',
     content: params.text,
     msgId: params.msgId,
-    project: params.teamName,
+    project: projectName,
   });
   return sessionKey;
 }
@@ -2771,7 +3138,10 @@ function mapCronJobToSchedule(
   let nextRunAt: string | undefined;
   if (cronJob.enabled && isNonEmptyString(cronJob.cron_expr)) {
     try {
-      const job = new Cron(cronJob.cron_expr.trim(), { timezone: DEFAULT_SCHEDULE_TIMEZONE, paused: true });
+      const job = new Cron(cronJob.cron_expr.trim(), {
+        timezone: DEFAULT_SCHEDULE_TIMEZONE,
+        paused: true,
+      });
       const next = job.nextRun();
       if (next) {
         nextRunAt = (next instanceof Date ? next : new Date(next)).toISOString();
@@ -2896,7 +3266,6 @@ app.post<{ Body: Record<string, unknown> }>('/api/schedules', async (request, re
         .code(400)
         .send({ error: 'teamName、cronExpression、launchConfig.prompt 不能为空' });
     }
-
     const created = await cc.createCronJob({
       project: teamName,
       session_key: sessionKey,
@@ -3234,25 +3603,23 @@ app.post<{ Body: { dirPath?: string } }>('/api/workspace/list', async (request) 
 
   try {
     const entries = readdirSync(target, { withFileTypes: true });
-    const files = entries
-      .slice(0, 500)
-      .map((e) => {
-        const fullPath = path.join(target, e.name);
-        const isDirectory = e.isDirectory();
-        let size = 0;
-        try {
-          const stat = statSync(fullPath);
-          size = stat.size;
-        } catch {
-          /* ignore */
-        }
-        return {
-          name: e.name,
-          isDirectory,
-          size,
-          ext: isDirectory ? '' : path.extname(e.name).slice(1).toLowerCase(),
-        };
-      });
+    const files = entries.slice(0, 500).map((e) => {
+      const fullPath = path.join(target, e.name);
+      const isDirectory = e.isDirectory();
+      let size = 0;
+      try {
+        const stat = statSync(fullPath);
+        size = stat.size;
+      } catch {
+        /* ignore */
+      }
+      return {
+        name: e.name,
+        isDirectory,
+        size,
+        ext: isDirectory ? '' : path.extname(e.name).slice(1).toLowerCase(),
+      };
+    });
     return { path: target, files, hasParent: target !== path.dirname(target) };
   } catch {
     return { path: target, files: [], hasParent: false, error: `无法访问目录: ${target}` };
@@ -3722,63 +4089,38 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (reques
     const workDir = team.workDir || team.bindProject || request.params.name;
     const localSessions = await localSessionScanner.scanSummaries(workDir, request.params.name);
 
-    // Attempt to merge cc-connect identity metadata (platform/chatName/userName/lastMessage)
-    let ccById = new Map<string, { platform: string; userName: string | null; chatName: string | null; lastMessage: { role: string; content: string; timestamp: string } | null }>();
+    // Merge cc-connect sessions into the response. External platform sessions (Feishu/Lark/etc.)
+    // may not have a local Claude JSONL yet, but users still expect to see them as listening sessions.
+    let ccSessions: CcSessionListItem[] = [];
     try {
       const bindProject = await resolveRouteCcProjectName(request.params.name);
-      const ccSessions = await cc.listSessions(bindProject);
-      for (const s of ccSessions) {
-        ccById.set(s.id, {
-          platform: s.platform,
-          userName: s.user_name ?? null,
-          chatName: s.chat_name ?? null,
-          lastMessage: s.last_message
-            ? { role: s.last_message.role, content: s.last_message.content, timestamp: s.last_message.timestamp }
-            : null,
-        });
-      }
-    } catch { /* cc-connect unavailable — local-only data */ }
+      ccSessions = await cc.listSessions(bindProject);
+    } catch {
+      /* cc-connect unavailable — local-only data */
+    }
 
-    return localSessions.map((s) => {
-      const ccMeta = ccById.get(s.id);
-      return {
-        id: s.id,
-        title: s.title || s.id,
-        projectId: request.params.name,
-        sessionKey: s.id,
-        platform: ccMeta?.platform ?? 'local',
-        userName: ccMeta?.userName ?? null,
-        chatName: ccMeta?.chatName ?? null,
-        active: s.active,
-        live: s.live,
-        historyCount: s.messageCount,
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt,
-        lastMessage: ccMeta?.lastMessage ?? null,
-      };
-    });
+    return mergeLocalAndCcSessions(localSessions, ccSessions, request.params.name);
   } catch {
     return [];
   }
 });
 
 // GET session detail — read local JSONL file for session history with pagination
-app.get<{ Params: { name: string; sessionId: string }; Querystring: { history_limit?: string; offset?: string } }>(
-  '/api/teams/:name/sessions/:sessionId',
-  async (request, reply) => {
-    const limit = request.query.history_limit
-      ? parseInt(request.query.history_limit, 10)
-      : 500;
-    const offset = request.query.offset
-      ? parseInt(request.query.offset, 10)
-      : 0;
-    const team = await svc.readTeamManifest(request.params.name);
-    const workDir = team.workDir || team.bindProject || request.params.name;
-    const detail = await localSessionScanner.readSessionDetail(workDir, request.params.sessionId, { offset, limit });
-    if (!detail) return reply.code(404).send({ error: 'Session not found' });
-    return detail;
-  }
-);
+app.get<{
+  Params: { name: string; sessionId: string };
+  Querystring: { history_limit?: string; offset?: string };
+}>('/api/teams/:name/sessions/:sessionId', async (request, reply) => {
+  const limit = request.query.history_limit ? parseInt(request.query.history_limit, 10) : 500;
+  const offset = request.query.offset ? parseInt(request.query.offset, 10) : 0;
+  const team = await svc.readTeamManifest(request.params.name);
+  const workDir = team.workDir || team.bindProject || request.params.name;
+  const detail = await localSessionScanner.readSessionDetail(workDir, request.params.sessionId, {
+    offset,
+    limit,
+  });
+  if (!detail) return reply.code(404).send({ error: 'Session not found' });
+  return detail;
+});
 
 // DELETE session — 关闭 cc-connect live session，使其从运行中转为历史会话。
 app.delete<{ Params: { name: string; sessionId: string } }>(
@@ -3839,15 +4181,8 @@ app.post<{ Params: { name: string }; Body: { text?: string; message?: string } }
     try {
       const text = request.body?.text ?? request.body?.message ?? '';
       if (text) {
-        let targetProject = request.params.name;
-        try {
-          const manifest = await svc.readTeamManifest(request.params.name);
-          targetProject = manifest.bindProject || request.params.name;
-        } catch {
-          // request.params.name may already be a cc-connect project name.
-        }
         await sendHarnessMessageViaBridge({
-          teamName: targetProject,
+          teamName: request.params.name,
           text,
         });
       }
@@ -3925,6 +4260,9 @@ app.patch<{ Params: { name: string; id: string }; Body: { status?: string } }>(
       const task = await svc.patchTask(request.params.name, request.params.id, {
         status: status ? toTaskStatus(status) : undefined,
       });
+      if (task.dispatchMeta && task.status === 'done') {
+        await taskDispatch.onTaskCompleted(request.params.name, request.params.id).catch(() => {});
+      }
       return toTeamTask(task);
     } catch {
       return { ok: true };
@@ -3939,9 +4277,6 @@ app.patch<{ Params: { name: string; id: string }; Body: { owner?: string } }>(
       const task = await svc.patchTask(request.params.name, request.params.id, {
         assignee: body.owner ?? null,
       });
-      if (task.assignee) {
-        svc.dispatchTask(request.params.name, task).catch(() => {});
-      }
       return toTeamTask(task);
     } catch {
       return { ok: true };
@@ -3967,9 +4302,16 @@ app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/start',
   async (request) => {
     try {
+      const existingTasks = await svc.readTasks(request.params.name);
+      const existingTask = existingTasks.find((task) => task.id === request.params.id);
+      if (existingTask?.dispatchMeta) {
+        await taskDispatch.startDispatchedTask(request.params.name, request.params.id);
+        return { notifiedOwner: true, crossTeamStarted: true };
+      }
+
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'doing' });
       if (task.assignee) {
-        svc.dispatchTask(request.params.name, task).catch(() => {});
+        await svc.dispatchTask(request.params.name, task).catch(() => {});
         return { notifiedOwner: true };
       }
       return { notifiedOwner: false };
@@ -3982,9 +4324,16 @@ app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/start-by-user',
   async (request) => {
     try {
+      const existingTasks = await svc.readTasks(request.params.name);
+      const existingTask = existingTasks.find((task) => task.id === request.params.id);
+      if (existingTask?.dispatchMeta) {
+        await taskDispatch.startDispatchedTask(request.params.name, request.params.id);
+        return { notifiedOwner: true, crossTeamStarted: true };
+      }
+
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'doing' });
       if (task.assignee) {
-        svc.dispatchTask(request.params.name, task).catch(() => {});
+        await svc.dispatchTask(request.params.name, task).catch(() => {});
         return { notifiedOwner: true };
       }
       return { notifiedOwner: false };
@@ -4091,18 +4440,17 @@ async function applyTeamConfigUpdate(
   const providerRefs = Array.isArray(body.providerRefs)
     ? normalizeStringArray(body.providerRefs)
     : undefined;
-  const platformAllowFrom = body.platformAllowFrom
-    ? normalizePlatformAllowFrom(body.platformAllowFrom)
-    : undefined;
-  const platformAllowChat = body.platformAllowChat
-    ? normalizePlatformAllowFrom(body.platformAllowChat)
-    : undefined;
+  const platformAllowFrom = normalizePlatformAllowUpdate(body.platformAllowFrom);
+  const platformAllowChat = normalizePlatformAllowUpdate(body.platformAllowChat);
 
-  // Validate agent type CLI availability before saving
+  // Validate agent type before checking CLI availability.
+  if (agentType && !CC_AGENT_TYPES.includes(agentType as CcAgentType)) {
+    throw new Error(`${agentType} 不是支持的运行时类型。`);
+  }
   if (agentType && agentType !== 'claudecode') {
     try {
-      const { execSync } = await import('node:child_process');
-      execSync(`which ${agentType}`, { stdio: 'pipe', timeout: 5000 });
+      const { execFileSync } = await import('node:child_process');
+      execFileSync('which', [agentType], { stdio: 'pipe', timeout: 5000 });
     } catch {
       throw new Error(
         `${agentType} CLI 未安装，无法切换到 ${agentType} 模式。请先安装对应的 CLI 工具。`
@@ -4115,7 +4463,9 @@ async function applyTeamConfigUpdate(
   if (description) localPatch.description = description;
   if (color) localPatch.color = color;
   if (agentType) localPatch.harness = agentType;
-  if (workDir) localPatch.workDir = workDir;
+  if (workDir) {
+    localPatch.workDir = workDir;
+  }
   if (permissionMode) localPatch.permissionMode = permissionMode;
   if (language) localPatch.language = language;
   if (managedSources) localPatch.managedSources = managedSources;
@@ -4165,6 +4515,7 @@ async function applyTeamConfigUpdate(
   } catch {
     bindProject = teamName;
   }
+
   if (Object.keys(ccPatch).length > 0) {
     try {
       const updateResult = await cc.updateProject(
@@ -4172,17 +4523,25 @@ async function applyTeamConfigUpdate(
         ccPatch as Parameters<CcConnectClient['updateProject']>[1]
       );
       if (updateResult.restart_required) {
-        try { await cc.reload(); } catch { /* best effort */ }
+        try {
+          await cc.reload();
+        } catch {
+          /* best effort */
+        }
       }
     } catch (err) {
-      ccSyncError = err instanceof Error ? err.message : String(err);
+      if (!isCcProjectNotFoundError(err)) {
+        ccSyncError = err instanceof Error ? err.message : String(err);
+      }
     }
   }
   if (providerRefs !== undefined) {
     try {
       await cc.setProviderRefs(bindProject, providerRefs);
     } catch (err) {
-      ccSyncError = err instanceof Error ? err.message : String(err);
+      if (!isCcProjectNotFoundError(err)) {
+        ccSyncError = err instanceof Error ? err.message : String(err);
+      }
     }
   }
 
@@ -4201,6 +4560,7 @@ async function applyTeamConfigUpdate(
     replyFooter: replyFooter ?? false,
     injectSender: injectSender ?? false,
     platformAllowFrom: platformAllowFrom ?? {},
+    platformAllowChat: platformAllowChat ?? {},
     providerRefs: providerRefs ?? [],
     ccSyncError,
   };
@@ -4292,7 +4652,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
     return {
       name,
       color,
-      projectPath: p.work_dir ?? '',
+      projectPath: p.work_dir || '',
       description,
       agentType: p.agent_type,
       workDir: p.work_dir ?? '',
@@ -4316,6 +4676,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
         reply_footer: resolvedReplyFooter,
         inject_sender: resolvedInjectSender,
         platform_allow_from: resolvedPlatformAllowFrom,
+        platform_allow_chat: resolvedPlatformAllowChat,
       },
     };
   } catch {
@@ -4409,6 +4770,7 @@ app.post<{
           { deadlineMinutes: 10, needsHumanReview: true }
         );
         broadcastSse('team-change', { type: 'inbox', teamName });
+        broadcastSse('team-change', { type: 'task', teamName: targetTeam });
         broadcastSse('collab-change', {
           dispatchId: result.dispatchId,
           status: result.status,
@@ -4423,8 +4785,9 @@ app.post<{
           status: result.status,
           message: result.message,
           runtimeDelivery: {
-            attempted: true,
-            delivered: result.status !== 'failed',
+            attempted: false,
+            delivered: false,
+            reason: 'waiting_for_target_start',
           },
         };
       } catch (err) {
@@ -4603,6 +4966,8 @@ app.get<{ Params: { name: string; memberName: string } }>(
       let inputTokens = 0;
       let outputTokens = 0;
       let cacheReadTokens = 0;
+      let cacheCreationTokens = 0;
+      let totalTokens = 0;
       let messageCount = 0;
       let totalDurationMs = 0;
 
@@ -4613,6 +4978,8 @@ app.get<{ Params: { name: string; memberName: string } }>(
         inputTokens += s.inputTokens;
         outputTokens += s.outputTokens;
         cacheReadTokens += s.cacheReadTokens;
+        cacheCreationTokens += s.cacheCreationTokens;
+        totalTokens += s.totalTokens;
         messageCount += s.messageCount;
 
         if (s.startTime && (!earliestStart || s.startTime < earliestStart)) {
@@ -4646,6 +5013,8 @@ app.get<{ Params: { name: string; memberName: string } }>(
         inputTokens,
         outputTokens,
         cacheReadTokens,
+        cacheCreationTokens,
+        totalTokens,
         costUsd: 0,
         tasksCompleted,
         messageCount,
@@ -4663,6 +5032,8 @@ app.get<{ Params: { name: string; memberName: string } }>(
         inputTokens: 0,
         outputTokens: 0,
         cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 0,
         costUsd: 0,
         tasksCompleted: 0,
         messageCount: 0,
@@ -4929,40 +5300,33 @@ app.post<{
       },
     });
 
-    const existingTasks = await svc.readTasks(resolvedToTeam).catch(() => []);
-    const existingTask = existingTasks.find((task) => task.dispatchMeta?.dispatchId === threadId);
-    if (!existingTask) {
-      const now = new Date().toISOString();
-      await svc.createTask(resolvedToTeam, {
-        title: summary || trimmedText.split(/\r?\n/, 1)[0]?.slice(0, 120) || '跨团队 @ 消息',
+    const dispatchResult = await taskDispatch.dispatchTask(
+      fromTeam,
+      {
+        subject: summary || trimmedText.split(/\r?\n/, 1)[0]?.slice(0, 120) || '跨团队 @ 消息',
         description: trimmedText,
-        status: 'todo',
-        dispatchMeta: {
-          dispatchId: threadId,
-          originTeam: fromTeam,
-          targetTeam: resolvedToTeam,
-          status: 'pending_accept',
-          dispatchedAt: now,
-          receivedAt: now,
-        },
-      });
+        prompt: trimmedText,
+      },
+      resolvedToTeam,
+      { dispatchId: threadId }
+    );
+    if (dispatchResult.status === 'failed') {
+      return { ok: false, error: dispatchResult.message };
     }
 
     broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
     broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
     broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
 
-    void sendHarnessMessageViaBridge({
-      teamName: resolvedToTeam,
-      text: sentText,
-    }).catch((err) => {
-      request.log.warn({ err }, 'cross-team runtime delivery failed after persistence');
-    });
-
     return {
       messageId: outgoing.id,
       deliveredToInbox: true,
       deduplicated: false,
+      runtimeDelivery: {
+        attempted: false,
+        delivered: false,
+        reason: 'waiting_for_target_start',
+      },
     };
   }
 
@@ -4981,21 +5345,6 @@ app.post<{
   });
   broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
 
-  // Check collaboration toggle
-  try {
-    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
-    const raw = await fs.readFile(configPath, 'utf-8');
-    const settings = JSON.parse(raw);
-    if (!settings.taskBus?.collaboration) {
-      return {
-        ok: false,
-        error: 'Distributed collaboration is not enabled. Enable it in Settings → Task Bus.',
-      };
-    }
-  } catch {
-    return { ok: false, error: 'Could not read task bus configuration.' };
-  }
-
   const result = await taskDispatch.dispatchTask(
     fromTeam ?? 'unknown',
     { subject, description, prompt },
@@ -5008,15 +5357,7 @@ app.post<{
   const ok = result.status !== 'failed';
   if (ok) {
     broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
-    void sendHarnessMessageViaBridge({
-      teamName: resolvedToTeam,
-      text: `[跨团队任务] ${fromTeam} 派发了任务：${subject}${description ? `\n\n${description}` : ''}`,
-    }).catch((err) => {
-      request.log.warn(
-        { err, fromTeam, resolvedToTeam },
-        'cross-team task runtime delivery failed'
-      );
-    });
+    broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
   }
   return {
     ok,
@@ -5164,6 +5505,7 @@ app.post('/api/telemetry/scan', async (request, reply) => {
       tokensOut: result.aggregate.tokens.output,
       cacheRead: result.aggregate.tokens.cacheRead,
       cacheCreation: result.aggregate.tokens.cacheCreation,
+      totalTokens: result.aggregate.tokens.total,
       activeDays: result.aggregate.activeDays,
       hourly: result.aggregate.hourly,
       projects: result.aggregate.projects,
@@ -5292,6 +5634,7 @@ app.get('/api/telemetry/status', async (request, reply) => {
         tokensOut: 0,
         cacheRead: 0,
         cacheCreation: 0,
+        totalTokens: 0,
         activeDays: 0,
         hourly: [],
         projects: [],

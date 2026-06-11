@@ -182,6 +182,7 @@ interface ProjectDetail {
   agent_type: string;
   platforms: Array<{ type: string; connected: boolean }>;
   platform_configs: Array<Record<string, string>>;
+  work_dir?: string;
 }
 
 async function fetchProjects(): Promise<ProjectSummary[]> {
@@ -200,22 +201,18 @@ async function fetchProjectDetail(name: string): Promise<ProjectDetail> {
 async function addPlatform(
   projectName: string,
   type: string,
-  options: Record<string, string>
-): Promise<{ restartRequired: boolean }> {
-  const res = await fetch(`/api/v1/projects/${encodeURIComponent(projectName)}/add-platform`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, options }),
+  options: Record<string, string>,
+  detail?: ProjectDetail
+): Promise<{ restartRequired: boolean; restartHandled: boolean }> {
+  const result = await api.ccSetup.addPlatform(projectName, {
+    type,
+    options,
+    work_dir: detail?.work_dir,
+    agent_type: detail?.agent_type,
   });
-  const json = (await res.json()) as {
-    ok: boolean;
-    error?: string;
-    data?: { restart_required?: boolean };
-    restart_required?: boolean;
-  };
-  if (!json.ok) throw new Error(json.error ?? '添加失败');
   return {
-    restartRequired: json.data?.restart_required === true || json.restart_required === true,
+    restartRequired: result.restart_required === true,
+    restartHandled: result.restart_handled === true,
   };
 }
 
@@ -425,7 +422,12 @@ export const PlatformsSection = (): React.JSX.Element => {
                     </p>
                   )}
 
-                  <Button size="sm" variant="outline" onClick={() => setAddOpen(proj.name)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!detail}
+                    onClick={() => setAddOpen(proj.name)}
+                  >
                     <Plus className="mr-1.5 size-3.5" />
                     添加渠道
                   </Button>
@@ -442,6 +444,7 @@ export const PlatformsSection = (): React.JSX.Element => {
         open={!!addOpen}
         onClose={() => setAddOpen(null)}
         onAdded={handleAdded}
+        projectDetail={details[addOpen ?? '']}
       />
     </div>
   );
@@ -456,11 +459,13 @@ function AddPlatformDialog({
   open,
   onClose,
   onAdded,
+  projectDetail,
 }: {
   projectName: string;
   open: boolean;
   onClose: () => void;
   onAdded: (projectName: string) => void;
+  projectDetail?: ProjectDetail;
 }) {
   const [platformType, setPlatformType] = useState<PlatformType>('feishu');
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -496,10 +501,13 @@ function AddPlatformDialog({
       const result = await addPlatform(
         projectName,
         platformType,
-        ccOptions as Record<string, string>
+        ccOptions as Record<string, string>,
+        projectDetail
       );
       onAdded(projectName);
-      if (result.restartRequired) {
+      if (result.restartHandled) {
+        emitOpenHermitEvent(OPEN_HERMIT_EVENTS.runtimeRestarted);
+      } else if (result.restartRequired) {
         const shouldRestart = await confirm({
           title: '重启服务',
           message: '渠道已添加。需要重启服务才会生效。',
