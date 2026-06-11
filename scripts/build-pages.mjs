@@ -262,19 +262,21 @@ This repository publishes an agent-readable page through GitHub Pages.
 
 Expected workflow behavior:
 
-- Trigger on pushes to \`main\` and manual dispatch.
+- Trigger on pushes to \`main\`, pushes to the active release/fix branch, pull requests to \`main\`, and manual dispatch.
 - Build static files into \`_site/\` using \`node scripts/build-pages.mjs\`.
-- Upload \`_site\` with \`actions/upload-pages-artifact\`.
-- Deploy with \`actions/deploy-pages\`.
+- Verify \`_site/index.html\`, \`_site/agent-manual.md\`, \`_site/llms.txt\`, and required screenshots.
+- Upload and deploy \`_site\` with \`actions/upload-pages-artifact\` and \`actions/deploy-pages\` for non-PR runs.
+- For pull requests, run build/verification only and skip deployment.
 - Pages repository setting should use GitHub Actions as the source.
 
 If the page does not update:
 
 1. Check Actions -> Deploy Agent Runbook to GitHub Pages.
-2. Confirm the push landed on \`main\`.
-3. Confirm no restrictive \`paths\` filter skipped the workflow.
-4. Confirm \`_site/agent-manual.md\`, \`_site/llms.txt\`, and \`_site/index.html\` exist in the build log.
-5. Confirm Pages source is GitHub Actions, not branch/docs.
+2. Confirm the push landed on a branch that the workflow watches, or manually dispatch the workflow.
+3. Confirm the run reached the Deploy to GitHub Pages step, not only the build/verify steps.
+4. Confirm no restrictive \`paths\` filter skipped the workflow.
+5. Confirm \`_site/agent-manual.md\`, \`_site/llms.txt\`, and \`_site/index.html\` exist in the build log.
+6. Confirm Pages source is GitHub Actions, not branch/docs.
 
 If deployment fails:
 
