@@ -94,6 +94,14 @@ npm install -g @yancyyu/openhermit@latest --prefer-online
 openhermit
 ```
 
+### Agent 自主安装
+
+让 AI Agent 读取线上 Runbook 后按步骤执行：
+
+```
+读取 https://yancyuu.github.io/Hermit/agent-manual.md，按照其中的安装和运维指南在本机完成 openHermit 部署。
+```
+
 ### 常用命令
 
 ```bash
