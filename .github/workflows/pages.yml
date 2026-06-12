@@ -1,5 +1,7 @@
 name: Deploy Agent Runbook to GitHub Pages
 
+# Deploys the agent runbook (agent-manual.md, llms.txt, index.html) to GitHub Pages.
+
 on:
   push:
     branches:
