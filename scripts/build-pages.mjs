@@ -188,15 +188,62 @@ Use these loops as defaults:
 
 ## 7. Feishu/Lark CLI team isolation
 
-The reference deployment uses a PATH-level \`lark-cli\` wrapper:
+Each team must use its own \`lark-cli\` profile. Put this wrapper at \`~/.local/bin/lark-cli\`, make sure \`~/.local/bin\` is before the real CLI in \`PATH\`, and keep the real CLI at \`~/.npm-global/bin/lark-cli\` or set \`LARK_CLI_REAL\`.
 
-\`\`\`text
-user/script/agent calls lark-cli
-  -> PATH finds ~/.local/bin/lark-cli
-  -> wrapper walks upward from pwd -P to nearest .env
-  -> wrapper reads LARK_CLI_PROFILE and app variables
-  -> wrapper creates/reuses profile if needed
-  -> wrapper calls real ~/.npm-global/bin/lark-cli with --profile <resolved_profile>
+The wrapper chooses the profile by walking upward from the current directory to the nearest \`.env\` and reading \`LARK_CLI_PROFILE\`:
+
+\`\`\`bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL="\${LARK_CLI_REAL:-$HOME/.npm-global/bin/lark-cli}"
+if [[ ! -x "$REAL" ]]; then
+  echo "lark-cli wrapper: real CLI not executable: $REAL" >&2
+  exit 127
+fi
+
+find_team_env() {
+  local dir
+  dir="$(pwd -P)"
+  while true; do
+    if [[ -f "$dir/.env" ]]; then
+      printf '%s\\n' "$dir/.env"
+      return 0
+    fi
+    [[ "$dir" == "/" ]] && return 1
+    dir="$(dirname "$dir")"
+  done
+}
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      value=$0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^['\''\"]|['\''\"]$/, "", value)
+      print value
+      exit
+    }
+  ' "$file"
+}
+
+ENV_FILE="$(find_team_env || true)"
+PROFILE=""
+
+if [[ -n "$ENV_FILE" ]]; then
+  PROFILE="$(read_env_value "$ENV_FILE" LARK_CLI_PROFILE || true)"
+fi
+
+if [[ -z "$PROFILE" ]]; then
+  echo "lark-cli wrapper: no LARK_CLI_PROFILE found in nearest .env from $(pwd -P)" >&2
+  echo "Add LARK_CLI_PROFILE=<team-profile> to the team .env, or call the real CLI with --profile explicitly." >&2
+  exit 2
+fi
+
+exec "$REAL" --profile "$PROFILE" "$@"
 \`\`\`
 
 Team \`.env\` template:
@@ -239,62 +286,6 @@ Expected:
 
 If a script intentionally bypasses the wrapper by calling the real binary, it must pass \`--profile <team-profile>\` explicitly.
 
-## 8. Feishu/Lark CLI troubleshooting
-
-| Symptom | Check | Fix |
-| --- | --- | --- |
-| Wrong team profile | \`pwd\`, nearest \`.env\`, \`lark-cli config show\` | cd into the correct team directory or pass \`--profile\` explicitly |
-| Agent subprocess uses wrong app | \`command -v lark-cli\` | ensure PATH hits \`~/.local/bin/lark-cli\`, not \`~/.npm-global/bin/lark-cli\` |
-| User auth page shows wrong application | current cwd, \`.env\`, \`LARK_APP_ID\`, profile injection | fix cwd/PATH/profile, regenerate auth URL |
-| Permission denied | missing scope and current identity | bot scopes in developer console; user scopes with minimal \`lark-cli auth login --scope ...\` |
-| Shared OS account leaks auth state | profiles and user tokens are under same OS user | use separate OS users or isolated runtime for strong person-level isolation |
-| Secret appears in docs/logs | search for token/secret/password patterns | rotate secret and remove leaked material from docs/logs/history |
-
-Default identity guidance:
-
-- Prefer bot identity for team docs/files where bot has access.
-- Use \`--as user\` only when bot cannot access the resource, resource is user-only, or the operation genuinely needs current-user semantics.
-- Explain why user auth is needed before asking for it.
-
-## 9. GitHub Pages CI and deployment troubleshooting
-
-This repository publishes an agent-readable page through GitHub Pages.
-
-Expected workflow behavior:
-
-- Trigger on pushes to \`main\`, pushes to the active release/fix branch, pull requests to \`main\`, and manual dispatch.
-- Build static files into \`_site/\` using \`node scripts/build-pages.mjs\`.
-- Verify \`_site/index.html\`, \`_site/agent-manual.md\`, \`_site/llms.txt\`, and required screenshots.
-- Upload and deploy \`_site\` with \`actions/upload-pages-artifact\` and \`actions/deploy-pages\` for non-PR runs.
-- For pull requests, run build/verification only and skip deployment.
-- Pages repository setting should use GitHub Actions as the source.
-
-If the page does not update:
-
-1. Check Actions -> Deploy Agent Runbook to GitHub Pages.
-2. Confirm the push landed on a branch that the workflow watches, or manually dispatch the workflow.
-3. Confirm the run reached the Deploy to GitHub Pages step, not only the build/verify steps.
-4. Confirm no restrictive \`paths\` filter skipped the workflow.
-5. Confirm \`_site/agent-manual.md\`, \`_site/llms.txt\`, and \`_site/index.html\` exist in the build log.
-6. Confirm Pages source is GitHub Actions, not branch/docs.
-
-If deployment fails:
-
-- Check workflow permissions: \`contents: read\`, \`pages: write\`, \`id-token: write\`.
-- Ensure \`actions/configure-pages\` runs before artifact upload/deploy.
-- Ensure artifact path is exactly \`_site\`.
-- Ensure generated files are not empty.
-- Ensure copied image paths exist.
-
-## 10. Safety rules for agents
-
-- Never print secrets, tokens, app secrets, cookies, private keys, or passwords.
-- Never copy raw tool output into memory unless reviewed and safe.
-- Never treat a target Task Bus design as a shipped feature.
-- Never treat a channel message as proof that a formal task was accepted.
-- Never bypass the Lark profile wrapper silently.
-- Never write business-specific facts into workspace-global memory without owner approval.
-- When uncertain, write to needs-review and ask for owner/admin confirmation.
 `;
 
 const llmsTxt = `# openHermit

@@ -108,24 +108,6 @@ openhermit update         # 自更新
 
 openHermit 会尝试准备本机运行时配置。真实使用 Claude Code、Codex、Gemini、Cursor、OpenCode 或外部协作渠道时，仍需在本机完成对应 CLI、账号、API key 或平台凭据配置。
 
-### 本地开发
-
-```bash
-git clone https://github.com/yancyuu/Hermit.git
-cd Hermit
-pnpm install
-pnpm dev
-```
-
-开发模式默认启动：
-
-- Fastify 后端：[http://127.0.0.1:5680](http://127.0.0.1:5680)
-- Vite 前端：[http://127.0.0.1:5174](http://127.0.0.1:5174)，端口占用时会自动切换
-
-如需连接真实 runtime，请配置 `~/.hermit/cc-connect/config.toml` 或相关环境变量。也可以在设置页调整 cc-connect Management API / Bridge 地址和 token；在团队详情里使用「渠道绑定」为团队添加外部平台。新增或修改渠道后，cc-connect 可能需要重启。
-
----
-
 ## 创建第一个团队
 
 1. 进入 `/teams`
