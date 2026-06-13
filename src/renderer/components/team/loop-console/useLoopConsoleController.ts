@@ -24,10 +24,10 @@ function currentIso(): string {
   return new Date().toISOString();
 }
 
-function buildOptimisticSystemMessage(text: string): InboxMessage {
+function buildOptimisticSystemMessage(text: string, to: string = 'user'): InboxMessage {
   return {
     from: 'system',
-    to: 'user',
+    to,
     text,
     timestamp: currentIso(),
     read: true,
@@ -232,7 +232,8 @@ export function useLoopConsoleController({
         addOptimisticTeamMessage(
           teamName,
           buildOptimisticSystemMessage(
-            `${verb} Loop 会话「${response.session.title || response.session.sessionKey}」并下发初始指令。`
+            `${verb} Loop 会话「${response.session.title || response.session.sessionKey}」并下发初始指令。`,
+            'cc'
           )
         );
         await refreshTeamMessagesHead(teamName).catch(() => undefined);

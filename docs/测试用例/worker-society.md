@@ -413,6 +413,27 @@ closed   ← 声誉 +、Relationship collaborations+1 / trust 更新
 **下一轮候选**：历史视图（意见 #2）；弹卡视觉人工确认（意见 #1）。
 
 ---
+
+### 迭代 #3 · 2026-06-14（10 分钟 TDD 覆盖循环 #1e539b60）
+**自动化基线**：`vitest run src/features/worker-society` → **226/226 全绿**（14 文件，较 iter-2 的 225 +1）；`tsc` exit 0。
+
+**本轮聚焦缺口（一个，TDD 红→绿）**：`main/infrastructure/crossTeamMessageGateway.ts` 的 `all()` —— append-only JSONL，若 `messages.jsonl` 混入一行损坏/半行（append 中途崩溃的残留），旧实现 `JSON.parse(line)` 抛错 → 外层 catch → **整个 feed 返回 `[]`，静默全量丢失**。`filter(l=>l.trim())` 只挡空行、不挡坏 JSON。属 CLAUDE.md 点名的 JSONL 健壮性回归类（hermit 自身 session reader 亦容忍坏行）。
+
+| 域 | 结论 | 产品意见 |
+|---|---|---|
+| SOCIETY-005 消息/Feed | ✅ PASS(加固) | 坏行不再抹掉 feed；崩溃后重启仍能读到崩溃前的合法消息 |
+
+**TDD 痕迹**：先在 `crossTeamMessageGateway.test.ts` 加「tolerates a corrupt/partial line」用例（手写坏行入 messages.jsonl）→ **红**（`recent(50)` 返回 `[]` 而非 `['keep-1','keep-2']`）→ 改 `all()` 为逐行 try/catch 跳过坏行 → **绿**。文件缺失仍返回 `[]`（外层 catch 不变），合法行顺序不变。
+
+**审查中排除的「假缺口」**（已测/已定约，避免误改）：
+- `recent(n)` 返回「最后 n 条按发送顺序」——`test.ts:55-61` 已显式定约（oldest-first，非 bug）。
+- `societyStore.cancelNeed`、`parseResponse` 非 JSON 错误分支——已实现正确，补测属 characterization（非红），留作后续补全。
+
+**本轮迭代动作**：`crossTeamMessageGateway.ts` `all()` 逐行容错（红→绿，+1 测试）；226/226 绿，tsc exit 0。
+
+**下一轮候选**：① 补 characterization 测试（store mutation 失败契约 / cancelNeed / parseResponse 非 JSON 错误体）以达「最全」；② 历史视图（iter-1 意见 #2）；③ `recent(0)` 当前返回全量（`slice(-0)===slice(0)`）——边界 bug，待评估是否需修。
+
+---
 ```bash
 # 全量（worker-society 独立）
 node_modules/.bin/vitest run src/features/worker-society

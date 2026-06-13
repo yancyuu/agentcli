@@ -50,21 +50,28 @@ export class CrossTeamMessageGateway implements MessageGateway {
     return { delivered: true };
   }
 
-  /** 读取全部持久化消息（按发送顺序）。文件缺失时返回空。 */
+  /** 读取全部持久化消息（按发送顺序）。文件缺失返回空；单行损坏（崩溃残留的半行）被跳过，不丢失其余合法记录。 */
   async all(): Promise<SocialMessageRecord[]> {
     try {
       const raw = await readFile(this.file, 'utf8');
-      return raw
-        .split('\n')
-        .filter((line) => line.trim())
-        .map((line) => JSON.parse(line) as SocialMessageRecord);
+      const records: SocialMessageRecord[] = [];
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          records.push(JSON.parse(line) as SocialMessageRecord);
+        } catch {
+          // 跳过损坏/半行（append 中途崩溃的残留），不因一行坏数据抹掉整个 feed。
+        }
+      }
+      return records;
     } catch {
       return [];
     }
   }
 
-  /** 读取最近的 N 条消息（供前端活动流）。 */
+  /** 读取最近的 N 条消息（供前端活动流）。limit<=0 或非有限数返回空——绝不回全量（防无界读）。 */
   async recent(limit: number): Promise<SocialMessageRecord[]> {
+    if (!Number.isFinite(limit) || limit <= 0) return [];
     const all = await this.all();
     return all.slice(-limit);
   }
