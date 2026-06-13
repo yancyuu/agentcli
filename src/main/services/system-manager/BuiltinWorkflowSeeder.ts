@@ -1,9 +1,9 @@
 /**
- * BuiltinWorkflowSeeder — 将内置 workflow 作为 Claude Code 自定义命令
- * 复制到 Admin Loop工作空间的 `.claude/commands/` 目录。
+ * BuiltinWorkflowSeeder — 将内置 workflow 作为 Claude Code 自定义命令。
  *
- * 内置 workflow 以代码常量形式内嵌，在 Admin Loop打开工作空间时自动复制到
- * <workspace>/.claude/commands/ 目录，成为原生 `/doctor` 等斜杠命令。
+ * 官方测试过的 Hermit workflow 会预安装到用户级 `~/.claude/commands/hermit/`，
+ * 成为所有团队 / cwd 可复用的 `/hermit:*` 斜杠命令。工作区级
+ * `<workspace>/.claude/commands/` 仍作为兼容路径保留。
  */
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -35,7 +35,8 @@ export interface BuiltinWorkflowDefinition {
     | 'loop'
     | 'connector'
     | 'worktree'
-    | 'state';
+    | 'state'
+    | 'team';
   safety: WorkflowPromptSafety;
   order: number;
   content: string;
@@ -562,6 +563,56 @@ ${READ_ONLY_SAFETY_RULES}
 不要修改状态文件。
 `,
   },
+  {
+    id: 'create-team',
+    filename: 'create-team.md',
+    commandName: '/create-team',
+    label: 'Create Team',
+    description: '通过 Hermit HTTP API 快速创建（provision）一个团队，不自动启动 agent。',
+    category: 'team',
+    safety: 'apply',
+    order: 110,
+    content: `${BUILTIN_WORKFLOW_MARKER}\n# Create Team — 创建团队
+
+你是 Hermit 团队创建助手。目标是通过本地 Hermit HTTP API 快速创建（provision）一个团队目录与清单，让用户马上能在看板里看到并管理它。
+
+## 安全边界
+
+- 这是 \`apply\` 级别命令：可以调用 Hermit API 创建团队，但只做"创建/登记"，不做破坏性操作。
+- 不要自动启动团队 agent：启动 agent 会拉起真实 CLI 进程并在目标 workDir 写代码，必须由用户显式触发（UI 点"启动"或单独命令），本命令不要替用户启动。
+- 不要覆盖或删除已有团队；遇到重复 bindProject（HTTP 409）如实回报，不要强制重写。
+- 创建前先只读确认 workDir 真实存在且是预期目录（\`test -d\`）；不要把敏感或无关目录设为 workDir，也不要在本命令里创建或改动 workDir 里的文件。
+- 不要泄露 secrets/token。
+
+## 参数
+
+从用户的 \`$ARGUMENTS\` 解析，缺失则向用户询问，不要瞎猜：
+
+- **bindProject**（必填）：团队唯一标识，slug 规则 \`^[a-z0-9][a-z0-9_-]*$\`（小写字母/数字/连字符/下划线，字母或数字开头）。例如 \`payment-svc\`。
+- **displayName**（必填）：人类可读团队名。例如 "支付服务团队"。
+- **workDir**（必填）：团队工作目录绝对路径，支持 \`~\`。例如 \`~/code/payment-svc\`。
+- **harness**（可选，默认 \`claudecode\`）：运行时。可选如 \`claudecode\` \`codex\` \`cursor\` \`gemini\` \`opencode\` \`kimi\` \`iflow\` 等。
+- **color**、**description**（可选）：团队颜色与描述。
+
+## 步骤
+
+1. 确认四个必填参数；bindProject 必须匹配 slug 正则，否则提示用户改名。
+2. 只读确认 workDir 存在：\`test -d "$workDir" && echo ok\`。不存在则告知用户并停下，不要自动建目录。
+3. 调用 Hermit API 创建团队（默认本地端口 5680，可用 \`HERMIT_API_URL\` 覆盖）：\`curl -s -X POST "\${HERMIT_API_URL:-http://127.0.0.1:5680}/api/teams/create" -H 'Content-Type: application/json' -d '{"bindProject":"<bindProject>","displayName":"<displayName>","workDir":"<workDir>","harness":"<harness>","color":"<color>","description":"<description>"}'\`
+4. 解析响应：
+   - 成功返回 \`{ "runId": "local:<bindProject>:<ts>" }\` → 团队已创建，可在 Hermit "团队" 看板看到。
+   - HTTP 400 → 参数缺失或 bindProject 不合法，按提示修正后重试。
+   - HTTP 409 → bindProject 已被其他团队占用，提示用户改名。
+   - 连接被拒（端口没起）→ 提示用户先启动 Hermit 服务（web 模式或 Electron 应用）。
+
+## 输出
+
+1. 创建结果（runId / 成功）或具体错误与修复建议。
+2. 下一步提示：团队已在看板可见；如需启动 agent，请在 UI 点"启动"或单独发起，本命令不自动启动。
+
+不要在本命令里启动 agent，也不要改动 workDir 里的文件。
+`,
+  },
 ];
 
 const BUILTIN_BY_FILENAME = new Map(BUILTIN_WORKFLOWS.map((item) => [item.filename, item]));
@@ -576,6 +627,14 @@ function hermitHome(): string {
   return process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
 }
 
+function globalClaudeCommandsRoot(): string {
+  return path.join(os.homedir(), '.claude', 'commands');
+}
+
+export function getGlobalHermitWorkflowDir(commandsRoot = globalClaudeCommandsRoot()): string {
+  return path.join(commandsRoot, 'hermit');
+}
+
 export function listBuiltinWorkflowMetadata(): BuiltinWorkflowDefinition[] {
   return [...BUILTIN_WORKFLOWS];
 }
@@ -583,7 +642,7 @@ export function listBuiltinWorkflowMetadata(): BuiltinWorkflowDefinition[] {
 export function getBuiltinWorkflowByFilename(
   filename: string
 ): BuiltinWorkflowDefinition | undefined {
-  return BUILTIN_BY_FILENAME.get(filename);
+  return BUILTIN_BY_FILENAME.get(path.basename(filename));
 }
 
 export function getBuiltinWorkflowByCommand(
@@ -596,7 +655,8 @@ function shouldRefreshBuiltinWorkflow(
   existingContent: string,
   workflow: BuiltinWorkflowDefinition
 ): boolean {
-  if (existingContent.includes(BUILTIN_WORKFLOW_MARKER)) return false;
+  if (existingContent.includes(BUILTIN_WORKFLOW_MARKER))
+    return existingContent !== workflow.content;
   const oldBuiltinHeadings: Record<string, string[]> = {
     'summary.md': ['# Ops Summary — 运维摘要'],
     'doctor.md': ['# Hermit Doctor — 环境诊断'],
@@ -618,32 +678,50 @@ function shouldRefreshBuiltinWorkflow(
  * @param workspaceDir 工作空间根目录
  * @returns 实际复制的文件数量
  */
-export async function seedBuiltinWorkflows(workspaceDir: string): Promise<number> {
+async function seedBuiltinWorkflowsIntoDir(targetDir: string): Promise<number> {
   let copied = 0;
-  try {
-    const targetDir = path.join(workspaceDir, '.claude', 'commands');
-    await mkdir(targetDir, { recursive: true });
+  await mkdir(targetDir, { recursive: true });
 
-    for (const workflow of BUILTIN_WORKFLOWS) {
-      const targetPath = path.join(targetDir, workflow.filename);
-      const exists = await stat(targetPath)
-        .then(() => true)
-        .catch(() => false);
-      if (exists) {
-        const existingContent = await readFile(targetPath, 'utf-8').catch(() => '');
-        if (!shouldRefreshBuiltinWorkflow(existingContent, workflow)) continue;
-      }
-
-      await writeFile(targetPath, workflow.content, 'utf-8');
-      copied++;
-      logger.info(
-        `${exists ? 'refreshed' : 'seeded'} builtin workflow: ${workflow.filename} → ${targetPath}`
-      );
+  for (const workflow of BUILTIN_WORKFLOWS) {
+    const targetPath = path.join(targetDir, workflow.filename);
+    const exists = await stat(targetPath)
+      .then(() => true)
+      .catch(() => false);
+    if (exists) {
+      const existingContent = await readFile(targetPath, 'utf-8').catch(() => '');
+      if (!shouldRefreshBuiltinWorkflow(existingContent, workflow)) continue;
     }
-  } catch (err) {
-    logger.warn('failed to seed builtin workflows:', err instanceof Error ? err.message : err);
+
+    await writeFile(targetPath, workflow.content, 'utf-8');
+    copied++;
+    logger.info(
+      `${exists ? 'refreshed' : 'seeded'} builtin workflow: ${workflow.filename} → ${targetPath}`
+    );
   }
   return copied;
+}
+
+export async function seedBuiltinWorkflows(workspaceDir: string): Promise<number> {
+  try {
+    return await seedBuiltinWorkflowsIntoDir(path.join(workspaceDir, '.claude', 'commands'));
+  } catch (err) {
+    logger.warn('failed to seed builtin workflows:', err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
+export async function seedGlobalHermitWorkflows(
+  commandsRoot = globalClaudeCommandsRoot()
+): Promise<number> {
+  try {
+    return await seedBuiltinWorkflowsIntoDir(getGlobalHermitWorkflowDir(commandsRoot));
+  } catch (err) {
+    logger.warn(
+      'failed to seed global Hermit workflows:',
+      err instanceof Error ? err.message : err
+    );
+    return 0;
+  }
 }
 
 /**
@@ -651,11 +729,16 @@ export async function seedBuiltinWorkflows(workspaceDir: string): Promise<number
  * Called once at app startup as fallback.
  */
 export async function ensureGlobalWorkflows(): Promise<void> {
-  const globalWorkspace = hermitHome();
-  const copied = await seedBuiltinWorkflows(globalWorkspace);
-  if (copied > 0) {
+  const [globalCopied, legacyCopied] = await Promise.all([
+    seedGlobalHermitWorkflows(),
+    seedBuiltinWorkflows(hermitHome()),
+  ]);
+  if (globalCopied > 0) {
+    logger.info(`seeded ${globalCopied} Hermit command(s) to ${getGlobalHermitWorkflowDir()}`);
+  }
+  if (legacyCopied > 0) {
     logger.info(
-      `seeded ${copied} builtin command(s) to ${path.join(globalWorkspace, '.claude', 'commands')}`
+      `seeded ${legacyCopied} legacy builtin command(s) to ${path.join(hermitHome(), '.claude', 'commands')}`
     );
   }
 }
