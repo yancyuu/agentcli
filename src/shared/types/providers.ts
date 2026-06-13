@@ -98,19 +98,3 @@ export interface ProviderPresetsResponse {
   updated_at?: string;
   providers: ProviderPreset[];
 }
-
-/** Result of reading from cc-switch SQLite DB. */
-export interface CCSwitchProvider {
-  name: string;
-  app_type: string;
-  api_key?: string;
-  base_url?: string;
-  model?: string;
-  is_current: boolean;
-}
-
-export interface CCSwitchListResponse {
-  providers: CCSwitchProvider[];
-  available: boolean;
-  error?: string;
-}

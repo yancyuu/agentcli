@@ -11,7 +11,6 @@ vi.mock('../../../../src/renderer/api/providers', () => ({
   providersApi: {
     list: vi.fn(),
     fetchPresets: vi.fn(),
-    listCCSwitch: vi.fn(),
     update: vi.fn(),
     add: vi.fn(),
     remove: vi.fn(),
@@ -69,7 +68,6 @@ describe('ProviderRuntimeSettingsDialog', () => {
   it('sends cleared provider fields as undefined instead of preserving stale values', async () => {
     vi.mocked(providersApi.list).mockResolvedValue({ providers: [existingProvider] });
     vi.mocked(providersApi.fetchPresets).mockResolvedValue({ version: 1, providers: [] });
-    vi.mocked(providersApi.listCCSwitch).mockResolvedValue({ available: false, providers: [] });
     vi.mocked(providersApi.update).mockResolvedValue({ message: 'ok' });
 
     const { host, root } = renderDialog();

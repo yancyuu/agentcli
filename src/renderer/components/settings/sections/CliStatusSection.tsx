@@ -7,15 +7,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { providersApi } from '@renderer/api/providers';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
-import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import {
   getProviderConnectLabel,
   getProviderDisconnectAction,
   shouldShowProviderConnectAction,
 } from '@renderer/components/runtime/providerConnectionUi';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
+import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from '@renderer/components/team/HarnessCards';
+import { HarnessIcon } from '@renderer/components/team/HarnessSelect';
 import {
   Dialog,
   DialogContent,
@@ -25,7 +26,6 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
-import { providersApi } from '@renderer/api/providers';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { getMainScreenCliProviders } from '@renderer/utils/claudeCodeOnlyProviders';
@@ -436,24 +436,18 @@ export const CliStatusSection = ({
                         key={agentType}
                         className="flex items-center gap-3 rounded-lg border px-3.5 py-2.5 transition-colors"
                         style={{
-                          borderColor: hasProviders ? 'var(--color-border-emphasis)' : 'var(--color-border-subtle)',
+                          borderColor: hasProviders
+                            ? 'var(--color-border-emphasis)'
+                            : 'var(--color-border-subtle)',
                           backgroundColor: 'var(--color-surface-raised)',
                           borderLeftWidth: hasProviders ? '2px' : '1px',
-                          borderLeftColor: hasProviders ? 'var(--color-accent)' : 'var(--color-border-subtle)',
+                          borderLeftColor: hasProviders
+                            ? 'var(--color-accent)'
+                            : 'var(--color-border-subtle)',
                           opacity: hasProviders ? 1 : 0.5,
                         }}
                       >
-                        {provider ? (
-                          <ProviderBrandLogo
-                            providerId={provider.providerId}
-                            className="size-4 shrink-0"
-                          />
-                        ) : (
-                          <Terminal
-                            className="size-4 shrink-0"
-                            style={{ color: 'var(--color-text-muted)' }}
-                          />
-                        )}
+                        <HarnessIcon type={agentType} className="size-4 shrink-0" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span
@@ -465,7 +459,10 @@ export const CliStatusSection = ({
                             {provider?.providerId === 'codex' ? <ProviderBetaBadge /> : null}
                           </div>
                           {hasProviders && (
-                            <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                            <span
+                              className="text-[10px]"
+                              style={{ color: 'var(--color-text-muted)' }}
+                            >
                               {harnessProviders.length} provider
                             </span>
                           )}
@@ -811,7 +808,7 @@ const GenericHarnessProviderDialog = ({
 
           {loading && providers.length === 0 ? (
             <div
-              className="flex items-center gap-2 rounded-md border px-3 py-3 text-xs"
+              className="flex items-center gap-2 rounded-md border p-3 text-xs"
               style={{
                 borderColor: 'var(--color-border-subtle)',
                 color: 'var(--color-text-muted)',
@@ -845,10 +842,14 @@ const GenericHarnessProviderDialog = ({
                     key={provider.name}
                     className="rounded-lg border px-3.5 py-2.5"
                     style={{
-                      borderColor: provider.api_key ? 'var(--color-border)' : 'var(--color-border-subtle)',
+                      borderColor: provider.api_key
+                        ? 'var(--color-border)'
+                        : 'var(--color-border-subtle)',
                       backgroundColor: 'var(--color-surface-raised)',
                       borderLeftWidth: provider.api_key ? '2px' : '1px',
-                      borderLeftColor: provider.api_key ? 'var(--color-accent)' : 'var(--color-border-subtle)',
+                      borderLeftColor: provider.api_key
+                        ? 'var(--color-accent)'
+                        : 'var(--color-border-subtle)',
                     }}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -859,13 +860,19 @@ const GenericHarnessProviderDialog = ({
                             backgroundColor: provider.api_key ? 'var(--color-accent)' : '#fbbf24',
                           }}
                         />
-                        <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                        <span
+                          className="text-sm font-medium"
+                          style={{ color: 'var(--color-text)' }}
+                        >
                           {provider.name}
                         </span>
                       </div>
-                      <span className="text-[10px]" style={{
-                        color: provider.api_key ? 'var(--color-accent)' : '#fbbf24',
-                      }}>
+                      <span
+                        className="text-[10px]"
+                        style={{
+                          color: provider.api_key ? 'var(--color-accent)' : '#fbbf24',
+                        }}
+                      >
                         {provider.api_key ? 'Key 已配置' : '未配置'}
                       </span>
                     </div>
@@ -883,7 +890,7 @@ const GenericHarnessProviderDialog = ({
             </div>
           ) : (
             <div
-              className="rounded-md border px-3 py-3 text-xs"
+              className="rounded-md border p-3 text-xs"
               style={{
                 borderColor: 'var(--color-border-subtle)',
                 color: 'var(--color-text-muted)',

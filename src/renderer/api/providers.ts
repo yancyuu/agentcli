@@ -5,11 +5,7 @@
  * cc-connect sidecar is the source of truth for provider/channel management.
  */
 
-import type {
-  CCSwitchListResponse,
-  GlobalProvider,
-  ProviderPresetsResponse,
-} from '@shared/types/providers';
+import type { GlobalProvider, ProviderPresetsResponse } from '@shared/types/providers';
 
 function stringifyProviderPatch(patch: Partial<GlobalProvider>): string {
   return JSON.stringify(patch, (_key, value: unknown) => (value === undefined ? null : value));
@@ -45,7 +41,7 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
     if (!contentType.includes('json') || !text.trim().startsWith('{')) {
       throw new Error(
         `Provider API ${path} 返回了非 JSON 响应 (HTTP ${res.status})。` +
-        '请检查 cc-connect 是否正在运行且支持该端点。'
+          '请检查 cc-connect 是否正在运行且支持该端点。'
       );
     }
 
@@ -53,7 +49,9 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
     try {
       json = JSON.parse(text) as typeof json;
     } catch (e) {
-      throw new Error(`Provider API ${path} 返回了无效 JSON: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(
+        `Provider API ${path} 返回了无效 JSON: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
 
     if (!res.ok || json.ok === false) {
@@ -84,15 +82,6 @@ export const providersApi = {
   fetchPresets(options: { forceRefresh?: boolean } = {}): Promise<ProviderPresetsResponse> {
     return request(`/providers/presets${options.forceRefresh ? '?refresh=1' : ''}`, {
       timeoutMs: 20_000,
-    });
-  },
-  listCCSwitch(): Promise<CCSwitchListResponse> {
-    return request('/providers/cc-switch');
-  },
-  importCCSwitch(names: string[]): Promise<{ imported: string[]; skipped: string[] }> {
-    return request('/providers/cc-switch', {
-      method: 'POST',
-      body: JSON.stringify({ names }),
     });
   },
 };

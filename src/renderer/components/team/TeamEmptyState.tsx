@@ -1,6 +1,9 @@
 import { Button } from '@renderer/components/ui/button';
+
+import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from './HarnessCards';
+import { HarnessIcon } from './HarnessSelect';
+
 import type { CcAgentType } from '@shared/types/ccConnect';
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from './HarnessCards';
 
 interface TeamEmptyStateProps {
   canCreate: boolean;
@@ -31,9 +34,9 @@ export const TeamEmptyState = ({
   return (
     <div className="flex size-full flex-col items-center justify-center gap-6 px-6">
       <div className="text-center">
-        <p className="text-lg font-medium text-[var(--color-text)]">还没有 Loop runtime</p>
+        <p className="text-lg font-medium text-[var(--color-text)]">还没有 Agent runtime</p>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-          选择一种 Agent 类型启动循环，或创建自定义 Loop runtime。
+          选择一种 Agent 类型启动循环，或创建自定义 runtime。
         </p>
       </div>
 
@@ -51,7 +54,7 @@ export const TeamEmptyState = ({
                 className="flex flex-col items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-center transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)]"
                 onClick={() => onSelectHarness(type)}
               >
-                <span className="text-lg">{getHarnessIcon(type)}</span>
+                <HarnessIcon type={type} className="size-6" />
                 <span className="text-xs font-medium text-[var(--color-text)]">
                   {AGENT_TYPE_LABELS[type]}
                 </span>
@@ -71,45 +74,12 @@ export const TeamEmptyState = ({
       </div>
 
       <Button size="sm" disabled={!canCreate} onClick={onCreateTeam}>
-        创建自定义 Loop runtime
+        创建自定义 runtime
       </Button>
 
       {!canCreate && (
-        <p className="text-xs text-[var(--color-text-muted)]">
-          只有本地桌面模式支持创建 Loop runtime。
-        </p>
+        <p className="text-xs text-[var(--color-text-muted)]">只有本地桌面模式支持创建 runtime。</p>
       )}
     </div>
   );
 };
-
-function getHarnessIcon(type: CcAgentType): string {
-  switch (type) {
-    case 'claudecode':
-      return '🤖';
-    case 'codex':
-      return '🔬';
-    case 'cursor':
-      return '💻';
-    case 'gemini':
-      return '💎';
-    case 'iflow':
-      return '🌊';
-    case 'kimi':
-      return '🌙';
-    case 'devin':
-      return '🧑‍💻';
-    case 'opencode':
-      return '🔓';
-    case 'qoder':
-      return '⚡';
-    case 'pi':
-      return '🥧';
-    case 'acp':
-      return '🔗';
-    case 'tmux':
-      return '🖥️';
-    default:
-      return '📦';
-  }
-}

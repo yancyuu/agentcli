@@ -16,12 +16,11 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
-import { CheckCircle2, Download, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
 import type {
   AgentType,
-  CCSwitchProvider,
   GlobalProvider,
   ProviderModelEntry,
   ProviderPreset,
@@ -214,23 +213,6 @@ function formFromPreset(preset: ProviderPreset, fallbackAgentType: AgentType): P
   };
 }
 
-function formFromCCSwitch(
-  provider: CCSwitchProvider,
-  fallbackAgentType: AgentType
-): ProviderFormState {
-  const agentType = normalizeAgentType(provider.app_type) ?? fallbackAgentType;
-  return {
-    ...emptyForm(agentType),
-    name: provider.name,
-    apiKey: provider.api_key ?? '',
-    baseUrl: provider.base_url ?? '',
-    model: provider.model ?? '',
-    agentTypes: [agentType],
-    agentModels: provider.model ? { [agentType]: provider.model } : {},
-    endpoints: provider.base_url ? { [agentType]: provider.base_url } : {},
-  };
-}
-
 function formToProvider(form: ProviderFormState, originalName?: string): GlobalProvider {
   const agentTypes = form.agentTypes.length > 0 ? form.agentTypes : undefined;
   const endpoints = Object.fromEntries(
@@ -271,11 +253,8 @@ export const ProviderRuntimeSettingsDialog = ({
   const harnessLabel = CLI_PROVIDER_LABELS[initialProviderId] ?? initialProviderId;
   const [providers, setProviders] = useState<GlobalProvider[]>([]);
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
-  const [ccSwitchProviders, setCcSwitchProviders] = useState<CCSwitchProvider[]>([]);
-  const [ccSwitchAvailable, setCcSwitchAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [presetsLoading, setPresetsLoading] = useState(false);
-  const [ccSwitchLoading, setCcSwitchLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -313,20 +292,6 @@ export const ProviderRuntimeSettingsDialog = ({
     }
   }, []);
 
-  const refreshCCSwitch = useCallback(async (): Promise<void> => {
-    setCcSwitchLoading(true);
-    try {
-      const result = await providersApi.listCCSwitch();
-      setCcSwitchProviders(result.providers ?? []);
-      setCcSwitchAvailable(result.available);
-    } catch {
-      setCcSwitchProviders([]);
-      setCcSwitchAvailable(false);
-    } finally {
-      setCcSwitchLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm(agentType));
@@ -334,8 +299,7 @@ export const ProviderRuntimeSettingsDialog = ({
     setFormError(null);
     void refreshProviders();
     void refreshPresets();
-    void refreshCCSwitch();
-  }, [agentType, open, refreshCCSwitch, refreshPresets, refreshProviders]);
+  }, [agentType, open, refreshPresets, refreshProviders]);
 
   const updateForm = (patch: Partial<ProviderFormState>): void => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -410,19 +374,6 @@ export const ProviderRuntimeSettingsDialog = ({
     }
   };
 
-  const handleImportCCSwitch = async (providerName: string): Promise<void> => {
-    setSaving(true);
-    try {
-      await providersApi.importCCSwitch([providerName]);
-      await refreshProviders();
-      emitOpenHermitEvent(OPEN_HERMIT_EVENTS.providersChanged);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '导入 cc-switch Provider 失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[88vh] w-[min(96vw,1120px)] max-w-[min(96vw,1120px)] flex-col overflow-hidden">
@@ -439,7 +390,6 @@ export const ProviderRuntimeSettingsDialog = ({
               <TabsList className="mb-3">
                 <TabsTrigger value="providers">Provider 库</TabsTrigger>
                 <TabsTrigger value="presets">预设</TabsTrigger>
-                <TabsTrigger value="cc-switch">cc-switch</TabsTrigger>
               </TabsList>
 
               <TabsContent value="providers" className="mt-0 space-y-3">
@@ -479,7 +429,7 @@ export const ProviderRuntimeSettingsDialog = ({
                   </div>
                 ) : providers.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--color-border)] p-6 text-center text-sm text-[var(--color-text-muted)]">
-                    还没有全局 Provider。可以从右侧新建，或从预设/cc-switch 导入。
+                    还没有全局 Provider。可以从右侧新建，或从预设导入。
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -565,7 +515,7 @@ export const ProviderRuntimeSettingsDialog = ({
                   <div>
                     <div className="text-sm font-medium text-[var(--color-text)]">从预设开始</div>
                     <div className="text-xs text-[var(--color-text-muted)]">
-                      参考 cc-switch 的交互：先选网关预设，再补 Key、模型和适用 Harness。
+                      先选网关预设，再补 Key、模型和适用 Harness。
                     </div>
                   </div>
                   <Button
@@ -623,87 +573,6 @@ export const ProviderRuntimeSettingsDialog = ({
                       </p>
                     </button>
                   ))}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="cc-switch" className="mt-0 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-[var(--color-text)]">
-                      从 cc-switch 导入
-                    </div>
-                    <div className="text-xs text-[var(--color-text-muted)]">
-                      可导入已有 cc-switch Provider，再在右侧按 Hermit 字段调整。
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={ccSwitchLoading}
-                    onClick={() => void refreshCCSwitch()}
-                  >
-                    <RefreshCw
-                      className={ccSwitchLoading ? 'mr-1 size-3.5 animate-spin' : 'mr-1 size-3.5'}
-                    />
-                    刷新
-                  </Button>
-                </div>
-                {ccSwitchAvailable === false ? (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                    没有检测到可导入的 Provider，或服务未返回导入数据。
-                  </div>
-                ) : null}
-                <div className="space-y-2">
-                  {ccSwitchProviders.map((provider) => (
-                    <div
-                      key={`${provider.app_type}:${provider.name}`}
-                      className="rounded-xl border border-[var(--color-border-subtle)] bg-white/[0.025] px-3 py-3"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-                            {provider.is_current ? (
-                              <CheckCircle2 className="size-3.5 text-emerald-400" />
-                            ) : null}
-                            {provider.name}
-                          </div>
-                          <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                            {provider.app_type} · {provider.base_url || '默认端点'} ·{' '}
-                            {provider.model || '未指定模型'}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => {
-                              setEditingName(null);
-                              setForm(formFromCCSwitch(provider, agentType));
-                              setFormError(null);
-                            }}
-                          >
-                            填入表单
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            disabled={saving}
-                            onClick={() => void handleImportCCSwitch(provider.name)}
-                          >
-                            <Download className="mr-1 size-3" />
-                            直接导入
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {ccSwitchProviders.length === 0 && !ccSwitchLoading ? (
-                    <div className="rounded-xl border border-dashed border-[var(--color-border)] p-5 text-center text-xs text-[var(--color-text-muted)]">
-                      暂无 cc-switch Provider 可导入。
-                    </div>
-                  ) : null}
                 </div>
               </TabsContent>
             </Tabs>

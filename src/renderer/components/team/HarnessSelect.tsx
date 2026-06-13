@@ -1,4 +1,3 @@
-import type { CcAgentType } from '@shared/types/ccConnect';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import {
   Select,
@@ -7,13 +6,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@renderer/components/ui/select';
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from './HarnessCards';
+
+import { HarnessBrandLogo } from './HarnessBrandLogos';
+import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from './HarnessCards';
+
+import type { CcAgentType } from '@shared/types/ccConnect';
 
 interface HarnessSelectProps {
-  value: CcAgentType;
-  onChange: (value: CcAgentType) => void;
-  className?: string;
-  id?: string;
+  readonly value: CcAgentType;
+  readonly onChange: (value: CcAgentType) => void;
+  readonly className?: string;
+  readonly id?: string;
 }
 
 const HARNESS_PROVIDER_MAP: Partial<
@@ -25,30 +28,26 @@ const HARNESS_PROVIDER_MAP: Partial<
   opencode: 'opencode',
 };
 
-function HarnessIcon({ type, className }: { type: CcAgentType; className?: string }) {
+interface HarnessIconProps {
+  readonly type: CcAgentType;
+  readonly className?: string;
+}
+
+const HarnessIcon = ({ type, className }: HarnessIconProps): React.JSX.Element => {
   const providerId = HARNESS_PROVIDER_MAP[type];
   if (providerId) {
     return <ProviderBrandLogo providerId={providerId} className={className} />;
   }
-  return <span className={className}>{EMOJI_FALLBACK[type]}</span>;
-}
-
-const EMOJI_FALLBACK: Record<CcAgentType, string> = {
-  claudecode: '🤖',
-  codex: '🔬',
-  cursor: '💻',
-  gemini: '💎',
-  iflow: '🌊',
-  kimi: '🌙',
-  devin: '🧑‍💻',
-  opencode: '🔓',
-  qoder: '⚡',
-  pi: '🥧',
-  acp: '🔗',
-  tmux: '🖥️',
+  // Brand logo for the non-provider harness runtimes (cursor, kimi, …, tmux).
+  return <HarnessBrandLogo type={type} className={className} />;
 };
 
-export function HarnessSelect({ value, onChange, className, id }: HarnessSelectProps) {
+const HarnessSelect = ({
+  value,
+  onChange,
+  className,
+  id,
+}: HarnessSelectProps): React.JSX.Element => {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as CcAgentType)}>
       <SelectTrigger id={id} className={className}>
@@ -66,6 +65,6 @@ export function HarnessSelect({ value, onChange, className, id }: HarnessSelectP
       </SelectContent>
     </Select>
   );
-}
+};
 
-export { HarnessIcon, HARNESS_PROVIDER_MAP, EMOJI_FALLBACK };
+export { HARNESS_PROVIDER_MAP, HarnessIcon, HarnessSelect };
