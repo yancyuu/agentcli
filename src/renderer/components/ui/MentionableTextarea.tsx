@@ -356,6 +356,8 @@ interface MentionableTextareaProps extends Omit<
   taskSuggestions?: MentionSuggestion[];
   /** Slash command suggestions for /command autocomplete */
   commandSuggestions?: MentionSuggestion[];
+  /** Called after a suggestion is inserted into the textarea. */
+  onSuggestionSelected?: (suggestion: MentionSuggestion, insertedText: string) => void;
   /** Called when Enter (without Shift) is pressed. */
   onModEnter?: () => void;
   /** Called when Shift+Tab is pressed. */
@@ -388,6 +390,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       teamSuggestions = [],
       taskSuggestions = [],
       commandSuggestions = [],
+      onSuggestionSelected,
       onModEnter,
       onShiftTab,
       dismissMentionsRef,
@@ -454,6 +457,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         if (trigger.triggerChar !== '/') return true;
         return text.slice(0, trigger.triggerIndex).trim().length === 0;
       },
+      onSuggestionSelected,
     });
 
     // Expose dismiss to parent via ref for external close (e.g. Send button click)

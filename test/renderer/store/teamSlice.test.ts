@@ -11,6 +11,8 @@ import {
   selectMemberMessagesForTeamMember,
   selectResolvedMemberForTeamName,
   selectResolvedMembersForTeamName,
+  selectTeamMessages,
+  TEAM_MESSAGES_PAGE_LIMIT,
 } from '../../../src/renderer/store/slices/teamSlice';
 
 const hoisted = vi.hoisted(() => ({
@@ -1207,7 +1209,7 @@ describe('teamSlice actions', () => {
     expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(1);
     expect(hoisted.getMessagesPage.mock.calls[0]).toEqual([
       'my-team',
-      { cursor: 'cursor-older', limit: 50 },
+      { cursor: 'cursor-older', limit: TEAM_MESSAGES_PAGE_LIMIT },
     ]);
 
     olderRequest.resolve({
@@ -1230,7 +1232,10 @@ describe('teamSlice actions', () => {
     await headPromise;
 
     expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(2);
-    expect(hoisted.getMessagesPage.mock.calls[1]).toEqual(['my-team', { limit: 50 }]);
+    expect(hoisted.getMessagesPage.mock.calls[1]).toEqual([
+      'my-team',
+      { limit: TEAM_MESSAGES_PAGE_LIMIT },
+    ]);
     expect(
       store
         .getState()
@@ -4330,6 +4335,160 @@ describe('teamSlice actions', () => {
           'my-team'
         )
       ).toBeNull();
+    });
+  });
+
+  describe('clearTeamMessages (clear console)', () => {
+    const oldMessages = [
+      {
+        from: 'lead',
+        text: 'older command',
+        timestamp: '2026-03-20T08:00:00.000Z',
+        read: true,
+        messageId: 'msg-1',
+        source: 'inbox',
+      },
+      {
+        from: 'lead',
+        text: 'most recent command',
+        timestamp: '2026-03-20T08:00:01.000Z',
+        read: true,
+        messageId: 'msg-2',
+        source: 'inbox',
+      },
+    ];
+
+    function seedHydratedEntry(store: ReturnType<typeof createSliceStore>, overrides: Record<string, unknown> = {}) {
+      store.setState({
+        teamMessagesByName: {
+          'my-team': {
+            canonicalMessages: oldMessages,
+            optimisticMessages: [],
+            feedRevision: 'rev-1',
+            nextCursor: null,
+            hasMore: false,
+            lastFetchedAt: 123,
+            loadingHead: false,
+            loadingOlder: false,
+            headHydrated: true,
+            olderHydrated: false,
+            clearedAt: null,
+            ...overrides,
+          },
+        },
+      });
+    }
+
+    it('returns all canonical messages before a clear', () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      expect(selectTeamMessages(store.getState(), 'my-team').map((m) => m.messageId)).toEqual([
+        'msg-2',
+        'msg-1',
+      ]);
+    });
+
+    it('hides all pre-existing messages after clearTeamMessages', () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      // Sanity: visible before clear.
+      expect(selectTeamMessages(store.getState(), 'my-team')).toHaveLength(2);
+
+      store.getState().clearTeamMessages('my-team');
+
+      expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
+    });
+
+    it('records a clearedAt cutoff and keeps canonicalMessages + headHydrated intact', () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      store.getState().clearTeamMessages('my-team');
+
+      const entry = store.getState().teamMessagesByName['my-team'];
+      expect(entry?.clearedAt).toEqual(expect.any(Number));
+      expect(entry?.clearedAt).toBeGreaterThan(Date.parse('2026-03-20T08:00:01.000Z'));
+      // Canonical messages must be preserved so a subsequent head refresh can diff cleanly.
+      expect(entry?.canonicalMessages).toBe(oldMessages);
+      expect(entry?.headHydrated).toBe(true);
+      // Optimistic messages are dropped so they don't resurface through the merge.
+      expect(entry?.optimisticMessages).toEqual([]);
+    });
+
+    it('survives a head refresh that re-pushes the same old messages (the original "clear did nothing" bug)', async () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      store.getState().clearTeamMessages('my-team');
+      expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
+
+      // Server still has the same old messages; a refresh re-pushes them.
+      hoisted.getMessagesPage.mockResolvedValueOnce({
+        messages: oldMessages.map((m) => ({ ...m })),
+        nextCursor: null,
+        hasMore: false,
+        feedRevision: 'rev-1',
+      });
+
+      await store.getState().refreshTeamMessagesHead('my-team');
+
+      // clearedAt cutoff must still hide them — this is exactly what was broken before.
+      expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
+    });
+
+    it('reveals only messages newer than the cutoff after a clear', () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      store.getState().clearTeamMessages('my-team');
+      const cutoff = store.getState().teamMessagesByName['my-team']?.clearedAt as number;
+
+      // A brand-new message (timestamp strictly after the cutoff) arrives via the feed.
+      const freshTimestamp = new Date(cutoff + 60_000).toISOString();
+      const fresh = {
+        from: 'lead',
+        text: 'fresh after clear',
+        timestamp: freshTimestamp,
+        read: false,
+        messageId: 'msg-3',
+        source: 'inbox',
+      };
+      store.setState({
+        teamMessagesByName: {
+          'my-team': {
+            ...store.getState().teamMessagesByName['my-team']!,
+            canonicalMessages: [...oldMessages, fresh],
+          },
+        },
+      });
+
+      const visible = selectTeamMessages(store.getState(), 'my-team');
+      expect(visible).toHaveLength(1);
+      expect(visible[0]?.messageId).toBe('msg-3');
+    });
+
+    it('treats a legacy entry without clearedAt as "no cutoff" so it is not accidentally emptied', () => {
+      const store = createSliceStore();
+      // Deliberately omit clearedAt — emulates entries built before the field existed.
+      store.setState({
+        teamMessagesByName: {
+          'my-team': {
+            canonicalMessages: oldMessages,
+            optimisticMessages: [],
+            feedRevision: 'rev-1',
+            nextCursor: null,
+            hasMore: false,
+            lastFetchedAt: 0,
+            loadingHead: false,
+            loadingOlder: false,
+            headHydrated: true,
+          },
+        },
+      });
+
+      expect(selectTeamMessages(store.getState(), 'my-team')).toHaveLength(2);
     });
   });
 });

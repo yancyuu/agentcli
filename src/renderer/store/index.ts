@@ -1216,6 +1216,23 @@ export function initializeNotificationListeners(): () => void {
         return;
       }
 
+      // Live token stream from a direct-CLI subprocess: accumulate each text delta into
+      // an in-progress optimistic assistant reply keyed by messageId. The canonical reply
+      // (same messageId, appended on the turn's result) prunes this twin on the next inbox
+      // refresh — so no duplicate, and a missing/failed turn just leaves a partial bubble.
+      if (event.type === 'direct-cli-stream') {
+        if (isStaleRuntimeEvent) return;
+        if (event.kind === 'delta' && event.messageId && typeof event.text === 'string') {
+          useStore.getState().appendStreamingTeamReply(event.teamName, {
+            messageId: event.messageId,
+            delta: event.text,
+            from: event.from ?? event.teamName,
+            to: 'user',
+          });
+        }
+        return;
+      }
+
       if (event.type === 'log-source-change') {
         if (!event?.teamName || !isTeamVisibleInAnyPane(event.teamName)) {
           return;

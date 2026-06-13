@@ -28,8 +28,8 @@ import {
 
 import type { CcSession, CcSessionDetail } from '@shared/types';
 
-const SESSION_DETAIL_PAGE_SIZE = 12;
-const HISTORICAL_SESSION_PAGE_SIZE = 10;
+const SESSION_DETAIL_PAGE_SIZE = 6;
+const HISTORICAL_SESSION_PAGE_SIZE = 3;
 
 function formatSessionDetailError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || '');
@@ -415,9 +415,7 @@ function CcSessionRow({
           {detail && (
             <div className="rounded-lg bg-[var(--color-surface)] p-2">
               {detail.history.length === 0 ? (
-                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">
-                  暂无 Loop 动态
-                </div>
+                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">暂无动态</div>
               ) : (
                 <>
                   <div className="mb-2 flex items-center justify-between px-1 text-[10px] text-[var(--color-text-muted)]">

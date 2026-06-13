@@ -3,16 +3,32 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { Button } from '@renderer/components/ui/button';
+import {
+  buildCapabilityPackCommandSuggestions,
+  collectSlashSuggestionAliases,
+} from '@renderer/utils/slashCommandRegistry';
+import { buildWorkflowCommandSuggestion } from '@renderer/utils/workflowCommandSuggestions';
 import { Input } from '@renderer/components/ui/input';
-import { SYSTEM_MANAGER_DISPLAY_NAME } from '@shared/types/team';
+import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import type {
   SystemManagerConfig,
   SystemManagerStatus,
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
-import { ExternalLink, Loader2, RefreshCw, TerminalSquare } from 'lucide-react';
+import { Loader2, RefreshCw, Settings2, TerminalSquare } from 'lucide-react';
 
+import type { MentionSuggestion } from '@renderer/types/mention';
+
+import { LoopConsolePanel } from '../team/loop-console/LoopConsolePanel';
+import { RuntimeConfigDialog } from '../team/dialogs/RuntimeConfigDialog';
 import { FolderBrowser } from './FolderBrowser';
+
+import type {
+  CcSession,
+  ResolvedTeamMember,
+  TeamTaskWithKanban,
+  TeamViewSnapshot,
+} from '@shared/types';
 
 interface SystemManagerViewProps {
   isPaneFocused?: boolean;
@@ -30,6 +46,35 @@ function joinPath(basePath: string, childPath: string): string {
   return `${trimmedBase}/${childPath}`;
 }
 
+const EMPTY_ADMIN_TASKS: TeamTaskWithKanban[] = [];
+const EMPTY_CAPABILITY_PACKS = [] as const;
+const NOOP_FETCH_CAPABILITY_PACKS = () => Promise.resolve();
+
+function buildAdminLoopMember(teamData: TeamViewSnapshot | null): ResolvedTeamMember[] {
+  const lead = teamData?.members[0];
+  return [
+    {
+      name: lead?.name ?? SYSTEM_MANAGER_DISPLAY_NAME,
+      agentId: lead?.agentId,
+      status: teamData?.isAlive ? 'active' : 'idle',
+      currentTaskId: null,
+      taskCount: teamData?.tasks.length ?? 0,
+      lastActiveAt: null,
+      messageCount: 0,
+      color: 'slate',
+      agentType: 'admin-loop',
+      role: 'Workspace loop manager',
+      workflow: lead?.workflow,
+      providerId: lead?.providerId,
+      model: lead?.model,
+      effort: lead?.effort,
+      cwd: teamData?.config.projectPath,
+      gitBranch: lead?.gitBranch,
+      runtimeAdvisory: lead?.runtimeAdvisory,
+    },
+  ];
+}
+
 export const SystemManagerView = ({
   isPaneFocused: _isPaneFocused = false,
   isActive: _isActive = true,
@@ -40,9 +85,16 @@ export const SystemManagerView = ({
   const [workflowPrompts, setWorkflowPrompts] = useState<WorkflowPromptSummary[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
+  const [adminTeamData, setAdminTeamData] = useState<TeamViewSnapshot | null>(null);
+  const [adminSessions, setAdminSessions] = useState<CcSession[]>([]);
+  const [pendingRepliesByMember, setPendingRepliesByMember] = useState<Record<string, number>>({});
+  const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetchTeams = useStore((state) => state.fetchTeams);
+  const capabilityPacks = useStore((state) => state.capabilityPacks ?? EMPTY_CAPABILITY_PACKS);
+  const fetchCapabilityPacks = useStore(
+    (state) => state.fetchCapabilityPacks ?? NOOP_FETCH_CAPABILITY_PACKS
+  );
 
   const load = useCallback(async (): Promise<SystemManagerConfig | null> => {
     setLoading(true);
@@ -51,11 +103,20 @@ export const SystemManagerView = ({
       const [nextStatus, nextConfig] = await Promise.all([
         api.systemManager.getStatus(),
         api.systemManager.getConfig(),
+        fetchCapabilityPacks().then(() => undefined),
+      ]);
+      await api.teams.ensureSystemManager();
+      const [nextTeamData, nextSessions] = await Promise.all([
+        api.teams.getData(SYSTEM_MANAGER_TEAM_NAME),
+        api.teams.getTeamSessions(SYSTEM_MANAGER_TEAM_NAME),
       ]);
       setStatus(nextStatus);
       setConfig(nextConfig);
+      setAdminTeamData(nextTeamData);
+      setAdminSessions(nextSessions);
       setWorkDirInput(nextConfig.selectedWorkDir);
       const candidateFolders = [
+        nextStatus.globalHermitWorkflowFolder,
         joinPath(nextConfig.selectedWorkDir, '.claude/commands'),
         nextConfig.workflowFolder,
         joinPath(nextConfig.selectedWorkDir, 'workflows'),
@@ -94,37 +155,11 @@ export const SystemManagerView = ({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchCapabilityPacks]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const openClaudeInSystemTerminal = useCallback(
-    async (workDirOverride?: string, args?: string[]) => {
-      setStarting(true);
-      setError(null);
-      try {
-        const effectiveWorkDir = workDirOverride ?? workDirInput;
-        const nextConfig = await api.systemManager.updateConfig({
-          selectedWorkDir: effectiveWorkDir,
-        });
-        setConfig(nextConfig);
-        setWorkDirInput(nextConfig.selectedWorkDir);
-        void fetchTeams();
-        await api.terminal.openExternal({
-          command: 'claude',
-          args,
-          cwd: nextConfig.selectedWorkDir,
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setStarting(false);
-      }
-    },
-    [fetchTeams, workDirInput]
-  );
 
   const refreshConsole = useCallback(async () => {
     const nextConfig = await load();
@@ -139,27 +174,22 @@ export const SystemManagerView = ({
     }
   }, [fetchTeams, load, workDirInput]);
 
-  const runWorkflowPrompt = useCallback(
-    async (prompt: WorkflowPromptSummary) => {
-      if (prompt.commandName) {
-        await openClaudeInSystemTerminal(undefined, [prompt.commandName]);
-        return;
-      }
-      const folder = prompt.folder ?? config?.workflowFolder;
-      if (!folder) return;
-      const result = await api.systemManager.readWorkflowPrompt(folder, prompt.id);
-      const content = result.content.trim();
-      const args = content.startsWith('/') ? content.split(/\s+/) : ['-p', content];
-      await openClaudeInSystemTerminal(undefined, args);
-    },
-    [config?.workflowFolder, openClaudeInSystemTerminal]
-  );
-
   const titlePath = useMemo(
     () =>
       formatPathForTitle(config?.selectedWorkDir ?? (workDirInput || status?.defaultWorkDir || '')),
     [config?.selectedWorkDir, status?.defaultWorkDir, workDirInput]
   );
+  const adminWorkflowCommandSuggestions = useMemo(() => {
+    const workflowSuggestions = [...workflowPrompts]
+      .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+      .map((prompt) => buildWorkflowCommandSuggestion(prompt, 'admin-workflow'));
+    const packSuggestions = buildCapabilityPackCommandSuggestions(capabilityPacks, 'admin-loop', {
+      forceNamespacedAliases: collectSlashSuggestionAliases(workflowSuggestions),
+    });
+    return [...workflowSuggestions, ...packSuggestions];
+  }, [capabilityPacks, workflowPrompts]);
+  const adminMembers = useMemo(() => buildAdminLoopMember(adminTeamData), [adminTeamData]);
+  const adminTasks = adminTeamData?.tasks ?? EMPTY_ADMIN_TASKS;
 
   return (
     <div className="flex size-full flex-col bg-[var(--color-surface)] p-4 text-[var(--color-text)]">
@@ -209,11 +239,10 @@ export const SystemManagerView = ({
             size="sm"
             variant="outline"
             className="h-8 shrink-0 border-[var(--color-border)]"
-            disabled={starting}
-            onClick={() => void openClaudeInSystemTerminal()}
+            onClick={() => setBindingDialogOpen(true)}
           >
-            {starting ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
-            打开终端
+            <Settings2 size={13} />
+            运行时
           </Button>
           <Button
             size="sm"
@@ -227,77 +256,78 @@ export const SystemManagerView = ({
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 bg-[var(--color-surface)] p-4">
-          <div className="flex size-full flex-col justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-            <div className="space-y-4">
-              <div>
-                <div className="font-mono text-sm text-[var(--color-text)]">Loop Console</div>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
-                  Admin Loop 不再嵌入终端。选择工作区后，点击“打开终端”会在系统默认终端中运行 Claude
-                  Code；点击下面的 Loop workflow 会在同一个工作区打开终端并执行对应斜杠命令。
-                </p>
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-surface)] p-4">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+            <div className="rounded-xl border border-indigo-500/20 bg-[var(--color-surface-raised)] p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-mono text-sm text-[var(--color-text)]">
+                    Admin Loop 指令台
+                  </div>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
+                    全局巡检、诊断、复盘、治理和改进提案。团队消息、runtime 注入和派单在 Team Loop
+                    指令台。
+                  </p>
+                </div>
+                <span className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
+                  {workflowPrompts.length} workflows
+                </span>
               </div>
-              <div className="grid gap-2 text-xs text-[var(--color-text-muted)] sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  Automations：让循环有心跳
+              <div className="mt-3 grid gap-2 text-[11px] text-[var(--color-text-muted)] sm:grid-cols-3">
+                <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
+                  作用域：{formatPathForTitle(config?.selectedWorkDir ?? workDirInput)}
                 </div>
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  Worktrees：并行不互相踩文件
+                <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
+                  命令源：全局 Hermit / 团队 `.claude/commands` / workflows
                 </div>
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  Skills / Plugins：把意图和工具外置
-                </div>
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  Subagents：实现和验证分离
-                </div>
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  State：状态落盘，循环可恢复
-                </div>
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-                  Human review：工程师保留判断力
+                <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
+                  默认边界：只读/报告/提案优先
                 </div>
               </div>
             </div>
 
-            {(workflowPrompts.length || warnings.length || error || loading) && (
-              <div className="mt-6 border-t border-[var(--color-border)] pt-4">
-                {workflowPrompts.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {workflowPrompts.map((prompt) => (
-                      <button
-                        key={prompt.id}
-                        type="button"
-                        className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text)] disabled:opacity-60"
-                        title={prompt.description}
-                        disabled={starting}
-                        aria-label={`运行 ${prompt.label}${prompt.commandName ? ` (${prompt.commandName})` : ''}`}
-                        onClick={() => void runWorkflowPrompt(prompt)}
-                      >
-                        <span>{prompt.label}</span>
-                        {prompt.safety ? (
-                          <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">
-                            {' '}
-                            {prompt.safety}
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+            {(warnings.length || error || loading) && (
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-xs">
                 {warnings.length ? (
-                  <div className="mt-2 text-xs text-amber-300">{warnings.join('；')}</div>
+                  <div className="text-amber-300">{warnings.join('；')}</div>
                 ) : null}
-                {error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
+                {error ? <div className="text-red-300">{error}</div> : null}
                 {loading ? (
-                  <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-                    加载 Admin Loop 配置中...
-                  </div>
+                  <div className="text-[var(--color-text-muted)]">加载 Admin Loop 配置中...</div>
                 ) : null}
               </div>
             )}
+
+            <LoopConsolePanel
+              teamName={SYSTEM_MANAGER_TEAM_NAME}
+              members={adminMembers}
+              tasks={adminTasks}
+              isTeamAlive={adminTeamData?.isAlive}
+              isProvisioning={loading}
+              currentLeadSessionId={adminTeamData?.config.leadSessionId}
+              leadProjectPath={adminTeamData?.config.projectPath}
+              sessions={adminSessions}
+              commandSuggestions={adminWorkflowCommandSuggestions}
+              slashCommandMode="session"
+              pendingRepliesByMember={pendingRepliesByMember}
+              onPendingReplyChange={setPendingRepliesByMember}
+            />
+
+            {!workflowPrompts.length && !loading ? (
+              <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 text-center text-sm text-[var(--color-text-muted)]">
+                当前没有可用 Admin Loop workflow。Hermit 默认命令会预装到
+                `~/.claude/commands/hermit`；团队自定义命令可添加到 `.claude/commands` 或
+                workflows。
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
+      <RuntimeConfigDialog
+        open={bindingDialogOpen}
+        teamName={SYSTEM_MANAGER_TEAM_NAME}
+        onClose={() => setBindingDialogOpen(false)}
+      />
     </div>
   );
 };

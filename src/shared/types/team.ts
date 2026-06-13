@@ -152,6 +152,10 @@ export interface TeamSummary {
     sessions: number;
     messages: number;
     tokens: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    cacheRead?: number;
+    cacheCreation?: number;
     durationMs: number;
   };
 }
@@ -1192,6 +1196,13 @@ export interface TeamLaunchRequest {
 
 export interface TeamLaunchResponse {
   runId: string;
+  ok?: boolean;
+  data?: {
+    teamName: string;
+    bindProject: string;
+    projectExists: boolean;
+    isOnline: boolean;
+  };
 }
 
 export interface CreateTaskRequest {
@@ -1400,11 +1411,24 @@ export interface TeamChangeEvent {
     | 'lead-message'
     | 'tool-activity'
     | 'process'
-    | 'member-spawn';
+    | 'member-spawn'
+    | 'direct-cli-stream';
   teamName: string;
   runId?: string;
   detail?: string;
   taskId?: string;
+  /** direct-cli-stream: which session this live token/turn came from. */
+  sessionKey?: string;
+  /** direct-cli-stream: optimistic id shared with the canonical reply (drives dedup). */
+  messageId?: string;
+  /** direct-cli-stream: init | delta | thinking | tool. */
+  kind?: string;
+  /** direct-cli-stream: incremental assistant text (delta) or tool name. */
+  text?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  /** direct-cli-stream: reply sender shown during streaming (team name or member name). */
+  from?: string;
 }
 
 export interface ProjectBranchChangeEvent {

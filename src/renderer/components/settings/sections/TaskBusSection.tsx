@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
+import { downloadTextFile } from '../../team/CcSessionsSection';
 import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
 import type { TaskBusConfig } from '@shared/types/team';
 import {
@@ -25,14 +26,19 @@ interface TelemetryStatus {
   tokensOut: number;
   cacheRead: number;
   cacheCreation: number;
+  totalTokens: number;
   activeDays: number;
   hourly: number[];
   projects: Array<{
     cwd: string;
+    displayName?: string;
+    teamSlug?: string;
+    bindProject?: string;
     sessions: number;
     messages: number;
     tokensIn: number;
     tokensOut: number;
+    tokensTotal: number;
   }>;
   workSecondsByDay: Record<string, number>;
 }
@@ -66,13 +72,18 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           icon={<MessageSquare size={14} />}
-          label="Loop runs"
+          label="采集会话"
           value={formatNum(status.sessions)}
         />
         <StatCard
           icon={<MessageSquare size={14} />}
-          label="指令事件"
+          label="Messages"
           value={formatNum(status.messages)}
+        />
+        <StatCard
+          icon={<Zap size={14} />}
+          label="Total Tokens"
+          value={formatNum(status.totalTokens)}
         />
         <StatCard icon={<Zap size={14} />} label="Input" value={formatNum(status.tokensIn)} />
         <StatCard icon={<Zap size={14} />} label="Output" value={formatNum(status.tokensOut)} />
@@ -92,7 +103,7 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
 
       <div>
         <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
-          24小时 Loop 分布
+          24小时 Messages 分布
         </div>
         <div className="flex h-16 items-end gap-0.5">
           {status.hourly.map((count, i) => {
@@ -102,7 +113,7 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
                 key={i}
                 className="flex-1 rounded-sm bg-[var(--color-accent-muted)] transition-all hover:bg-[var(--color-accent)]"
                 style={{ height: `${Math.max(pct, 2)}%` }}
-                title={`${i}:00 - ${count} Loop events`}
+                title={`${i}:00 - ${count} messages`}
               />
             );
           })}
@@ -146,26 +157,24 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
 
       {status.projects.length > 0 && (
         <div>
-          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
-            项目 Loop 吞吐（累计）
-          </div>
+          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">项目吞吐</div>
           {/* Header row */}
-          <div className="grid grid-cols-[1fr_64px_64px] items-center gap-2 pb-1 text-[10px] text-[var(--color-text-muted)]">
-            <span>项目</span>
-            <span className="text-right">事件</span>
-            <span className="text-right">Token</span>
+          <div className="grid grid-cols-[1fr_72px_80px] items-center gap-2 pb-1 text-[10px] text-[var(--color-text-muted)]">
+            <span>名称</span>
+            <span className="text-right">Messages</span>
+            <span className="text-right">Total Tokens</span>
           </div>
           <div className="max-h-40 space-y-1 overflow-y-auto">
             {status.projects.slice(0, 10).map((proj, i) => (
-              <div key={i} className="grid grid-cols-[1fr_64px_64px] items-center gap-2 text-xs">
+              <div key={i} className="grid grid-cols-[1fr_72px_80px] items-center gap-2 text-xs">
                 <span className="truncate text-[var(--color-text-secondary)]" title={proj.cwd}>
-                  {proj.cwd.split('/').pop() || proj.cwd}
+                  {proj.displayName || proj.cwd.split('/').pop() || proj.cwd}
                 </span>
                 <span className="text-right text-[var(--color-text-muted)]">
                   {formatNum(proj.messages)}
                 </span>
                 <span className="text-right text-[var(--color-text-muted)]">
-                  {formatNum(proj.tokensIn + proj.tokensOut)}
+                  {formatNum(proj.tokensTotal)}
                 </span>
               </div>
             ))}
@@ -211,6 +220,7 @@ export function TaskBusSection(): React.JSX.Element {
   const [collaborationEnabled, setCollaborationEnabled] = useState(false);
   const [telemetryPlatform, setTelemetryPlatform] = useState('claudecode');
   const [scanning, setScanning] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
 
   useEffect(() => {
@@ -381,6 +391,23 @@ export function TaskBusSection(): React.JSX.Element {
       .finally(() => setScanning(false));
   };
 
+  const exportTelemetry = (format: 'csv' | 'json' = 'csv') => {
+    if (exporting) return;
+    setExporting(true);
+    fetch(`/api/telemetry/export?format=${format}`)
+      .then((r) => r.json())
+      .then((payload: { filename?: string; mimeType?: string; content?: string }) => {
+        if (payload.filename && payload.mimeType && payload.content !== undefined) {
+          downloadTextFile(payload.content, payload.filename, payload.mimeType);
+          setMessage('采集数据已导出');
+        } else {
+          setMessage('导出失败：没有可导出的数据');
+        }
+      })
+      .catch(() => setMessage('导出失败，请稍后重试'))
+      .finally(() => setExporting(false));
+  };
+
   const saveTelemetryPlatform = (nextPlatform = telemetryPlatform) => {
     const config = buildConfig({ telemetryPlatform: nextPlatform });
     fetch('/api/settings/task-bus', {
@@ -450,6 +477,25 @@ export function TaskBusSection(): React.JSX.Element {
         >
           {scanning ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
           {scanning ? '采集中...' : '立即采集'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => exportTelemetry('csv')}
+          disabled={exporting || !telemetryStatus}
+          className="gap-1.5"
+        >
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
+          导出 CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => exportTelemetry('json')}
+          disabled={exporting || !telemetryStatus}
+          className="gap-1.5"
+        >
+          JSON
         </Button>
         <span className="text-[10px] text-[var(--color-text-muted)]">
           本地扫描，不依赖团队总线或 Redis。{!collectionEnabled ? '开启数据采集后可手动刷新。' : ''}

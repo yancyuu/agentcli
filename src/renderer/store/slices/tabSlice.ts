@@ -52,6 +52,7 @@ export interface TabSlice {
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   openDashboard: () => void;
+  openSocietyTab: () => void;
   openChatTab: () => void;
   openSessionReport: (sourceTabId: string) => void;
   getActiveTab: () => Tab | null;
@@ -456,6 +457,50 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
     set(syncFromLayout(newLayout));
   },
 
+  // Open a worker-society tab — reuse existing one if found, otherwise create new
+  openSocietyTab: () => {
+    const state = get();
+    const { paneLayout } = state;
+
+    const existing = getAllTabs(paneLayout).find((t) => t.type === 'society');
+    if (existing) {
+      const pane = findPaneByTabId(paneLayout, existing.id);
+      if (pane) {
+        const fromIndex = pane.tabs.findIndex((t) => t.id === existing.id);
+        const lastIndex = pane.tabs.length - 1;
+        if (fromIndex !== -1 && fromIndex !== lastIndex) {
+          const reordered = [...pane.tabs];
+          const [moved] = reordered.splice(fromIndex, 1);
+          reordered.push(moved);
+          const updatedPane = { ...pane, tabs: reordered, activeTabId: existing.id };
+          const newLayout = updatePane(paneLayout, updatedPane);
+          set(syncFromLayout(newLayout));
+          return;
+        }
+      }
+      state.setActiveTab(existing.id);
+      return;
+    }
+
+    const focusedPane = findPane(paneLayout, paneLayout.focusedPaneId);
+    if (!focusedPane) return;
+
+    const newTab: Tab = {
+      id: crypto.randomUUID(),
+      type: 'society',
+      label: 'Worker 社会',
+      createdAt: Date.now(),
+    };
+
+    const updatedPane = {
+      ...focusedPane,
+      tabs: [...focusedPane.tabs, newTab],
+      activeTabId: newTab.id,
+    };
+    const newLayout = updatePane(paneLayout, updatedPane);
+    set(syncFromLayout(newLayout));
+  },
+
   openChatTab: () => {
     const state = get();
     const focusedPane = findPane(state.paneLayout, state.paneLayout.focusedPaneId);
@@ -467,7 +512,7 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
 
     state.openTab({
       type: 'chat',
-      label: '交流圈',
+      label: '加入飞书群',
     });
   },
 

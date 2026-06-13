@@ -7,6 +7,9 @@
 
 import type { CcAgentType } from '@shared/types/ccConnect';
 import type {
+  CapabilityCommandPromptRequest,
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
   McpCustomInstallRequest,
   McpLibraryImportRequest,
   McpLibraryUpsertRequest,
@@ -18,6 +21,7 @@ import type {
   SkillWatcherEvent,
 } from '@shared/types/extensions';
 
+import { CapabilityPackLoaderService } from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
 import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
 import { ExtensionFacadeService } from '@main/services/extensions/ExtensionFacadeService';
 import { McpLibraryService } from '@main/services/extensions/library/McpLibraryService';
@@ -52,6 +56,7 @@ function wrapHandler<T>(handler: () => Promise<T>): Promise<IpcResult<T>> {
 
 let facade: ExtensionFacadeService | null = null;
 let mcpLibrary: McpLibraryService | null = null;
+let capabilityPacks: CapabilityPackLoaderService | null = null;
 let skillsCatalog: SkillsCatalogService | null = null;
 let skillsMutation: SkillsMutationService | null = null;
 let skillsWatcher: SkillsWatcherService | null = null;
@@ -69,6 +74,11 @@ function getFacade(): ExtensionFacadeService {
 function getMcpLibrary(): McpLibraryService {
   if (!mcpLibrary) mcpLibrary = new McpLibraryService();
   return mcpLibrary;
+}
+
+function getCapabilityPacks(): CapabilityPackLoaderService {
+  if (!capabilityPacks) capabilityPacks = new CapabilityPackLoaderService();
+  return capabilityPacks;
 }
 
 function getSkillsCatalog(): SkillsCatalogService {
@@ -114,6 +124,10 @@ const channels = {
   MCP_INSTALL: 'extensions:mcp:install',
   MCP_INSTALL_CUSTOM: 'extensions:mcp:installCustom',
   MCP_UNINSTALL: 'extensions:mcp:uninstall',
+  CAPABILITY_PACKS_LIST: 'extensions:capabilityPacks:list',
+  CAPABILITY_PACKS_IMPORT: 'extensions:capabilityPacks:import',
+  CAPABILITY_PACKS_EXPORT: 'extensions:capabilityPacks:export',
+  CAPABILITY_PACKS_COMMAND_PROMPT: 'extensions:capabilityPacks:commandPrompt',
   SKILLS_LIST: 'extensions:skills:list',
   SKILLS_GET_DETAIL: 'extensions:skills:getDetail',
   SKILLS_UPSERT: 'extensions:skills:upsert',
@@ -248,6 +262,19 @@ export const extensionHandlers = {
 
   mcpLibraryImport: (request: McpLibraryImportRequest) =>
     wrapHandler(() => getMcpLibrary().importFromLive(request)),
+
+  // ── Capability Packs ──
+
+  capabilityPacksList: () => wrapHandler(() => getCapabilityPacks().list()),
+
+  capabilityPacksImport: (request: CapabilityPackImportRequest) =>
+    wrapHandler(() => getCapabilityPacks().importPack(request)),
+
+  capabilityPacksExport: (request: CapabilityPackExportRequest) =>
+    wrapHandler(() => getCapabilityPacks().exportPack(request)),
+
+  capabilityPacksCommandPrompt: (request: CapabilityCommandPromptRequest) =>
+    wrapHandler(() => getCapabilityPacks().getCommandPrompt(request)),
 
   // ── Skills ──
 

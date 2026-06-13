@@ -59,6 +59,7 @@ import type {
   CcSession,
   InboxMessage,
   ResolvedTeamMember,
+  SlashCommandMeta,
   TaskRef,
   TeamTaskWithKanban,
 } from '@shared/types';
@@ -705,7 +706,8 @@ export const MessagesPanel = memo(function MessagesPanel({
         ? A
         : never,
       actionMode?: AgentActionMode,
-      taskRefs?: TaskRef[]
+      taskRefs?: TaskRef[],
+      slashCommand?: SlashCommandMeta
     ) => {
       const sentAtMs = Date.now();
       onPendingReplyChange((prev) => ({ ...prev, [member]: sentAtMs }));
@@ -716,6 +718,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         attachments,
         actionMode,
         taskRefs,
+        slashCommand,
         sessionKey:
           selectedSessionKey && selectedSessionKey !== '__unassigned__'
             ? selectedSessionKey
@@ -1045,7 +1048,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         {/* Header */}
         <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-sidebar)] px-3 py-2">
           <MessageSquare size={14} className="shrink-0 text-[var(--color-text-muted)]" />
-          <span className="text-sm font-medium text-[var(--color-text)]">Loop 动态</span>
+          <span className="text-sm font-medium text-[var(--color-text)]">动态</span>
           {filteredMessages.length > 0 && (
             <Badge
               variant="secondary"
@@ -1280,7 +1283,7 @@ export const MessagesPanel = memo(function MessagesPanel({
               </div>
               <div className="flex h-full items-center gap-1.5">
                 <MessageSquare size={13} className="shrink-0 text-[var(--color-text-muted)]" />
-                <span className="text-[13px] font-medium text-[var(--color-text)]">Loop 动态</span>
+                <span className="text-[13px] font-medium text-[var(--color-text)]">动态</span>
                 {filteredMessages.length > 0 && (
                   <Badge
                     variant="secondary"

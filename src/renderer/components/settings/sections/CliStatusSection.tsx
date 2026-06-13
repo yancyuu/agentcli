@@ -41,7 +41,6 @@ import {
   Loader2,
   LogIn,
   LogOut,
-  Puzzle,
   RefreshCw,
   SlidersHorizontal,
   Terminal,
@@ -153,7 +152,6 @@ export const CliStatusSection = ({
   const selectedProjectId = useStore((s) => s.selectedProjectId);
   const projects = useStore((s) => s.projects);
   const repositoryGroups = useStore((s) => s.repositoryGroups);
-  const openExtensionsTab = useStore((s) => s.openExtensionsTab);
   const updateConfig = useStore((s) => s.updateConfig);
   const {
     cliStatus,
@@ -196,7 +194,6 @@ export const CliStatusSection = ({
     () => getMainScreenCliProviders(effectiveCliStatus),
     [effectiveCliStatus]
   );
-  const canOpenExtensions = effectiveCliStatus?.installed === true;
   const showInstalledControls =
     effectiveCliStatus !== null && (installerState === 'idle' || installerState === 'completed');
 
@@ -400,21 +397,6 @@ export const CliStatusSection = ({
                   {runtimeLabel && (
                     <span style={{ color: 'var(--color-text)' }}>{runtimeLabel}</span>
                   )}
-                  {/* Extensions button — right-aligned */}
-                  {canOpenExtensions && (
-                    <button
-                      type="button"
-                      onClick={openExtensionsTab}
-                      className="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-                      style={{
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)',
-                      }}
-                    >
-                      <Puzzle className="size-3.5" />
-                      扩展
-                    </button>
-                  )}
                 </div>
                 {effectiveCliStatus.showBinaryPath && effectiveCliStatus.binaryPath && (
                   <p
@@ -444,7 +426,6 @@ export const CliStatusSection = ({
                           borderLeftColor: hasProviders
                             ? 'var(--color-accent)'
                             : 'var(--color-border-subtle)',
-                          opacity: hasProviders ? 1 : 0.5,
                         }}
                       >
                         <HarnessIcon type={agentType} className="size-4 shrink-0" />

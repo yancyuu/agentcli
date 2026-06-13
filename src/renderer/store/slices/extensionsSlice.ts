@@ -18,10 +18,15 @@ import { findPaneByTabId, updatePane } from '../utils/paneHelpers';
 
 import type { AppState } from '../types';
 import type {
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
+  CapabilityPackListResult,
+  CapabilityPackMutationResult,
   EnrichedPlugin,
   ExtensionOperationState,
   InstalledMcpEntry,
   InstallScope,
+  LoadedCapabilityPack,
   McpCatalogItem,
   McpCustomInstallRequest,
   McpInstallRequest,
@@ -79,6 +84,14 @@ export interface ExtensionsSlice {
     message?: string;
   }>;
 
+  // ── Capability packs cache ──
+  capabilityPackList: CapabilityPackListResult | null;
+  capabilityPacks: LoadedCapabilityPack[];
+  capabilityPacksLoading: boolean;
+  capabilityPacksError: string | null;
+  capabilityPacksMutationLoading: boolean;
+  capabilityPacksMutationError: string | null;
+
   // ── Skills catalog cache ──
   skillsUserCatalog: SkillCatalogItem[];
   skillsProjectCatalogByProjectPath: Record<string, SkillCatalogItem[]>;
@@ -101,6 +114,13 @@ export interface ExtensionsSlice {
   mcpBrowse: (cursor?: string) => Promise<void>;
   mcpFetchInstalled: (projectPath?: string) => Promise<void>;
   runMcpDiagnostics: (projectPath?: string) => Promise<void>;
+  fetchCapabilityPacks: () => Promise<void>;
+  importCapabilityPack: (
+    request: CapabilityPackImportRequest
+  ) => Promise<CapabilityPackMutationResult>;
+  exportCapabilityPack: (
+    request: CapabilityPackExportRequest
+  ) => Promise<CapabilityPackMutationResult>;
   fetchSkillsCatalog: (projectPath?: string) => Promise<void>;
   fetchSkillDetail: (skillId: string, projectPath?: string) => Promise<void>;
   previewSkillUpsert: (request: SkillUpsertRequest) => Promise<SkillReviewPreview>;
@@ -394,6 +414,13 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
   installErrors: {},
   extensionToasts: [],
 
+  capabilityPackList: null,
+  capabilityPacks: [],
+  capabilityPacksLoading: false,
+  capabilityPacksError: null,
+  capabilityPacksMutationLoading: false,
+  capabilityPacksMutationError: null,
+
   skillsUserCatalog: [],
   skillsProjectCatalogByProjectPath: {},
   skillsCatalogLoadingByProjectPath: {},
@@ -666,6 +693,62 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
 
     mcpDiagnosticsInFlightByKey.set(projectStateKey, promise);
     await promise;
+  },
+
+  fetchCapabilityPacks: async () => {
+    if (!api.capabilityPacks) return;
+
+    set({ capabilityPacksLoading: true, capabilityPacksError: null });
+    try {
+      const result = await api.capabilityPacks.list();
+      set({
+        capabilityPackList: result,
+        capabilityPacks: result.packs,
+        capabilityPacksLoading: false,
+        capabilityPacksError: null,
+      });
+    } catch (err) {
+      set({
+        capabilityPacksLoading: false,
+        capabilityPacksError:
+          err instanceof Error ? err.message : 'Failed to load capability packs',
+      });
+    }
+  },
+
+  importCapabilityPack: async (request: CapabilityPackImportRequest) => {
+    if (!api.capabilityPacks) {
+      throw new Error('Capability packs API is not available');
+    }
+
+    set({ capabilityPacksMutationLoading: true, capabilityPacksMutationError: null });
+    try {
+      const result = await api.capabilityPacks.importPack(request);
+      await get().fetchCapabilityPacks();
+      set({ capabilityPacksMutationLoading: false });
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to import capability pack';
+      set({ capabilityPacksMutationLoading: false, capabilityPacksMutationError: message });
+      throw err;
+    }
+  },
+
+  exportCapabilityPack: async (request: CapabilityPackExportRequest) => {
+    if (!api.capabilityPacks) {
+      throw new Error('Capability packs API is not available');
+    }
+
+    set({ capabilityPacksMutationLoading: true, capabilityPacksMutationError: null });
+    try {
+      const result = await api.capabilityPacks.exportPack(request);
+      set({ capabilityPacksMutationLoading: false });
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to export capability pack';
+      set({ capabilityPacksMutationLoading: false, capabilityPacksMutationError: message });
+      throw err;
+    }
   },
 
   fetchSkillsCatalog: async (projectPath?: string) => {

@@ -44,18 +44,26 @@ import staticPlugin from '@fastify/static';
 import { Cron } from 'croner';
 import Fastify from 'fastify';
 
-import {
-  CROSS_TEAM_SENT_SOURCE,
-  CROSS_TEAM_SOURCE,
-  formatCrossTeamText,
-} from '@shared/constants/crossTeam';
+import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
 import type { CcAgentType, CcProjectPlatform, CcSessionListItem } from '../shared/types/ccConnect';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
+import { isPlaceholderWorkDir, needsWorkDirReconcile } from './services/ccConnect/workDirReconcile';
+import {
+  DirectCliSessionManager,
+  buildDirectReplyMessageId,
+  type DirectCliEvent,
+} from './services/direct-cli';
 import { TeamProvisioningService } from './services/teams-mvp';
 import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
 import { resolveCcProjectName } from './utils/teamProjectResolution';
 import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
+import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
+import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
+import {
+  SOCIETY_MCP_TOOLS,
+  executeSocietyMcpTool,
+} from '@features/worker-society/main/adapters/input/societyMcp';
 import { SystemManagerConfigService } from './services/system-manager/SystemManagerConfigService';
 import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
 import {
@@ -83,6 +91,7 @@ import {
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
 import { mergeLocalAndCcSessions } from './services/session-intelligence/teamSessionListMapper';
 import type { CcSession } from '@shared/types/api';
+import { discoverableTeamToWorker, type DiscoverableWorker } from '@shared/types/worker';
 import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
 import {
   scanProjectStats,
@@ -443,6 +452,10 @@ async function restartCcConnectAndReconnectBridge(): Promise<void> {
 const collabBoard = new CollaborationBoardService();
 const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
+// Worker Society —— 去中心化 worker 自治社交平台（替代派单的主路径）。
+// 状态持久化到 ~/.hermit/society/（声誉/关系/需求/消息跨重启存活）；REST 路由见下方 registerSocietyRoutes。
+const workerSociety = createWorkerSociety();
+
 // Broadcast collab board changes via SSE
 taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
   broadcastSse('collab-change', { dispatchId, status, fromTeam, toTeam });
@@ -547,6 +560,67 @@ function normalizePlatformAllowUpdate(value: unknown): Record<string, string> | 
   return Object.keys(value).length === 0 || hasPlatformAllowDeleteMarker(value) ? {} : undefined;
 }
 
+function readStringOption(record: Record<string, unknown>, keys: readonly string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return '';
+}
+
+async function persistPlatformRoutingMetadataForProject(
+  projectName: string,
+  platformType: string,
+  options: Record<string, unknown>
+): Promise<void> {
+  const project = projectName.trim();
+  const platform = platformType.trim();
+  if (!project || !platform) return;
+
+  const allowFrom = readStringOption(options, [
+    'allow_from',
+    'owner_open_id',
+    'owner_user_id',
+    'owner_union_id',
+    'user_id',
+    'open_id',
+  ]);
+  const explicitAllowChat = readStringOption(options, ['allow_chat', 'chat_id', 'open_chat_id']);
+  const allowChat = explicitAllowChat || (allowFrom ? '*' : '');
+  if (!allowFrom && !allowChat) return;
+
+  let teamSlug: string;
+  try {
+    const manifest = await svc.readTeamManifestByProject(project);
+    teamSlug = manifest.slug || project;
+  } catch {
+    teamSlug = project === SYSTEM_MANAGER_BIND_PROJECT ? SYSTEM_MANAGER_TEAM_NAME : project;
+  }
+
+  let existingFrom: Record<string, string> = {};
+  let existingChat: Record<string, string> = {};
+  try {
+    const manifest = await svc.readTeamManifest(teamSlug);
+    existingFrom = normalizePlatformAllowFrom(manifest.platformAllowFrom);
+    existingChat = normalizePlatformAllowFrom(manifest.platformAllowChat);
+  } catch {
+    // Team metadata may not exist for a cc-connect-only project yet.
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (allowFrom) patch.platformAllowFrom = { ...existingFrom, [platform]: allowFrom };
+  if (allowChat) patch.platformAllowChat = { ...existingChat, [platform]: allowChat };
+
+  try {
+    await svc.updateTeam(teamSlug, patch);
+  } catch (err) {
+    app.log.warn(
+      { err, project, teamSlug, platform },
+      'failed to persist platform routing metadata'
+    );
+  }
+}
+
 function isCcProjectNotFoundError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /project not found:/i.test(message);
@@ -572,6 +646,76 @@ function broadcastSse(eventName: string, data: unknown): void {
 
 // 启动 bridge 并把事件广播到 SSE 客户端
 bridge.start();
+
+// ---------------------------------------------------------------------------
+// Direct-CLI execution layer.
+// In-app Loop consoles (admin + team lead) and team-member DMs spawn the local
+// `claude` CLI directly as a long-lived stream-json subprocess, bypassing
+// cc-connect (which is now reserved for external IM). cc-connect's project/
+// work_dir/platform layer was the root cause of "❌ 错误: 启动 Agent 会话失败".
+// Manager events relay to SSE for token-level streaming; the `result` event
+// persists the final reply into the team inbox (same appendMessage path as the
+// bridge reply handler), so the existing renderer refresh Just Works.
+// ---------------------------------------------------------------------------
+const directCliManager = new DirectCliSessionManager();
+
+/** Routes a sessionKey → the team inbox + reply sender/recipient it belongs to. */
+interface DirectCliRoute {
+  teamName: string;
+  /** `from` value persisted on the assistant reply (team name for lead, member name for DM). */
+  from: string;
+  to: string;
+}
+
+const directCliRoutes = new Map<string, DirectCliRoute>();
+
+directCliManager.on('event', (event: DirectCliEvent) => {
+  const route = directCliRoutes.get(event.sessionKey);
+  if (!route) return;
+  const { teamName } = route;
+
+  if (event.kind === 'complete') {
+    void (async () => {
+      if (event.text) {
+        await svc
+          .appendMessage(teamName, {
+            // Carry the streaming messageId as the canonical id so the renderer's
+            // optimistic in-progress reply (same messageId) is pruned, not duplicated.
+            id: event.messageId,
+            from: route.from,
+            to: route.to,
+            role: 'agent',
+            content: event.text,
+            meta: { sessionKey: event.sessionKey, source: 'direct-cli' },
+          })
+          .catch((err) =>
+            app.log.warn({ err, sessionKey: event.sessionKey }, 'direct-cli append failed')
+          );
+      }
+      broadcastSse('team-change', { type: 'inbox', teamName });
+    })();
+    return;
+  }
+
+  if (event.kind === 'error') {
+    app.log.warn({ error: event.error, sessionKey: event.sessionKey }, 'direct-cli session error');
+    broadcastSse('team-change', { type: 'inbox', teamName });
+    return;
+  }
+
+  // init / delta / thinking / tool → live streaming payload for the renderer.
+  broadcastSse('team-change', {
+    type: 'direct-cli-stream',
+    teamName,
+    sessionKey: event.sessionKey,
+    messageId: 'messageId' in event ? event.messageId : undefined,
+    kind: event.kind,
+    text: 'text' in event ? event.text : undefined,
+    toolName: 'toolName' in event ? event.toolName : undefined,
+    toolInput: 'toolInput' in event ? event.toolInput : undefined,
+    from: route.from,
+  });
+});
 
 bridge.on('reply', (msg) => {
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
@@ -1416,6 +1560,9 @@ app.post<{ Body: { command: string; args?: string[]; cwd?: string } }>(
   }
 );
 
+// Worker Society REST 路由（/api/society/*）—— worker 自治社会的 HTTP 接口（workers/needs/social/feed）。
+registerSocietyRoutes(app, workerSociety);
+
 // GET /api/teams → Hermit 本地团队优先，裸 cc-connect project 作为历史兼容显示；过滤飞书/系统项目
 app.get('/api/teams', async () => {
   try {
@@ -1441,16 +1588,11 @@ app.get('/api/teams', async () => {
         .map(async (meta) => {
           const bindProject = meta.bindProject || meta.slug;
           const project = projectByName.get(bindProject);
-          const detail = project ? await cc.getProject(bindProject).catch(() => null) : null;
-          const isOnline =
-            Array.isArray(detail?.platforms) && detail.platforms.some((pl) => pl.connected);
-          let workDir = (meta.workDir || '').trim();
-          let projectPath = (meta.workDir || '').trim();
-          if (!workDir && typeof detail?.work_dir === 'string' && detail.work_dir.trim()) {
-            workDir = detail.work_dir.trim();
-            if (!projectPath) projectPath = workDir;
-          }
-          const harness = toCcAgentType(detail?.agent_type || project?.agent_type || meta.harness);
+          // Keep the list endpoint fast: per-team cc.getProject calls are slow and
+          // block first paint. Runtime liveness is loaded separately via aliveList.
+          const workDir = (meta.workDir || '').trim();
+          const projectPath = (meta.workDir || '').trim();
+          const harness = toCcAgentType(project?.agent_type || meta.harness);
           const color = meta.color || 'blue';
           const displayName = meta.displayName || meta.slug;
           const usageStats = workDir ? getProjectStatsSnapshot(workDir) : null;
@@ -1464,7 +1606,7 @@ app.get('/api/teams', async () => {
             members: [{ name: displayName, role: 'agent', agentId: harness, color }],
             taskCount: 0,
             lastActivity: null,
-            isAlive: isOnline,
+            isAlive: false,
             harness,
             bindProject,
             workDir,
@@ -1478,6 +1620,10 @@ app.get('/api/teams', async () => {
                   sessions: usageStats.sessions,
                   messages: usageStats.messages,
                   tokens: usageStats.totalTokens,
+                  tokensIn: usageStats.tokensIn,
+                  tokensOut: usageStats.tokensOut,
+                  cacheRead: usageStats.cacheRead,
+                  cacheCreation: usageStats.cacheCreation,
                   durationMs: usageStats.durationMs,
                 }
               : undefined,
@@ -1851,6 +1997,13 @@ function toTaskStatus(s: string): 'todo' | 'doing' | 'done' {
   return 'todo';
 }
 
+function isManualInProgressExitBlocked(
+  currentStatus: string | undefined,
+  nextStatus: 'todo' | 'doing' | 'done' | undefined
+): boolean {
+  return currentStatus === 'doing' && nextStatus !== undefined && nextStatus !== 'doing';
+}
+
 /** internal Task → TeamTask shape (for UI consumption) */
 function toTeamTask(task: {
   id: string;
@@ -1921,16 +2074,27 @@ app.post<{ Params: { name: string }; Body: Record<string, unknown> }>(
 
 app.patch<{ Params: { name: string; id: string }; Body: Record<string, unknown> }>(
   '/api/teams/:name/tasks/:id',
-  async (request) => {
+  async (request, reply) => {
     const body = request.body ?? {};
     const patch: Record<string, unknown> = {};
+    const nextStatus = body.status !== undefined ? toTaskStatus(body.status as string) : undefined;
     if (body.subject !== undefined) patch.title = body.subject;
     if (body.title !== undefined) patch.title = body.title;
     if (body.description !== undefined) patch.description = body.description;
-    if (body.status !== undefined) patch.status = toTaskStatus(body.status as string);
+    if (nextStatus !== undefined) patch.status = nextStatus;
     if (body.owner !== undefined) patch.assignee = body.owner;
     if (body.assignee !== undefined) patch.assignee = body.assignee;
     if (body.result !== undefined) patch.result = body.result;
+
+    const tasks = await svc.readTasks(request.params.name);
+    const existingTask = tasks.find((task) => task.id === request.params.id);
+    if (isManualInProgressExitBlocked(existingTask?.status, nextStatus)) {
+      return reply.code(409).send({
+        ok: false,
+        error: 'Agent 正在处理中，不能手动完成或取消。请等待 agent 调用 complete_task。',
+      });
+    }
+
     const task = await svc.patchTask(request.params.name, request.params.id, patch);
     return toTeamTask(task);
   }
@@ -1940,6 +2104,14 @@ app.delete<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id',
   async (request, reply) => {
     try {
+      const tasks = await svc.readTasks(request.params.name);
+      const existingTask = tasks.find((task) => task.id === request.params.id);
+      if (existingTask?.status === 'doing') {
+        return reply.code(409).send({
+          ok: false,
+          error: 'Agent 正在处理中，不能手动删除任务。',
+        });
+      }
       await svc.patchTask(request.params.name, request.params.id, {
         status: 'done',
         result: '__deleted__',
@@ -2146,54 +2318,200 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/loop-assets', async (req
   }
 });
 
+async function ensureLoopSessionProjectReady(teamName: string): Promise<{
+  bindProject: string;
+  projectExists: boolean;
+  isOnline: boolean;
+}> {
+  if (teamName === SYSTEM_MANAGER_TEAM_NAME) {
+    await ensureSystemManager();
+  }
+
+  let manifest: TeamManifest | null = null;
+  try {
+    manifest = await svc.readTeamManifestByProject(teamName);
+  } catch {
+    // Route name may already be a cc-connect project name.
+  }
+
+  const bindProject = manifest?.bindProject?.trim() || teamName;
+  let projectExists = false;
+  let isOnline = false;
+  let workDir = manifest?.workDir?.trim() || '';
+  const harness = manifest?.harness || 'claudecode';
+  const platformType = manifest?.platform || 'bridge';
+  const platformOptions = manifest?.platformOptions ?? {};
+
+  let projectWorkDir = '';
+  try {
+    const project = await cc.getProject(bindProject);
+    projectExists = true;
+    isOnline =
+      Array.isArray(project.platforms) && project.platforms.some((platform) => platform.connected);
+    if (typeof project.work_dir === 'string') projectWorkDir = project.work_dir.trim();
+    // Only inherit the project's work_dir when the manifest has none AND it isn't the
+    // cc-connect default template placeholder — adopting the placeholder would keep the
+    // agent pointed at a non-existent directory and break every session.
+    if (!workDir && !isPlaceholderWorkDir(projectWorkDir)) {
+      workDir = projectWorkDir;
+    }
+  } catch {
+    // Project can be missing after cc-connect reset; create it below when possible.
+  }
+
+  // Reconcile work_dir: cc-connect spawns the agent with chdir(work_dir), so a stale or
+  // placeholder work_dir makes every session fail with "启动 Agent 会话失败" — the session
+  // record is created (so the user sees the success message) but the agent never starts.
+  // This runs whether or not the project is "online": the Admin Loop's bind project is
+  // `my-project`, which is online via bridge yet still carries the template placeholder
+  // work_dir, so the isOnline branch below would skip it. The PATCH updates the live agent
+  // immediately and persists to config.toml (no restart required).
+  if (projectExists && workDir && needsWorkDirReconcile(projectWorkDir, workDir)) {
+    try {
+      await cc.updateProject(bindProject, { work_dir: workDir });
+      projectWorkDir = workDir;
+    } catch (err) {
+      app.log.warn({ err, bindProject, workDir }, 'cc-connect work_dir reconcile failed');
+    }
+  }
+
+  if (!isOnline) {
+    if (!projectExists) {
+      if (!workDir) {
+        throw new Error('团队缺少项目路径，无法启动 Loop runtime');
+      }
+      await cc.createProject(
+        bindProject,
+        harness,
+        workDir,
+        platformType,
+        platformOptions as Record<string, string>
+      );
+      projectExists = true;
+    }
+
+    await restartCcConnectAndReconnectBridge();
+    try {
+      const project = await cc.getProject(bindProject);
+      isOnline =
+        Array.isArray(project.platforms) &&
+        project.platforms.some((platform) => platform.connected);
+    } catch {
+      isOnline = false;
+    }
+  }
+
+  return { bindProject, projectExists, isOnline };
+}
+
+/**
+ * Resolve the work_dir for a direct-CLI session WITHOUT cc-connect side effects (no
+ * project create / restart). Prefers the team manifest's workDir; falls back to the
+ * cc-connect project work_dir only when it is a real path (never the template
+ * placeholder). The system-manager workDir is synced into its manifest from the runtime
+ * config, so this reads the same source for admin and team loops.
+ */
+async function resolveDirectCliWorkDir(teamName: string): Promise<string> {
+  if (teamName === SYSTEM_MANAGER_TEAM_NAME) {
+    await ensureSystemManager().catch(() => undefined);
+  }
+  let manifest: TeamManifest | null = null;
+  try {
+    manifest = await svc.readTeamManifestByProject(teamName);
+  } catch {
+    // Route name may already be a cc-connect project name.
+  }
+  const manifestWorkDir = manifest?.workDir?.trim() || '';
+  if (manifestWorkDir) return manifestWorkDir;
+  try {
+    const bindProject = manifest?.bindProject?.trim() || teamName;
+    const project = await cc.getProject(bindProject);
+    if (typeof project.work_dir === 'string') {
+      const dir = project.work_dir.trim();
+      if (dir && !isPlaceholderWorkDir(dir)) return dir;
+    }
+  } catch {
+    // Project may not exist — that's fine for direct-CLI.
+  }
+  return '';
+}
+
+/**
+ * Register a direct-CLI session route and dispatch a user turn to it. The subprocess
+ * spawns lazily (resuming a persisted claude session when possible) and this resolves
+ * once the turn is on stdin; the streamed reply arrives later via the manager event
+ * listener above.
+ */
+async function dispatchDirectCliMessage(params: {
+  teamName: string;
+  sessionKey: string;
+  workDir: string;
+  from: string;
+  to: string;
+  text: string;
+  messageId: string;
+}): Promise<void> {
+  directCliRoutes.set(params.sessionKey, {
+    teamName: params.teamName,
+    from: params.from,
+    to: params.to,
+  });
+  await directCliManager.send(params.sessionKey, {
+    text: params.text,
+    messageId: params.messageId,
+    workDir: params.workDir,
+  });
+}
+
 app.post<{
   Params: { name: string };
   Body: { sessionName?: unknown; message?: unknown; reuse?: unknown };
 }>('/api/teams/:name/loop-session', async (request, reply) => {
   try {
     const teamName = request.params.name;
+    const message = typeof request.body?.message === 'string' ? request.body.message.trim() : '';
+    const reuse = request.body?.reuse === true;
     const requestedSessionName =
       typeof request.body?.sessionName === 'string' ? request.body.sessionName.trim() : '';
     const sessionName =
       requestedSessionName || `Loop ${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    const reuse = request.body?.reuse === true;
 
-    const bindProject = await resolveRouteCcProjectName(teamName);
-    const sessionKey = `${buildFallbackSessionKey(teamName)}:${Date.now().toString(36)}`;
-    const sessions = reuse ? await cc.listSessions(bindProject).catch(() => []) : [];
-    let session = reuse ? sessions.find((item) => item.name === sessionName) : undefined;
-    const reused = Boolean(session);
-    if (!session) {
-      const created = await cc.createSession(bindProject, sessionName, sessionKey);
-      session = {
-        id: created.id,
-        name: created.name || sessionName,
-        session_key: created.session_key || sessionKey,
-        agent_session_id: created.agent_session_id,
-        agent_type: created.agent_type,
-        active: created.active,
-        live: created.live,
-        history_count: created.history_count,
-        created_at: created.created_at,
-        updated_at: created.updated_at,
-        last_message: null,
-        platform: created.platform,
-      };
+    const workDir = await resolveDirectCliWorkDir(teamName);
+    if (!workDir) {
+      return reply.code(400).send({ error: '团队缺少项目路径，无法启动 Loop runtime' });
     }
 
-    const message = typeof request.body?.message === 'string' ? request.body.message.trim() : '';
+    // One long-lived lead subprocess per team, resumed across sends (--resume keeps the
+    // claude conversation continuous, like an interactive terminal session).
+    const sessionKey = `${teamName}:lead`;
+    // "Reused" means the claude conversation continues (--resume), which is true
+    // whenever a session id is known — in-memory OR persisted in the store. The
+    // in-memory-only `has()` would wrongly report false right after a Hermit
+    // restart even though the subprocess resumes the same conversation.
+    const reused = reuse && directCliManager.getSessionId(sessionKey) != null;
+
     let messageSent = false;
     if (message) {
-      await sendHarnessMessageViaBridge({
+      const messageId = buildDirectReplyMessageId(sessionKey);
+      await dispatchDirectCliMessage({
         teamName,
+        sessionKey,
+        workDir,
+        from: teamName,
+        to: 'user',
         text: message,
-        sessionKey: session.session_key,
+        messageId,
       });
       messageSent = true;
     }
 
     return {
-      session: mapCcSessionListItem(session, teamName),
+      session: {
+        id: directCliManager.getSessionId(sessionKey) ?? sessionKey,
+        name: sessionName,
+        session_key: sessionKey,
+        title: sessionName,
+      },
       reused,
       messageSent,
     };
@@ -2335,16 +2653,27 @@ app.post('/api/setup/feishu/poll', async (request, reply) => {
 
 app.post('/api/setup/feishu/save', async (request, reply) => {
   try {
-    const result = await (
-      await fetch(`${runtimeConfig.ccBaseUrl}/api/v1/setup/feishu/save`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(runtimeConfig.ccToken ? { Authorization: `Bearer ${runtimeConfig.ccToken}` } : {}),
-        },
-        body: JSON.stringify(request.body ?? {}),
-      })
-    ).json();
+    const requestBody = (request.body ?? {}) as Record<string, unknown>;
+    const response = await fetch(`${runtimeConfig.ccBaseUrl}/api/v1/setup/feishu/save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(runtimeConfig.ccToken ? { Authorization: `Bearer ${runtimeConfig.ccToken}` } : {}),
+      },
+      body: JSON.stringify(requestBody),
+    });
+    const result = (await response.json()) as { data?: unknown; error?: unknown };
+    if (!response.ok) {
+      return reply.code(response.status).send(result);
+    }
+    const resultData = result && typeof result.data === 'object' ? result.data : result;
+    if (resultData && typeof resultData === 'object' && !('error' in resultData)) {
+      await persistPlatformRoutingMetadataForProject(
+        typeof requestBody.project === 'string' ? requestBody.project : '',
+        typeof requestBody.platform_type === 'string' ? requestBody.platform_type : 'feishu',
+        requestBody
+      );
+    }
     return result;
   } catch (err) {
     return reply500(err);
@@ -2390,16 +2719,27 @@ app.post('/api/setup/weixin/poll', async (request, reply) => {
 
 app.post('/api/setup/weixin/save', async (request, reply) => {
   try {
-    const result = await (
-      await fetch(`${runtimeConfig.ccBaseUrl}/api/v1/setup/weixin/save`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(runtimeConfig.ccToken ? { Authorization: `Bearer ${runtimeConfig.ccToken}` } : {}),
-        },
-        body: JSON.stringify(request.body ?? {}),
-      })
-    ).json();
+    const requestBody = (request.body ?? {}) as Record<string, unknown>;
+    const response = await fetch(`${runtimeConfig.ccBaseUrl}/api/v1/setup/weixin/save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(runtimeConfig.ccToken ? { Authorization: `Bearer ${runtimeConfig.ccToken}` } : {}),
+      },
+      body: JSON.stringify(requestBody),
+    });
+    const result = (await response.json()) as { data?: unknown; error?: unknown };
+    if (!response.ok) {
+      return reply.code(response.status).send(result);
+    }
+    const resultData = result && typeof result.data === 'object' ? result.data : result;
+    if (resultData && typeof resultData === 'object' && !('error' in resultData)) {
+      await persistPlatformRoutingMetadataForProject(
+        typeof requestBody.project === 'string' ? requestBody.project : '',
+        'weixin',
+        requestBody
+      );
+    }
     return result;
   } catch (err) {
     return reply500(err);
@@ -2419,6 +2759,12 @@ app.post<{
       request.body.work_dir ?? existingProject?.work_dir ?? '',
       request.body.type,
       (request.body.options ?? {}) as Record<string, string>
+    );
+
+    await persistPlatformRoutingMetadataForProject(
+      request.params.name,
+      request.body.type,
+      request.body.options ?? {}
     );
 
     if (result.restart_required) {
@@ -2611,6 +2957,8 @@ const MCP_TOOLS = [
       required: ['team_slug', 'dispatch_id', 'feedback'],
     },
   },
+  // Worker Society —— 去中心化自治社会的 MCP 工具（society_* 命名空间）。
+  ...SOCIETY_MCP_TOOLS,
 ];
 
 /** 执行 MCP tool，返回 content array */
@@ -2619,6 +2967,10 @@ async function executeMcpTool(
   args: Record<string, string>
 ): Promise<{ type: string; text: string }[]> {
   const text = async (result: unknown) => [{ type: 'text', text: JSON.stringify(result, null, 2) }];
+
+  // Worker Society 工具（society_*）：命中即返回，未命中回退到既有派单/任务工具。
+  const societyResult = await executeSocietyMcpTool(toolName, args, workerSociety);
+  if (societyResult) return societyResult;
 
   if (toolName === 'list_tasks') {
     const tasks = await svc.readTasks(args.team_slug);
@@ -4236,8 +4588,16 @@ app.get('/api/teams/tasks', async () => {
 // 团队任务子操作 — 全部委托给 svc.patchTask
 app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/request-review',
-  async (request) => {
+  async (request, reply) => {
     try {
+      const tasks = await svc.readTasks(request.params.name);
+      const existingTask = tasks.find((task) => task.id === request.params.id);
+      if (existingTask?.status === 'doing') {
+        return reply.code(409).send({
+          ok: false,
+          error: 'Agent 正在处理中，不能手动提交审核。请等待 agent 调用 complete_task。',
+        });
+      }
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'done' });
       return { ok: true, data: toTeamTask(task) };
     } catch {
@@ -4254,11 +4614,20 @@ app.patch<{ Params: { name: string; id: string }; Body: Record<string, unknown> 
 );
 app.patch<{ Params: { name: string; id: string }; Body: { status?: string } }>(
   '/api/teams/:name/tasks/:id/status',
-  async (request) => {
+  async (request, reply) => {
     try {
       const { status } = request.body ?? {};
+      const nextStatus = status ? toTaskStatus(status) : undefined;
+      const tasks = await svc.readTasks(request.params.name);
+      const existingTask = tasks.find((task) => task.id === request.params.id);
+      if (isManualInProgressExitBlocked(existingTask?.status, nextStatus)) {
+        return reply.code(409).send({
+          ok: false,
+          error: 'Agent 正在处理中，不能手动完成或取消。请等待 agent 调用 complete_task。',
+        });
+      }
       const task = await svc.patchTask(request.params.name, request.params.id, {
-        status: status ? toTaskStatus(status) : undefined,
+        status: nextStatus,
       });
       if (task.dispatchMeta && task.status === 'done') {
         await taskDispatch.onTaskCompleted(request.params.name, request.params.id).catch(() => {});
@@ -4346,6 +4715,14 @@ app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/soft-delete',
   async (request, reply) => {
     try {
+      const tasks = await svc.readTasks(request.params.name);
+      const existingTask = tasks.find((task) => task.id === request.params.id);
+      if (existingTask?.status === 'doing') {
+        return reply.code(409).send({
+          ok: false,
+          error: 'Agent 正在处理中，不能手动删除任务。',
+        });
+      }
       await svc.patchTask(request.params.name, request.params.id, {
         status: 'done',
         result: '__deleted__',
@@ -4779,7 +5156,7 @@ app.post<{
         });
         return {
           ok: result.status !== 'failed',
-          deliveredToInbox: true,
+          deliveredToInbox: false,
           messageId: sourceMsg.id,
           dispatchId: result.dispatchId,
           status: result.status,
@@ -4805,6 +5182,7 @@ app.post<{
   // 本地存储用户消息
   const userMsg = await svc
     .appendMessage(teamName, {
+      id: msgId,
       from: 'user',
       to: teamName,
       role: 'user',
@@ -4816,16 +5194,37 @@ app.post<{
   // 广播 SSE 让前端触发消息刷新
   broadcastSse('team-change', { type: 'inbox', teamName });
 
-  const bridgeWasConnected = bridge.connected;
-  void sendHarnessMessageViaBridge({
-    teamName,
-    text,
-    sessionKey,
-    msgId,
-  }).catch((err) => {
-    request.log.warn({ err, teamName, sessionKey }, 'send-message bridge delivery failed');
-    broadcastSse('team-change', { type: 'inbox', teamName });
-  });
+  // Member DM: dispatch to the local claude CLI directly (bypass cc-connect). One
+  // subprocess per member, resumed across messages. The reply streams back via the
+  // manager event listener and is persisted on the turn's `result` event. cc-connect's
+  // bridge stays reserved for external IM (Feishu/WeChat).
+  const member = typeof request.body?.member === 'string' ? request.body.member.trim() : '';
+  const directSessionKey = `${teamName}:member:${member || 'lead'}`;
+  const memberWorkDir = await resolveDirectCliWorkDir(teamName).catch(() => '');
+  const dispatchedDirect = Boolean(memberWorkDir);
+  if (dispatchedDirect) {
+    void dispatchDirectCliMessage({
+      teamName,
+      sessionKey: directSessionKey,
+      workDir: memberWorkDir,
+      from: member || teamName,
+      to: 'user',
+      text,
+      // The agent reply needs its OWN id — distinct from the user message's
+      // `msgId`. Reusing `msgId` persisted the reply with the user message's id,
+      // colliding in the inbox so the renderer's id-keyed dedup dropped it
+      // (the team-3ond "回复的没了" bug).
+      messageId: buildDirectReplyMessageId(directSessionKey),
+    }).catch((err) => {
+      request.log.warn(
+        { err, teamName, sessionKey: directSessionKey },
+        'send-message direct-cli delivery failed'
+      );
+      broadcastSse('team-change', { type: 'inbox', teamName });
+    });
+  } else {
+    request.log.warn({ teamName }, 'send-message direct-cli skipped: no work_dir resolved');
+  }
 
   return {
     ok: true,
@@ -4833,7 +5232,7 @@ app.post<{
     messageId: userMsg?.id ?? msgId,
     runtimeDelivery: {
       attempted: true,
-      delivered: bridgeWasConnected,
+      delivered: dispatchedDirect,
     },
   };
 });
@@ -4845,8 +5244,16 @@ app.post<{
 // requestReview: 前端调用 /tasks/:id/review，服务端原路由是 /tasks/:id/request-review
 app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/review',
-  async (request) => {
+  async (request, reply) => {
     try {
+      const tasks = await svc.readTasks(request.params.name);
+      const existingTask = tasks.find((task) => task.id === request.params.id);
+      if (existingTask?.status === 'doing') {
+        return reply.code(409).send({
+          ok: false,
+          error: 'Agent 正在处理中，不能手动提交审核。请等待 agent 调用 complete_task。',
+        });
+      }
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'done' });
       return { ok: true, data: toTeamTask(task) };
     } catch {
@@ -5111,6 +5518,110 @@ app.get<{ Querystring: { excludeTeam?: string } }>('/api/cross-team/targets', as
   }));
 });
 
+async function listDiscoverableWorkers(): Promise<DiscoverableWorker[]> {
+  const teams = await taskDispatch.discoverTeams();
+  return teams
+    .filter((team) => team.slug !== SYSTEM_MANAGER_TEAM_NAME && team.location === 'local')
+    .map(discoverableTeamToWorker)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+app.get('/api/workers', async () => {
+  return { workers: await listDiscoverableWorkers() };
+});
+
+app.post<{
+  Params: { workerId: string };
+  Body: {
+    fromTeam?: string;
+    text?: unknown;
+    summary?: unknown;
+    sessionName?: unknown;
+    reuse?: unknown;
+    sessionKey?: unknown;
+  };
+}>('/api/workers/:workerId/invoke', async (request, reply) => {
+  try {
+    const workerId = request.params.workerId.trim();
+    const resolvedWorkerId = await resolveTeamSlugForMention(workerId);
+    if (!resolvedWorkerId || resolvedWorkerId === SYSTEM_MANAGER_TEAM_NAME) {
+      return reply.code(404).send({ error: `Unknown worker: ${workerId}` });
+    }
+
+    const workers = await listDiscoverableWorkers();
+    const worker = workers.find((entry) => entry.workerId === resolvedWorkerId);
+    if (!worker) return reply.code(404).send({ error: `Unknown worker: ${workerId}` });
+
+    const message = typeof request.body?.text === 'string' ? request.body.text.trim() : '';
+    if (!message) return reply.code(400).send({ error: 'text is required' });
+
+    const requestedSessionName =
+      typeof request.body?.sessionName === 'string' ? request.body.sessionName.trim() : '';
+    const summary = typeof request.body?.summary === 'string' ? request.body.summary.trim() : '';
+    const sessionName =
+      requestedSessionName ||
+      summary ||
+      `Admin Invoke ${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const reuse = request.body?.reuse !== false;
+    const fromTeam = typeof request.body?.fromTeam === 'string' ? request.body.fromTeam.trim() : '';
+    const fromSessionKey =
+      typeof request.body?.sessionKey === 'string' && request.body.sessionKey.trim().length > 0
+        ? request.body.sessionKey.trim()
+        : buildFallbackSessionKey(fromTeam || SYSTEM_MANAGER_TEAM_NAME);
+
+    const { bindProject } = await ensureLoopSessionProjectReady(resolvedWorkerId);
+    const sessionKey = `${buildFallbackSessionKey(resolvedWorkerId)}:${Date.now().toString(36)}`;
+    const sessions = reuse ? await cc.listSessions(bindProject).catch(() => []) : [];
+    let session = reuse
+      ? sessions.find((item) => item.name === sessionName && (item.live || item.active))
+      : undefined;
+    const reused = Boolean(session);
+    if (!session) {
+      const created = await cc.createSession(bindProject, sessionName, sessionKey);
+      session = {
+        id: created.id,
+        name: created.name || sessionName,
+        session_key: created.session_key || sessionKey,
+        agent_session_id: created.agent_session_id,
+        agent_type: created.agent_type,
+        active: created.active,
+        live: created.live,
+        history_count: created.history_count,
+        created_at: created.created_at,
+        updated_at: created.updated_at,
+        last_message: null,
+        platform: created.platform,
+      };
+    }
+
+    await sendHarnessMessageViaBridge({
+      teamName: resolvedWorkerId,
+      text: message,
+      sessionKey: session.session_key,
+    });
+    if (fromTeam) {
+      await svc.appendMessage(fromTeam, {
+        from: `${fromTeam}.user`,
+        to: resolvedWorkerId,
+        role: 'user',
+        content: `@${resolvedWorkerId} ${message}`,
+        meta: { source: CROSS_TEAM_SENT_SOURCE, sessionKey: fromSessionKey, summary },
+      });
+      broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
+    }
+    broadcastSse('team-change', { type: 'inbox', teamName: resolvedWorkerId });
+    return {
+      ok: true,
+      worker,
+      session: mapCcSessionListItem(session, resolvedWorkerId),
+      reused,
+      messageSent: true,
+    };
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {
   const teamSlug = request.params.name;
   const tasks = await svc.readTasks(teamSlug);
@@ -5265,11 +5776,6 @@ app.post<{
       typeof sessionKey === 'string' && sessionKey.trim().length > 0
         ? sessionKey.trim()
         : buildFallbackSessionKey(fromTeam);
-    const toSessionKey = buildFallbackSessionKey(resolvedToTeam);
-    const sentText = formatCrossTeamText(`${fromTeam}.${sender}`, depth, trimmedText, {
-      conversationId: threadId,
-      replyToConversationId,
-    });
     const meta = {
       taskRefs,
       actionMode,
@@ -5287,19 +5793,9 @@ app.post<{
       meta: { ...meta, source: CROSS_TEAM_SENT_SOURCE, sessionKey: fromSessionKey },
     });
 
-    await svc.appendMessage(resolvedToTeam, {
-      from: `${fromTeam}.${sender}`,
-      to: resolvedToTeam,
-      role: 'user',
-      content: sentText,
-      meta: {
-        ...meta,
-        source: CROSS_TEAM_SOURCE,
-        relayOfMessageId: outgoing.id,
-        sessionKey: toSessionKey,
-      },
-    });
-
+    // Do not write the relayed message into the target inbox here. Cross-team
+    // transfer must first create a target TODO/review surface; the target inbox or
+    // runtime should only receive content after the user explicitly starts it.
     const dispatchResult = await taskDispatch.dispatchTask(
       fromTeam,
       {
@@ -5308,19 +5804,18 @@ app.post<{
         prompt: trimmedText,
       },
       resolvedToTeam,
-      { dispatchId: threadId }
+      { dispatchId: threadId, needsHumanReview: needsHumanReview ?? true }
     );
     if (dispatchResult.status === 'failed') {
       return { ok: false, error: dispatchResult.message };
     }
 
     broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
-    broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
     broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
 
     return {
       messageId: outgoing.id,
-      deliveredToInbox: true,
+      deliveredToInbox: false,
       deduplicated: false,
       runtimeDelivery: {
         attempted: false,
@@ -5476,18 +5971,171 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   return { ok: true, connected: false, message: 'Task bus disabled' };
 });
 
+type TelemetryProjectRow = {
+  cwd: string;
+  displayName?: string;
+  teamSlug?: string;
+  bindProject?: string;
+  sessions: number;
+  messages: number;
+  tokensIn: number;
+  tokensOut: number;
+  tokensTotal: number;
+};
+
+type TelemetryStatusShape = {
+  connected: boolean;
+  lastScan: string | null;
+  sessions: number;
+  messages: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheCreation: number;
+  totalTokens: number;
+  activeDays: number;
+  hourly: number[];
+  projects: TelemetryProjectRow[];
+  workSecondsByDay: Record<string, number>;
+};
+
+async function readTaskBusSettings(): Promise<TaskBusConfig> {
+  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    settings = JSON.parse(raw);
+  } catch {
+    // no settings
+  }
+  return (settings.taskBus ?? {}) as TaskBusConfig;
+}
+
+async function enrichTelemetryProjectNames<T extends { projects: TelemetryProjectRow[] }>(
+  status: T
+): Promise<T> {
+  const teams = await svc.listTeams().catch(() => []);
+  const byWorkDir = new Map<string, TeamManifest>();
+  const byBindProject = new Map<string, TeamManifest>();
+  for (const team of teams) {
+    if (team.slug === SYSTEM_MANAGER_TEAM_NAME) continue;
+    const workDir = (team.workDir || '').trim();
+    if (workDir) byWorkDir.set(path.resolve(workDir), team);
+    if (team.bindProject) byBindProject.set(team.bindProject, team);
+    byBindProject.set(team.slug, team);
+  }
+
+  return {
+    ...status,
+    projects: status.projects.map((project) => {
+      const cwd = (project.cwd || '').trim();
+      const team =
+        (cwd ? byWorkDir.get(path.resolve(cwd)) : undefined) ??
+        byBindProject.get(cwd) ??
+        byBindProject.get(path.basename(cwd));
+      if (!team) return project;
+      return {
+        ...project,
+        displayName: team.displayName || team.slug,
+        teamSlug: team.slug,
+        bindProject: team.bindProject,
+      };
+    }),
+  };
+}
+
+function telemetryEmptyStatus(): TelemetryStatusShape {
+  return {
+    connected: false,
+    lastScan: null,
+    sessions: 0,
+    messages: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    totalTokens: 0,
+    activeDays: 0,
+    hourly: [],
+    projects: [],
+    workSecondsByDay: {},
+  };
+}
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function buildUsageTelemetryExport(status: TelemetryStatusShape, format: 'csv' | 'json') {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  if (format === 'json') {
+    return {
+      filename: `hermit-loop-usage-${stamp}.json`,
+      mimeType: 'application/json;charset=utf-8',
+      content: JSON.stringify(status, null, 2),
+    };
+  }
+
+  const rows = [
+    [
+      'section',
+      'name',
+      'sessions',
+      'messages',
+      'tokensIn',
+      'tokensOut',
+      'cacheRead',
+      'cacheCreation',
+      'totalTokens',
+      'activeDays',
+      'durationSeconds',
+      'cwd',
+    ],
+    [
+      'summary',
+      '累计 Loop 数据',
+      status.sessions,
+      status.messages,
+      status.tokensIn,
+      status.tokensOut,
+      status.cacheRead,
+      status.cacheCreation,
+      status.totalTokens,
+      status.activeDays,
+      '',
+      '',
+    ],
+    ...Object.entries(status.workSecondsByDay)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, seconds]) => ['day', day, '', '', '', '', '', '', '', '', seconds, '']),
+    ...status.projects.map((project) => [
+      'project',
+      project.displayName || path.basename(project.cwd) || project.cwd,
+      project.sessions,
+      project.messages,
+      project.tokensIn,
+      project.tokensOut,
+      '',
+      '',
+      project.tokensTotal,
+      '',
+      '',
+      project.cwd,
+    ]),
+  ];
+
+  return {
+    filename: `hermit-loop-usage-${stamp}.csv`,
+    mimeType: 'text/csv;charset=utf-8',
+    content: rows.map((row) => row.map(csvCell).join(',')).join('\n'),
+  };
+}
+
 // POST /api/telemetry/scan → trigger manual scan
 app.post('/api/telemetry/scan', async (request, reply) => {
   try {
-    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
-    let settings: Record<string, unknown> = {};
-    try {
-      const raw = await fs.readFile(configPath, 'utf-8');
-      settings = JSON.parse(raw);
-    } catch {
-      // no settings
-    }
-    const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
+    const taskBus = await readTaskBusSettings();
     if (!taskBus.telemetry?.enabled) {
       return reply.code(400).send({ error: 'Telemetry is not enabled' });
     }
@@ -5495,7 +6143,7 @@ app.post('/api/telemetry/scan', async (request, reply) => {
     if (!result) {
       return reply.code(503).send({ error: 'Telemetry scan failed' });
     }
-    return {
+    return await enrichTelemetryProjectNames({
       ok: true,
       connected: taskBus.telemetry.uploadEnabled === true,
       lastScan: new Date().toISOString(),
@@ -5510,11 +6158,29 @@ app.post('/api/telemetry/scan', async (request, reply) => {
       hourly: result.aggregate.hourly,
       projects: result.aggregate.projects,
       workSecondsByDay: result.aggregate.workSecondsByDay,
-    };
+    });
   } catch (err) {
     return reply.code(500).send({ error: String(err) });
   }
 });
+
+// GET /api/telemetry/export → export Loop usage telemetry summary/projects
+app.get<{ Querystring: { format?: 'csv' | 'json' | string } }>(
+  '/api/telemetry/export',
+  async (request, reply) => {
+    try {
+      const format = request.query.format === 'json' ? 'json' : 'csv';
+      const taskBus = await readTaskBusSettings();
+      const redisCfg = taskBus.enabled ? taskBus.redis : undefined;
+      const status = await enrichTelemetryProjectNames(
+        (await getTelemetryStatus(redisCfg)) ?? telemetryEmptyStatus()
+      );
+      return buildUsageTelemetryExport(status, format);
+    } catch (err) {
+      return reply.code(500).send({ error: String(err) });
+    }
+  }
+);
 
 // GET /api/telemetry/conversations → local Feishu/Lark conversation telemetry
 app.get<{
@@ -5613,49 +6279,12 @@ app.get<{
 // GET /api/telemetry/status → current telemetry status (full stats)
 app.get('/api/telemetry/status', async (request, reply) => {
   try {
-    const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
-    let settings: Record<string, unknown> = {};
-    try {
-      const raw = await fs.readFile(configPath, 'utf-8');
-      settings = JSON.parse(raw);
-    } catch {
-      // no settings
-    }
-    const taskBus = (settings.taskBus ?? {}) as TaskBusConfig;
+    const taskBus = await readTaskBusSettings();
     const redisCfg = taskBus.enabled ? taskBus.redis : undefined;
     const status = await getTelemetryStatus(redisCfg);
-    return (
-      status ?? {
-        connected: false,
-        lastScan: null,
-        sessions: 0,
-        messages: 0,
-        tokensIn: 0,
-        tokensOut: 0,
-        cacheRead: 0,
-        cacheCreation: 0,
-        totalTokens: 0,
-        activeDays: 0,
-        hourly: [],
-        projects: [],
-        workSecondsByDay: {},
-      }
-    );
+    return await enrichTelemetryProjectNames(status ?? telemetryEmptyStatus());
   } catch {
-    return {
-      connected: false,
-      lastScan: null,
-      sessions: 0,
-      messages: 0,
-      tokensIn: 0,
-      tokensOut: 0,
-      cacheRead: 0,
-      cacheCreation: 0,
-      activeDays: 0,
-      hourly: [],
-      projects: [],
-      workSecondsByDay: {},
-    };
+    return telemetryEmptyStatus();
   }
 });
 
@@ -5814,6 +6443,22 @@ app.delete('/api/extensions/mcp/library/:id', async (request) => {
 
 app.post('/api/extensions/mcp/library/import', async (request) => {
   return ext.mcpLibraryImport((request.body ?? {}) as any);
+});
+
+app.get('/api/extensions/capability-packs', async () => {
+  return ext.capabilityPacksList();
+});
+
+app.post('/api/extensions/capability-packs/import', async (request) => {
+  return ext.capabilityPacksImport((request.body ?? {}) as any);
+});
+
+app.post('/api/extensions/capability-packs/export', async (request) => {
+  return ext.capabilityPacksExport((request.body ?? {}) as any);
+});
+
+app.post('/api/extensions/capability-packs/command-prompt', async (request) => {
+  return ext.capabilityPacksCommandPrompt((request.body ?? {}) as any);
 });
 
 app.get('/api/extensions/skills', async (request) => {
@@ -6028,6 +6673,7 @@ try {
 // graceful shutdown
 const shutdown = async () => {
   try {
+    directCliManager.shutdown();
     bridge.dispose?.();
     await app.close();
     process.exit(0);
@@ -6037,3 +6683,6 @@ const shutdown = async () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// Sync backstop: reap direct-CLI subprocesses on any exit path that skips the async
+// shutdown (e.g. process killed without a delivered signal). child.kill() is synchronous.
+process.on('exit', () => directCliManager.shutdown());

@@ -12,6 +12,7 @@ const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as 
 
 export default defineConfig({
   root: resolve(ROOT, 'src/renderer'),
+  publicDir: resolve(ROOT, 'public'),
   plugins: [react()],
   server: {
     host: '127.0.0.1',

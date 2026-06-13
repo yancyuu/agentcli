@@ -25,6 +25,7 @@ import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
+import { generateBindProject, isValidBindProject } from '@renderer/utils/bindProjectSlug';
 import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
@@ -62,35 +63,7 @@ export interface TeamCopyData {
   templateDirectoryId?: string;
 }
 
-/**
- * Sanitize team name: keep Unicode letters and digits (Chinese, Latin, etc.),
- * replace other sequences with `-`, then lowercase Latin chars.
- */
-/**
- * Generate a unique ASCII project identifier from a display name.
- * For Chinese names: produces "team-xxxx" (4-char random suffix).
- * For ASCII names: produces a slugified version.
- */
-function generateBindProject(displayName: string): string {
-  const trimmed = displayName.trim();
-  if (!trimmed) return '';
-  // Try to extract ASCII parts from the name
-  const asciiParts = trimmed
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  const base = asciiParts || 'team';
-  const suffix = Math.random().toString(36).slice(2, 6);
-  return `${base}-${suffix}`;
-}
-
-/** Validate bindProject: ASCII lowercase alphanumeric, hyphens, underscores. */
-function isValidBindProject(value: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]*$/.test(value);
-}
+// bindProject slug rules live in @renderer/utils/bindProjectSlug (unit-tested).
 
 // ---------------------------------------------------------------------------
 // Wizard step types
@@ -156,15 +129,12 @@ export const CreateTeamDialog = ({
   const [description, setDescription] = useState('');
 
   // ── bindProject (ASCII unique identifier) ────────────────────────────
-  const [bindProject, setBindProject] = useState('');
+  // Only the *manual* override is state. The auto value is DERIVED (below) so
+  // it is collision-free in the SAME render as `existingBindProjectSet`. A
+  // state + useEffect pair lagged one render behind the set and flickered a
+  // false "该项目标识已存在" red box whenever the teams list refreshed.
+  const [manualBindProject, setManualBindProject] = useState('');
   const [bindProjectManuallyEdited, setBindProjectManuallyEdited] = useState(false);
-
-  // Auto-generate bindProject from displayName when not manually edited
-  useEffect(() => {
-    if (bindProjectManuallyEdited) return;
-    const auto = generateBindProject(teamName);
-    setBindProject(auto);
-  }, [teamName, bindProjectManuallyEdited]);
 
   // ── Projects (for path selector) ─────────────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);
@@ -181,7 +151,6 @@ export const CreateTeamDialog = ({
   const [fieldErrors, setFieldErrors] = useState<{ teamName?: string; cwd?: string }>({});
 
   // ── Name conflict detection ──────────────────────────────────────────
-  const normalizedBindProject = bindProject.trim().toLowerCase();
   const existingBindProjectSet = useMemo(
     () => new Set(existingBindProjects.map((value) => value.trim().toLowerCase()).filter(Boolean)),
     [existingBindProjects]
@@ -190,6 +159,19 @@ export const CreateTeamDialog = ({
     () => new Set(provisioningTeamNames.map((value) => value.trim().toLowerCase()).filter(Boolean)),
     [provisioningTeamNames]
   );
+
+  // bindProject is DERIVED, not state. The auto value is generated in the same
+  // render as `existingBindProjectSet`, so it is collision-free BY CONSTRUCTION
+  // and `isBindProjectTaken` can never flicker true between a set change and an
+  // effect flush. (The previous state + useEffect implementation lagged one
+  // render and produced a transient false "该项目标识已存在" red box.)
+  const autoBindProject = useMemo(
+    () => generateBindProject(teamName, existingBindProjectSet),
+    [teamName, existingBindProjectSet]
+  );
+  const bindProject = bindProjectManuallyEdited ? manualBindProject : autoBindProject;
+  const normalizedBindProject = bindProject.trim().toLowerCase();
+
   const isBindProjectTaken = existingBindProjectSet.has(normalizedBindProject);
   const isNameProvisioning =
     provisioningTeamNameSet.has(normalizedBindProject) && !isBindProjectTaken;
@@ -307,7 +289,7 @@ export const CreateTeamDialog = ({
     setIsSubmitting(false);
     setConflictDismissed(false);
     setSelectedProviderRef(null);
-    setBindProject('');
+    setManualBindProject('');
     setBindProjectManuallyEdited(false);
     setStep('name');
   };
@@ -466,7 +448,7 @@ export const CreateTeamDialog = ({
                 )}
                 value={bindProject}
                 onChange={(e) => {
-                  setBindProject(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+                  setManualBindProject(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
                   setBindProjectManuallyEdited(true);
                 }}
                 placeholder="auto-generated-id"

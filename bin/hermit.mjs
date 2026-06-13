@@ -63,6 +63,8 @@ Options:
   status             Show background service status
   stop               Stop background service
   update             Check and install updates
+  add <plugin>       Install a feature plugin into the MCP library
+                     (e.g. openhermit add worker-society)
 
 Examples:
   npx @yancyyu/openhermit             # Run without installing
@@ -152,6 +154,100 @@ async function runUpdate() {
       process.exit(1);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// add <plugin> — install a feature plugin into the MCP library
+// ---------------------------------------------------------------------------
+
+/**
+ * Known installable feature plugins. Each maps a `openhermit add <name>` key to
+ * the MCP library entry it registers (pointing at a hermit-served MCP endpoint).
+ * Mirrors src/features/worker-society/main/composition/workerSocietyPlugin.ts.
+ */
+const KNOWN_PLUGINS = {
+  'worker-society': {
+    name: 'worker-society',
+    description:
+      '去中心化 worker 自治社会：agent 通过 society_* 工具发布需求、自荐、择优选派、积累声誉与关系，替代中心化派单。',
+    endpoint: '/mcp',
+    transport: 'sse',
+    hint: 'society_* tools (publish need / volunteer / auto-select …)',
+  },
+};
+
+async function runAddPlugin(pluginName, port) {
+  if (!pluginName) {
+    console.error('[openHermit] Usage: openhermit add <plugin-name>');
+    console.error('[openHermit] Known plugins: ' + Object.keys(KNOWN_PLUGINS).join(', '));
+    process.exit(1);
+  }
+
+  const spec = KNOWN_PLUGINS[pluginName];
+  if (!spec) {
+    console.error(`[openHermit] Unknown plugin: ${pluginName}`);
+    console.error('[openHermit] Known plugins: ' + Object.keys(KNOWN_PLUGINS).join(', '));
+    process.exit(1);
+  }
+
+  const base = `http://127.0.0.1:${port}`;
+  const body = {
+    name: spec.name,
+    description: spec.description,
+    installSpec: {
+      type: 'http',
+      url: `${base}${spec.endpoint}`,
+      transportType: spec.transport,
+    },
+  };
+
+  console.log(`[openHermit] Installing plugin "${pluginName}" → registering MCP server ${body.installSpec.url}`);
+
+  try {
+    const res = await fetch(`${base}/api/extensions/mcp/library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    // 服务端统一包成 { success, data | error }：HTTP 200 但 success:false 也算失败。
+    const text = await res.text().catch(() => '');
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      /* 非 JSON 响应，按 HTTP 状态兜底 */
+    }
+    const ok = res.ok && parsed && parsed.success !== false;
+    const errMsg = parsed && typeof parsed.error === 'string' ? parsed.error : '';
+
+    if (ok) {
+      console.log(`[openHermit] ✓ "${pluginName}" installed into the MCP library.`);
+      console.log(`[openHermit]   Agents can now use: ${spec.hint}`);
+      console.log('[openHermit]   Enable it for a worker in the Extensions panel, or via the MCP library.');
+      return;
+    }
+
+    // 同名已存在 → 幂等视为已安装。
+    if (res.status === 409 || /already exist|已存在|exists/i.test(errMsg)) {
+      console.log(`[openHermit] ✓ "${pluginName}" already in the MCP library (idempotent).`);
+      return;
+    }
+    console.error(`[openHermit] Install failed (HTTP ${res.status}): ${(errMsg || text).slice(0, 200)}`);
+    process.exit(1);
+  } catch (err) {
+    console.error(`[openHermit] Could not reach openHermit at ${base}.`);
+    console.error(`[openHermit] ${err instanceof Error ? err.message : String(err)}`);
+    console.error('[openHermit] Start it first with: openhermit');
+    process.exit(1);
+  }
+}
+
+const addIndex = args.indexOf('add');
+if (addIndex !== -1) {
+  await runAddPlugin(args[addIndex + 1], port);
+  process.exit(0);
 }
 
 function readDaemonPid() {

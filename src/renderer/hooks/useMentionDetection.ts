@@ -17,6 +17,8 @@ interface UseMentionDetectionOptions {
   isTriggerEnabled?: (triggerChar: string) => boolean;
   /** Additional validation for trigger matches before opening the dropdown. */
   isTriggerMatchValid?: (trigger: MentionTrigger, text: string) => boolean;
+  /** Called after a suggestion is inserted into the textarea. */
+  onSuggestionSelected?: (suggestion: MentionSuggestion, insertedText: string) => void;
 }
 
 export interface DropdownPosition {
@@ -179,6 +181,7 @@ export function useMentionDetection({
   triggerChars = ['@'],
   isTriggerEnabled,
   isTriggerMatchValid,
+  onSuggestionSelected,
 }: UseMentionDetectionOptions): UseMentionDetectionResult {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTriggerChar, setActiveTriggerChar] = useState<string | null>(null);
@@ -234,6 +237,7 @@ export function useMentionDetection({
       const newCursorPos = before.length + insertion.length;
 
       onValueChange(newValue);
+      onSuggestionSelected?.(s, insertionBody);
       dismiss();
 
       // Set cursor position after React re-render
@@ -242,7 +246,7 @@ export function useMentionDetection({
         textarea.setSelectionRange(newCursorPos, newCursorPos);
       });
     },
-    [value, onValueChange, textareaRef, dismiss]
+    [value, onValueChange, onSuggestionSelected, textareaRef, dismiss]
   );
 
   /**

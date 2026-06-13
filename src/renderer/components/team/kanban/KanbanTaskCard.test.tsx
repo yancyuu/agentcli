@@ -196,4 +196,45 @@ describe('KanbanTaskCard change badge', () => {
       await Promise.resolve();
     });
   });
+
+  it('renders in-progress tasks as agent-controlled without manual action buttons', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(KanbanTaskCard, {
+          task: baseTask,
+          teamName: 'my-team',
+          columnId: 'in_progress',
+          hasReviewers: true,
+          compact: false,
+          taskMap: new Map(),
+          memberColorMap: new Map([['alice', 'blue']]),
+          onRequestReview: noop,
+          onApprove: noop,
+          onRequestChanges: noop,
+          onMoveBackToDone: noop,
+          onStartTask: noop,
+          onCompleteTask: noop,
+          onCancelTask: noop,
+          onDeleteTask: noop,
+          onViewChanges: noop,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Agent 处理中');
+    expect(host.querySelector('[aria-label="完成"]')).toBeNull();
+    expect(host.querySelector('[aria-label="取消任务 task-1"]')).toBeNull();
+    expect(host.querySelector('[aria-label="删除任务"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
 });

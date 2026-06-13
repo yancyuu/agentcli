@@ -15,6 +15,7 @@ import { createLogger } from '@shared/utils/logger';
 import type { CcConnectBridge } from '../ccConnect/CcConnectBridge';
 import type { CcConnectClient } from '../ccConnect/CcConnectClient';
 
+import { buildHermitOpsRunbookContext } from './OpsRunbookContext';
 import {
   TeamWorkspaceService,
   groupSessionKey,
@@ -106,6 +107,7 @@ export class TeamProvisioningService {
 
     if (injectInstructions && manifest.harness === 'claudecode') {
       await injectHermitTasksMcpConfig(manifest.workDir);
+      await this.injectTeamInstructions(manifest.workDir, manifest.slug);
     }
 
     if (createCcProject) {
@@ -314,6 +316,7 @@ export class TeamProvisioningService {
             : team.slug;
         return team.description ? `- ${label}: ${team.description}` : `- ${label}`;
       });
+    const opsRunbookContext = buildHermitOpsRunbookContext();
     const section = `
 
 ${TEAM_INSTRUCTIONS_BEGIN}
@@ -330,6 +333,8 @@ Hermit will create and track the cross-team collaboration task automatically.
 
 Do not call cross-team dispatch APIs yourself and do not invent dispatch IDs.
 You may use the team list only to understand which teams exist and when a user is referring to one.
+
+${opsRunbookContext}
 ${TEAM_INSTRUCTIONS_END}
 `;
 

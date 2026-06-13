@@ -61,6 +61,8 @@ export function useTeamSuggestions(currentTeamName: string | null): UseTeamSugge
         color: t.color,
         type: 'team' as const,
         isOnline,
+        insertText: t.teamName,
+        searchText: [t.teamName, t.displayName].filter(Boolean).join(' '),
       };
     });
 

@@ -23,7 +23,7 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
   style,
   onClick,
 }: CalendarEventBlockProps): React.JSX.Element {
-  const label = occurrence.label || '定时 Loop';
+  const label = occurrence.label || '定时任务';
   const timeStr = occurrence.date.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',

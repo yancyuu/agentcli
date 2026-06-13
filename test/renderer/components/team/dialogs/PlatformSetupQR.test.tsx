@@ -21,10 +21,13 @@ vi.mock('@renderer/api', () => ({
         platform: 'lark',
         owner_open_id: 'owner-open-id',
       })),
-      feishuSave: vi.fn(async () => undefined),
+      feishuSave: vi.fn(async () => ({ message: 'saved', restart_required: false })),
       weixinBegin: vi.fn(),
       weixinPoll: vi.fn(),
       weixinSave: vi.fn(),
+    },
+    ccSettings: {
+      restart: vi.fn(async () => undefined),
     },
   },
 }));
@@ -87,6 +90,55 @@ describe('PlatformSetupQR', () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(host.textContent).toContain('正在重启服务并刷新平台长连接');
     expect(host.textContent).toContain('正在重启');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('restarts cc-connect immediately when QR save requires restart', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.mocked(api.ccSetup.feishuSave).mockResolvedValueOnce({
+      message: 'saved',
+      restart_required: true,
+    });
+    const onComplete = vi.fn();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <PlatformSetupQR
+          platformType="feishu"
+          projectName="my-project"
+          workDir="/repo"
+          agentType="claudecode"
+          onComplete={onComplete}
+          onCancel={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const startButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('开始扫码绑定')
+    );
+    expect(startButton).toBeTruthy();
+
+    await act(async () => {
+      startButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.ccSetup.feishuSave).toHaveBeenCalledWith(
+      expect.objectContaining({ project: 'my-project', platform_type: 'lark' })
+    );
+    expect(api.ccSettings.restart).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith({ restartHandled: true });
 
     await act(async () => {
       root.unmount();

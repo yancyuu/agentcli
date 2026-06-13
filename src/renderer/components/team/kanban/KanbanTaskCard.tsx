@@ -3,7 +3,6 @@ import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { UnreadCommentsBadge } from '@renderer/components/team/UnreadCommentsBadge';
 import { Button } from '@renderer/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
@@ -23,7 +22,6 @@ import {
   Play,
   Send,
   Trash2,
-  XCircle,
 } from 'lucide-react';
 
 import type { DispatchMeta } from '@shared/types/team';
@@ -186,63 +184,6 @@ const TruncatedTitle = ({
   );
 };
 
-const CancelTaskButton = ({
-  taskId,
-  onConfirm,
-}: {
-  taskId: string;
-  onConfirm: (taskId: string) => void;
-}): React.JSX.Element => {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              variant="destructive"
-              size="icon"
-              className="size-6 rounded-full shadow-sm"
-              aria-label={`取消任务 ${taskId}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <XCircle size={11} />
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top">取消</TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        className="w-56 p-3"
-        side="top"
-        align="start"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-          将此任务移回“待处理”并通知团队吗？
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="flex-1"
-            onClick={() => {
-              setOpen(false);
-              onConfirm(taskId);
-            }}
-          >
-            确认
-          </Button>
-          <Button variant="outline" size="sm" className="flex-1" onClick={() => setOpen(false)}>
-            保持不变
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-};
-
 interface TaskActionIconButtonProps {
   label: string;
   icon: React.ReactNode;
@@ -289,7 +230,6 @@ export const KanbanTaskCard = memo(
     memberColorMap,
     onStartTask,
     onCompleteTask,
-    onCancelTask,
     onScrollToTask,
     onTaskClick,
     onViewChanges,
@@ -333,7 +273,7 @@ export const KanbanTaskCard = memo(
           </span>
         ) : null}
         <UnreadCommentsBadge unreadCount={unreadCount} totalCount={task.comments?.length ?? 0} />
-        {onDeleteTask ? (
+        {onDeleteTask && task.status !== 'in_progress' ? (
           <TaskActionIconButton
             label="删除任务"
             icon={<Trash2 size={11} />}
@@ -463,25 +403,12 @@ export const KanbanTaskCard = memo(
             ) : null}
 
             {columnId === 'in_progress' ? (
-              isScheduleTask ? (
-                <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <Loader2 size={11} className="animate-spin text-emerald-400" />
-                  <span className="whitespace-nowrap text-[11px] text-emerald-400">执行中</span>
-                </div>
-              ) : (
-                <>
-                  <TaskActionIconButton
-                    label="完成"
-                    icon={<CheckCircle2 size={11} />}
-                    className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCompleteTask(task.id);
-                    }}
-                  />
-                  <CancelTaskButton taskId={task.id} onConfirm={onCancelTask} />
-                </>
-              )
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                <Loader2 size={11} className="animate-spin text-emerald-400" />
+                <span className="whitespace-nowrap text-[11px] text-emerald-400">
+                  {isScheduleTask ? '执行中' : 'Agent 处理中'}
+                </span>
+              </div>
             ) : null}
           </div>
 

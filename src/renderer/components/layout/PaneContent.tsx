@@ -4,9 +4,11 @@
  */
 
 import { TeamGraphTab } from '@features/agent-graph/renderer';
+import { SocietyView } from '@features/worker-society/renderer';
 import { TabUIProvider } from '@renderer/contexts/TabUIContext';
 import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
+import { CommunityChatView } from '../chat/CommunityChatView';
 import { DashboardView } from '../dashboard/DashboardView';
 import { ExtensionStoreView } from '../extensions/ExtensionStoreView';
 import { NotificationsView } from '../notifications/NotificationsView';
@@ -54,6 +56,8 @@ export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JS
             style={{ display: isActive ? 'flex' : 'none' }}
           >
             {tab.type === 'dashboard' && <DashboardView />}
+            {tab.type === 'society' && <SocietyView />}
+            {tab.type === 'chat' && <CommunityChatView />}
             {tab.type === 'notifications' && <NotificationsView />}
             {tab.type === 'settings' && <SettingsView />}
             {tab.type === 'teams' && <TeamListView />}

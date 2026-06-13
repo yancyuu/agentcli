@@ -25,5 +25,11 @@ export type {
 } from './TeamWorkspaceService';
 
 export { TeamProvisioningService } from './TeamProvisioningService';
+export {
+  HERMIT_OPS_GUIDE_URL,
+  buildHermitOpsRunbookContext,
+  buildMemberWorkflowWithOpsContext,
+  removeHermitOpsRunbookContext,
+} from './OpsRunbookContext';
 
 export { CollaborationBoardService } from './CollaborationBoardService';

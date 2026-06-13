@@ -47,6 +47,9 @@ When running build/typecheck/test commands, pipe through `tail -20` to avoid flo
 - `pnpm fix` - Lint fix + format
 - `pnpm quality` - Full check + format check + knip
 
+## Test-First Workflow
+For any new requirement or change, **first** check whether existing tests cover the affected code path (find the relevant `*.test.*` file, or confirm none exists). If coverage is missing, add tests for the behavior BEFORE making the change — do not blindly edit code without test backing. This is how regressions like duplicate messages, broken dedup, and silent restarts slipped through: the message pipeline (`teamMessageKey`, `mergeTeamMessages`, `teamMessageFiltering`, server-side `appendMessage` ID propagation) had zero tests. When a bug surfaces, write a failing test that reproduces it, then fix until green.
+
 ## Context Compaction Instructions
 When compacting context, preserve the original goal, current plan, completed work, remaining TODOs, key decisions, modified/read files, test results, important errors, blockers, and next steps.
 

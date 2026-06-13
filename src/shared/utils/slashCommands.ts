@@ -74,6 +74,11 @@ export const KNOWN_SLASH_COMMANDS: readonly KnownSlashCommandDefinition[] = [
     command: '/usage',
     description: 'Show plan usage limits and rate-limit status.',
   },
+  {
+    name: 'workers',
+    command: '/workers',
+    description: 'List currently discoverable digital workers.',
+  },
 ] as const;
 
 const KNOWN_SLASH_COMMANDS_BY_NAME = new Map(

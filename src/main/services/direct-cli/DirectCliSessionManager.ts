@@ -1,0 +1,433 @@
+/**
+ * Direct-CLI execution layer for in-app Loop sessions and team-member DMs.
+ *
+ * Hermit spawns the local `claude` CLI directly as a long-lived stream-json subprocess
+ * (one per session key), bypassing the cc-connect sidecar entirely for these surfaces.
+ * cc-connect stays in charge of external IM (Feishu/WeChat). Running claude directly in
+ * the work_dir removes the project/work_dir/platform misconfiguration that surfaced as
+ * "❌ 错误: 启动 Agent 会话失败".
+ *
+ * Each subprocess writes the standard `~/.claude/projects/<encoded-cwd>/<id>.jsonl`, so
+ * the existing tool-activity / chunk / context views (LocalSessionScanner) keep working
+ * with no changes. We only relay the live stream over SSE for token-level display.
+ */
+
+import { EventEmitter } from 'events';
+
+import type { ChildProcess, SpawnOptions } from 'child_process';
+
+import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
+
+import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { spawnCli } from '@main/utils/childProcess';
+import { type DirectCliSessionRepository, DirectCliSessionStore } from './DirectCliSessionStore';
+
+/** Args mirror the cc-connect claudecode invocation that this replaces. */
+export interface ClaudeStreamArgsOptions {
+  resumeSessionId?: string;
+  appendSystemPrompt?: string;
+  verbose?: boolean;
+  /** Provider-resolved args (model, effort, flags) from buildProviderAwareCliEnv. */
+  providerArgs?: string[];
+}
+
+/**
+ * Build the argv for `claude --output-format stream-json ...`. Pure + tested separately
+ * so the spawn wiring never needs to launch a real process to verify its flags.
+ */
+export function buildClaudeStreamArgs(options: ClaudeStreamArgsOptions = {}): string[] {
+  const args = [
+    '--output-format',
+    'stream-json',
+    '--input-format',
+    'stream-json',
+    '--permission-prompt-tool',
+    'stdio',
+  ];
+  // --verbose makes claude flush assistant events as they stream (granular deltas). It only
+  // conflicts with --output-format stream-json when a router_url is set, which we never do.
+  if (options.verbose !== false) args.push('--verbose');
+  if (options.resumeSessionId?.trim()) {
+    args.push('--resume', options.resumeSessionId.trim());
+  }
+  if (options.appendSystemPrompt?.trim()) {
+    args.push('--append-system-prompt', options.appendSystemPrompt.trim());
+  }
+  if (options.providerArgs?.length) {
+    args.push(...options.providerArgs);
+  }
+  return args;
+}
+
+/**
+ * Format a user turn as the NDJSON line claude's stream-json stdin expects.
+ * Mirrors what cc-connect writes to the harness stdin.
+ */
+export function formatClaudeStdinUserTurn(text: string): string {
+  return (
+    JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text }],
+      },
+    }) + '\n'
+  );
+}
+
+export interface DirectCliSpawnParams {
+  sessionKey: string;
+  workDir: string;
+  resumeSessionId?: string;
+  appendSystemPrompt?: string;
+  model?: string | null;
+  providerId?: string;
+  providerBackendId?: string | null;
+  verbose?: boolean;
+}
+
+export interface DirectCliSendParams {
+  text: string;
+  /** Optimistic id used to route stream deltas to the right in-progress message. */
+  messageId: string;
+  /** cwd used to (lazily) spawn the subprocess if the session doesn't exist yet. */
+  workDir: string;
+}
+
+export type DirectCliEvent =
+  | { kind: 'init'; sessionKey: string; sessionId: string; model?: string }
+  | { kind: 'delta'; sessionKey: string; messageId: string; text: string }
+  | { kind: 'thinking'; sessionKey: string; messageId: string; text: string }
+  | { kind: 'tool'; sessionKey: string; messageId: string; toolName: string; toolInput: unknown }
+  | {
+      kind: 'complete';
+      sessionKey: string;
+      messageId: string;
+      text: string;
+      sessionId?: string;
+    }
+  | { kind: 'error'; sessionKey: string; messageId?: string; error: string };
+
+interface CliSessionHandle {
+  child: ChildProcess;
+  sessionId?: string;
+  activeMessageId?: string;
+  /** Accumulated assistant text for the in-flight turn (fallback if result has none). */
+  accumulatedText: string;
+  /** Half-finished stdout line pending a newline. */
+  stdoutBuffer: string;
+  /** True after the process exited; guards against writing to a dead stdin. */
+  closed: boolean;
+}
+
+/** Spawn function signature (mockable in tests). */
+export type DirectCliSpawnFn = (
+  binaryPath: string,
+  args: string[],
+  options: SpawnOptions
+) => ChildProcess;
+
+/** Provider env resolver (mockable in tests). */
+export interface DirectCliEnvResolver {
+  (params: {
+    binaryPath: string | null;
+    providerId?: string;
+    providerBackendId?: string | null;
+    model?: string | null;
+    projectPath?: string;
+  }): Promise<{ env: NodeJS.ProcessEnv; providerArgs: string[] }>;
+}
+
+export interface DirectCliSessionManagerOptions {
+  spawnFn?: DirectCliSpawnFn;
+  envResolver?: DirectCliEnvResolver;
+  binaryResolver?: typeof ClaudeBinaryResolver;
+  store?: DirectCliSessionRepository;
+}
+
+const DEFAULT_ENV_RESOLVER: DirectCliEnvResolver = async (params) => {
+  // Imported lazily so the manager module stays cheap and unit-testable without the
+  // credential/provider service graph.
+  const { buildProviderAwareCliEnv } = await import('@main/services/runtime/providerAwareCliEnv');
+  const result = await buildProviderAwareCliEnv({
+    binaryPath: params.binaryPath,
+    providerId: params.providerId,
+    providerBackendId: params.providerBackendId ?? null,
+    model: params.model ?? null,
+    projectPath: params.projectPath,
+  });
+  return { env: result.env, providerArgs: result.providerArgs };
+};
+
+export class DirectCliSessionManager extends EventEmitter {
+  private readonly sessions = new Map<string, CliSessionHandle>();
+
+  /** In-flight ensureSession promises dedupe concurrent callers for the same key. */
+  private readonly ensuring = new Map<string, Promise<void>>();
+
+  private readonly spawnFn: DirectCliSpawnFn;
+
+  private readonly envResolver: DirectCliEnvResolver;
+
+  private readonly binaryResolver: typeof ClaudeBinaryResolver;
+
+  private readonly store: DirectCliSessionRepository;
+
+  constructor(options: DirectCliSessionManagerOptions = {}) {
+    super();
+    this.spawnFn =
+      options.spawnFn ?? ((binaryPath, args, opts) => spawnCli(binaryPath, args, opts));
+    this.envResolver = options.envResolver ?? DEFAULT_ENV_RESOLVER;
+    this.binaryResolver = options.binaryResolver ?? ClaudeBinaryResolver;
+    this.store = options.store ?? new DirectCliSessionStore();
+  }
+
+  has(sessionKey: string): boolean {
+    return this.sessions.has(sessionKey);
+  }
+
+  getSessionId(sessionKey: string): string | undefined {
+    return this.sessions.get(sessionKey)?.sessionId ?? this.store.get(sessionKey);
+  }
+
+  /**
+   * Ensure a subprocess exists for `sessionKey`, spawning lazily. Resolves once the
+   * process is running (NOT once claude is ready — the first `session-init` event
+   * signals readiness). Safe to call concurrently; duplicate callers await the same spawn.
+   */
+  async ensureSession(params: DirectCliSpawnParams): Promise<void> {
+    const sessionKey = params.sessionKey.trim();
+    if (this.sessions.has(sessionKey)) return;
+    const inFlight = this.ensuring.get(sessionKey);
+    if (inFlight) return inFlight;
+
+    const promise = this.spawnSession(sessionKey, params)
+      .catch((err) => {
+        // Surface the failure to SSE listeners, then re-throw so callers (send) know the
+        // spawn failed and the session is unusable.
+        const error = err instanceof Error ? err.message : String(err);
+        this.emit('event', { kind: 'error', sessionKey, error } satisfies DirectCliEvent);
+        throw err;
+      })
+      .finally(() => {
+        // Clear the in-flight guard so a later retry can spawn again.
+        this.ensuring.delete(sessionKey);
+      });
+    this.ensuring.set(sessionKey, promise);
+    await promise;
+  }
+
+  private async spawnSession(sessionKey: string, params: DirectCliSpawnParams): Promise<void> {
+    const workDir = params.workDir.trim();
+    if (!workDir) throw new Error('direct-cli: workDir is required to spawn a agent session');
+
+    const binaryPath = await this.binaryResolver.resolve();
+    if (!binaryPath) {
+      throw new Error('未找到本地 claude CLI，无法启动直连会话');
+    }
+
+    // Prefer a persisted session id (resume continuity across Hermit restarts); fall back
+    // to the caller-provided resumeSessionId only if the store has nothing yet.
+    const resumeSessionId = this.store.get(sessionKey) ?? params.resumeSessionId;
+
+    const { env, providerArgs } = await this.envResolver({
+      binaryPath,
+      providerId: params.providerId,
+      providerBackendId: params.providerBackendId,
+      model: params.model ?? null,
+      projectPath: workDir,
+    });
+
+    const args = buildClaudeStreamArgs({
+      resumeSessionId,
+      appendSystemPrompt: params.appendSystemPrompt,
+      verbose: params.verbose,
+      providerArgs,
+    });
+
+    const child = this.spawnFn(binaryPath, args, {
+      cwd: workDir,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const handle: CliSessionHandle = {
+      child,
+      accumulatedText: '',
+      stdoutBuffer: '',
+      closed: false,
+    };
+    this.sessions.set(sessionKey, handle);
+    this.attachListeners(sessionKey, handle);
+  }
+
+  private attachListeners(sessionKey: string, handle: CliSessionHandle): void {
+    const { child } = handle;
+    if (typeof child.stdout?.setEncoding === 'function') child.stdout.setEncoding('utf-8');
+    child.stdout?.on('data', (chunk: string) => this.onStdout(sessionKey, handle, chunk));
+    if (typeof child.stderr?.setEncoding === 'function') child.stderr.setEncoding('utf-8');
+    child.stderr?.on('data', () => {
+      // Stderr is informational (claude progress/debug). Not surfaced as message content.
+    });
+    child.on('error', (err) => {
+      handle.closed = true;
+      this.emit('event', {
+        kind: 'error',
+        sessionKey,
+        error: err.message,
+      } satisfies DirectCliEvent);
+    });
+    child.on('exit', (code) => {
+      handle.closed = true;
+      // Flush any trailing stdout line that never got a newline.
+      if (handle.stdoutBuffer.trim()) {
+        this.processLine(sessionKey, handle, handle.stdoutBuffer);
+        handle.stdoutBuffer = '';
+      }
+      // Resolve any in-flight turn so the renderer's optimistic bubble can't hang
+      // forever. If a `result` already arrived, `activeMessageId` was cleared and
+      // nothing fires here. A clean exit (code 0) with no `result` (e.g. claude
+      // bailed after a permission prompt) still needs a terminal `complete`.
+      if (handle.activeMessageId) {
+        if (code !== null && code !== 0) {
+          this.emit('event', {
+            kind: 'error',
+            sessionKey,
+            messageId: handle.activeMessageId,
+            error: `claude 进程退出（code ${code}）`,
+          } satisfies DirectCliEvent);
+        } else if (code === 0) {
+          this.emit('event', {
+            kind: 'complete',
+            sessionKey,
+            messageId: handle.activeMessageId,
+            text: handle.accumulatedText,
+            sessionId: handle.sessionId,
+          } satisfies DirectCliEvent);
+        }
+        handle.activeMessageId = undefined;
+        handle.accumulatedText = '';
+      }
+      this.sessions.delete(sessionKey);
+    });
+  }
+
+  private onStdout(sessionKey: string, handle: CliSessionHandle, chunk: string): void {
+    handle.stdoutBuffer += chunk;
+    let newlineIndex = handle.stdoutBuffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const line = handle.stdoutBuffer.slice(0, newlineIndex);
+      handle.stdoutBuffer = handle.stdoutBuffer.slice(newlineIndex + 1);
+      this.processLine(sessionKey, handle, line);
+      newlineIndex = handle.stdoutBuffer.indexOf('\n');
+    }
+  }
+
+  private processLine(sessionKey: string, handle: CliSessionHandle, rawLine: string): void {
+    const classified: ClaudeStreamLine | null = classifyClaudeStreamLine(rawLine);
+    if (!classified) return;
+
+    switch (classified.type) {
+      case 'session-init': {
+        handle.sessionId = classified.sessionId;
+        this.store.set(sessionKey, classified.sessionId);
+        this.emit('event', {
+          kind: 'init',
+          sessionKey,
+          sessionId: classified.sessionId,
+          model: classified.model,
+        } satisfies DirectCliEvent);
+        break;
+      }
+      case 'assistant': {
+        const messageId = handle.activeMessageId ?? '';
+        for (const block of classified.blocks) {
+          if (block.kind === 'text' && block.text) {
+            handle.accumulatedText += block.text;
+            this.emit('event', {
+              kind: 'delta',
+              sessionKey,
+              messageId,
+              text: block.text,
+            } satisfies DirectCliEvent);
+          } else if (block.kind === 'thinking' && block.text) {
+            this.emit('event', {
+              kind: 'thinking',
+              sessionKey,
+              messageId,
+              text: block.text,
+            } satisfies DirectCliEvent);
+          } else if (block.kind === 'tool-use') {
+            this.emit('event', {
+              kind: 'tool',
+              sessionKey,
+              messageId,
+              toolName: block.toolName ?? 'Unknown',
+              toolInput: block.toolInput,
+            } satisfies DirectCliEvent);
+          }
+        }
+        break;
+      }
+      case 'result': {
+        const messageId = handle.activeMessageId ?? '';
+        const text = classified.text || handle.accumulatedText;
+        this.emit('event', {
+          kind: 'complete',
+          sessionKey,
+          messageId,
+          text,
+          sessionId: classified.sessionId ?? handle.sessionId,
+        } satisfies DirectCliEvent);
+        handle.activeMessageId = undefined;
+        handle.accumulatedText = '';
+        break;
+      }
+      case 'control-request':
+      case 'unknown':
+      case 'parse-error':
+      default:
+        // Permission prompts are not auto-handled in Phase 1; parse-errors/unknown lines
+        // are ignored to avoid flooding the message feed with raw stdout.
+        break;
+    }
+  }
+
+  /**
+   * Send a user turn to an existing (or about-to-be-spawned) session and tag the
+   * resulting stream with `messageId` until the `result` event arrives.
+   */
+  async send(sessionKey: string, params: DirectCliSendParams): Promise<void> {
+    const key = sessionKey.trim();
+    await this.ensureSession({ sessionKey: key, workDir: params.workDir });
+    const handle = this.sessions.get(key);
+    if (!handle) {
+      throw new Error(`direct-cli: session ${key} is not running`);
+    }
+    if (handle.closed || !handle.child.stdin || handle.child.stdin.destroyed) {
+      throw new Error(`direct-cli: session ${key} stdin is closed`);
+    }
+    handle.activeMessageId = params.messageId;
+    handle.accumulatedText = '';
+    handle.child.stdin.write(formatClaudeStdinUserTurn(params.text));
+  }
+
+  kill(sessionKey: string): void {
+    const handle = this.sessions.get(sessionKey.trim());
+    if (!handle) return;
+    handle.closed = true;
+    try {
+      handle.child.kill('SIGTERM');
+    } catch {
+      // Best effort.
+    }
+    this.sessions.delete(sessionKey.trim());
+  }
+
+  /** Reap every live subprocess. Call on app before-quit. */
+  shutdown(): void {
+    for (const key of Array.from(this.sessions.keys())) {
+      this.kill(key);
+    }
+  }
+}

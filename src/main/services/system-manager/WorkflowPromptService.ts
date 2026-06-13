@@ -32,13 +32,18 @@ function labelFromFilename(filename: string): string {
   return path.basename(filename, path.extname(filename)).replace(/[-_]+/g, ' ').trim() || filename;
 }
 
-function isClaudeCommandFolder(folder: string): boolean {
-  return folder.endsWith(path.join('.claude', 'commands'));
+function getClaudeCommandRoot(folder: string): string | null {
+  const normalized = path.normalize(folder);
+  const commandsSuffix = path.join('.claude', 'commands');
+  if (normalized.endsWith(commandsSuffix)) return normalized;
+  const parent = path.dirname(normalized);
+  return parent.endsWith(commandsSuffix) ? parent : null;
 }
 
-function commandNameFromFilename(filename: string): `/${string}` {
-  const basename = path.basename(filename, path.extname(filename));
-  return `/${basename}`;
+function commandNameFromRelativePath(relativePath: string): `/${string}` {
+  const withoutExt = relativePath.slice(0, -path.extname(relativePath).length);
+  const commandName = withoutExt.split(path.sep).filter(Boolean).join(':');
+  return `/${commandName}`;
 }
 
 function applyBuiltinMetadata(
@@ -49,7 +54,7 @@ function applyBuiltinMetadata(
   return {
     ...summary,
     label: builtin.label,
-    commandName: builtin.commandName,
+    commandName: summary.commandName ?? builtin.commandName,
     description: builtin.description,
     category: builtin.category,
     safety: builtin.safety,
@@ -69,7 +74,7 @@ export class WorkflowPromptService {
     const warnings: string[] = [];
     const prompts: WorkflowPromptSummary[] = [];
     const entries = await readdir(folder, { withFileTypes: true });
-    const commandFolder = isClaudeCommandFolder(folder);
+    const commandRoot = getClaudeCommandRoot(folder);
 
     for (const entry of entries) {
       if (!entry.isFile() || entry.name.startsWith('.')) continue;
@@ -82,8 +87,11 @@ export class WorkflowPromptService {
         continue;
       }
 
-      const commandName = commandFolder ? commandNameFromFilename(entry.name) : undefined;
-      const builtin = commandFolder ? getBuiltinWorkflowByFilename(entry.name) : undefined;
+      const relativeCommandPath = commandRoot ? path.relative(commandRoot, filePath) : entry.name;
+      const commandName = commandRoot
+        ? commandNameFromRelativePath(relativeCommandPath)
+        : undefined;
+      const builtin = commandRoot ? getBuiltinWorkflowByFilename(entry.name) : undefined;
       const summary: WorkflowPromptSummary = {
         id: promptId(filePath),
         label: labelFromFilename(entry.name),
@@ -92,9 +100,9 @@ export class WorkflowPromptService {
         folder,
         sizeBytes: fileStat.size,
         updatedAt: fileStat.mtime.toISOString(),
-        source: commandFolder ? 'claude-command' : 'workflow-folder',
+        source: commandRoot ? 'claude-command' : 'workflow-folder',
         commandName,
-        safety: commandFolder ? 'unknown' : undefined,
+        safety: commandRoot ? 'unknown' : undefined,
       };
       prompts.push(applyBuiltinMetadata(summary, builtin));
     }

@@ -799,7 +799,7 @@ export const TaskDetailDialog = ({
                   );
                 })()
               : null}
-            {onDeleteTask && currentTask ? (
+            {onDeleteTask && currentTask && currentTask.status !== 'in_progress' ? (
               <Button
                 variant="ghost"
                 size="sm"

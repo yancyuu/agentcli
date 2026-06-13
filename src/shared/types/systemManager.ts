@@ -3,6 +3,7 @@ export interface SystemManagerStatus {
   defaultWorkDir: string;
   selectedWorkDir: string;
   workflowFolder?: string;
+  globalHermitWorkflowFolder?: string;
   claudeCommand: 'claude';
   localStatus: 'ready' | 'missing-claude' | 'error';
   error?: string;

@@ -310,6 +310,35 @@ describe('ActivityItem slash command rendering', () => {
     });
   });
 
+  it('does not duplicate standalone slash command text in the expanded header', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    const message: InboxMessage = {
+      from: 'user',
+      text: '/hermit:doctor\n检查 Hermit 安装、运行时、cc-connect、MCP 和常见配置问题',
+      timestamp: new Date('2026-03-27T12:00:30.000Z').toISOString(),
+      read: true,
+      source: 'user_sent',
+    };
+
+    await act(async () => {
+      root.render(React.createElement(ActivityItem, { message, teamName: 'my-team' }));
+      await Promise.resolve();
+    });
+
+    const slashCommandOccurrences = (host.textContent?.match(/\/hermit:doctor/g) ?? []).length;
+    expect(slashCommandOccurrences).toBe(1);
+    expect(host.textContent).toContain('检查 Hermit 安装');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('renders slash command results as a distinct command output row', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');
@@ -462,6 +491,37 @@ describe('ActivityItem legacy system message fallback', () => {
     expect(host.textContent).toContain('Я здесь.');
     expect(host.textContent).not.toContain('[to user]');
     expect(host.textContent).not.toContain('idle');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('does not duplicate cross-team-start system text in the expanded header', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    const text = '[跨团队任务已启动] "@资产创建 你能干啥" — team-opue 已从 TODO 点击启动并开始执行。';
+    const message: InboxMessage = {
+      from: 'system',
+      to: 'team',
+      text,
+      timestamp: new Date('2026-04-13T13:30:00.000Z').toISOString(),
+      read: true,
+      source: 'system_notification',
+    };
+
+    await act(async () => {
+      root.render(React.createElement(ActivityItem, { message, teamName: 'my-team' }));
+      await Promise.resolve();
+    });
+
+    const occurrences = (host.textContent?.match(/\[跨团队任务已启动\]/g) ?? []).length;
+    expect(occurrences).toBe(1);
+    expect(host.textContent).toContain('team-opue 已从 TODO 点击启动并开始执行');
 
     await act(async () => {
       root.unmount();

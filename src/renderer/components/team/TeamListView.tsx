@@ -274,6 +274,33 @@ const PendingDeleteBadge = (): React.JSX.Element => (
   </span>
 );
 
+const TeamListSkeleton = (): React.JSX.Element => (
+  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+    {Array.from({ length: 9 }).map((_, index) => (
+      <div
+        key={index}
+        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="skeleton-shimmer size-8 rounded-md bg-[var(--skeleton-base)]" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="skeleton-shimmer h-3 w-28 rounded bg-[var(--skeleton-base)]" />
+            <div className="skeleton-shimmer h-2.5 w-20 rounded bg-[var(--skeleton-base-dim)]" />
+          </div>
+        </div>
+        <div className="mt-3 space-y-2 pl-[42px]">
+          <div className="skeleton-shimmer h-2.5 w-3/4 rounded bg-[var(--skeleton-base-dim)]" />
+          <div className="flex gap-2">
+            <div className="skeleton-shimmer h-2.5 w-16 rounded bg-[var(--skeleton-base)]" />
+            <div className="skeleton-shimmer h-2.5 w-14 rounded bg-[var(--skeleton-base-dim)]" />
+            <div className="skeleton-shimmer h-2.5 w-12 rounded bg-[var(--skeleton-base-dim)]" />
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export const TeamListView = (): React.JSX.Element => {
   const { isLight } = useTheme();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -288,6 +315,7 @@ export const TeamListView = (): React.JSX.Element => {
   const [filter, setFilter] = useState<TeamListFilterState>(EMPTY_TEAM_FILTER);
   const [deletingTeamName, setDeletingTeamName] = useState<string | null>(null);
   const [aliveTeams, setAliveTeams] = useState<string[]>([]);
+  const [statsWarmupRequested, setStatsWarmupRequested] = useState(false);
   const {
     teams,
     teamsLoading,
@@ -371,6 +399,37 @@ export const TeamListView = (): React.JSX.Element => {
       .map((name) => provisioningSnapshotByTeam[name]);
     return synthetic.length > 0 ? [...teams, ...synthetic] : teams;
   }, [teams, provisioningTeamNames, provisioningSnapshotByTeam]);
+
+  const teamListStats = useMemo(() => {
+    const activeTeams = teamsWithProvisioning.filter((team) => !team.deletedAt);
+    const aliveSet = new Set(aliveTeams);
+    return activeTeams.reduce(
+      (acc, team) => {
+        acc.teams += 1;
+        if (aliveSet.has(team.teamName)) acc.running += 1;
+        acc.sessions += team.stats?.sessions ?? 0;
+        acc.messages += team.stats?.messages ?? 0;
+        acc.tokens += team.stats?.tokens ?? 0;
+        acc.durationMs += team.stats?.durationMs ?? 0;
+        return acc;
+      },
+      { teams: 0, running: 0, sessions: 0, messages: 0, tokens: 0, durationMs: 0 }
+    );
+  }, [teamsWithProvisioning, aliveTeams]);
+
+  useEffect(() => {
+    if (statsWarmupRequested || teamsLoading || teamsWithProvisioning.length === 0) return;
+    if (teamListStats.sessions > 0 || teamListStats.messages > 0 || teamListStats.tokens > 0)
+      return;
+
+    setStatsWarmupRequested(true);
+    const firstRefresh = window.setTimeout(() => void fetchTeams(), 1200);
+    const secondRefresh = window.setTimeout(() => void fetchTeams(), 3500);
+    return () => {
+      window.clearTimeout(firstRefresh);
+      window.clearTimeout(secondRefresh);
+    };
+  }, [fetchTeams, statsWarmupRequested, teamListStats, teamsLoading, teamsWithProvisioning.length]);
 
   // Fetch alive teams on mount and when teams list changes
   useEffect(() => {
@@ -1027,6 +1086,41 @@ export const TeamListView = (): React.JSX.Element => {
       </div>
 
       {teamsWithProvisioning.length > 0 ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-6">
+          {[
+            {
+              label: '数字员工',
+              value: String(teamListStats.teams),
+              tone: 'text-[var(--color-accent)]',
+            },
+            { label: '运行中', value: String(teamListStats.running), tone: 'text-emerald-400' },
+            { label: 'Sessions', value: String(teamListStats.sessions), tone: 'text-sky-400' },
+            { label: 'Messages', value: String(teamListStats.messages), tone: 'text-violet-400' },
+            {
+              label: 'Tokens',
+              value: formatTokensCompact(teamListStats.tokens),
+              tone: 'text-amber-400',
+            },
+            {
+              label: '耗时',
+              value: formatDurationShort(teamListStats.durationMs),
+              tone: 'text-orange-400',
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 duration-200 animate-in fade-in slide-in-from-bottom-1"
+            >
+              <div className={`text-sm font-semibold tabular-nums ${item.tone}`}>{item.value}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                {item.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {teamsWithProvisioning.length > 0 ? (
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search
@@ -1056,11 +1150,7 @@ export const TeamListView = (): React.JSX.Element => {
 
   const renderContent = (): React.JSX.Element => {
     if (teamsLoading) {
-      return (
-        <div className="flex size-full items-center justify-center text-sm text-[var(--color-text-muted)]">
-          正在加载团队...
-        </div>
-      );
+      return <TeamListSkeleton />;
     }
 
     if (teamsError) {
@@ -1130,7 +1220,7 @@ export const TeamListView = (): React.JSX.Element => {
                 key={team.teamName}
                 role="button"
                 tabIndex={0}
-                className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)]"
+                className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-all duration-200 animate-in fade-in slide-in-from-bottom-1 hover:-translate-y-0.5 hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)] hover:shadow-lg"
                 onClick={
                   isDeleting ? undefined : () => openTeamTab(team.teamName, team.projectPath)
                 }
@@ -1225,15 +1315,35 @@ export const TeamListView = (): React.JSX.Element => {
                   </p>
 
                   {/* Row 3: Stats bar */}
-                  <div className="mt-2 flex items-center gap-1.5 pl-[42px] text-[10px] tabular-nums">
-                    {team.stats && team.stats.sessions > 0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-[42px] text-[10px] tabular-nums">
+                    {team.stats && (team.stats.sessions > 0 || team.stats.messages > 0) ? (
                       <>
                         <span className="text-[var(--color-accent)]">
                           {team.stats.sessions} sessions
                         </span>
                         <span className="text-[var(--color-text-muted)] opacity-30">·</span>
-                        <span className="text-emerald-400">
-                          {formatTokensCompact(team.stats.tokens)}
+                        <span className="text-sky-400">{team.stats.messages} msgs</span>
+                        <span className="text-[var(--color-text-muted)] opacity-30">·</span>
+                        <span
+                          className="text-emerald-400"
+                          title={[
+                            team.stats.tokensIn !== undefined
+                              ? `输入 ${formatTokensCompact(team.stats.tokensIn)}`
+                              : null,
+                            team.stats.tokensOut !== undefined
+                              ? `输出 ${formatTokensCompact(team.stats.tokensOut)}`
+                              : null,
+                            team.stats.cacheRead !== undefined
+                              ? `缓存读 ${formatTokensCompact(team.stats.cacheRead)}`
+                              : null,
+                            team.stats.cacheCreation !== undefined
+                              ? `缓存写 ${formatTokensCompact(team.stats.cacheCreation)}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        >
+                          {formatTokensCompact(team.stats.tokens)} tokens
                         </span>
                         {team.stats.durationMs > 0 && (
                           <>

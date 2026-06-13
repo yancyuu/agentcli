@@ -4,8 +4,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Mock sub-components using full resolved paths
 vi.mock('@renderer/components/team/dialogs/PlatformSetupQR', () => ({
-  default: ({ onComplete, onCancel }: { onComplete: () => void; onCancel: () => void }) => (
-    <div data-testid="qr-setup">
+  default: ({
+    projectName,
+    platformType,
+    onComplete,
+    onCancel,
+  }: {
+    projectName: string;
+    platformType: string;
+    onComplete: () => void;
+    onCancel: () => void;
+  }) => (
+    <div data-testid="qr-setup" data-project={projectName} data-platform={platformType}>
       <button data-testid="qr-complete" onClick={onComplete}>QR Done</button>
       <button data-testid="qr-cancel" onClick={onCancel}>QR Back</button>
     </div>
@@ -87,7 +97,10 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    expect(host.querySelector('[data-testid="qr-setup"]')).toBeTruthy();
+    const qrSetup = host.querySelector('[data-testid="qr-setup"]');
+    expect(qrSetup).toBeTruthy();
+    expect(qrSetup?.getAttribute('data-project')).toBe('test-project');
+    expect(qrSetup?.getAttribute('data-platform')).toBe('feishu');
 
     await act(async () => {
       root.unmount();

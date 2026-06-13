@@ -2,10 +2,11 @@ import { TabsTrigger } from '@renderer/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { Info } from 'lucide-react';
 
+import type { ExtensionsSubTab } from '@renderer/hooks/useExtensionsTabState';
 import type { LucideIcon } from 'lucide-react';
 
 interface ExtensionsSubTabTriggerProps {
-  value: 'plugins';
+  value: ExtensionsSubTab;
   label: string;
   description: string;
   icon: LucideIcon;

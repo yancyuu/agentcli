@@ -174,6 +174,7 @@ describe('TaskDispatchService local dispatch start gate', () => {
       },
     });
     expect(collabBoard.getTask('dispatch-1')?.status).toBe('received');
+    expect(workspace.messages).toHaveLength(0);
   });
 
   it('only moves a received dispatch to doing/in_progress when Start is called', async () => {
@@ -222,6 +223,83 @@ describe('TaskDispatchService local dispatch start gate', () => {
       remoteTaskId: task.id,
     });
     expect(collabBoard.getTask('dispatch-3')?.status).toBe('received');
+    expect(workspace.messages).toHaveLength(0);
     expect(onRuntimeStart).not.toHaveBeenCalled();
+  });
+
+  it('rejects delivery before the target agent marks the local task done', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+
+    await service.dispatchTask('origin', { subject: 'Cannot deliver early' }, 'target', {
+      dispatchId: 'dispatch-4',
+    });
+    const [queued] = await workspace.readTasks('target');
+    await service.startDispatchedTask('target', queued.id);
+    const messageCountBeforeDelivery = workspace.messages.length;
+
+    await expect(service.deliverTask('target', 'dispatch-4', 'premature result')).rejects.toThrow(
+      'Task result cannot be delivered before the agent marks the task done.'
+    );
+    expect(collabBoard.getTask('dispatch-4')?.status).toBe('in_progress');
+    expect(workspace.messages).toHaveLength(messageCountBeforeDelivery);
+  });
+
+  it('delivers only after the target agent marks the local task done', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+
+    await service.dispatchTask('origin', { subject: 'Deliver after done' }, 'target', {
+      dispatchId: 'dispatch-5',
+    });
+    const [queued] = await workspace.readTasks('target');
+    await service.startDispatchedTask('target', queued.id);
+    await workspace.patchTask('target', queued.id, { status: 'done', result: 'finished' });
+    await service.onTaskCompleted('target', queued.id);
+
+    expect(collabBoard.getTask('dispatch-5')?.status).toBe('in_progress');
+    const originMessageCountBeforeDelivery = workspace.messages.filter(
+      (message) => message.teamSlug === 'origin'
+    ).length;
+
+    await expect(service.deliverTask('target', 'dispatch-5', 'finished')).resolves.toEqual({
+      ok: true,
+    });
+    expect(collabBoard.getTask('dispatch-5')?.status).toBe('delivered');
+    const originMessagesAfterDelivery = workspace.messages.filter(
+      (message) => message.teamSlug === 'origin'
+    );
+    expect(originMessagesAfterDelivery).toHaveLength(originMessageCountBeforeDelivery + 1);
+    expect(originMessagesAfterDelivery.at(-1)).toEqual(
+      expect.objectContaining({
+        teamSlug: 'origin',
+        content: expect.stringContaining('[跨团队任务待审核]'),
+      })
+    );
+  });
+
+  it('rejects re-delivery after approval before callback side effects', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+
+    await service.dispatchTask('origin', { subject: 'Do not deliver twice' }, 'target', {
+      dispatchId: 'dispatch-6',
+    });
+    const [queued] = await workspace.readTasks('target');
+    await service.startDispatchedTask('target', queued.id);
+    await workspace.patchTask('target', queued.id, { status: 'done', result: 'finished' });
+    await service.deliverTask('target', 'dispatch-6', 'finished');
+    await service.approveTask('origin', 'dispatch-6');
+    const originMessageCountBeforeRedelivery = workspace.messages.filter(
+      (message) => message.teamSlug === 'origin'
+    ).length;
+
+    await expect(service.deliverTask('target', 'dispatch-6', 'again')).rejects.toThrow(
+      'Task result has already been approved and cannot be delivered again.'
+    );
+    expect(collabBoard.getTask('dispatch-6')?.status).toBe('approved');
+    expect(workspace.messages.filter((message) => message.teamSlug === 'origin')).toHaveLength(
+      originMessageCountBeforeRedelivery
+    );
   });
 });

@@ -91,6 +91,7 @@ export interface GroupMessage {
 }
 
 export interface AppendGroupMessageInput {
+  id?: string;
   from: string;
   to?: string;
   role?: GroupMessage['role'];
@@ -365,7 +366,7 @@ export class TeamWorkspaceService {
     const file = path.join(teamRoot(storageSlug), 'messages', 'group.jsonl');
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
     const entry: GroupMessage = {
-      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: msg.id || `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       ts: new Date().toISOString(),
       from: msg.from,
       to: msg.to || 'team',

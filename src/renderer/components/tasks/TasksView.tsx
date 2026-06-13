@@ -23,7 +23,7 @@ type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'compl
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Loop 任务总览', icon: <Columns3 size={13} /> },
-  { id: 'schedules', label: '定时 Loop', icon: <Calendar size={13} /> },
+  { id: 'schedules', label: '定时任务', icon: <Calendar size={13} /> },
 ];
 
 const COLUMNS: {

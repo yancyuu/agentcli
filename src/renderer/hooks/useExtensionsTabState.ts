@@ -8,7 +8,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import type { PluginCapability, PluginFilters, PluginSortField } from '@shared/types/extensions';
 
-export type ExtensionsSubTab = 'plugins';
+export type ExtensionsSubTab = 'plugins' | 'capability-packs';
 
 interface PluginSortState {
   field: PluginSortField;

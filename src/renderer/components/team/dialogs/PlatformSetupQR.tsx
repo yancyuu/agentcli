@@ -90,7 +90,7 @@ export default function PlatformSetupQR({
           switch (res.status) {
             case 'completed':
               setPhase('saving');
-              await api.ccSetup.feishuSave({
+              const saved = await api.ccSetup.feishuSave({
                 project: projectName,
                 app_id: res.app_id!,
                 app_secret: res.app_secret!,
@@ -99,6 +99,13 @@ export default function PlatformSetupQR({
                 work_dir: workDir,
                 agent_type: agentType,
               });
+              if (saved.restart_required) {
+                setPhase('restarting');
+                await api.ccSettings.restart();
+                onComplete({ restartHandled: true });
+                pollingRef.current = false;
+                return;
+              }
               setPhase('completed');
               pollingRef.current = false;
               return;
@@ -159,7 +166,7 @@ export default function PlatformSetupQR({
               break;
             case 'confirmed':
               setPhase('saving');
-              await api.ccSetup.weixinSave({
+              const saved = await api.ccSetup.weixinSave({
                 project: projectName,
                 token: pollRes.bot_token!,
                 base_url: pollRes.base_url,
@@ -168,6 +175,12 @@ export default function PlatformSetupQR({
                 work_dir: workDir,
                 agent_type: agentType,
               });
+              if (saved.restart_required) {
+                setPhase('restarting');
+                await api.ccSettings.restart();
+                onComplete({ restartHandled: true });
+                return;
+              }
               setPhase('completed');
               return;
             case 'expired':

@@ -1,0 +1,49 @@
+/**
+ * Worker Society — 组合根（composition root）。
+ *
+ * 把领域/应用层与基础设施层装配成一个可被 server.ts / MCP / 前端调用的活实例：
+ *   - FS store（~/.hermit/society/*.json）让声誉/关系/需求持久。
+ *   - CrossTeamMessageGateway 让 worker 间消息走 hermit cross-team 协议并持久化。
+ *   - SystemClock 提供真实时间（应用层允许使用 Date；只有 workflow 脚本受限）。
+ *
+ * 镜像 server.ts:440-441（taskDispatch 构造）的注入式构造风格。
+ * rootDir 可注入（生产默认 ~/.hermit/society，测试用临时目录）。
+ */
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+import type { ClockPort } from '../../core/application/ports';
+import { WorkerSocietyService } from '../../core/application/WorkerSocietyService';
+import { CrossTeamMessageGateway } from '../infrastructure/crossTeamMessageGateway';
+import { FsNeedStore, FsProfileStore, FsRelationshipStore } from '../infrastructure/fsStores';
+
+/** 默认社会数据根目录：~/.hermit/society。 */
+export function defaultSocietyRoot(): string {
+  return join(homedir(), '.hermit', 'society');
+}
+
+/** 真实系统时钟（ISO 字符串）。 */
+class SystemClock implements ClockPort {
+  now(): string {
+    return new Date().toISOString();
+  }
+}
+
+export interface SocietyComponents {
+  service: WorkerSocietyService;
+  gateway: CrossTeamMessageGateway;
+  profiles: FsProfileStore;
+  needs: FsNeedStore;
+  relationships: FsRelationshipStore;
+}
+
+/** 装配 worker-society 全栈。同一 rootDir 可多次调用以「重载」磁盘状态。 */
+export function createWorkerSociety(rootDir: string = defaultSocietyRoot()): SocietyComponents {
+  const clock = new SystemClock();
+  const profiles = new FsProfileStore(rootDir);
+  const needs = new FsNeedStore(rootDir);
+  const relationships = new FsRelationshipStore(rootDir);
+  const gateway = new CrossTeamMessageGateway(rootDir, clock);
+  const service = new WorkerSocietyService(profiles, needs, relationships, gateway, clock);
+  return { service, gateway, profiles, needs, relationships };
+}

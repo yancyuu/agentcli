@@ -36,6 +36,7 @@ import type {
   CrossTeamAPI,
   CrossTeamMessage,
   CrossTeamSendResult,
+  DiscoverableWorker,
   ElectronAPI,
   FileChangeEvent,
   GlobalTask,
@@ -111,6 +112,12 @@ import type { AgentConfig } from '@shared/types/api';
 import type { CliProviderStatus } from '@shared/types/cliInstaller';
 import type { EditorAPI, ProjectAPI, WorkspaceListResponse } from '@shared/types/editor';
 import type {
+  CapabilityCommandPromptRequest,
+  CapabilityCommandPromptResult,
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
+  CapabilityPackListResult,
+  CapabilityPackMutationResult,
   EnrichedPlugin,
   InstalledMcpEntry,
   McpCatalogItem,
@@ -1681,6 +1688,28 @@ export class HttpAPIClient implements ElectronAPI {
       this.get<CrossTeamMessage[]>(`/api/cross-team/outbox/${encodeURIComponent(teamName)}`),
   };
 
+  workers = {
+    list: () => this.get<{ workers: DiscoverableWorker[] }>('/api/workers'),
+    invoke: (
+      workerId: string,
+      request: {
+        fromTeam?: string;
+        text: string;
+        summary?: string;
+        sessionName?: string;
+        reuse?: boolean;
+        sessionKey?: string;
+      }
+    ) =>
+      this.postLong<{
+        ok: boolean;
+        worker: DiscoverableWorker;
+        session: CcSession;
+        reused: boolean;
+        messageSent: boolean;
+      }>(`/api/workers/${encodeURIComponent(workerId)}/invoke`, request, 30_000),
+  };
+
   // Collaboration board API
   collab = {
     getBoard: () => this.get<{ tasks: CollabTask[] }>('/api/collab/board'),
@@ -2202,6 +2231,47 @@ export class HttpAPIClient implements ElectronAPI {
       }>('/api/extensions/mcp/library/import', request);
       if (!result.success) throw new Error(result.error ?? 'Import failed');
       return result.data ?? { imported: [], skipped: [] };
+    },
+  };
+
+  capabilityPacks = {
+    list: async () => {
+      const result = await this.get<{
+        success: boolean;
+        data?: CapabilityPackListResult;
+        error?: string;
+      }>('/api/extensions/capability-packs');
+      if (!result.success)
+        return { packs: [], warnings: result.error ? [result.error] : [], rootDir: '' };
+      return result.data ?? { packs: [], warnings: [], rootDir: '' };
+    },
+    importPack: async (request: CapabilityPackImportRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: CapabilityPackMutationResult;
+        error?: string;
+      }>('/api/extensions/capability-packs/import', request);
+      if (!result.success) throw new Error(result.error ?? 'Import capability pack failed');
+      return result.data ?? { pack: null, warnings: [] };
+    },
+    exportPack: async (request: CapabilityPackExportRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: CapabilityPackMutationResult;
+        error?: string;
+      }>('/api/extensions/capability-packs/export', request);
+      if (!result.success) throw new Error(result.error ?? 'Export capability pack failed');
+      return result.data ?? { pack: null, warnings: [] };
+    },
+    getCommandPrompt: async (request: CapabilityCommandPromptRequest) => {
+      const result = await this.post<{
+        success: boolean;
+        data?: CapabilityCommandPromptResult;
+        error?: string;
+      }>('/api/extensions/capability-packs/command-prompt', request);
+      if (!result.success) throw new Error(result.error ?? 'Load capability command failed');
+      if (!result.data) throw new Error('Load capability command failed');
+      return result.data;
     },
   };
 

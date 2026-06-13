@@ -2,13 +2,41 @@
  * Extension Store types — barrel export.
  */
 
-export type { ApiKeysAPI, McpCatalogAPI, PluginCatalogAPI, SkillsCatalogAPI } from './api';
+export type {
+  ApiKeysAPI,
+  CapabilityPacksAPI,
+  McpCatalogAPI,
+  PluginCatalogAPI,
+  SkillsCatalogAPI,
+} from './api';
 export type {
   ApiKeyEntry,
   ApiKeyLookupResult,
   ApiKeySaveRequest,
   ApiKeyStorageStatus,
 } from './apikey';
+export type {
+  CapabilityCommand,
+  CapabilityCommandExecution,
+  CapabilityCommandExecutionType,
+  CapabilityCommandSurface,
+  CapabilityPackImportRequest,
+  CapabilityPackExportRequest,
+  CapabilityPackListResult,
+  CapabilityPackManifest,
+  CapabilityPackMutationResult,
+  CapabilityPackSource,
+  CapabilityCommandPromptRequest,
+  CapabilityCommandPromptResult,
+  CapabilitySafety,
+  CapabilityScope,
+  CapabilitySkill,
+  CapabilityWorkflow,
+  LoadedCapabilityPack,
+  RegisteredSlashCommand,
+  SlashCommandResolveResult,
+  SlashCommandSource,
+} from './capabilityPack';
 export type { ExtensionOperationState, InstallScope, OperationResult } from './common';
 export type {
   InstalledMcpEntry,

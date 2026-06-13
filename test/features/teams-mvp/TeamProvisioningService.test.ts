@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import { HERMIT_OPS_GUIDE_URL } from '@main/services/teams-mvp/OpsRunbookContext';
 import { TeamProvisioningService } from '@main/services/teams-mvp/TeamProvisioningService';
 import { TeamWorkspaceService } from '@main/services/teams-mvp/TeamWorkspaceService';
 
@@ -103,7 +104,7 @@ describe('createTeam', () => {
     expect(mockCc.restart).not.toHaveBeenCalled();
   });
 
-  it('injects MCP config for claudecode harness', async () => {
+  it('injects MCP config and ops runbook context for claudecode harness', async () => {
     const workDir = path.join(tmpDir, 'mcp-work');
     fs.mkdirSync(workDir, { recursive: true });
     await svc.createTeam({
@@ -118,9 +119,16 @@ describe('createTeam', () => {
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     expect(settings.mcpServers['hermit-tasks']).toBeDefined();
     expect(settings.mcpServers['hermit-tasks'].url).toContain('/mcp');
+
+    const claudeMd = fs.readFileSync(path.join(workDir, 'CLAUDE.md'), 'utf8');
+    expect(claudeMd).toContain('## Hermit Team Context');
+    expect(claudeMd).toContain('## Hermit Ops Runbook Context');
+    expect(claudeMd).toContain(HERMIT_OPS_GUIDE_URL);
+    expect(claudeMd).toContain('/hermit:doctor');
+    expect(claudeMd).toContain('/hermit:loop-scan');
   });
 
-  it('does NOT inject MCP config for codex harness', async () => {
+  it('does NOT inject MCP config or CLAUDE.md instructions for codex harness', async () => {
     const workDir = path.join(tmpDir, 'codex-work');
     fs.mkdirSync(workDir, { recursive: true });
     await svc.createTeam({
@@ -132,6 +140,7 @@ describe('createTeam', () => {
     });
     const settingsPath = path.join(workDir, '.claude', 'settings.json');
     expect(fs.existsSync(settingsPath)).toBe(false);
+    expect(fs.existsSync(path.join(workDir, 'CLAUDE.md'))).toBe(false);
   });
 });
 

@@ -86,7 +86,7 @@ export const CcCronScheduleDialog = ({
       return;
     }
     if (!normalizedPrompt) {
-      setError('请填写定时 Loop 指令');
+      setError('请填写定时指令');
       return;
     }
 
@@ -122,7 +122,7 @@ export const CcCronScheduleDialog = ({
       }
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存定时 Loop 失败');
+      setError(err instanceof Error ? err.message : '保存定时任务失败');
     } finally {
       setSaving(false);
     }
@@ -132,7 +132,7 @@ export const CcCronScheduleDialog = ({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEditing ? '编辑定时 Loop' : '添加定时 Loop'}</DialogTitle>
+          <DialogTitle>{isEditing ? '编辑定时任务' : '添加定时任务'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -175,11 +175,11 @@ export const CcCronScheduleDialog = ({
           </div>
 
           <div className="space-y-1.5">
-            <Label>定时 Loop 指令</Label>
+            <Label>定时指令</Label>
             <Textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="到时间后发送给 Loop Lead 的循环指令..."
+              placeholder="到时间后发送给 Lead 的循环指令..."
               className="min-h-28"
             />
           </div>

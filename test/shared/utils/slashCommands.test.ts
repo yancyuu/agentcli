@@ -21,6 +21,7 @@ describe('slashCommands', () => {
       '/fast',
       '/cost',
       '/usage',
+      '/workers',
     ]);
   });
 

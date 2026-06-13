@@ -153,6 +153,10 @@ vi.mock('@renderer/components/extensions/plugins/PluginsPanel', () => ({
   },
 }));
 
+vi.mock('@renderer/components/extensions/capability-packs/CapabilityPacksPanel', () => ({
+  CapabilityPacksPanel: () => React.createElement('div', null, 'capability-packs-panel'),
+}));
+
 vi.mock('@renderer/components/extensions/mcp/McpLibraryPanel', () => ({
   McpLibraryPanel: (props: unknown) => {
     mcpServersPanelSpy(props);
@@ -180,6 +184,7 @@ vi.mock('lucide-react', () => {
   return {
     AlertTriangle: Icon,
     BookOpen: Icon,
+    Boxes: Icon,
     CheckCircle: Icon,
     CheckCircle2: Icon,
     Eye: Icon,

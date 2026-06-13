@@ -25,6 +25,7 @@ import { PERMISSION_MODE_OPTIONS } from './useTeamEditForm';
 
 import type { CcAgentType, CcProjectPlatform } from '@shared/types/ccConnect';
 import type { TeamUpdateConfigRequest } from '@shared/types/team';
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
 // ── Section wrapper ──────────────────────────────────────────
 function FormSection({
@@ -135,6 +136,7 @@ export function RuntimeConfigDialog({
   teamName,
   onClose,
 }: RuntimeConfigDialogProps): React.JSX.Element {
+  const isAdminTeam = teamName === SYSTEM_MANAGER_TEAM_NAME;
   const { data, fetchTeams, selectTeam } = useStore((s) => ({
     data: s.selectedTeamName === teamName ? s.selectedTeamData : null,
     fetchTeams: s.fetchTeams,
@@ -285,15 +287,20 @@ export function RuntimeConfigDialog({
       try {
         await saveRuntimeConfig();
 
-        setSavePhase('restarting');
-        try {
-          await api.ccSettings.restart();
+        if (isAdminTeam) {
+          void Promise.all([fetchTeams(), selectTeam(teamName)]);
           setSavePhase('done');
-        } catch (restartErr) {
-          setError(
-            `配置已保存，但重启失败：${restartErr instanceof Error ? restartErr.message : '未知错误'}`
-          );
-          setSavePhase('idle');
+        } else {
+          setSavePhase('restarting');
+          try {
+            await api.ccSettings.restart();
+            setSavePhase('done');
+          } catch (restartErr) {
+            setError(
+              `配置已保存，但重启失败：${restartErr instanceof Error ? restartErr.message : '未知错误'}`
+            );
+            setSavePhase('idle');
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '保存失败');
@@ -326,7 +333,7 @@ export function RuntimeConfigDialog({
     setError(null);
     void (async () => {
       try {
-        if (!options?.restartHandled) {
+        if (!options?.restartHandled && !isAdminTeam) {
           await api.ccSettings.restart();
         }
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
@@ -348,7 +355,9 @@ export function RuntimeConfigDialog({
         ? '正在重启...'
         : savePhase === 'saving'
           ? '保存中...'
-          : '保存并重启';
+          : isAdminTeam
+            ? '保存'
+            : '保存并重启';
 
   return (
     <Dialog

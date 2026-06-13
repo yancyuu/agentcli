@@ -94,7 +94,7 @@ export const SchedulesView = (): React.JSX.Element => {
             style={{ color: 'var(--color-text-muted)' }}
           >
             <span className="text-cyan-400/40">#</span>
-            定时 Loop
+            定时任务
           </h1>
           {schedules.length > 0 && (
             <span
@@ -124,7 +124,7 @@ export const SchedulesView = (): React.JSX.Element => {
               style={{ color: 'var(--color-text-muted)', opacity: 0.4 }}
             />
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              暂无定时 Loop。在 Loop workspace 中创建计划即可自动运行。
+              暂无定时任务。在 Loop workspace 中创建计划即可自动运行。
             </p>
             <Button
               size="sm"

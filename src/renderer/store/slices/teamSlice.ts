@@ -72,6 +72,7 @@ const logger = createLogger('teamSlice');
 
 const TEAM_GET_DATA_TIMEOUT_MS = 30_000;
 const TEAM_FETCH_TIMEOUT_MS = 30_000;
+export const TEAM_MESSAGES_PAGE_LIMIT = 20;
 const MEMBER_SPAWN_STATUSES_IPC_RETRY_BACKOFF_MS = 5_000;
 const TEAM_REFRESH_BURST_WINDOW_MS = 4_000;
 const MEMBER_SPAWN_UI_EQUAL_WARN_THROTTLE_MS = 2_000;
@@ -796,6 +797,8 @@ export interface TeamMessagesCacheEntry {
   loadingOlder: boolean;
   headHydrated: boolean;
   olderHydrated: boolean;
+  /** Epoch ms of last manual clear; messages with timestamp ≤ this are hidden from the view. */
+  clearedAt: number | null;
 }
 
 export interface RefreshTeamMessagesHeadResult {
@@ -815,6 +818,7 @@ const EMPTY_TEAM_MESSAGES_CACHE_ENTRY: TeamMessagesCacheEntry = {
   loadingOlder: false,
   headHydrated: false,
   olderHydrated: false,
+  clearedAt: null,
 };
 
 function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
@@ -829,6 +833,7 @@ function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
     loadingOlder: false,
     headHydrated: false,
     olderHydrated: false,
+    clearedAt: null,
   };
 }
 
@@ -1500,6 +1505,7 @@ const mergedMessagesSelectorCache = new Map<
   {
     canonicalRef: InboxMessage[];
     optimisticRef: InboxMessage[];
+    clearedAt: number | null;
     result: InboxMessage[];
   }
 >();
@@ -1733,15 +1739,23 @@ export function selectTeamMessages(
   const cached = mergedMessagesSelectorCache.get(teamName);
   if (
     cached?.canonicalRef === entry.canonicalMessages &&
-    cached.optimisticRef === entry.optimisticMessages
+    cached.optimisticRef === entry.optimisticMessages &&
+    cached.clearedAt === entry.clearedAt
   ) {
     return cached.result;
   }
 
-  const result = mergeTeamMessages(entry.canonicalMessages, entry.optimisticMessages);
+  let result = mergeTeamMessages(entry.canonicalMessages, entry.optimisticMessages);
+  // `!= null` treats both null and a missing/undefined field as "no cutoff", so
+  // legacy entries constructed before clearedAt existed are not accidentally emptied.
+  if (entry.clearedAt != null) {
+    const cutoff = entry.clearedAt;
+    result = result.filter((msg) => Date.parse(msg.timestamp) > cutoff);
+  }
   mergedMessagesSelectorCache.set(teamName, {
     canonicalRef: entry.canonicalMessages,
     optimisticRef: entry.optimisticMessages,
+    clearedAt: entry.clearedAt,
     result,
   });
   return result;
@@ -2070,6 +2084,7 @@ export interface TeamSlice {
   refreshTeamData: (teamName: string, opts?: RefreshTeamDataOptions) => Promise<void>;
   refreshTeamMessagesHead: (teamName: string) => Promise<RefreshTeamMessagesHeadResult>;
   loadOlderTeamMessages: (teamName: string) => Promise<void>;
+  clearTeamMessages: (teamName: string) => void;
   refreshMemberActivityMeta: (teamName: string) => Promise<void>;
   syncTeamPendingReplyRefresh: (
     teamName: string,
@@ -2079,6 +2094,15 @@ export interface TeamSlice {
   ) => void;
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<SendMessageResult>;
   addOptimisticTeamMessage: (teamName: string, message: InboxMessage) => void;
+  /**
+   * Accumulate a streaming direct-CLI assistant reply token-by-token into an optimistic
+   * in-progress message keyed by `messageId`. The canonical reply (appended server-side
+   * with the same messageId) prunes this twin on the next inbox refresh — no duplicate.
+   */
+  appendStreamingTeamReply: (
+    teamName: string,
+    chunk: { messageId: string; delta: string; from: string; to?: string }
+  ) => void;
   crossTeamTargets: {
     teamName: string;
     displayName: string;
@@ -3668,7 +3692,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
       try {
         const page = await unwrapIpc('team:getMessagesPage', () =>
-          api.teams.getMessagesPage(teamName, { limit: 50 })
+          api.teams.getMessagesPage(teamName, { limit: TEAM_MESSAGES_PAGE_LIMIT })
         );
         if (!isTeamLocalStateEpochCurrent(teamName, teamStateEpoch)) {
           return {
@@ -3805,7 +3829,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         const page = await unwrapIpc('team:getMessagesPage', () =>
           api.teams.getMessagesPage(teamName, {
             cursor: entry.nextCursor,
-            limit: 50,
+            limit: TEAM_MESSAGES_PAGE_LIMIT,
           })
         );
         if (!isTeamLocalStateEpochCurrent(teamName, teamStateEpoch)) {
@@ -3882,6 +3906,27 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     const request = requestRef.current;
     inFlightTeamMessagesOlderRequests.set(teamName, request);
     return request;
+  },
+
+  clearTeamMessages: (teamName: string) => {
+    const clearedAt = Date.now();
+    mergedMessagesSelectorCache.delete(teamName);
+    set((state) => {
+      const existing = getTeamMessagesCacheEntry(state, teamName);
+      // Keep canonical messages (so refetch comparison is stable) but mark a cutoff:
+      // any message with timestamp ≤ clearedAt is hidden from the view.
+      return {
+        teamMessagesByName: {
+          ...state.teamMessagesByName,
+          [teamName]: {
+            ...existing,
+            optimisticMessages: [],
+            clearedAt,
+            hasMore: false,
+          },
+        },
+      };
+    });
   },
 
   refreshMemberActivityMeta: async (teamName: string) => {
@@ -4111,6 +4156,43 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         ),
       },
     }));
+  },
+  appendStreamingTeamReply: (teamName, chunk) => {
+    const messageId = chunk.messageId.trim();
+    if (!messageId) return;
+    set((state) => {
+      const entry = getTeamMessagesCacheEntry(state, teamName);
+      const existingIndex = entry.optimisticMessages.findIndex(
+        (m) => typeof m.messageId === 'string' && m.messageId.trim() === messageId
+      );
+      let nextOptimistic: InboxMessage[];
+      if (existingIndex >= 0) {
+        // Append the delta to the in-progress reply (token-by-token accumulation).
+        const existing = entry.optimisticMessages[existingIndex];
+        nextOptimistic = [...entry.optimisticMessages];
+        nextOptimistic[existingIndex] = { ...existing, text: existing.text + chunk.delta };
+      } else {
+        nextOptimistic = [
+          ...entry.optimisticMessages,
+          {
+            from: chunk.from,
+            to: chunk.to,
+            text: chunk.delta,
+            timestamp: new Date().toISOString(),
+            read: true,
+            messageId,
+            source: 'runtime_delivery',
+          },
+        ];
+        nextOptimistic.sort(compareInboxMessagesByTimestamp);
+      }
+      return {
+        teamMessagesByName: {
+          ...state.teamMessagesByName,
+          [teamName]: { ...entry, optimisticMessages: nextOptimistic },
+        },
+      };
+    });
   },
 
   fetchCrossTeamTargets: async () => {

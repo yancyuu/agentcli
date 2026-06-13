@@ -1092,6 +1092,11 @@ export const ActivityItem = memo(
         </>
       ) : null;
 
+    const hideExpandedHeaderSummary =
+      isSlashCommandMessage ||
+      !!displayText ||
+      (isSystemMessage && strippedText ? /^\[跨团队任务已启动\]/.test(strippedText) : false);
+
     const summaryContent =
       isSlashCommandResult && message.commandOutput ? (
         <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -1388,9 +1393,16 @@ export const ActivityItem = memo(
               {messageTypeBadge}
               {statusBadge}
               {recipientBadge}
-              <span className="min-w-0 flex-1 truncate text-xs" style={{ color: CARD_TEXT_LIGHT }}>
-                {summaryContent}
-              </span>
+              {!hideExpandedHeaderSummary ? (
+                <span
+                  className="min-w-0 flex-1 truncate text-xs"
+                  style={{ color: CARD_TEXT_LIGHT }}
+                >
+                  {summaryContent}
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1" />
+              )}
               <div className="relative flex shrink-0 items-center">
                 <span
                   className={

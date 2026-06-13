@@ -8,6 +8,8 @@ import type {
   SystemManagerStatus,
 } from '@shared/types/systemManager';
 
+import { getGlobalHermitWorkflowDir } from './BuiltinWorkflowSeeder';
+
 const CONFIG_FILE = 'system-manager.json';
 
 function hermitHome(): string {
@@ -106,6 +108,7 @@ export class SystemManagerConfigService {
       defaultWorkDir: this.defaultWorkDir,
       selectedWorkDir: config.selectedWorkDir,
       ...(config.workflowFolder ? { workflowFolder: config.workflowFolder } : {}),
+      globalHermitWorkflowFolder: getGlobalHermitWorkflowDir(),
       claudeCommand: 'claude',
       localStatus: hasClaude ? 'ready' : 'missing-claude',
       ...(hasClaude ? {} : { error: '未在 PATH 中找到 claude 命令' }),

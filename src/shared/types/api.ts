@@ -10,7 +10,13 @@
 import type { CliArgsValidationResult } from '../utils/cliArgsParser';
 import type { CliInstallerAPI } from './cliInstaller';
 import type { EditorAPI, EditorFileChangeEvent, ProjectAPI, WorkspaceListResponse } from './editor';
-import type { ApiKeysAPI, McpCatalogAPI, PluginCatalogAPI, SkillsCatalogAPI } from './extensions';
+import type {
+  ApiKeysAPI,
+  CapabilityPacksAPI,
+  McpCatalogAPI,
+  PluginCatalogAPI,
+  SkillsCatalogAPI,
+} from './extensions';
 import type {
   AppConfig,
   DetectedError,
@@ -97,6 +103,7 @@ import type {
 import type { LoopAssetsSnapshot } from './loopAssets';
 import type { SystemManagerAPI } from './systemManager';
 import type { TerminalAPI } from './terminal';
+import type { DiscoverableWorker } from './worker';
 import type { WaterfallData } from './visualization';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type {
@@ -864,6 +871,36 @@ export interface CrossTeamAPI {
 }
 
 // =============================================================================
+// Digital Workers API
+// =============================================================================
+
+export interface WorkerListResponse {
+  workers: DiscoverableWorker[];
+}
+
+export interface WorkerInvokeRequest {
+  fromTeam?: string;
+  text: string;
+  summary?: string;
+  sessionName?: string;
+  reuse?: boolean;
+  sessionKey?: string;
+}
+
+export interface WorkerInvokeResponse {
+  ok: boolean;
+  worker: DiscoverableWorker;
+  session: CcSession;
+  reused: boolean;
+  messageSent: boolean;
+}
+
+export interface WorkersAPI {
+  list: () => Promise<WorkerListResponse>;
+  invoke: (workerId: string, request: WorkerInvokeRequest) => Promise<WorkerInvokeResponse>;
+}
+
+// =============================================================================
 // Collaboration Board API
 // =============================================================================
 
@@ -1227,6 +1264,10 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // Cross-Team Communication API
   crossTeam: CrossTeamAPI;
+
+  // Digital Workers API
+  workers: WorkersAPI;
+
   collab: CollabBoardAPI;
 
   // Review API
@@ -1263,6 +1304,9 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // Extension Store — Skills Catalog API (Electron-only, optional)
   skills?: SkillsCatalogAPI;
+
+  // Extension Store — Capability Packs API (Electron-only, optional)
+  capabilityPacks?: CapabilityPacksAPI;
 
   // Extension Store — Credentials (project env, MCP credentials)
   credentials?: {

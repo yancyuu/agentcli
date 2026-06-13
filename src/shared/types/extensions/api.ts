@@ -24,6 +24,14 @@ import type {
 } from './mcp';
 import type { EnrichedPlugin, PluginInstallRequest } from './plugin';
 import type {
+  CapabilityCommandPromptRequest,
+  CapabilityCommandPromptResult,
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
+  CapabilityPackListResult,
+  CapabilityPackMutationResult,
+} from './capabilityPack';
+import type {
   SkillCatalogItem,
   SkillDeleteRequest,
   SkillDetail,
@@ -86,6 +94,17 @@ export interface SkillsCatalogAPI {
   startWatching: (projectPath?: string) => Promise<string>;
   stopWatching: (watchId: string) => Promise<void>;
   onChanged: (callback: (event: SkillWatcherEvent) => void) => () => void;
+}
+
+// ── Capability Packs API ──────────────────────────────────────────────────
+
+export interface CapabilityPacksAPI {
+  list: () => Promise<CapabilityPackListResult>;
+  importPack: (request: CapabilityPackImportRequest) => Promise<CapabilityPackMutationResult>;
+  exportPack: (request: CapabilityPackExportRequest) => Promise<CapabilityPackMutationResult>;
+  getCommandPrompt: (
+    request: CapabilityCommandPromptRequest
+  ) => Promise<CapabilityCommandPromptResult>;
 }
 
 // ── API Keys API ──────────────────────────────────────────────────────────

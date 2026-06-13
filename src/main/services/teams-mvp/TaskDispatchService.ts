@@ -355,10 +355,24 @@ export class TaskDispatchService {
       remoteTaskId: task.id,
     };
 
-    const updated = await this.workspace.patchTask(teamSlug, taskId, {
+    await this.workspace.patchTask(teamSlug, taskId, {
       status: 'doing',
       dispatchMeta: meta,
     } as any);
+
+    const description = task.description?.trim();
+    const runtimeText = `[跨团队任务启动] 来自 ${meta.originTeam} 的任务已由用户点击启动，请开始执行。\n\n任务：${task.title}${description ? `\n\n描述：${description}` : ''}\n\n完成后请调用 complete_task 标记完成。`;
+    try {
+      await this.onRuntimeStart?.({ teamName: teamSlug, text: runtimeText });
+    } catch (err) {
+      await this.workspace
+        .patchTask(teamSlug, taskId, {
+          status: 'todo',
+          dispatchMeta: task.dispatchMeta,
+        } as any)
+        .catch(() => {});
+      throw err;
+    }
 
     const collabTask = this.collabBoard.getTask(meta.dispatchId);
     if (collabTask && ['received', 'pending_accept', 'accepted'].includes(collabTask.status)) {
@@ -373,10 +387,6 @@ export class TaskDispatchService {
       });
       this.emitCollabChange(meta.dispatchId, next.status, next.fromTeam, next.toTeam);
     }
-
-    const description = updated.description?.trim();
-    const runtimeText = `[跨团队任务启动] 来自 ${meta.originTeam} 的任务已由用户点击启动，请开始执行。\n\n任务：${updated.title}${description ? `\n\n描述：${description}` : ''}\n\n完成后请调用 complete_task 标记完成。`;
-    await this.onRuntimeStart?.({ teamName: teamSlug, text: runtimeText });
 
     const pending = this.pendingRequests.get(meta.dispatchId);
     if (pending?.teamSlug === teamSlug) {
@@ -406,7 +416,7 @@ export class TaskDispatchService {
         from: 'system',
         to: 'team',
         role: 'agent',
-        content: `[跨团队任务已启动] "${updated.title}" — ${teamSlug} 已从 TODO 点击启动并开始执行。`,
+        content: `[跨团队任务已启动] "${task.title}" — ${teamSlug} 已从 TODO 点击启动并开始执行。`,
         meta: {
           source: 'cross_team_started',
           dispatchId: meta.dispatchId,
@@ -448,21 +458,9 @@ export class TaskDispatchService {
     }
     this.emitCollabChange(payload.dispatchId, 'received', payload.originTeam, payload.targetTeam);
 
-    try {
-      await this.workspace.appendMessage(teamSlug, {
-        from: 'system',
-        to: 'team',
-        role: 'agent',
-        content: `[跨团队任务已接收] "${payload.task.subject}" — 来自 ${payload.originTeam} 的任务已记录，等待目标团队在 TODO 中点击启动。`,
-        meta: {
-          source: 'cross_team_received',
-          dispatchId: payload.dispatchId,
-          originTeam: payload.originTeam,
-          taskId: localTask?.id ?? remoteTaskId,
-          runtimeDeliverable: false,
-        },
-      });
-    } catch {}
+    // Do not append anything to the target inbox on receipt/accept. The target
+    // team's TODO card is the only pre-start surface; inbox/runtime delivery is
+    // gated by explicit Start.
 
     this.sendFeishuNotification(
       `跨团队任务待启动：${payload.originTeam} → ${teamSlug}\n${payload.task.subject}\n状态：等待目标团队点击启动`
@@ -551,6 +549,19 @@ export class TaskDispatchService {
       throw new Error(`No collab task found for dispatchId: ${dispatchId}`);
     }
 
+    const localTasks = await this.workspace.readTasks(teamSlug).catch(() => []);
+    const completedTask = localTasks.find((task) => task.dispatchMeta?.dispatchId === dispatchId);
+    if (!completedTask) {
+      throw new Error(`No local task found for dispatchId: ${dispatchId}`);
+    }
+    if (completedTask.status !== 'done') {
+      throw new Error('Task result cannot be delivered before the agent marks the task done.');
+    }
+
+    if (collabTask.status === 'approved') {
+      throw new Error('Task result has already been approved and cannot be delivered again.');
+    }
+
     const deliveredAt = new Date().toISOString();
 
     // Send deliver response to origin team
@@ -577,7 +588,7 @@ export class TaskDispatchService {
     // Update local collab board
     const deliveredTask = this.collabBoard.transition({
       dispatchId,
-      expected: ['accepted', 'revision'],
+      expected: ['in_progress', 'accepted', 'revision'],
       next: 'delivered',
       actor: { type: 'team', id: teamSlug },
       eventType: 'task_delivered',
@@ -785,37 +796,18 @@ export class TaskDispatchService {
     } as any);
 
     const collabTask = this.collabBoard.getTask(meta.dispatchId);
-    if (
-      collabTask &&
-      ['in_progress', 'accepted', 'delivered', 'revision'].includes(collabTask.status)
-    ) {
-      const next = this.collabBoard.transition({
-        dispatchId: meta.dispatchId,
-        expected: ['in_progress', 'accepted', 'delivered', 'revision'],
-        next: 'approved',
-        actor: { type: 'team', id: teamSlug },
-        eventType: 'task_approved',
-        payload: { remoteTaskId: task.id, completedAt: update.timestamp },
-        extra: { completedAt: update.timestamp, result: task.result ?? undefined },
-      });
-      this.emitCollabChange(meta.dispatchId, next.status, next.fromTeam, next.toTeam);
+    if (collabTask) {
+      this.emitCollabChange(
+        meta.dispatchId,
+        collabTask.status,
+        collabTask.fromTeam,
+        collabTask.toTeam
+      );
     }
 
-    await this.workspace
-      .appendMessage(meta.originTeam, {
-        from: 'system',
-        to: 'team',
-        role: 'agent',
-        content: `[跨团队任务已完成] "${task.title}" — ${teamSlug} 已完成任务${task.result ? `。结果：${task.result}` : '。'}`,
-        meta: {
-          source: 'cross_team_completed',
-          dispatchId: meta.dispatchId,
-          targetTeam: teamSlug,
-          taskId,
-          result: task.result ?? undefined,
-        },
-      })
-      .catch(() => {});
+    // Completion only marks the target-side task as done. The origin team should
+    // receive the callback/result through deliverTask(), which is gated above by
+    // this local done state.
 
     if (this.redis) {
       const channel = `task:status:${meta.originTeam}`;

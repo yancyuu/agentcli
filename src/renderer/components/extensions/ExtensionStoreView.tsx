@@ -37,9 +37,10 @@ import {
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
-import { AlertTriangle, Info, Loader2, Puzzle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Boxes, Info, Loader2, Puzzle, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { CapabilityPacksPanel } from './capability-packs/CapabilityPacksPanel';
 import { PluginsPanel } from './plugins/PluginsPanel';
 import { StoreExtensionToast } from './common/ExtensionToast';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
@@ -104,9 +105,15 @@ function isCodexSnapshotPending(
 const EXTENSION_SUB_TABS = [
   {
     value: 'plugins' as const,
-    label: 'Loop 扩展',
+    label: 'cc 扩展',
     icon: Puzzle,
     description: '为 Agent loop 注入工具、Skills、MCP 和连接器。',
+  },
+  {
+    value: 'capability-packs' as const,
+    label: '能力包',
+    icon: Boxes,
+    description: '本地 commands、skills metadata 和 workflows metadata 集合。',
   },
 ] as const;
 
@@ -241,9 +248,9 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         <div className="bg-surface/70 mx-4 mt-3 flex items-start gap-3 rounded-md border border-border px-4 py-3">
           <Info className="mt-0.5 size-4 shrink-0 text-text-secondary" />
           <div>
-            <p className="text-sm font-medium text-text">正在检查 Loop 扩展运行时可用性</p>
+            <p className="text-sm font-medium text-text">正在检查 cc 扩展运行时可用性</p>
             <p className="mt-0.5 text-xs text-text-muted">
-              Loop 扩展需要配置好的运行时来管理工具、Skills 和提供商连接。
+              cc 扩展需要配置好的运行时来管理工具、Skills 和提供商连接。
             </p>
           </div>
         </div>
@@ -417,6 +424,10 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                   cliStatus={effectiveCliStatus}
                   cliStatusLoading={effectiveCliStatusLoading}
                 />
+              </TabsContent>
+
+              <TabsContent value="capability-packs" className="mt-0 pt-4">
+                <CapabilityPacksPanel />
               </TabsContent>
             </Tabs>
           </div>

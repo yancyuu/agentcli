@@ -17,10 +17,21 @@ import { useStore } from '@renderer/store';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import {
+  expandCapabilityCommand,
+  resolveCapabilityCommandInput,
+  type SelectedCapabilityCommandRef,
+} from '@renderer/utils/capabilityCommandExecution';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { getLoopShortcutSuggestions } from '@renderer/utils/loopShortcutSuggestions';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';
+import {
+  RESERVED_SLASH_COMMANDS,
+  buildCapabilityPackCommandSuggestions,
+  buildSlashCommandRegistry,
+  collectSlashSuggestionAliases,
+} from '@renderer/utils/slashCommandRegistry';
 import { buildSlashCommandSuggestions } from '@renderer/utils/skillCommandSuggestions';
 import {
   extractTaskRefsFromText,
@@ -42,6 +53,7 @@ import type {
   AttachmentPayload,
   ResolvedTeamMember,
   SendMessageResult,
+  SlashCommandMeta,
   TaskRef,
 } from '@shared/types';
 
@@ -63,7 +75,8 @@ interface MessageComposerProps {
     summary?: string,
     attachments?: AttachmentPayload[],
     actionMode?: AgentActionMode,
-    taskRefs?: TaskRef[]
+    taskRefs?: TaskRef[],
+    slashCommand?: SlashCommandMeta
   ) => void;
   onDispatchTask?: (
     toTeam: string,
@@ -109,6 +122,7 @@ export const MessageComposer = ({
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileRestrictionError, setFileRestrictionError] = useState<string | null>(null);
+  const [selectedCommand, setSelectedCommand] = useState<SelectedCapabilityCommandRef | null>(null);
   const fileRestrictionTimerRef = useRef(0);
   const dismissMentionsRef = useRef<(() => void) | null>(null);
 
@@ -129,7 +143,9 @@ export const MessageComposer = ({
   );
   const skillsUserCatalog = useStore((s) => s.skillsUserCatalog);
   const skillsProjectCatalogByProjectPath = useStore((s) => s.skillsProjectCatalogByProjectPath);
+  const capabilityPacks = useStore((s) => s.capabilityPacks);
   const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
+  const fetchCapabilityPacks = useStore((s) => s.fetchCapabilityPacks);
   const currentTeamColor = useStore((s) => {
     if (s.selectedTeamName !== teamName) {
       return nameColorSet(teamName).border;
@@ -162,23 +178,50 @@ export const MessageComposer = ({
 
   useEffect(() => {
     void fetchSkillsCatalog(projectPath ?? undefined);
-  }, [fetchSkillsCatalog, projectPath]);
+    void fetchCapabilityPacks();
+  }, [fetchCapabilityPacks, fetchSkillsCatalog, projectPath]);
 
   const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
   const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
   const projectSkills = projectPath ? (skillsProjectCatalogByProjectPath[projectPath] ?? []) : [];
   const slashCommandSuggestions = useMemo<MentionSuggestion[]>(() => {
-    const baseSuggestions = buildSlashCommandSuggestions(
-      getSuggestedSlashCommandsForProvider(leadProviderId),
-      projectSkills,
-      skillsUserCatalog,
-      leadProviderId
-    );
-    return [...getLoopShortcutSuggestions(), ...baseSuggestions];
-  }, [leadProviderId, projectSkills, skillsUserCatalog]);
+    const localSuggestions = [
+      ...getLoopShortcutSuggestions(),
+      ...buildSlashCommandSuggestions(
+        getSuggestedSlashCommandsForProvider(leadProviderId),
+        projectSkills,
+        skillsUserCatalog,
+        leadProviderId
+      ),
+    ];
+    const packSuggestions = buildCapabilityPackCommandSuggestions(capabilityPacks, 'team-loop', {
+      forceNamespacedAliases: collectSlashSuggestionAliases(localSuggestions),
+    });
+    return [...localSuggestions, ...packSuggestions];
+  }, [capabilityPacks, leadProviderId, projectSkills, skillsUserCatalog]);
+  const capabilityRegistry = useMemo(
+    () => buildSlashCommandRegistry({ packs: capabilityPacks, scope: 'team-loop' }),
+    [capabilityPacks]
+  );
+  const shadowedAliases = useMemo(() => {
+    const aliases = new Set(RESERVED_SLASH_COMMANDS);
+    for (const alias of collectSlashSuggestionAliases(
+      slashCommandSuggestions.filter((suggestion) => !suggestion.commandRef)
+    )) {
+      aliases.add(alias);
+    }
+    return aliases;
+  }, [slashCommandSuggestions]);
 
   const trimmed = stripEncodedTaskReferenceMetadata(draft.text).trim();
   const standaloneSlashCommand = useMemo(() => parseStandaloneSlashCommand(trimmed), [trimmed]);
+  const capabilityCommandResult = useMemo(
+    () =>
+      resolveCapabilityCommandInput(capabilityRegistry, trimmed, selectedCommand, {
+        shadowedAliases,
+      }),
+    [capabilityRegistry, selectedCommand, shadowedAliases, trimmed]
+  );
 
   const selectedMember = members.find((m) => m.name === recipient);
   const selectedResolvedColor = selectedMember ? colorMap.get(selectedMember.name) : undefined;
@@ -192,18 +235,21 @@ export const MessageComposer = ({
   const canAttach = supportsAttachments && draft.canAddMore;
   const attachmentRestrictionReason = !supportsAttachments
     ? !isLeadRecipient
-      ? '文件只能发送给 Loop Lead'
-      : 'Loop runtime 在线时才能添加文件'
+      ? '文件只能发送给 Lead'
+      : 'Agent 在线时才能添加文件'
     : undefined;
   const attachmentsBlocked = draft.attachments.length > 0 && !supportsAttachments;
   const slashCommandRestrictionReason = standaloneSlashCommand
-    ? draft.attachments.length > 0
-      ? '斜杠命令需要 Loop Lead 在线，且不能与附件同时发送'
-      : !isLeadRecipient
-        ? '斜杠命令只能发送给 Loop Lead'
-        : !isTeamAlive
-          ? '斜杠命令需要 Loop Lead 在线'
-          : null
+    ? capabilityCommandResult.status === 'conflict'
+      ? (capabilityCommandResult.conflictLabel ??
+        '能力包命令存在冲突，请从菜单选择带 namespace 的命令。')
+      : draft.attachments.length > 0
+        ? '斜杠命令需要 Lead 在线，且不能与附件同时发送'
+        : !isLeadRecipient
+          ? '斜杠命令只能发送给 Lead'
+          : !isTeamAlive
+            ? '斜杠命令需要 Lead 在线'
+            : null
     : null;
   const teamDispatch = useMemo(() => {
     const match = trimmed.match(/^@([^\s]+)\s+([\s\S]+)$/);
@@ -252,16 +298,53 @@ export const MessageComposer = ({
       return;
     }
 
-    pendingSendRef.current = true;
-    onSend(
-      recipient,
-      serialized,
-      trimmed,
-      draft.attachments.length > 0 ? draft.attachments : undefined,
-      undefined,
-      taskRefs
-    );
-  }, [canSend, recipient, trimmed, onSend, draft, taskSuggestions, teamDispatch, onDispatchTask]);
+    const send = async () => {
+      if (capabilityCommandResult.status === 'resolved' && capabilityCommandResult.resolved) {
+        const expanded = await expandCapabilityCommand(
+          capabilityCommandResult.resolved,
+          'team-loop'
+        );
+        pendingSendRef.current = true;
+        onSend(
+          recipient,
+          expanded.text,
+          expanded.summary,
+          undefined,
+          undefined,
+          taskRefs,
+          expanded.slashCommand
+        );
+        return;
+      }
+
+      pendingSendRef.current = true;
+      onSend(
+        recipient,
+        serialized,
+        trimmed,
+        draft.attachments.length > 0 ? draft.attachments : undefined,
+        undefined,
+        taskRefs
+      );
+    };
+
+    void send().catch((error: unknown) => {
+      pendingSendRef.current = false;
+      // Reuse the persisted draft; surface the error via console because this path is a local expansion failure
+      // before the normal send error store is involved.
+      console.error(error);
+    });
+  }, [
+    canSend,
+    capabilityCommandResult,
+    recipient,
+    trimmed,
+    onSend,
+    draft,
+    taskSuggestions,
+    teamDispatch,
+    onDispatchTask,
+  ]);
 
   // Clear draft only after send completes successfully (sending: true → false, no error)
   useEffect(() => {
@@ -286,7 +369,7 @@ export const MessageComposer = ({
   );
 
   const showFileRestrictionError = useCallback(() => {
-    setFileRestrictionError(attachmentRestrictionReason ?? '文件只能发送给 Loop Lead');
+    setFileRestrictionError(attachmentRestrictionReason ?? '文件只能发送给 Lead');
     window.clearTimeout(fileRestrictionTimerRef.current);
     fileRestrictionTimerRef.current = window.setTimeout(() => {
       setFileRestrictionError(null);
@@ -426,7 +509,7 @@ export const MessageComposer = ({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {!isTeamAlive
-                    ? 'Loop runtime 在线时才能添加文件'
+                    ? 'Agent 在线时才能添加文件'
                     : !draft.canAddMore
                       ? '已达到附件上限'
                       : '添加文件（支持粘贴或拖拽）'}
@@ -438,7 +521,7 @@ export const MessageComposer = ({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {!isTeamAlive && !isProvisioning && (
               <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
-                Loop runtime 离线
+                Agent 离线
               </span>
             )}
 
@@ -573,7 +656,7 @@ export const MessageComposer = ({
             error={draft.attachmentError ?? fileRestrictionError}
             onDismissError={draft.clearAttachmentError}
             disabled={attachmentsBlocked}
-            disabledHint="仅在 Loop runtime 在线且接收人为 Loop Lead 时支持附件。请移除附件或切换接收人。"
+            disabledHint="仅在 Agent 在线且接收人为 Lead 时支持附件。请移除附件或切换接收人。"
           />
         ) : null}
       </div>
@@ -589,8 +672,8 @@ export const MessageComposer = ({
           id={`compose-${teamName}`}
           placeholder={
             isProvisioning
-              ? 'Loop runtime 正在启动中... 指令将排队并在稍后执行。'
-              : '输入 Loop 指令...（回车发送，Shift+Enter 换行）'
+              ? 'Agent 正在启动中... 指令将排队并在稍后执行。'
+              : '输入指令...（回车发送，Shift+Enter 换行）'
           }
           value={draft.text}
           onValueChange={draft.setText}
@@ -603,6 +686,20 @@ export const MessageComposer = ({
           projectPath={projectPath}
           onFileChipInsert={draft.addChip}
           onModEnter={handleSend}
+          onSuggestionSelected={(suggestion, insertedText) => {
+            if (
+              suggestion.type === 'command' &&
+              suggestion.commandRef &&
+              insertedText.startsWith('/')
+            ) {
+              setSelectedCommand({
+                commandRef: suggestion.commandRef,
+                command: insertedText as `/${string}`,
+              });
+            } else {
+              setSelectedCommand(null);
+            }
+          }}
           dismissMentionsRef={dismissMentionsRef}
           extraTips={useMemo(() => {
             const commands = Array.from(
@@ -615,7 +712,7 @@ export const MessageComposer = ({
               .slice(0, 6)
               .join('、');
             return [
-              `Tips：你可以输入 "/" 来运行命令，如 ${commands} 等；输入 "/loop" 可选择常用 Loop 模板。`,
+              `Tips：你可以输入 "/" 来运行命令，如 ${commands} 等；输入 "/loop" 可选择常用模板。`,
             ];
           }, [slashCommandSuggestions])}
           surfaceClassName="message-composer-shell message-composer-orbit-surface bg-[var(--color-surface-raised)]"
@@ -661,7 +758,7 @@ export const MessageComposer = ({
                 {slashCommandRestrictionReason ? (
                   <TooltipContent side="top">{slashCommandRestrictionReason}</TooltipContent>
                 ) : isProvisioning && !sending ? (
-                  <TooltipContent side="top">Loop runtime 启动期间暂不可下发</TooltipContent>
+                  <TooltipContent side="top">Agent 启动期间暂不可下发</TooltipContent>
                 ) : null}
               </Tooltip>
             </div>

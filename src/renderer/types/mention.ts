@@ -23,6 +23,14 @@ export interface MentionSuggestion {
   searchText?: string;
   /** Optional slash command string including leading slash (command and skill suggestions only) */
   command?: `/${string}`;
+  /** Optional canonical command reference for registry-backed slash commands */
+  commandRef?: string;
+  /** Workflow prompt id for slash suggestions backed by a local workflow file */
+  workflowPromptId?: string;
+  /** Workflow prompt folder for slash suggestions backed by a local workflow file */
+  workflowPromptFolder?: string;
+  /** Workflow prompt metadata for slash suggestions backed by a local workflow file */
+  workflowPrompt?: import('@shared/types/systemManager').WorkflowPromptSummary;
   /** Canonical task id (task suggestions only) */
   taskId?: string;
   /** Owning team name (task suggestions only) */

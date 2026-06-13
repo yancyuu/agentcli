@@ -59,7 +59,6 @@ import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   AlertTriangle,
-  Boxes,
   Bot,
   Columns3,
   Download,
@@ -71,7 +70,6 @@ import {
   Pencil,
   Play,
   Plus,
-  RefreshCw,
   Terminal,
   Trash2,
   Loader2,
@@ -102,6 +100,7 @@ import type { ComponentProps } from 'react';
 const ProjectEditorOverlay = lazy(() =>
   import('./editor/ProjectEditorOverlay').then((m) => ({ default: m.ProjectEditorOverlay }))
 );
+import { LoopConsolePanel } from './loop-console/LoopConsolePanel';
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
 import {
@@ -140,15 +139,11 @@ import type {
   TaskRef,
   TeamAgentRuntimeEntry,
   TeamCreateRequest,
-  LoopAssetAction,
-  LoopAssetCategorySnapshot,
-  LoopAssetsSnapshot,
   TeamFastMode,
   TeamLaunchRequest,
   TeamProviderId,
   TeamTaskWithKanban,
   TeamViewSnapshot,
-  Schedule,
 } from '@shared/types';
 import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import type { EditorSelectionAction } from '@shared/types/editor';
@@ -251,8 +246,7 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
   teamName: string;
   onLaunch: () => void;
 }): React.JSX.Element {
-  const message =
-    'Loop runtime 未运行：当前没有本地 Claude/Agent 进程在运行，已有 Loop 状态和任务仍会保留。';
+  const message = 'Agent 未运行：当前没有本地 Claude/Agent 进程在运行，已有状态和任务仍会保留。';
 
   return (
     <div
@@ -274,7 +268,7 @@ const TeamOfflineStatusBanner = memo(function TeamOfflineStatusBanner({
         onClick={onLaunch}
       >
         <Play size={12} />
-        启动 Loop runtime
+        启动 Agent
       </Button>
     </div>
   );
@@ -704,7 +698,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
               </div>
               <div className="flex flex-1 items-center justify-center p-4">
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  {leadSessionLoading ? '正在加载上下文…' : '打开 Loop Lead 会话后可查看上下文。'}
+                  {leadSessionLoading ? '正在加载上下文…' : '打开 Lead 会话后可查看上下文。'}
                 </p>
               </div>
             </div>
@@ -911,328 +905,6 @@ function getCommandForHarness(harness?: string): string {
   }
 }
 
-const LOOP_ASSET_STATUS_CLASS: Record<LoopAssetCategorySnapshot['status'], string> = {
-  ready: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300',
-  partial: 'border-amber-500/20 bg-amber-500/5 text-amber-300',
-  warning: 'border-orange-500/20 bg-orange-500/5 text-orange-300',
-  missing:
-    'border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]',
-};
-
-function formatAssetDetails(details: string[]): string {
-  if (details.length === 0) return '未发现资产';
-  if (details.length <= 3) return details.join(' · ');
-  return `${details.slice(0, 3).join(' · ')} · +${details.length - 3}`;
-}
-
-function getLoopActionCommand(action: LoopAssetAction): string {
-  const payload = action.payload ?? {};
-  if (typeof payload.command === 'string') return payload.command;
-  if (typeof payload.prompt === 'string') return 'prompt';
-  if (typeof action.target === 'string' && action.target.startsWith('/')) return action.target;
-  return '配置';
-}
-
-function getRecommendedLoopDescription(action: LoopAssetAction): string {
-  switch (action.id) {
-    case 'run-folder-hygiene':
-      return '每天扫一遍工作区，找混乱目录、临时产物、陈旧报告和脏 worktree。';
-    case 'run-memory-conflicts':
-      return '检查 CLAUDE / AGENTS / memory / settings 里的重复、过期和冲突指令。';
-    case 'run-workflow-extraction':
-      return '从最近聊天和会话里提取重复流程，沉淀成下次可执行的 workflow。';
-    default:
-      return action.tooltip ?? '运行一次 Loop workflow，并把过程写回消息看板。';
-  }
-}
-
-function getLoopStatusSummary(assets: LoopAssetCategorySnapshot[]): string {
-  const missing = assets.filter((asset) => asset.status === 'missing');
-  const needsVerifier = assets.some(
-    (asset) => asset.key === 'subagents' && asset.status !== 'ready'
-  );
-  if (needsVerifier) return '当前建议：先补一个独立 verifier/reviewer，避免实现者自审。';
-  if (missing.length > 0)
-    return `当前建议：补齐 ${missing.map((asset) => asset.title).join('、')}。`;
-  const warning = assets.find((asset) => asset.status === 'warning' || asset.status === 'partial');
-  if (warning) return `当前建议：优化 ${warning.title}，让 Loop 更容易恢复和复用。`;
-  return 'Loop 基础能力已就绪，可以直接运行日常 workflow。';
-}
-
-function isLoopSchedule(schedule: Schedule, teamName: string): boolean {
-  if (schedule.teamName !== teamName) return false;
-  const text = [schedule.label, schedule.launchConfig.prompt]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-  return /(^|\s|\/)loop\b|daily-|workflow|memory|hygiene|summary|doctor|state-scan|worktree-scan|skills/.test(
-    text
-  );
-}
-
-function getScheduleLoopLabel(schedule: Schedule): string {
-  return schedule.label || schedule.launchConfig.prompt.split(/\s+/)[0] || 'Loop';
-}
-
-function ActiveLoopsSection({ schedules }: { schedules: Schedule[] }): React.JSX.Element | null {
-  if (schedules.length === 0) return null;
-
-  return (
-    <div className="space-y-2">
-      <div>
-        <div className="text-xs font-semibold text-[var(--color-text)]">当前 Loop</div>
-        <div className="text-[10px] text-[var(--color-text-muted)]">
-          已创建的 /loop、daily 和定时 workflow
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        {schedules.slice(0, 4).map((schedule) => (
-          <div
-            key={schedule.id}
-            className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2"
-          >
-            <div className="min-w-0">
-              <div className="truncate text-xs font-medium text-[var(--color-text)]">
-                {getScheduleLoopLabel(schedule)}
-              </div>
-              <div className="mt-0.5 truncate font-mono text-[10px] text-[var(--color-text-muted)]">
-                {schedule.launchConfig.prompt}
-              </div>
-            </div>
-            <span className="shrink-0 rounded-full border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-              {schedule.status === 'active' ? '运行中' : schedule.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RecommendedLoopsSection({
-  actions,
-  onAction,
-}: {
-  actions: LoopAssetAction[];
-  onAction: (action: LoopAssetAction) => void;
-}): React.JSX.Element | null {
-  if (actions.length === 0) return null;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-semibold text-[var(--color-text)]">
-            Recommended Workflows
-          </div>
-          <div className="text-[10px] text-[var(--color-text-muted)]">
-            常用 Loop，一次点击新建会话并运行
-          </div>
-        </div>
-      </div>
-      <div className="grid gap-2 md:grid-cols-3">
-        {actions.map((action) => (
-          <div
-            key={action.id}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-[var(--color-text)]">{action.label}</div>
-                <div className="mt-1 text-[10px] leading-4 text-[var(--color-text-muted)]">
-                  {getRecommendedLoopDescription(action)}
-                </div>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <span className="truncate rounded-full bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10px] text-emerald-300">
-                {getLoopActionCommand(action)}
-              </span>
-              <button
-                type="button"
-                className="shrink-0 rounded-md bg-emerald-500/15 px-2 py-1 text-[10px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => onAction(action)}
-                disabled={action.disabled}
-              >
-                运行一次
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function getCapabilitySummary(asset: LoopAssetCategorySnapshot): string {
-  if (asset.key === 'skills') {
-    const skills = asset.details.find((detail) => /skills available|project skills/i.test(detail));
-    const mcp = asset.details.find((detail) => /MCP servers/i.test(detail));
-    return [skills, mcp].filter(Boolean).join(' · ') || '等待 /skills 返回可用能力';
-  }
-  if (asset.key === 'subagents') {
-    return asset.status === 'ready' ? '已有独立分工/验证能力' : '缺独立 verifier/reviewer';
-  }
-  if (asset.key === 'worktrees') {
-    return asset.status === 'missing'
-      ? '高风险并行任务时再启用 worktree 隔离'
-      : formatAssetDetails(asset.details);
-  }
-  if (asset.key === 'state') {
-    return asset.status === 'ready' ? '已有状态/看板/记忆恢复层' : '缺少可恢复状态';
-  }
-  return formatAssetDetails(asset.details);
-}
-
-function formatCapabilityStatus(status: LoopAssetCategorySnapshot['status']): string {
-  switch (status) {
-    case 'ready':
-      return '可用';
-    case 'partial':
-      return '部分可用';
-    case 'warning':
-      return '需补齐';
-    case 'missing':
-      return '未配置';
-    default:
-      return status;
-  }
-}
-
-function CapabilitiesSection({
-  assets,
-  onAction,
-}: {
-  assets: LoopAssetCategorySnapshot[];
-  onAction: (action: LoopAssetAction) => void;
-}): React.JSX.Element {
-  const visibleAssets = assets.filter((asset) => asset.key !== 'automations');
-
-  return (
-    <div className="space-y-2">
-      <div>
-        <div className="text-xs font-semibold text-[var(--color-text)]">当前能力</div>
-        <div className="text-[10px] text-[var(--color-text-muted)]">
-          Skills、MCP、会话分工和状态层，只显示可操作摘要
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        {visibleAssets.map((asset) => (
-          <div
-            key={asset.key}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-[var(--color-text)]">
-                    {asset.title}
-                  </span>
-                  <span
-                    className={cn(
-                      'rounded-full border px-1.5 py-0.5 text-[10px]',
-                      LOOP_ASSET_STATUS_CLASS[asset.status]
-                    )}
-                  >
-                    {formatCapabilityStatus(asset.status)}
-                  </span>
-                </div>
-                <div className="mt-1 text-[10px] leading-4 text-[var(--color-text-muted)]">
-                  {getCapabilitySummary(asset)}
-                </div>
-              </div>
-              {asset.actions.length > 0 ? (
-                <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                  {asset.actions.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="rounded-md border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => onAction(item)}
-                      disabled={item.disabled}
-                      title={item.tooltip ?? item.label}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function LoopAssetsSection({
-  assets,
-  onAction,
-  excludeKeys = [],
-}: {
-  assets: LoopAssetCategorySnapshot[];
-  onAction: (action: LoopAssetAction) => void;
-  excludeKeys?: LoopAssetCategorySnapshot['key'][];
-}): React.JSX.Element {
-  const visibleAssets = assets.filter((asset) => !excludeKeys.includes(asset.key));
-
-  return (
-    <div className="grid gap-2 md:grid-cols-2">
-      {visibleAssets.map((asset) => (
-        <div
-          key={asset.key}
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-[var(--color-text)]">{asset.title}</div>
-              <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-                {asset.subtitle}
-              </div>
-            </div>
-            <span
-              className={cn(
-                'shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
-                LOOP_ASSET_STATUS_CLASS[asset.status]
-              )}
-            >
-              {asset.status}
-            </span>
-          </div>
-          <div className="mt-3 text-[11px] leading-5 text-[var(--color-text-secondary)]">
-            <span className="font-mono text-emerald-300">{asset.count}</span> ·{' '}
-            {formatAssetDetails(asset.details)}
-          </div>
-          {asset.warnings?.length ? (
-            <div className="mt-2 rounded-md border border-orange-500/20 bg-orange-500/5 px-2 py-1 text-[10px] leading-4 text-orange-300">
-              {asset.warnings.slice(0, 2).join(' · ')}
-            </div>
-          ) : null}
-          <div className="mt-2 border-t border-[var(--color-border-subtle)] pt-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
-            缺口：{asset.gap}
-          </div>
-          {asset.actions.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {asset.actions.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="rounded-md border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => onAction(item)}
-                  disabled={item.disabled}
-                  title={item.tooltip ?? item.label}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export const TeamDetailView = ({
   teamName,
   isPaneFocused = false,
@@ -1255,10 +927,6 @@ export const TeamDetailView = ({
   const [updatingRoleLoading, setUpdatingRoleLoading] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
-  const [loopAssets, setLoopAssets] = useState<LoopAssetsSnapshot | null>(null);
-  const [loopAssetsLoading, setLoopAssetsLoading] = useState(false);
-  const [loopAssetsError, setLoopAssetsError] = useState<string | null>(null);
-  const [loopShortcutStatus, setLoopShortcutStatus] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [launchDialogState, setLaunchDialogState] = useState<{
     open: boolean;
@@ -1346,6 +1014,8 @@ export const TeamDetailView = ({
       })();
     });
     const onCompleteTask = taskAction((taskId) => {
+      const task = data?.tasks.find((t: { id: string }) => t.id === taskId);
+      if (task?.status === 'in_progress') return;
       void (async () => {
         try {
           await updateTaskStatus(teamName, taskId, 'completed');
@@ -1364,6 +1034,8 @@ export const TeamDetailView = ({
       })();
     });
     const onRequestReviewTask = taskAction((taskId) => {
+      const task = data?.tasks.find((t: { id: string }) => t.id === taskId);
+      if (task?.status === 'in_progress') return;
       void (async () => {
         try {
           await requestReview(teamName, taskId);
@@ -1376,6 +1048,8 @@ export const TeamDetailView = ({
       setRequestChangesTaskId(taskId);
     });
     const onCancelTask = taskAction((taskId) => {
+      const task = data?.tasks.find((t: { id: string }) => t.id === taskId);
+      if (task?.status === 'in_progress') return;
       void (async () => {
         try {
           await updateTaskStatus(teamName, taskId, 'pending');
@@ -1394,7 +1068,11 @@ export const TeamDetailView = ({
         }
       })();
     });
-    const onDeleteTaskGraph = taskAction((taskId) => handleDeleteTask(taskId));
+    const onDeleteTaskGraph = taskAction((taskId) => {
+      const task = data?.tasks.find((t: { id: string }) => t.id === taskId);
+      if (task?.status === 'in_progress') return;
+      handleDeleteTask(taskId);
+    });
 
     window.addEventListener('graph:start-task', onStartTask);
     window.addEventListener('graph:complete-task', onCompleteTask);
@@ -1515,11 +1193,6 @@ export const TeamDetailView = ({
     error,
     projects,
     repositoryGroups,
-    schedules,
-    skillsUserCatalog,
-    skillsProjectCatalogByProjectPath,
-    mcpInstalledServersByProjectPath,
-    fetchSchedules,
     fetchSkillsCatalog,
     mcpFetchInstalled,
     initTabUIState,
@@ -1534,11 +1207,6 @@ export const TeamDetailView = ({
     startTaskByUser,
     deleteTeam,
     openTeamsTab,
-    openSchedulesTab,
-    openTasksTab,
-    openSettingsTab,
-    openExtensionsTab,
-    navigateToSession,
     closeTab,
     sendingMessage,
     sendMessageError,
@@ -1570,15 +1238,12 @@ export const TeamDetailView = ({
     setPendingReviewRequest,
     teams,
     fetchTeams,
+    leadActivity,
+    leadContextUpdatedAt,
   } = useStore(
     useShallow((s) => ({
       projects: s.projects,
       repositoryGroups: s.repositoryGroups,
-      schedules: s.schedules,
-      skillsUserCatalog: s.skillsUserCatalog,
-      skillsProjectCatalogByProjectPath: s.skillsProjectCatalogByProjectPath,
-      mcpInstalledServersByProjectPath: s.mcpInstalledServersByProjectPath,
-      fetchSchedules: s.fetchSchedules,
       fetchSkillsCatalog: s.fetchSkillsCatalog,
       mcpFetchInstalled: s.mcpFetchInstalled,
       initTabUIState: s.initTabUIState,
@@ -1593,11 +1258,6 @@ export const TeamDetailView = ({
       startTaskByUser: s.startTaskByUser,
       deleteTeam: s.deleteTeam,
       openTeamsTab: s.openTeamsTab,
-      openSchedulesTab: s.openSchedulesTab,
-      openTasksTab: s.openTasksTab,
-      openSettingsTab: s.openSettingsTab,
-      openExtensionsTab: s.openExtensionsTab,
-      navigateToSession: s.navigateToSession,
       closeTab: s.closeTab,
       sendingMessage: s.sendingMessage,
       sendMessageError: s.sendMessageError,
@@ -1633,6 +1293,8 @@ export const TeamDetailView = ({
       setPendingReviewRequest: s.setPendingReviewRequest,
       teams: s.teams,
       fetchTeams: s.fetchTeams,
+      leadActivity: teamName ? s.leadActivityByTeam[teamName] : undefined,
+      leadContextUpdatedAt: teamName ? s.leadContextByTeam[teamName]?.updatedAt : undefined,
     }))
   );
 
@@ -1658,116 +1320,12 @@ export const TeamDetailView = ({
   }, [pendingRepliesByMember, teamName]);
 
   useEffect(() => {
-    void fetchSchedules();
-  }, [fetchSchedules]);
-
-  useEffect(() => {
     const projectPath = data?.config.projectPath;
     void fetchSkillsCatalog(projectPath ?? undefined);
     if (projectPath) {
       void mcpFetchInstalled(projectPath);
     }
   }, [data?.config.projectPath, fetchSkillsCatalog, mcpFetchInstalled]);
-
-  const loadLoopAssets = useCallback(async () => {
-    if (!teamName) return;
-    setLoopAssetsLoading(true);
-    setLoopAssetsError(null);
-    try {
-      const snapshot = await api.teams.getLoopAssets(teamName);
-      setLoopAssets(snapshot);
-    } catch (err) {
-      setLoopAssets(null);
-      setLoopAssetsError(err instanceof Error ? err.message : 'Loop 资产扫描失败');
-    } finally {
-      setLoopAssetsLoading(false);
-    }
-  }, [teamName]);
-
-  useEffect(() => {
-    void loadLoopAssets();
-  }, [loadLoopAssets]);
-
-  const handleLoopAssetAction = useCallback(
-    (item: LoopAssetAction) => {
-      if (item.disabled) return;
-      if (
-        item.kind === 'loop-session' ||
-        item.kind === 'run-command' ||
-        item.kind === 'run-workflow'
-      ) {
-        const payload = item.payload ?? {};
-        const sessionName =
-          typeof payload.sessionName === 'string' ? payload.sessionName : item.label;
-        const message =
-          typeof payload.prompt === 'string'
-            ? payload.prompt
-            : typeof payload.command === 'string'
-              ? payload.command
-              : typeof item.target === 'string' && item.target.startsWith('/')
-                ? item.target
-                : undefined;
-        setLoopShortcutStatus(`正在打开 ${sessionName}...`);
-        void api.teams
-          .createLoopSession(teamName, { sessionName, message })
-          .then(async (result) => {
-            const refreshedSessions = await api.teams.getTeamSessions(teamName).catch(() => null);
-            if (refreshedSessions) setCcSessions(refreshedSessions);
-
-            const targetProjectId = resolveProjectIdByPath(
-              data?.config.projectPath,
-              projects,
-              repositoryGroups
-            );
-            if (targetProjectId) {
-              navigateToSession(targetProjectId, result.session.id);
-            }
-
-            setLoopShortcutStatus(
-              `${result.reused ? '已打开' : '已创建'} ${sessionName}${result.messageSent ? '，指令已发送' : ''}${targetProjectId ? '，会话已打开' : '，请在会话列表查看'}`
-            );
-          })
-          .catch((err) => {
-            setLoopShortcutStatus(err instanceof Error ? err.message : 'Loop session 打开失败');
-          });
-        return;
-      }
-      if (item.target === 'schedules') {
-        openSchedulesTab();
-        return;
-      }
-      if (item.target === 'settings') {
-        openSettingsTab('advanced');
-        return;
-      }
-      if (item.target === 'extensions') {
-        openExtensionsTab();
-        return;
-      }
-      if (item.target === 'runtime-config') {
-        setBindingDialogOpen(true);
-        return;
-      }
-      if (item.target === 'tasks') {
-        openTasksTab();
-        return;
-      }
-      if (item.target === 'add-member') {
-        setLaunchDialogState({ open: true, mode: 'relaunch' });
-      }
-    },
-    [
-      data?.config.projectPath,
-      navigateToSession,
-      openExtensionsTab,
-      openSchedulesTab,
-      openSettingsTab,
-      openTasksTab,
-      projects,
-      repositoryGroups,
-      teamName,
-    ]
-  );
 
   useEffect(() => {
     const wasProvisioning = wasProvisioningRef.current;
@@ -2357,6 +1915,8 @@ export const TeamDetailView = ({
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
+      const task = taskMapRef.current.get(taskId);
+      if (task?.status === 'in_progress') return;
       void (async () => {
         const confirmed = await confirm({
           title: '删除任务',
@@ -2487,6 +2047,7 @@ export const TeamDetailView = ({
       pendingRepliesByMember,
       onPendingReplyChange: setPendingRepliesByMember,
       onMemberClick: handleSelectMember,
+      onTaskIdClick: handleTaskIdClick,
       onReplyToMessage: handleReplyToMessage,
       onRestartTeam: handleRestartTeam,
       inlineScrollContainerRef: contentRef,
@@ -2501,6 +2062,7 @@ export const TeamDetailView = ({
       handleReplyToMessage,
       handleRestartTeam,
       handleSelectMember,
+      handleTaskIdClick,
       pendingRepliesByMember,
       teamName,
       timeWindow,
@@ -2581,7 +2143,7 @@ export const TeamDetailView = ({
               </span>
             </div>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--color-text-secondary)]">
-              终端不再嵌入页面。需要接管这个 Loop 工作区时，请在系统终端中打开默认 CLI。
+              终端不再嵌入页面。需要接管这个工作区时，请在系统终端中打开默认 CLI。
             </p>
             <Button
               size="sm"
@@ -2855,7 +2417,7 @@ export const TeamDetailView = ({
                 title="会话"
                 icon={<MessageSquare size={14} />}
                 badge={ccSessions.length}
-                defaultOpen={ccSessions.length > 0}
+                defaultOpen={false}
                 action={
                   ccSessions.length > 0 ? (
                     <button
@@ -2934,6 +2496,8 @@ export const TeamDetailView = ({
                       />
                     }
                     onRequestReview={(taskId) => {
+                      const task = taskMapRef.current.get(taskId);
+                      if (task?.status === 'in_progress') return;
                       void (async () => {
                         try {
                           await requestReview(teamName, taskId);
@@ -2998,6 +2562,8 @@ export const TeamDetailView = ({
                       })();
                     }}
                     onCompleteTask={(taskId) => {
+                      const task = taskMapRef.current.get(taskId);
+                      if (task?.status === 'in_progress') return;
                       void (async () => {
                         try {
                           await updateTaskStatus(teamName, taskId, 'completed');
@@ -3010,6 +2576,7 @@ export const TeamDetailView = ({
                       void (async () => {
                         try {
                           const task = data?.tasks.find((t) => t.id === taskId);
+                          if (task?.status === 'in_progress') return;
                           await updateTaskStatus(teamName, taskId, 'pending');
 
                           if (task?.owner) {
@@ -3107,105 +2674,31 @@ export const TeamDetailView = ({
               )}
 
               <CollapsibleTeamSection
-                sectionId="loop-assets"
-                title="Loop Engineering"
-                icon={<Boxes size={14} />}
-                badge={
-                  loopAssets
-                    ? `${loopAssets.categories.filter((item) => item.status === 'ready').length}/${loopAssets.categories.length}`
-                    : '扫描'
-                }
-                headerExtra={
-                  loopAssets ? (
-                    <span className="text-[10px] tabular-nums text-[var(--color-text-muted)] opacity-50">
-                      {loopAssets.healthScore}%
-                    </span>
-                  ) : undefined
-                }
+                sectionId="loop-console"
+                title="指令台"
+                icon={<MessageSquare size={14} />}
+                badge={data.isAlive ? 'online' : 'offline'}
                 defaultOpen
-                action={
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void loadLoopAssets();
-                    }}
-                    disabled={loopAssetsLoading}
-                  >
-                    <RefreshCw size={11} className={loopAssetsLoading ? 'animate-spin' : ''} />
-                    刷新
-                  </button>
-                }
               >
-                {loopAssetsLoading && !loopAssets ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
-                    <Loader2 size={14} className="animate-spin" />
-                    正在扫描 Loop 资产...
-                  </div>
-                ) : loopAssetsError ? (
-                  <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-xs text-orange-300">
-                    Loop 资产扫描失败：{loopAssetsError}
-                  </div>
-                ) : loopAssets ? (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-[var(--color-text)]">
-                            Loop 状态
-                          </div>
-                          <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">
-                            {getLoopStatusSummary(loopAssets.categories)}
-                          </div>
-                        </div>
-                        <span className="shrink-0 rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-                          Skills + Workflows
-                        </span>
-                      </div>
-                    </div>
-                    {loopAssets.warnings?.length ? (
-                      <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-xs text-orange-300">
-                        {loopAssets.warnings.join(' · ')}
-                      </div>
-                    ) : null}
-                    {loopShortcutStatus ? (
-                      <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
-                        {loopShortcutStatus}
-                      </div>
-                    ) : null}
-                    <div className="space-y-3">
-                      <div className="min-w-0 space-y-3">
-                        <RecommendedLoopsSection
-                          actions={
-                            loopAssets.categories.find((asset) => asset.key === 'automations')
-                              ?.actions ?? []
-                          }
-                          onAction={handleLoopAssetAction}
-                        />
-                        <ActiveLoopsSection
-                          schedules={schedules.filter((schedule) =>
-                            isLoopSchedule(schedule, teamName)
-                          )}
-                        />
-                        <CapabilitiesSection
-                          assets={loopAssets.categories}
-                          onAction={handleLoopAssetAction}
-                        />
-                      </div>
-                      <div className="min-w-0 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-2">
-                        <TeamMessagesPanelBridge
-                          {...sharedMessagesPanelProps}
-                          teamName={teamName}
-                          position="inline"
-                          sectionTitle="Loop 消息看板"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-[var(--color-text-muted)]">暂无 Loop 资产数据。</div>
-                )}
+                <LoopConsolePanel
+                  teamName={teamName}
+                  members={activeMembers}
+                  tasks={data.tasks}
+                  isTeamAlive={data.isAlive}
+                  isProvisioning={isTeamProvisioning}
+                  leadActivity={leadActivity}
+                  leadContextUpdatedAt={leadContextUpdatedAt}
+                  currentLeadSessionId={data.config.leadSessionId}
+                  leadProjectPath={data.config.projectPath}
+                  sessions={ccSessions}
+                  pendingRepliesByMember={pendingRepliesByMember}
+                  onPendingReplyChange={setPendingRepliesByMember}
+                  onMemberClick={handleSelectMember}
+                  onTaskClick={handleOpenTask}
+                  onReplyToMessage={handleReplyToMessage}
+                  onRestartTeam={handleRestartTeam}
+                  onTaskIdClick={handleTaskIdClick}
+                />
               </CollapsibleTeamSection>
 
               <ReviewDialog
@@ -3295,8 +2788,8 @@ export const TeamDetailView = ({
                   <DialogHeader>
                     <DialogTitle>移除成员</DialogTitle>
                     <DialogDescription>
-                      确认将 &ldquo;{removeMemberConfirm}&rdquo; 从团队中移除？任务与 Loop
-                      动态会保留， 但该名称将无法再次使用。
+                      确认将 &ldquo;{removeMemberConfirm}&rdquo; 从团队中移除？任务与 动态会保留，
+                      但该名称将无法再次使用。
                     </DialogDescription>
                   </DialogHeader>
                   <DialogFooter>
