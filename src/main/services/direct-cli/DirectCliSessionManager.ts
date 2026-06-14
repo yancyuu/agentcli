@@ -15,6 +15,7 @@
 import { EventEmitter } from 'events';
 
 import type { ChildProcess, SpawnOptions } from 'child_process';
+import { randomUUID } from 'crypto';
 
 import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
 
@@ -106,11 +107,25 @@ export type DirectCliEvent =
       text: string;
       sessionId?: string;
     }
+  | {
+      kind: 'permission-request';
+      sessionKey: string;
+      /** Stable per-spawn id; changes when the subprocess is respawned so stale approvals
+       *  can be dismissed by runId after a stop→launch race. */
+      runId: string;
+      requestId: string;
+      subtype?: string;
+      toolName?: string;
+      toolInput?: Record<string, unknown>;
+    }
   | { kind: 'error'; sessionKey: string; messageId?: string; error: string };
 
 interface CliSessionHandle {
   child: ChildProcess;
   sessionId?: string;
+  /** Per-spawn id threaded onto permission-request events so stale approvals are
+   *  dismissible after a respawn. */
+  runId: string;
   activeMessageId?: string;
   /** Accumulated assistant text for the in-flight turn (fallback if result has none). */
   accumulatedText: string;
@@ -253,6 +268,7 @@ export class DirectCliSessionManager extends EventEmitter {
 
     const handle: CliSessionHandle = {
       child,
+      runId: randomUUID(),
       accumulatedText: '',
       stdoutBuffer: '',
       closed: false,
@@ -383,12 +399,27 @@ export class DirectCliSessionManager extends EventEmitter {
         handle.accumulatedText = '';
         break;
       }
-      case 'control-request':
+      case 'control-request': {
+        // A tool needs interactive approval (`--permission-prompt-tool stdio`). Surface it
+        // so server.ts can render the approval sheet and write the control_response back.
+        // Without this the CLI blocks on stdin forever and the turn never emits `result`.
+        if (classified.requestId) {
+          this.emit('event', {
+            kind: 'permission-request',
+            sessionKey,
+            runId: handle.runId,
+            requestId: classified.requestId,
+            subtype: classified.subtype,
+            toolName: classified.toolName,
+            toolInput: classified.toolInput,
+          } satisfies DirectCliEvent);
+        }
+        break;
+      }
       case 'unknown':
       case 'parse-error':
       default:
-        // Permission prompts are not auto-handled in Phase 1; parse-errors/unknown lines
-        // are ignored to avoid flooding the message feed with raw stdout.
+        // parse-errors/unknown lines are ignored to avoid flooding the feed with raw stdout.
         break;
     }
   }
@@ -410,6 +441,50 @@ export class DirectCliSessionManager extends EventEmitter {
     handle.activeMessageId = params.messageId;
     handle.accumulatedText = '';
     handle.child.stdin.write(formatClaudeStdinUserTurn(params.text));
+  }
+
+  /** Per-spawn run id for a live session (for dismissing stale approvals on respawn). */
+  getRunId(sessionKey: string): string | undefined {
+    return this.sessions.get(sessionKey.trim())?.runId;
+  }
+
+  /**
+   * Answer a `permission-request` (control_request) by writing a `control_response` line to
+   * the subprocess stdin. This unblocks the turn so the CLI can run the tool (allow) or
+   * skip it (deny) and eventually emit the `result` that persists the reply.
+   *
+   * `updatedInput` carries the user's answers for `AskUserQuestion` (mirrors the multi-agent
+   * reference impl: allow responses pass `{...toolInput, answers}` so the CLI delivers them
+   * without re-prompting). Omit it for ordinary Allow.
+   */
+  respondPermission(
+    sessionKey: string,
+    requestId: string,
+    allow: boolean,
+    message?: string,
+    updatedInput?: Record<string, unknown>
+  ): void {
+    const handle = this.sessions.get(sessionKey.trim());
+    if (!handle) {
+      throw new Error(`direct-cli: session ${sessionKey.trim()} is not running`);
+    }
+    if (handle.closed || !handle.child.stdin || handle.child.stdin.destroyed) {
+      throw new Error(`direct-cli: session ${sessionKey.trim()} stdin is closed`);
+    }
+    // Wire format verified against the working multi-agent reference impl:
+    // { type:'control_response', response:{ subtype:'success', request_id, response:{behavior, ...} } }
+    const innerResponse: Record<string, unknown> = allow
+      ? { behavior: 'allow', updatedInput: updatedInput ?? {} }
+      : { behavior: 'deny', message: message ?? 'User denied' };
+    const response = {
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: requestId,
+        response: innerResponse,
+      },
+    };
+    handle.child.stdin.write(JSON.stringify(response) + '\n');
   }
 
   kill(sessionKey: string): void {

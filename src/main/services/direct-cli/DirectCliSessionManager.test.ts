@@ -238,6 +238,99 @@ describe('DirectCliSessionManager', () => {
     expect(completeText).toBe('partial reply');
   });
 
+  it('emits permission-request when a can_use_tool control_request arrives', async () => {
+    const { manager, child } = createManager();
+    await manager.send('t:lead', { text: 'x', messageId: 'm1', workDir: '/proj' });
+    const events: {
+      kind: string;
+      requestId?: string;
+      subtype?: string;
+      toolName?: string;
+      runId?: string;
+    }[] = [];
+    manager.on('event', (e) => {
+      if (e.kind === 'permission-request') events.push(e as (typeof events)[number]);
+    });
+    child.stdout.emit(
+      'data',
+      JSON.stringify({
+        type: 'control_request',
+        request_id: 'req_42',
+        request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } },
+      }) + '\n'
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'permission-request',
+      requestId: 'req_42',
+      subtype: 'can_use_tool',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+    });
+    expect(typeof events[0].runId).toBe('string');
+  });
+
+  it('respondPermission writes a control_response line to stdin (allow/deny)', async () => {
+    const { manager, child } = createManager();
+    await manager.send('t:lead', { text: 'x', messageId: 'm1', workDir: '/proj' });
+    const written: string[] = [];
+    child.stdin.write = (data: string) => {
+      written.push(data);
+      return true;
+    };
+    manager.respondPermission('t:lead', 'req_42', true);
+    manager.respondPermission('t:lead', 'req_43', false, 'User denied');
+    expect(written.map((line) => JSON.parse(line.trim()))).toEqual([
+      {
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: 'req_42',
+          response: { behavior: 'allow', updatedInput: {} },
+        },
+      },
+      {
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: 'req_43',
+          response: { behavior: 'deny', message: 'User denied' },
+        },
+      },
+    ]);
+  });
+
+  it('respondPermission passes updatedInput through for AskUserQuestion answers (allow)', async () => {
+    const { manager, child } = createManager();
+    await manager.send('t:lead', { text: 'x', messageId: 'm1', workDir: '/proj' });
+    const written: string[] = [];
+    child.stdin.write = (data: string) => {
+      written.push(data);
+      return true;
+    };
+    const answers = { 'Pick one': 'A' };
+    manager.respondPermission('t:lead', 'req_99', true, undefined, {
+      ...{ prompt: 'Pick one' },
+      answers,
+    });
+    const parsed = JSON.parse(written[0].trim());
+    expect(parsed).toEqual({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: 'req_99',
+        response: { behavior: 'allow', updatedInput: { prompt: 'Pick one', answers } },
+      },
+    });
+  });
+
+  it('respondPermission throws when the session is not running', async () => {
+    const { manager } = createManager();
+    expect(() => manager.respondPermission('missing:lead', 'req_1', true)).toThrow(
+      /is not running/
+    );
+  });
+
   it('ignores parse-error and unknown lines without emitting', async () => {
     const { manager, child } = createManager();
     await manager.send('t:lead', { text: 'x', messageId: 'm1', workDir: '/proj' });

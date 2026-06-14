@@ -21,8 +21,11 @@ declare global {
   }
 }
 
+// Version is injected at build time from package.json (vite.web.config.ts define),
+// the same source the Settings page and Sentry use — so the splash version always
+// tracks the real release instead of a stale hardcoded literal.
 const BOOT_LINES = [
-  '🦀 hermit v1.6.38',
+  `🦀 hermit v${__APP_VERSION__}`,
   'connecting harness…',
   'loading team configs…',
   'scanning session history…',
@@ -96,7 +99,8 @@ export function startSplashScene(
     if (!line) return;
 
     const lineEl = document.createElement('div');
-    lineEl.style.cssText = 'opacity: 0; transform: translateY(4px); transition: opacity 0.3s, transform 0.3s;';
+    lineEl.style.cssText =
+      'opacity: 0; transform: translateY(4px); transition: opacity 0.3s, transform 0.3s;';
 
     if (lineIndex === 0) {
       // First line — brand with crab

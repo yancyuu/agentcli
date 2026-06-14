@@ -24,7 +24,14 @@ export type ClaudeStreamLine =
   | { type: 'session-init'; sessionId: string; model?: string }
   | { type: 'assistant'; blocks: ParsedAssistantBlock[]; messageId?: string }
   | { type: 'result'; text: string; subtype: string; sessionId?: string }
-  | { type: 'control-request'; requestId?: string }
+  | {
+      type: 'control-request';
+      requestId?: string;
+      /** `can_use_tool` = a tool needs interactive approval; other subtypes are auto-allowed. */
+      subtype?: string;
+      toolName?: string;
+      toolInput?: Record<string, unknown>;
+    }
   | { type: 'unknown' }
   | { type: 'parse-error'; line: string };
 
@@ -119,11 +126,24 @@ export function classifyClaudeStreamLine(line: string): ClaudeStreamLine | null 
 
     case 'control_request':
     case 'control_cancel_request': {
-      // Permission prompt (`--permission-prompt-tool stdio`). Phase 1 launches in the
-      // background and does not surface interactive approvals here.
+      // The CLI nests the gate details under `request`: { subtype, tool_name, input }.
+      // Only `subtype: can_use_tool` is a real tool-approval gate; other subtypes are
+      // surfaced so the caller can auto-allow them and avoid deadlocking the stream.
+      const req =
+        raw.request && typeof raw.request === 'object'
+          ? (raw.request as Record<string, unknown>)
+          : undefined;
+      const strField = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+      const inputRaw = req?.input as unknown;
       return {
         type: 'control-request',
         requestId: typeof raw.request_id === 'string' ? raw.request_id : undefined,
+        subtype: strField(req?.subtype),
+        toolName: strField(req?.tool_name),
+        toolInput:
+          inputRaw && typeof inputRaw === 'object'
+            ? (inputRaw as Record<string, unknown>)
+            : undefined,
       };
     }
 

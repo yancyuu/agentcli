@@ -134,31 +134,37 @@ async function renderDialog(props: Record<string, unknown>): Promise<RenderHandl
   };
 }
 
-// The user's REAL team data (from ~/.hermit/teams/*/team.json).
+// The user's REAL team data (read live from ~/.hermit/teams/*/team.json). Kept in sync
+// with disk so the regression guard reflects reality, not a stale snapshot — the bug is a
+// flicker that only surfaces against the actual collision context the user hits. Note the
+// real data even carries non-ASCII bindProjects (汇报/产品经理团队/hermit开发) and a duplicate
+// 'my-project'; the auto-slug must stay collision-free against all of it.
 const REAL_BIND_PROJECTS = [
+  '汇报',
+  '产品经理团队',
+  'hermit开发',
+  '212121-og3z',
   '222-11io',
   'aads-e487',
   'boss-1sxv',
-  'hermit开发',
   'my-project',
-  '汇报',
-  '产品经理团队',
+  'team-2kclb4',
   'team-aztc',
   'team-jcve',
-  'team-2kclb4',
 ];
 const REAL_DISPLAY_NAMES = [
+  '汇报',
+  '产品经理团队',
+  'hermit开发',
+  '212121',
   '你好222',
   '测试aads',
   'boss',
-  'hermit开发',
-  'my-project',
   'Helm Loop',
-  '汇报',
-  '产品经理团队',
+  'my-project',
+  '爬虫',
   '呜呜呜欧',
   '测试',
-  '爬虫',
 ];
 
 const baseProps = (

@@ -135,12 +135,25 @@ describe('classifyClaudeStreamLine', () => {
   it('classifies control_request / control_cancel_request as control-request', () => {
     expect(
       classifyClaudeStreamLine(
-        JSON.stringify({ type: 'control_request', request_id: 'req_1', subtype: 'can_use_tool' })
+        JSON.stringify({
+          type: 'control_request',
+          request_id: 'req_1',
+          request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } },
+        })
       )
-    ).toEqual({ type: 'control-request', requestId: 'req_1' });
+    ).toEqual({
+      type: 'control-request',
+      requestId: 'req_1',
+      subtype: 'can_use_tool',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+    });
     expect(classifyClaudeStreamLine(JSON.stringify({ type: 'control_cancel_request' }))).toEqual({
       type: 'control-request',
       requestId: undefined,
+      subtype: undefined,
+      toolName: undefined,
+      toolInput: undefined,
     });
   });
 

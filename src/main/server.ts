@@ -81,7 +81,16 @@ import {
   SYSTEM_MANAGER_DISPLAY_NAME,
   SYSTEM_MANAGER_TEAM_NAME,
 } from '@shared/types/team';
-import type { SystemManagerSummary, TaskBusConfig, TeamLaunchRequest } from '@shared/types/team';
+import type {
+  SystemManagerSummary,
+  TaskBusConfig,
+  TeamLaunchRequest,
+  ToolApprovalSettings,
+  ToolApprovalRequest,
+  ToolApprovalAutoResolved,
+} from '@shared/types/team';
+import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
+import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import type { TeamManifest } from './services/teams-mvp/TeamWorkspaceService';
 import { UpdateService } from './services/UpdateService';
 import {
@@ -712,6 +721,32 @@ interface DirectCliRoute {
 
 const directCliRoutes = new Map<string, DirectCliRoute>();
 
+// Per-team tool-approval settings (auto-allow categories). Synced from the renderer on
+// startup via /api/teams/:name/tool-approval/settings. Defaults deny everything so the user
+// is prompted — matching Claude Code's native cmd permission flow.
+const toolApprovalSettingsByName = new Map<string, ToolApprovalSettings>();
+
+/**
+ * Maps a permission requestId → the DirectCli session it came from (lead or member DM), plus
+ * the toolName/toolInput needed to build the AskUserQuestion `updatedInput` at respond time.
+ */
+interface PendingPermissionApproval {
+  sessionKey: string;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+}
+const permissionSessionByRequestId = new Map<string, PendingPermissionApproval>();
+
+function readToolApprovalSettings(teamName: string): ToolApprovalSettings {
+  return toolApprovalSettingsByName.get(teamName) ?? DEFAULT_TOOL_APPROVAL_SETTINGS;
+}
+
+// Auto-allow rules (autoAllowAll / file edits / safe-but-not-dangerous bash) live in the
+// shared, unit-tested `toolApprovalRules` util — copied verbatim from the multi-agent
+// reference impl so the rule set (incl. DANGEROUS_PATTERNS that override safe prefixes,
+// e.g. `git rm`) stays byte-identical. Only `can_use_tool` is a real gate; other control
+// subtypes must be auto-allowed or the stream deadlocks on stdin.
+
 directCliManager.on('event', (event: DirectCliEvent) => {
   const route = directCliRoutes.get(event.sessionKey);
   if (!route) return;
@@ -743,6 +778,46 @@ directCliManager.on('event', (event: DirectCliEvent) => {
   if (event.kind === 'error') {
     app.log.warn({ error: event.error, sessionKey: event.sessionKey }, 'direct-cli session error');
     broadcastSse('team-change', { type: 'inbox', teamName });
+    return;
+  }
+
+  if (event.kind === 'permission-request') {
+    void (async () => {
+      const settings = readToolApprovalSettings(teamName);
+      // Non-`can_use_tool` subtypes (hook_callback, etc.) auto-allow to prevent deadlock;
+      // `can_use_tool` goes through the shared shouldAutoAllow rules.
+      const autoAllow =
+        event.subtype !== 'can_use_tool' ||
+        shouldAutoAllow(settings, event.toolName ?? 'Unknown', event.toolInput ?? {}).autoAllow;
+      if (autoAllow) {
+        try {
+          directCliManager.respondPermission(event.sessionKey, event.requestId, true);
+        } catch (err) {
+          app.log.warn(
+            { err, sessionKey: event.sessionKey },
+            'direct-cli auto-allow respond failed'
+          );
+        }
+        return;
+      }
+      // Surface to the renderer's CC-style approval sheet (Allow / Deny / Allow all). The
+      // user's choice comes back via /api/teams/:name/tool-approval/respond, which writes
+      // the control_response to stdin and unblocks the turn.
+      permissionSessionByRequestId.set(event.requestId, {
+        sessionKey: event.sessionKey,
+        toolName: event.toolName,
+        toolInput: event.toolInput,
+      });
+      broadcastSse('tool-approval-event', {
+        requestId: event.requestId,
+        runId: event.runId,
+        teamName,
+        source: 'lead',
+        toolName: event.toolName ?? 'Unknown',
+        toolInput: event.toolInput ?? {},
+        receivedAt: new Date().toISOString(),
+      } satisfies ToolApprovalRequest);
+    })();
     return;
   }
 
@@ -5498,14 +5573,79 @@ app.get<{ Params: { name: string; memberName: string } }>(
   }
 );
 
-// tool-approval stubs
-app.post<{ Params: { name: string } }>('/api/teams/:name/tool-approval/respond', async () => ({
-  ok: true,
-}));
-app.post<{ Params: { name: string } }>('/api/teams/:name/tool-approval/settings', async () => ({
-  ok: true,
-}));
-app.post('/api/teams/tool-approval/read-file', async () => ({ content: '' }));
+// tool-approval: write the user's Allow/Deny choice back to the subprocess as a
+// control_response, unblocking the turn so it can emit `result` and persist the reply.
+app.post<{
+  Params: { name: string };
+  Body: { runId?: unknown; requestId?: unknown; allow?: unknown; message?: unknown };
+}>('/api/teams/:name/tool-approval/respond', async (request, reply) => {
+  const teamName = request.params.name;
+  const requestId = typeof request.body?.requestId === 'string' ? request.body.requestId : '';
+  const allow = request.body?.allow === true;
+  const message =
+    typeof request.body?.message === 'string' && request.body.message.trim()
+      ? request.body.message
+      : undefined;
+  if (!requestId) return reply.code(400).send({ ok: false, error: 'requestId required' });
+  const pending = permissionSessionByRequestId.get(requestId);
+  const sessionKey = pending?.sessionKey ?? `${teamName}:lead`;
+  // AskUserQuestion: pass the user's answers via updatedInput so the CLI delivers them
+  // without re-prompting (mirrors the multi-agent reference impl + --permission-prompt-tool spec).
+  let updatedInput: Record<string, unknown> | undefined;
+  if (allow && message && pending?.toolName === 'AskUserQuestion') {
+    const toolInput = pending.toolInput ?? {};
+    try {
+      updatedInput = { ...toolInput, answers: JSON.parse(message) as Record<string, string> };
+    } catch {
+      // If message isn't JSON, use it as the answer to the first question.
+      const questions = (toolInput.questions as { question?: string }[] | undefined) ?? [];
+      const answers: Record<string, string> = {};
+      if (questions[0]?.question) answers[questions[0].question] = message;
+      updatedInput = { ...toolInput, answers };
+    }
+  }
+  try {
+    directCliManager.respondPermission(sessionKey, requestId, allow, message, updatedInput);
+  } catch (err) {
+    app.log.warn({ err, sessionKey, requestId }, 'tool-approval respond failed');
+  }
+  permissionSessionByRequestId.delete(requestId);
+  return { ok: true };
+});
+
+// tool-approval: persist auto-allow settings per team (in-memory; renderer re-syncs on startup).
+app.post<{ Params: { name: string }; Body: Partial<ToolApprovalSettings> }>(
+  '/api/teams/:name/tool-approval/settings',
+  async (request) => {
+    const teamName = request.params.name;
+    const incoming = request.body ?? {};
+    const prev = readToolApprovalSettings(teamName);
+    toolApprovalSettingsByName.set(teamName, {
+      autoAllowAll: incoming.autoAllowAll ?? prev.autoAllowAll,
+      autoAllowFileEdits: incoming.autoAllowFileEdits ?? prev.autoAllowFileEdits,
+      autoAllowSafeBash: incoming.autoAllowSafeBash ?? prev.autoAllowSafeBash,
+      timeoutAction: incoming.timeoutAction ?? prev.timeoutAction,
+      timeoutSeconds: incoming.timeoutSeconds ?? prev.timeoutSeconds,
+    });
+    return { ok: true };
+  }
+);
+
+// tool-approval: read a file for the Edit/Write diff preview. Local-first, best-effort —
+// errors return empty content so the approval sheet still renders without the diff.
+app.post<{ Body: { filePath?: unknown } }>(
+  '/api/teams/tool-approval/read-file',
+  async (request) => {
+    const filePath = typeof request.body?.filePath === 'string' ? request.body.filePath : '';
+    if (!filePath) return { content: '' };
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return { content };
+    } catch {
+      return { content: '' };
+    }
+  }
+);
 
 // validate-cli-args
 app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], errors: [] }));
