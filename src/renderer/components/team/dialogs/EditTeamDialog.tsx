@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
-import { Checkbox } from '@renderer/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -14,12 +13,6 @@ import { Loader2 } from 'lucide-react';
 
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
-
-import {
-  buildFeishuLarkAllowUpdatePayload,
-  getFeishuLarkAllowValue,
-  readStringRecord,
-} from './platformAllowUtils';
 
 interface EditTeamDialogProps {
   open: boolean;
@@ -48,54 +41,20 @@ export const EditTeamDialog = ({
   }));
 
   // ── Derived defaults ─────────────────────────────────────────
-  const rawSettings = useMemo(
-    () => (data?.settings ?? {}) as Record<string, unknown>,
-    [data?.settings]
-  );
-
+  // Loop 动态设置（语言/管理来源/飞书权限/消息格式）已统一迁入 RuntimeConfigDialog，
+  // 这里只保留团队基础信息：名称、描述、颜色 (#21)。
   const defaults = useMemo(() => {
     const cfg = data?.config;
     return {
       name: cfg?.name ?? '',
       description: cfg?.description ?? '',
       color: cfg?.color ?? '',
-      language:
-        cfg?.language ?? (typeof rawSettings.language === 'string' ? rawSettings.language : 'zh'),
-      managedSources:
-        cfg?.managedSources ??
-        (typeof rawSettings.admin_from === 'string' ? rawSettings.admin_from : '*'),
-      platformAllowFrom:
-        cfg?.platformAllowFrom ?? readStringRecord(rawSettings.platform_allow_from),
-      platformAllowChat:
-        cfg?.platformAllowChat ?? readStringRecord(rawSettings.platform_allow_chat),
-      showContextIndicator:
-        cfg?.showContextIndicator ??
-        (typeof rawSettings.show_context_indicator === 'boolean'
-          ? rawSettings.show_context_indicator
-          : true),
-      replyFooter:
-        cfg?.replyFooter ??
-        (typeof rawSettings.reply_footer === 'boolean' ? rawSettings.reply_footer : true),
-      injectSender:
-        cfg?.injectSender ??
-        (typeof rawSettings.inject_sender === 'boolean' ? rawSettings.inject_sender : false),
     };
-  }, [data, rawSettings]);
+  }, [data]);
 
   // ── Local form state ─────────────────────────────────────────
   const [name, setName] = useState(defaults.name);
   const [description, setDescription] = useState(defaults.description);
-  const [language, setLanguage] = useState(defaults.language);
-  const [managedSources, setManagedSources] = useState(defaults.managedSources);
-  const [feishuAllowFrom, setFeishuAllowFrom] = useState(
-    getFeishuLarkAllowValue(defaults.platformAllowFrom)
-  );
-  const [feishuAllowChat, setFeishuAllowChat] = useState(
-    getFeishuLarkAllowValue(defaults.platformAllowChat)
-  );
-  const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
-  const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
-  const [injectSender, setInjectSender] = useState(defaults.injectSender);
   const [savePhase, setSavePhase] = useState<'idle' | 'saving' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
   const saving = savePhase === 'saving';
@@ -115,13 +74,6 @@ export const EditTeamDialog = ({
     setError(null);
     setName(d.name);
     setDescription(d.description);
-    setLanguage(d.language);
-    setManagedSources(d.managedSources);
-    setFeishuAllowFrom(getFeishuLarkAllowValue(d.platformAllowFrom));
-    setFeishuAllowChat(getFeishuLarkAllowValue(d.platformAllowChat));
-    setShowContextIndicator(d.showContextIndicator);
-    setReplyFooter(d.replyFooter);
-    setInjectSender(d.injectSender);
   }, [open]);
 
   const handleSave = (): void => {
@@ -133,28 +85,12 @@ export const EditTeamDialog = ({
     setSavePhase('saving');
     setError(null);
 
-    const platformAllowFrom = buildFeishuLarkAllowUpdatePayload(
-      defaultsRef.current.platformAllowFrom,
-      feishuAllowFrom
-    );
-    const platformAllowChat = buildFeishuLarkAllowUpdatePayload(
-      defaultsRef.current.platformAllowChat,
-      feishuAllowChat
-    );
-
     void (async () => {
       try {
         await api.teams.updateConfig(teamName, {
           name: name.trim(),
           description: description.trim(),
           color: defaultsRef.current.color,
-          language: language.trim() || undefined,
-          managedSources: managedSources.trim() || undefined,
-          platformAllowFrom,
-          platformAllowChat,
-          showContextIndicator,
-          replyFooter,
-          injectSender,
         });
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
         setSavePhase('done');
@@ -179,7 +115,7 @@ export const EditTeamDialog = ({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>编辑团队</DialogTitle>
-          <DialogDescription>修改团队信息和 Loop 动态设置（无需重启）</DialogDescription>
+          <DialogDescription>修改团队名称和描述</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -218,101 +154,6 @@ export const EditTeamDialog = ({
               className={`${inputCls} resize-none`}
               placeholder="团队描述（可选）"
             />
-          </div>
-
-          {/* Messaging settings */}
-          <div className="rounded-md border border-[var(--color-border)] p-3">
-            <h3 className="text-xs font-medium text-[var(--color-text)]">Loop 动态设置</h3>
-            <div className="mt-3 space-y-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className={labelCls}>语言</label>
-                  <input
-                    type="text"
-                    value={language}
-                    onChange={(e) => {
-                      setError(null);
-                      setLanguage(e.target.value);
-                    }}
-                    className={inputCls}
-                    placeholder="zh"
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>管理来源</label>
-                  <input
-                    type="text"
-                    value={managedSources}
-                    onChange={(e) => {
-                      setError(null);
-                      setManagedSources(e.target.value);
-                    }}
-                    className={inputCls}
-                    placeholder="user1,user2 或 *"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className={labelCls}>飞书私聊权限</label>
-                  <input
-                    type="text"
-                    value={feishuAllowFrom}
-                    onChange={(e) => {
-                      setError(null);
-                      setFeishuAllowFrom(e.target.value);
-                    }}
-                    className={inputCls}
-                    placeholder="ou_xxx 或 *"
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>飞书群聊权限</label>
-                  <input
-                    type="text"
-                    value={feishuAllowChat}
-                    onChange={(e) => {
-                      setError(null);
-                      setFeishuAllowChat(e.target.value);
-                    }}
-                    className={inputCls}
-                    placeholder="oc_xxx 或 *"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-2 md:grid-cols-3">
-                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text-secondary)]">
-                  <Checkbox
-                    checked={showContextIndicator}
-                    onCheckedChange={(c) => {
-                      setError(null);
-                      setShowContextIndicator(c === true);
-                    }}
-                  />
-                  上下文指示
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text-secondary)]">
-                  <Checkbox
-                    checked={replyFooter}
-                    onCheckedChange={(c) => {
-                      setError(null);
-                      setReplyFooter(c === true);
-                    }}
-                  />
-                  回复尾部信息
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text-secondary)]">
-                  <Checkbox
-                    checked={injectSender}
-                    onCheckedChange={(c) => {
-                      setError(null);
-                      setInjectSender(c === true);
-                    }}
-                  />
-                  注入发送者
-                </label>
-              </div>
-            </div>
           </div>
 
           {error && <p className="text-xs text-red-400">{error}</p>}

@@ -391,10 +391,10 @@ export function TaskBusSection(): React.JSX.Element {
       .finally(() => setScanning(false));
   };
 
-  const exportTelemetry = (format: 'csv' | 'json' = 'csv') => {
+  const exportTelemetry = () => {
     if (exporting) return;
     setExporting(true);
-    fetch(`/api/telemetry/export?format=${format}`)
+    fetch('/api/telemetry/export?format=csv')
       .then((r) => r.json())
       .then((payload: { filename?: string; mimeType?: string; content?: string }) => {
         if (payload.filename && payload.mimeType && payload.content !== undefined) {
@@ -481,21 +481,12 @@ export function TaskBusSection(): React.JSX.Element {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => exportTelemetry('csv')}
+          onClick={exportTelemetry}
           disabled={exporting || !telemetryStatus}
           className="gap-1.5"
         >
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
           导出 CSV
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => exportTelemetry('json')}
-          disabled={exporting || !telemetryStatus}
-          className="gap-1.5"
-        >
-          JSON
         </Button>
         <span className="text-[10px] text-[var(--color-text-muted)]">
           本地扫描，不依赖团队总线或 Redis。{!collectionEnabled ? '开启数据采集后可手动刷新。' : ''}

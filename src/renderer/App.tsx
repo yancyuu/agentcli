@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 import { TooltipProvider } from '@renderer/components/ui/tooltip';
 
@@ -17,14 +17,6 @@ import type { Tab } from './types/tabs';
 
 const PERSIST_KEY = 'hermit:lastTeam';
 const DEFAULT_APP_PATH = '/teams';
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
 
 function getActiveTabFromLayout(activeTabId: string | null, paneLayout: PaneLayout): Tab | null {
   if (!activeTabId) return null;
@@ -117,96 +109,20 @@ function useTabPathPersistence() {
     activeTabId: s.activeTabId,
     paneLayout: s.paneLayout,
   }));
-  const [routeReady, setRouteReady] = useState(false);
-  const didInitialRouteRestoreRef = useRef(false);
-
-  useEffect(() => {
-    if (didInitialRouteRestoreRef.current) return;
-    didInitialRouteRestoreRef.current = true;
-
-    const pathname = window.location.pathname;
-    const segments = pathname
-      .split('/')
-      .map((segment) => segment.trim())
-      .filter((segment) => segment.length > 0)
-      .map(safeDecodeURIComponent);
-    const state = useStore.getState();
-
-    if (segments.length === 0) {
-      setRouteReady(true);
-      return;
-    }
-
-    const [route, arg1, arg2] = segments;
-    switch (route) {
-      case 'team':
-        if (arg1) state.openTeamTab(arg1);
-        break;
-      case 'teams':
-        state.openTeamsTab();
-        break;
-      case 'system-manager':
-        void state.openSystemManager();
-        break;
-      case 'settings':
-        state.openSettingsTab();
-        break;
-      case 'extensions':
-        state.openExtensionsTab();
-        break;
-      case 'schedules':
-        state.openSchedulesTab();
-        break;
-      case 'tasks':
-        state.openTasksTab();
-        break;
-      case 'dashboard':
-        state.openDashboard();
-        break;
-      case 'society':
-        state.openSocietyTab();
-        break;
-      case 'session':
-        if (arg1 && arg2) {
-          state.navigateToSession(arg1, arg2);
-        }
-        break;
-      case 'notifications':
-        state.openTab({ type: 'notifications', label: '通知' });
-        break;
-      case 'graph':
-        if (arg1) {
-          state.openTab({ type: 'graph', label: arg1, teamName: arg1 });
-        }
-        break;
-      case 'report':
-        if (arg1 && arg2) {
-          state.openTab({
-            type: 'report',
-            label: 'Session Report',
-            projectId: arg1,
-            sessionId: arg2,
-          });
-        }
-        break;
-      default:
-        break;
-    }
-
-    setRouteReady(true);
-  }, []);
 
   const activeTab = useMemo(
     () => getActiveTabFromLayout(activeTabId, paneLayout),
     [activeTabId, paneLayout]
   );
 
+  // The initial route is restored before first render (main.tsx →
+  // restoreInitialRoute), so this hook only keeps the URL in sync as the active
+  // tab changes. No post-mount restore, no routeReady gate.
   useEffect(() => {
-    if (!routeReady) return;
     const nextPath = buildPathForTab(activeTab);
     if (window.location.pathname === nextPath) return;
     window.history.replaceState(null, '', nextPath);
-  }, [activeTab, routeReady]);
+  }, [activeTab]);
 }
 
 declare global {

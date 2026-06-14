@@ -44,15 +44,16 @@ function formatWorkersList(workers: DiscoverableWorker[]): string {
   if (!workers.length) return '当前没有可用数字员工。';
   const lines = workers.map((worker) => {
     const status = worker.status === 'online' ? 'online' : 'offline';
+    const workDir = worker.workDir ? ` · ${worker.workDir}` : '';
     const harness = worker.harness ? ` · ${worker.harness}` : '';
     const description = worker.description ? ` — ${worker.description}` : '';
-    return `- @${worker.workerId} ${worker.name} · ${status}${harness}${description}`;
+    return `- @${worker.workerId} ${worker.name} · ${status}${workDir}${harness}${description}`;
   });
   return [
     '当前数字员工：',
     ...lines,
     '',
-    '在 Admin Loop 输入 `@workerId 任务内容` 可直接调用对应员工。',
+    '在指令台输入 `@workerId 任务内容` 可直接调用对应员工。',
   ].join('\n');
 }
 

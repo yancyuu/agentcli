@@ -12,7 +12,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 const DASHBOARD_BOUNDARIES = [
   {
-    title: 'Admin Loop',
+    title: 'Helm Loop',
     description:
       '只放全局巡检、诊断、复盘、治理和改进提案。常用 workflow 不再铺成卡片，统一在指令台输入 / 查看。',
     badge: '全局控制台',
@@ -64,7 +64,7 @@ export const DashboardView = (): React.JSX.Element => {
                 先从这里进入：全局控制、团队协作、社区入口分开
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-text-secondary">
-                首页只做总览和入口；Admin Loop 是全局指令台，团队详情里的 Loop
+                首页只做总览和入口；Helm Loop 是全局指令台，团队详情里的 Loop
                 是当前团队指令台，飞书群独立成扫码页。这样边界更清楚，也不会把常用命令堆在 Admin
                 Loop 下方。
               </p>
@@ -75,7 +75,7 @@ export const DashboardView = (): React.JSX.Element => {
                   className="inline-flex items-center gap-2 rounded-lg border border-indigo-500/35 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-100 transition-colors hover:bg-indigo-500/15"
                 >
                   <Bot className="size-4" />
-                  打开 Admin Loop
+                  打开 Helm Loop
                 </button>
                 <button
                   type="button"
@@ -106,7 +106,7 @@ export const DashboardView = (): React.JSX.Element => {
               <div className="space-y-2 text-xs text-text-muted">
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface-overlay px-3 py-2">
                   <span>全局 workflow</span>
-                  <span>在 Admin Loop 输入 / 查看</span>
+                  <span>在 Helm Loop 输入 / 查看</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface-overlay px-3 py-2">
                   <span>团队 Loop</span>
@@ -145,7 +145,7 @@ export const DashboardView = (): React.JSX.Element => {
               快速开始（2 步）
             </div>
             <p className="mt-1 text-xs text-text-muted">
-              首次使用会看到空白首页。先连接运行时，再创建团队或进入 Admin Loop。
+              首次使用会看到空白首页。先连接运行时，再创建团队或进入 Helm Loop。
             </p>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <button
@@ -183,7 +183,7 @@ export const DashboardView = (): React.JSX.Element => {
                 onClick={() => void openSystemManager()}
                 className="text-xs text-text-muted transition-colors hover:text-text"
               >
-                Admin Loop →
+                Helm Loop →
               </button>
             </div>
 

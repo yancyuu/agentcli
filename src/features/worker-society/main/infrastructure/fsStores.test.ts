@@ -95,6 +95,15 @@ describe('FsProfileStore', () => {
     await store.delete('w1');
     expect(await store.get('w1')).toBeUndefined();
   });
+  it('delete is a no-op for a worker that was never stored (idempotent)', async () => {
+    // L65 真臂 `if (!(workerId in map)) return`：删一个不存在的 worker（未注册/已删过）应是
+    // 幂等 no-op——不抛、不写、不误伤既有数据。既有 delete 测删的是已存在的 w1（假臂）。
+    const store = new FsProfileStore(root);
+    await store.upsert(profile('w1'));
+    await store.delete('ghost'); // ghost 不在 map → 提前 return，无写
+    expect((await store.get('w1'))?.workerId).toBe('w1'); // 既有数据未被误伤
+    expect(await store.get('ghost')).toBeUndefined();
+  });
   it('persists across instances (reload from disk)', async () => {
     const a = new FsProfileStore(root);
     await a.upsert(profile('w1', 77));

@@ -2,9 +2,10 @@
  * SocietyNodeOverlay —— 纯图谱交互模型下，点开节点弹出的「操作卡片」。
  *
  * 删掉看板后，这是 worker/need 的唯一交互入口（图谱即界面）。引擎 GraphView 在节点
- * 被点击时以 renderOverlay({node, screenPos, onClose}) 调用本组件，返回的卡片渲染在
- * 一个 `pointer-events-auto fixed z-20` 包裹层里（位于视口左上角），因此本组件用
- * clampOverlayPosition 把自己绝对定位到节点旁、且不被屏幕边缘裁切。
+ * 被点击时以 renderOverlay({node, screenPos, onClose}) 调用本组件；引擎自身用 Floating UI
+ * （computePosition + flip + shift + offset + autoUpdate）把包裹层定位到节点旁并夹进容器，
+ * 故本组件**不再自行定位**——只渲染内容并把动作上抛。（曾用 clampOverlayPosition 自定位，
+ * 与引擎 Floating UI 叠加成 double-offset、卡片飞出视口，已移除该冗余逻辑。）
  *
  * 按 node.domainRef.kind 分三种卡片：
  *   - member：worker 名片（声誉/能力/负载）+ 发消息（人→worker，from='user'）。
@@ -17,12 +18,10 @@
 import { useState } from 'react';
 
 import { NEED_STATUS_LABEL, needStatusColor, reputationColor } from './societyViewUtils';
-import { clampOverlayPosition, needLifecycleActions } from './societyOverlayActions';
+import { needLifecycleActions } from './societyOverlayActions';
+import { classifyOpenNeedStall } from '../core/domain/policies/societyPolicies';
 import type { GraphDomainRef, GraphNode } from '@claude-teams/agent-graph';
 import type { PublishedNeed, WorkerProfile } from '../core/domain/models/society';
-
-/** 弹卡近似尺寸（用于 clamp 定位；实际高度按内容伸缩，不影响正确性）。 */
-const OVERLAY_SIZE = { width: 256, height: 210 } as const;
 
 export interface SocietyNodeOverlayProps {
   node: GraphNode;
@@ -46,20 +45,14 @@ export interface SocietyNodeOverlayProps {
 }
 
 export function SocietyNodeOverlay(props: SocietyNodeOverlayProps): React.JSX.Element {
-  const { node, screenPos, onClose, workerById, needById, societyStats } = props;
-
-  const pos = clampOverlayPosition(
-    screenPos,
-    { width: window.innerWidth, height: window.innerHeight },
-    OVERLAY_SIZE
-  );
+  const { node, onClose, workerById, needById, societyStats } = props;
 
   const ref = node.domainRef as GraphDomainRef;
 
   return (
     <div
-      className="pointer-events-auto absolute w-64 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 text-[var(--color-text)] shadow-xl"
-      style={{ left: pos.left, top: pos.top, backgroundColor: 'rgba(10,10,15,0.96)' }}
+      className="pointer-events-auto relative w-64 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 text-[var(--color-text)] shadow-xl"
+      style={{ backgroundColor: 'rgba(10,10,15,0.96)' }}
     >
       <button
         onClick={onClose}
@@ -80,6 +73,19 @@ export function SocietyNodeOverlay(props: SocietyNodeOverlayProps): React.JSX.El
 }
 
 // ─── Worker 名片 ─────────────────────────────────────────────────────────────
+
+/**
+ * 名片副标题：去掉误导的「复合团队」——所有真实成员同 kind，零信息量。
+ * 换成每个成员真正不同的属性：绑定的项目目录（会话实际工作的地方）。把家目录前缀
+ * 折成 ~（既给完整相对路径又不泄露用户名）；无 workDir（飞书 / 未绑定）时回退载体 harness。
+ */
+function workerSubtitle(worker: WorkerProfile): string {
+  if (worker.workDir) {
+    const tilde = worker.workDir.replace(/^\/(?:Users|home)\/[^/]+/, '~');
+    return `📁 ${tilde}`;
+  }
+  return worker.harness ?? '';
+}
 
 function WorkerCard(props: SocietyNodeOverlayProps & { workerId: string }): React.JSX.Element {
   const { workerId, workerById, onSendMessage } = props;
@@ -126,10 +132,7 @@ function WorkerCard(props: SocietyNodeOverlayProps & { workerId: string }): Reac
         )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{worker.name}</p>
-          <p className="truncate text-[10px] opacity-50">
-            {worker.kind === 'composite' ? '复合团队' : '原子 worker'}
-            {worker.harness ? ` · ${worker.harness}` : ''}
-          </p>
+          <p className="truncate text-[10px] opacity-50">{workerSubtitle(worker)}</p>
         </div>
       </div>
 
@@ -190,6 +193,7 @@ function NeedCard(props: SocietyNodeOverlayProps & { needId: string }): React.JS
   const {
     needId,
     needById,
+    workerById,
     workerName,
     onSelectAssignee,
     onStartNeed,
@@ -198,6 +202,8 @@ function NeedCard(props: SocietyNodeOverlayProps & { needId: string }): React.JS
     onTriggerAutonomy,
   } = props;
   const need = needById.get(needId);
+  // 开放且无人自荐时，归因「为何卡住」给用户可操作反馈（复用策略层 classifyOpenNeedStall）。
+  const stall = need ? classifyOpenNeedStall(need, [...workerById.values()]) : null;
 
   if (!need) {
     return (
@@ -282,6 +288,15 @@ function NeedCard(props: SocietyNodeOverlayProps & { needId: string }): React.JS
               {workerName(v.workerId)}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* 停滞归因：open 且无人能自荐时，告诉用户为何不进展（而非沉默卡死）。 */}
+      {stall && (
+        <div className="rounded border border-[var(--color-border)] bg-[rgba(240,198,116,0.1)] px-2 py-1 text-[11px] leading-snug text-[#f5d68a]">
+          {stall === 'no_matching_worker'
+            ? '暂无匹配能力的成员——补能力或取消该需求'
+            : '匹配的成员均已满载，待其释放并发后自荐'}
         </div>
       )}
 

@@ -16,6 +16,16 @@ function hermitHome(): string {
   return process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
 }
 
+/**
+ * Canonical, isolated runtime path for the Helm Loop. Dedicated (never shared
+ * with another team/project) so the admin agent can bootstrap its own CLAUDE.md
+ * here without colliding with project work. Single source of truth — reused by
+ * `getSystemManagerWorkDir` (runtime) and `getStatus` (UI scope display).
+ */
+export function adminWorkDir(): string {
+  return path.join(hermitHome(), 'admin-workspace');
+}
+
 function expandHome(input: string): string {
   const normalized = input.trim().replace(/^～/, '~');
   if (normalized === '~') return os.homedir();
@@ -64,6 +74,7 @@ export class SystemManagerConfigService {
         schemaVersion: 1,
         selectedWorkDir,
         ...(workflowFolder ? { workflowFolder } : {}),
+        ...(parsed.adminInitialized ? { adminInitialized: true } : {}),
         updatedAt:
           typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
       };
@@ -94,6 +105,9 @@ export class SystemManagerConfigService {
     } else if (typeof patch.workflowFolder === 'string') {
       next.workflowFolder = await this.normalizeDirectory(patch.workflowFolder, 'workflowFolder');
     }
+    if (typeof patch.adminInitialized === 'boolean') {
+      next.adminInitialized = patch.adminInitialized;
+    }
 
     await mkdir(path.dirname(this.configPath), { recursive: true });
     await writeFile(this.configPath, JSON.stringify(next, null, 2), 'utf-8');
@@ -104,7 +118,8 @@ export class SystemManagerConfigService {
     const config = await this.getConfig();
     const hasClaude = await commandExists('claude');
     return {
-      displayName: 'Admin Loop',
+      displayName: 'Helm Loop',
+      adminWorkDir: adminWorkDir(),
       defaultWorkDir: this.defaultWorkDir,
       selectedWorkDir: config.selectedWorkDir,
       ...(config.workflowFolder ? { workflowFolder: config.workflowFolder } : {}),

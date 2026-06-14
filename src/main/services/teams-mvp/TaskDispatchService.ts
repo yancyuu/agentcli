@@ -109,6 +109,7 @@ export class TaskDispatchService {
         description: team.description,
         harness: team.harness,
         capabilities: this.inferCapabilities(team),
+        workDir: team.workDir,
       });
     }
 
@@ -144,6 +145,7 @@ export class TaskDispatchService {
             description: info?.description || undefined,
             harness: info?.harness || undefined,
             capabilities,
+            workDir: info?.workDir || undefined,
           });
         }
       } catch {

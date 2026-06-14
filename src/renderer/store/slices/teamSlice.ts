@@ -3346,12 +3346,20 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       const prevByName = get().teamByName;
       const existingEntry = prevByName[teamName];
       const configColor = data.config.color;
+      // getData collapses config.name to the slug for a draft/partially-provisioned
+      // team (no team.json on disk). Prefer the summary's existing user-facing
+      // displayName in that case so the name never regresses to the slug.
+      const configName = data.config.name ?? '';
+      const resolvedDisplayName =
+        configName && configName !== teamName
+          ? configName
+          : existingEntry?.displayName || configName || teamName;
       if (configColor && (!existingEntry || existingEntry?.color !== configColor)) {
         const patched: TeamSummary = existingEntry
-          ? { ...existingEntry, color: configColor, displayName: data.config.name || teamName }
+          ? { ...existingEntry, color: configColor, displayName: resolvedDisplayName }
           : {
               teamName,
-              displayName: data.config.name || teamName,
+              displayName: resolvedDisplayName,
               description: data.config.description ?? '',
               color: configColor,
               memberCount: data.members.length,
@@ -3396,7 +3404,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         await api.review.invalidateTaskChangeSummaries(teamName, invalidationState.taskIds);
       }
       // Sync tab label with the team's display name from config
-      const displayName = data.config.name || teamName;
+      const displayName = resolvedDisplayName;
       const allTabs = get().getAllPaneTabs();
       const relatedTabs = allTabs.filter(
         (tab) => (tab.type === 'team' || tab.type === 'graph') && tab.teamName === teamName

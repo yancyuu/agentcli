@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseCrossTeamPrefix } from '@shared/constants/crossTeam';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeClock } from '../../core/application/fakes';
 import { CrossTeamMessageGateway } from './crossTeamMessageGateway';
@@ -107,5 +107,26 @@ describe('CrossTeamMessageGateway', () => {
     expect(await gw.recent(Number.NaN)).toEqual([]);
     // 正常 limit 不受影响：
     expect((await gw.recent(2)).map((m) => m.text)).toEqual(['1', '2']);
+  });
+
+  it('falls back to a Date/Math-based id when crypto.randomUUID is unavailable', async () => {
+    // L83-84：globalThis.crypto?.randomUUID 缺失时（旧 Node / 受限运行时），randomId() 降级为
+    // Date.now()+Math.random() 的 base36 串——仍生成 msg- 前缀、唯一的 id，send 不抛。
+    const gw = new CrossTeamMessageGateway(root, clock);
+    vi.stubGlobal('crypto', undefined); // 摘掉 crypto.randomUUID → 走 L83 降级臂
+    try {
+      await gw.send({ fromWorker: 'a', toWorker: 'b', text: 'm1' });
+      await gw.send({ fromWorker: 'a', toWorker: 'b', text: 'm2' });
+    } finally {
+      vi.unstubAllGlobals(); // 恢复 crypto，防污染后续测试
+    }
+    const recent = await gw.recent(10);
+    const [id1, id2] = recent.map((m) => m.id);
+    expect(id1).toMatch(/^msg-/); // 降级 id 仍带前缀
+    // 降级 = msg-<ts36>-<rand36>（2 个 '-'、3 段）；UUID = msg-<uuid>（5 个 '-'、6 段）。
+    // 段数断言稳健区分降级臂 vs crypto 臂（不靠 hex 字符，免 flaky）。
+    expect(id1.split('-')).toHaveLength(3);
+    expect(id2.split('-')).toHaveLength(3);
+    expect(id1).not.toBe(id2); // 降级 id 仍唯一
   });
 });

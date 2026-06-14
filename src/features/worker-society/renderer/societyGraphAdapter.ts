@@ -157,9 +157,10 @@ export function projectSocietyGraph(
     if (!VISIBLE_NEED_STATUSES.has(need.status)) continue;
     const assigneeId =
       need.assignee && knownWorkerIds.has(need.assignee) ? workerNodeId(need.assignee) : null;
+    const taskId = needNodeId(need.needId);
 
     nodes.push({
-      id: needNodeId(need.needId),
+      id: taskId,
       kind: 'task',
       label: need.subject,
       sublabel:
@@ -171,11 +172,12 @@ export function projectSocietyGraph(
     });
 
     if (assigneeId) {
-      const ownEdgeId = `edge:own:${assigneeId}:${needNodeId(need.needId)}`;
+      // 已指派 → ownership 边接到具体 worker；进行中再叠一条流动粒子。
+      const ownEdgeId = `edge:own:${assigneeId}:${taskId}`;
       edges.push({
         id: ownEdgeId,
         source: assigneeId,
-        target: needNodeId(need.needId),
+        target: taskId,
         type: 'ownership',
       });
 
@@ -189,6 +191,16 @@ export function projectSocietyGraph(
           color: PARTICLE_CYAN,
         });
       }
+    } else {
+      // 无指派人 → 锚定到广场（agora）。否则 open 需求在力导布局里没有边可依附，成为孤立
+      // 浮点，视觉上「看不出跟谁关联」。用 parent-child 表达「待认领，挂在广场」——ownership
+      // 语义无主不成立，故不用 ownership；粒子也只属于进行中的已指派任务。
+      edges.push({
+        id: `edge:agora:${taskId}`,
+        source: AGORA_ID,
+        target: taskId,
+        type: 'parent-child',
+      });
     }
   }
 

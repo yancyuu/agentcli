@@ -896,6 +896,7 @@ export const TeamListView = (): React.JSX.Element => {
       clearProvisioningError={clearProvisioningError}
       existingTeamNames={teams.map((t) => t.teamName)}
       existingBindProjects={teams.map((t) => t.bindProject).filter(Boolean) as string[]}
+      existingDisplayNames={teams.map((t) => t.displayName).filter(Boolean) as string[]}
       provisioningTeamNames={provisioningTeamNames}
       activeTeams={activeTeams}
       initialData={copyData ?? undefined}
@@ -1072,7 +1073,7 @@ export const TeamListView = (): React.JSX.Element => {
             className="border-[var(--color-accent-border)] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
             onClick={() => void openSystemManager()}
           >
-            Admin Loop
+            Helm Loop
           </Button>
           <Button
             variant="outline"

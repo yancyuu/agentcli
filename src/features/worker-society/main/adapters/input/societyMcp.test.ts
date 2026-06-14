@@ -54,6 +54,18 @@ describe('executeSocietyMcpTool', () => {
     expect(p.capabilities.map((x) => x.skill)).toEqual(['code', 'design']);
   });
 
+  it('falls back to worker_id as the name when registering without a name', async () => {
+    // L208 args.name ?? args.worker_id 的 false 臂：agent 注册时不传 name → 退回 worker_id 作名字。
+    const res = await executeSocietyMcpTool(
+      'society_register_worker',
+      { worker_id: 'dev' }, // 不传 name
+      c
+    );
+    const p = json(res!) as { workerId: string; name: string };
+    expect(p.workerId).toBe('dev');
+    expect(p.name).toBe('dev'); // name 缺省 → 退回 worker_id
+  });
+
   it('discovers workers filtered by capability', async () => {
     await executeSocietyMcpTool(
       'society_register_worker',
@@ -238,5 +250,68 @@ describe('executeSocietyMcpTool', () => {
     );
     const res = await executeSocietyMcpTool('society_get_feed', { limit: '5' }, c);
     expect((json(res!) as { text: string }[]).length).toBeGreaterThan(0);
+  });
+
+  it('publishes a need with no required capabilities (csv() undefined → [])', async () => {
+    // L34 csv 的 `value ?? ''` 真臂：society_publish_need 不传 required_capabilities →
+    // csv(undefined) → []（无能力要求的需求，任何 worker 可自荐）。既有 publishNeed 测都传 'code'。
+    await executeSocietyMcpTool(
+      'society_register_worker',
+      { worker_id: 'poster', name: 'Poster', capabilities: 'pm' },
+      c
+    );
+    const need = json(
+      (await executeSocietyMcpTool(
+        'society_publish_need',
+        { posted_by: 'poster', subject: 'open call' }, // 不传 required_capabilities
+        c
+      ))!
+    ) as { needId: string; status: string };
+    expect(need.status).toBe('open'); // csv(undefined)→[] 不影响发布
+    expect((await c.needs.get(need.needId))?.requiredCapabilities).toEqual([]);
+  });
+
+  it('get_feed with a non-numeric limit falls back to the default 20', async () => {
+    // L43 num 的 `Number.isFinite(n) ? n : undefined` false 臂 + L243 `num(args.limit) ?? 20`
+    // 降级臂：agent 传脏 limit（非数字）→ num 返回 undefined → 默认取 20。既有 feed 测传 '5'（真臂）。
+    await executeSocietyMcpTool(
+      'society_register_worker',
+      { worker_id: 'a', name: 'A', capabilities: 'x' },
+      c
+    );
+    await executeSocietyMcpTool(
+      'society_register_worker',
+      { worker_id: 'b', name: 'B', capabilities: 'x' },
+      c
+    );
+    // 灌 25 条消息，使默认上限 20 可观测（recent(20) 只回最后 20 条）。
+    for (let i = 0; i < 25; i++) {
+      await executeSocietyMcpTool(
+        'society_message_worker',
+        { from_worker: 'a', to_worker: 'b', text: `m${i}` },
+        c
+      );
+    }
+    const res = await executeSocietyMcpTool('society_get_feed', { limit: 'not-a-number' }, c);
+    expect((json(res!) as unknown[]).length).toBe(20); // 脏 limit → 默认 20（L43 false + L243 ?? 20）
+  });
+
+  it('lists open needs on the agora', async () => {
+    // society_list_open_needs 是唯一未测的 MCP switch 分支（L228-229）——补齐：发布一个 open
+    // need 后，该工具应把它列回来（映射 c.needs.listOpen()）。所有其余 society_* 工具均已覆盖。
+    await executeSocietyMcpTool(
+      'society_register_worker',
+      { worker_id: 'poster', name: 'Poster', capabilities: 'pm' },
+      c
+    );
+    const need = json(
+      (await executeSocietyMcpTool(
+        'society_publish_need',
+        { posted_by: 'poster', subject: 'open X', required_capabilities: 'code' },
+        c
+      ))!
+    ) as { needId: string };
+    const res = await executeSocietyMcpTool('society_list_open_needs', {}, c);
+    expect((json(res!) as { needId: string }[]).map((n) => n.needId)).toContain(need.needId);
   });
 });

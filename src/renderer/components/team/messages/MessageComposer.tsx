@@ -17,6 +17,7 @@ import { useStore } from '@renderer/store';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { parseTeamMentionDirective } from '@renderer/utils/teamMentionDirective';
 import {
   expandCapabilityCommand,
   resolveCapabilityCommandInput,
@@ -252,11 +253,10 @@ export const MessageComposer = ({
             : null
     : null;
   const teamDispatch = useMemo(() => {
-    const match = trimmed.match(/^@([^\s]+)\s+([\s\S]+)$/);
-    if (!match || !onDispatchTask) return null;
-    const mentioned = match[1];
-    const subject = match[2]?.trim();
-    if (!mentioned || !subject) return null;
+    if (!onDispatchTask) return null;
+    const parsed = parseTeamMentionDirective(trimmed);
+    if (!parsed) return null;
+    const { mentioned, subject } = parsed;
     const targetTeam = teamMentionSuggestions.find((team) => {
       const slug = team.id.startsWith('team:') ? team.id.slice('team:'.length) : team.id;
       return slug === mentioned || team.name === mentioned;

@@ -147,7 +147,10 @@ describe('RuntimeConfigDialog', () => {
     const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
     expect(allowFromInput?.value).toBe('');
     expect(allowChatInput?.value).toBe('');
-    expect(host.textContent).toContain('当前：A,B');
+    // managedSources is now an editable input in the Loop 动态设置 section (#21).
+    expect(
+      (host.querySelector('[data-testid="loop-managed-sources"]') as HTMLInputElement | null)?.value
+    ).toBe('A,B');
 
     await act(async () => {
       root.unmount();
@@ -434,6 +437,71 @@ describe('RuntimeConfigDialog', () => {
     expect(bindingContent).toBeTruthy();
     expect(JSON.parse(bindingContent?.getAttribute('data-allow-from') ?? '{}')).toEqual({ feishu: 'A,B' });
     expect(JSON.parse(bindingContent?.getAttribute('data-allow-chat') ?? '{}')).toEqual({ feishu: 'chat_1' });
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('seeds Loop 动态设置 fields from config and persists them on save', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    mockStoreState.selectedTeamData = {
+      ...(mockStoreState.selectedTeamData as Record<string, unknown>),
+      config: {
+        agentType: 'claudecode',
+        projectPath: '/tmp/project',
+        permissionMode: 'default',
+        disabledCommands: [],
+        language: 'zh',
+        managedSources: '*',
+        showContextIndicator: true,
+        replyFooter: false,
+        injectSender: true,
+      },
+    };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<RuntimeConfigDialog open teamName="test-team" onClose={vi.fn()} />);
+      await Promise.resolve();
+    });
+
+    // Defaults seeded from config.
+    expect(
+      (host.querySelector('[data-testid="loop-language"]') as HTMLInputElement | null)?.value
+    ).toBe('zh');
+    expect(
+      (host.querySelector('[data-testid="loop-managed-sources"]') as HTMLInputElement | null)?.value
+    ).toBe('*');
+    expect(
+      (host.querySelector('[data-testid="loop-inject-sender"]') as HTMLInputElement | null)?.checked
+    ).toBe(true);
+
+    const saveButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('保存并重启')
+    );
+    expect(saveButton).toBeTruthy();
+
+    await act(async () => {
+      saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.teams.updateConfig).toHaveBeenCalledWith(
+      'test-team',
+      expect.objectContaining({
+        language: 'zh',
+        managedSources: '*',
+        showContextIndicator: true,
+        replyFooter: false,
+        injectSender: true,
+      })
+    );
 
     await act(async () => {
       root.unmount();

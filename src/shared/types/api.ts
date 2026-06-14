@@ -509,6 +509,14 @@ export interface CcSession {
   createdAt: string;
   updatedAt: string;
   lastMessage: { role: string; content: string; timestamp: string } | null;
+  /**
+   * Whether this list entry is backed by a local Claude JSONL file. cc-only
+   * sessions (e.g. a Feishu listening session with no local file yet) are
+   * `false` — expanding them must not attempt a local detail read, which 404s
+   * and surfaces a misleading "会话文件已不存在" (#20). Defaults to true when
+   * unset, so construction sites that predate the flag keep current behavior.
+   */
+  hasLocalFile?: boolean;
 }
 
 export interface CcSessionMessage {

@@ -38,13 +38,13 @@ interface FetchOptions {
   headers?: Record<string, string>;
 }
 
-interface FetchResponse {
+export interface FetchResponse {
   statusCode: number;
   headers: Record<string, string | string[] | undefined>;
   body: string;
 }
 
-function httpsGetFollowRedirects(
+export function httpsGetFollowRedirects(
   url: string,
   options: FetchOptions = {},
   redirectsLeft = MAX_REDIRECTS,

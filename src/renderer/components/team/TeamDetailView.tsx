@@ -1237,6 +1237,7 @@ export const TeamDetailView = ({
     pendingReviewRequest,
     setPendingReviewRequest,
     teams,
+    teamSummaryDisplayName,
     fetchTeams,
     leadActivity,
     leadContextUpdatedAt,
@@ -1292,6 +1293,7 @@ export const TeamDetailView = ({
       pendingReviewRequest: s.pendingReviewRequest,
       setPendingReviewRequest: s.setPendingReviewRequest,
       teams: s.teams,
+      teamSummaryDisplayName: teamName ? s.teamByName[teamName]?.displayName : undefined,
       fetchTeams: s.fetchTeams,
       leadActivity: teamName ? s.leadActivityByTeam[teamName] : undefined,
       leadContextUpdatedAt: teamName ? s.leadContextByTeam[teamName]?.updatedAt : undefined,
@@ -2196,6 +2198,11 @@ export const TeamDetailView = ({
       );
     }
 
+    // Prefer the store summary's displayName over data.config.name: for a draft or
+    // partially-provisioned team (no team.json on disk) the server-side getData falls
+    // back to the slug for config.name, but the user-facing name survives in teamByName.
+    const displayTeamName = teamSummaryDisplayName || data.config.name || teamName;
+
     const headerColorSet = data.config.color
       ? getTeamColorSet(data.config.color)
       : nameColorSet(data.config.name);
@@ -2233,7 +2240,7 @@ export const TeamDetailView = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-base font-semibold text-[var(--color-text)]">
-                        {data.config.name}
+                        {displayTeamName}
                       </h2>
                       {data.platforms
                         ?.filter((pl) => pl.type !== 'bridge')
@@ -2324,22 +2331,18 @@ export const TeamDetailView = ({
                   )}
                 >
                   <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">
-                    {data.config.projectPath && (
+                    {data.teamName && (
                       <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)]">
                         <FolderOpen size={11} className="shrink-0 text-[var(--color-text-muted)]" />
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="max-w-60 truncate font-mono">
-                              {data.config.projectPath
-                                .replace(/\\/g, '/')
-                                .split('/')
-                                .filter(Boolean)
-                                .pop() ?? data.config.projectPath}
-                            </span>
+                            <span className="max-w-60 truncate font-mono">@{data.teamName}</span>
                           </TooltipTrigger>
                           <TooltipContent side="bottom">
                             <span className="font-mono text-xs">
-                              {formatProjectPath(data.config.projectPath)}
+                              {data.config.projectPath
+                                ? formatProjectPath(data.config.projectPath)
+                                : data.teamName}
                             </span>
                           </TooltipContent>
                         </Tooltip>
@@ -2822,7 +2825,7 @@ export const TeamDetailView = ({
                   <DialogHeader>
                     <DialogTitle>删除团队</DialogTitle>
                     <DialogDescription>
-                      确认删除团队 &ldquo;{data.config.name}
+                      确认删除团队 &ldquo;{displayTeamName}
                       &rdquo;？此操作不可恢复，所有团队数据与任务都将被删除。
                     </DialogDescription>
                   </DialogHeader>

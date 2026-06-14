@@ -168,4 +168,40 @@ describe('TeamWorkspaceService task board', () => {
     expect(await s.deleteTask('alpha', t.id)).toBe(true);
     expect(await s.readTasks('alpha')).toEqual([]);
   });
+
+  // F-4 (gstack-QA TEAM-010-007): a cross-team dispatch writes a received task
+  // onto the TARGET team's board via createOrReuseReceivedTask → createTask. The
+  // target team's kanban (GET /api/teams/:name/tasks → readTasks) must reflect it
+  // — read and write share resolveStorageSlug + teamRoot, so this is the
+  // read-after-write guarantee that the reported "API returns []" contradicted.
+  // (The cited route /api/teams/:name/board does not exist; the real route is
+  // /tasks. This test pins target-side visibility with the dispatchMeta intact.)
+  it('a dispatched received task is visible on the target team board (dispatchMeta round-trip)', async () => {
+    const s = svc();
+    const dispatchMeta = {
+      dispatchId: 'loop-cross-team-test-1',
+      originTeam: 'team-jcve',
+      targetTeam: 'team-4',
+      status: 'received' as const,
+      dispatchedAt: '2026-06-14T08:26:32.118Z',
+      receivedAt: '2026-06-14T08:26:32.118Z',
+    };
+    const created = await s.createTask('team-4', {
+      title: '[TEAM-010-005] cross-team dispatch arrival',
+      description: '@team-4 ...',
+      status: 'todo',
+      dispatchMeta,
+    });
+
+    // Re-read from disk the same way the board endpoint does.
+    const tasks = await s.readTasks('team-4');
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe(created.id);
+    expect(tasks[0].status).toBe('todo');
+    expect(tasks[0].dispatchMeta).toEqual(dispatchMeta);
+
+    // A second, unrelated read of a different team must NOT bleed the task over
+    // (guards against a slug-misroute false visible/invisible).
+    expect(await s.readTasks('team-jcve')).toEqual([]);
+  });
 });

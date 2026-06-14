@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
-import { Bot, ListTodo, MessageCircle, PanelRight, Puzzle, Users } from 'lucide-react';
+import { ListTodo, MessageCircle, PanelRight, Puzzle, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MoreMenu } from './MoreMenu';
@@ -20,7 +20,6 @@ export const TabBarActions = (): React.JSX.Element => {
     openExtensionsTab,
     openTasksTab,
     openTeamsTab,
-    openSocietyTab,
     activeTabId,
     openTabs,
     tabSessionData,
@@ -33,7 +32,6 @@ export const TabBarActions = (): React.JSX.Element => {
       openExtensionsTab: s.openExtensionsTab,
       openTasksTab: s.openTasksTab,
       openTeamsTab: s.openTeamsTab,
-      openSocietyTab: s.openSocietyTab,
       activeTabId: s.activeTabId,
       openTabs: s.openTabs,
       tabSessionData: s.tabSessionData,
@@ -47,7 +45,6 @@ export const TabBarActions = (): React.JSX.Element => {
   const [extensionsHover, setExtensionsHover] = useState(false);
   const [tasksHover, setTasksHover] = useState(false);
   const [chatHover, setChatHover] = useState(false);
-  const [societyHover, setSocietyHover] = useState(false);
   const [expandHover, setExpandHover] = useState(false);
 
   // Derive active tab and session detail for MoreMenu
@@ -120,26 +117,6 @@ export const TabBarActions = (): React.JSX.Element => {
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">任务</TooltipContent>
-      </Tooltip>
-
-      {/* Worker 社会 —— 去中心化自治 agent 互动平台 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={openSocietyTab}
-            onMouseEnter={() => setSocietyHover(true)}
-            onMouseLeave={() => setSocietyHover(false)}
-            className="rounded-md p-2 transition-colors"
-            style={{
-              color: societyHover ? 'var(--color-text)' : 'var(--color-text-muted)',
-              backgroundColor: societyHover ? 'var(--color-surface-raised)' : 'transparent',
-            }}
-            aria-label="Worker 社会"
-          >
-            <Bot className="size-4" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Worker 社会</TooltipContent>
       </Tooltip>
 
       {/* Feishu group QR */}

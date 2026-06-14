@@ -62,7 +62,7 @@ describe('external platform session routing', () => {
     expect(teamSlug).toBe('hermit-team');
   });
 
-  it('routes an Admin Loop Feishu session through QR-persisted owner metadata', () => {
+  it('routes an Helm Loop Feishu session through QR-persisted owner metadata', () => {
     const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_admin:ou_admin', [
       manifest('system-manager', {
         platformAllowFrom: { lark: 'ou_admin' },

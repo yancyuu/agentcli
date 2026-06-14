@@ -840,6 +840,52 @@ describe('teamSlice actions', () => {
     expect(updateTabLabel).toHaveBeenCalledWith('graph-tab', 'Northstar Graph');
   });
 
+  it('keeps the summary displayName instead of the slug when getData falls back to the team id', async () => {
+    // Reproduces the team-detail header bug: for a draft/partially-provisioned team
+    // (no team.json on disk), getData collapses config.name to the slug. selectTeam
+    // must NOT clobber the user-facing displayName (or the tab label) with that slug —
+    // the summary's displayName is the canonical name the user typed at creation.
+    const store = createSliceStore();
+    const getAllPaneTabs = vi.fn(() => [
+      { id: 'team-tab', type: 'team', teamName: 'team-n4kv', label: 'team-n4kv' },
+    ]);
+    const updateTabLabel = vi.fn();
+    store.setState({
+      getAllPaneTabs,
+      updateTabLabel,
+      teamByName: {
+        'team-n4kv': {
+          teamName: 'team-n4kv',
+          displayName: '测试团队',
+          description: '',
+          color: 'indigo',
+          memberCount: 1,
+          taskCount: 0,
+          lastActivity: null,
+        },
+      },
+    });
+
+    hoisted.getData.mockResolvedValue({
+      teamName: 'team-n4kv',
+      // name collapsed to the slug because no team.json exists on disk
+      config: { name: 'team-n4kv', color: 'blue', members: [], projectPath: '/repo' },
+      tasks: [],
+      members: [],
+      messages: [],
+      kanbanState: { teamName: 'team-n4kv', reviewers: [], tasks: {} },
+      processes: [],
+    });
+
+    await store.getState().selectTeam('team-n4kv');
+
+    // Tab label uses the canonical Chinese name, never the slug.
+    expect(updateTabLabel).toHaveBeenCalledWith('team-tab', '测试团队');
+    expect(updateTabLabel).not.toHaveBeenCalledWith('team-tab', 'team-n4kv');
+    // The summary displayName is preserved (not clobbered to the slug).
+    expect(store.getState().teamByName['team-n4kv'].displayName).toBe('测试团队');
+  });
+
   it('clears stale selectedTeamData immediately when selecting an uncached team', async () => {
     const store = createSliceStore();
     const nextTeamData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();

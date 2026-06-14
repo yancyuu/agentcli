@@ -8,11 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  clampOverlayPosition,
-  needLifecycleActions,
-  type NeedOverlayAction,
-} from './societyOverlayActions';
+import { needLifecycleActions, type NeedOverlayAction } from './societyOverlayActions';
 
 describe('needLifecycleActions', () => {
   it('open need with volunteers → 选派最优 + 触发自治', () => {
@@ -57,46 +53,5 @@ describe('needLifecycleActions', () => {
     expect(needLifecycleActions('delivered', true)).toEqual(
       needLifecycleActions('delivered', false)
     );
-  });
-});
-
-describe('clampOverlayPosition', () => {
-  const viewport = { width: 1000, height: 800 };
-  const size = { width: 240, height: 160 };
-  const gap = 12;
-
-  it('默认落在节点右侧、垂直居中', () => {
-    const pos = { x: 300, y: 400 };
-    const out = clampOverlayPosition(pos, viewport, size, gap);
-    expect(out.left).toBe(312); // x + gap
-    expect(out.top).toBe(320); // y - height/2
-  });
-
-  it('右侧溢出 → 翻到节点左侧', () => {
-    // 节点靠近右边缘：右侧放不下，翻左侧。
-    const pos = { x: 850, y: 400 };
-    const out = clampOverlayPosition(pos, viewport, size, gap);
-    expect(out.left).toBe(850 - gap - size.width); // 598
-    expect(out.left + size.width).toBeLessThanOrEqual(pos.x);
-  });
-
-  it('顶部越界 → 贴近上边距', () => {
-    const pos = { x: 300, y: 20 };
-    const out = clampOverlayPosition(pos, viewport, size, gap);
-    expect(out.top).toBeGreaterThanOrEqual(8);
-  });
-
-  it('底部越界 → 贴近下边距', () => {
-    const pos = { x: 300, y: 790 };
-    const out = clampOverlayPosition(pos, viewport, size, gap);
-    expect(out.top + size.height).toBeLessThanOrEqual(viewport.height - 8);
-  });
-
-  it('左侧也不够 → 至少留 8px 边距（不出现负值/越界）', () => {
-    // 节点在最左上角，翻左也不够宽，必须 clamp 到 ≥8。
-    const pos = { x: 0, y: 0 };
-    const out = clampOverlayPosition(pos, viewport, size, gap);
-    expect(out.left).toBeGreaterThanOrEqual(8);
-    expect(out.top).toBeGreaterThanOrEqual(8);
   });
 });

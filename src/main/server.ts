@@ -64,7 +64,13 @@ import {
   SOCIETY_MCP_TOOLS,
   executeSocietyMcpTool,
 } from '@features/worker-society/main/adapters/input/societyMcp';
-import { SystemManagerConfigService } from './services/system-manager/SystemManagerConfigService';
+import {
+  SystemManagerConfigService,
+  adminWorkDir,
+} from './services/system-manager/SystemManagerConfigService';
+import { ensureAdminLoopInitialized as runAdminLoopInit } from './services/system-manager/AdminLoopInitializer';
+import { httpsGetFollowRedirects } from './services/extensions/catalog/PluginCatalogService';
+import { HERMIT_OPS_GUIDE_URL } from './services/teams-mvp/OpsRunbookContext';
 import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
 import {
   ensureGlobalWorkflows,
@@ -125,7 +131,7 @@ const CC_AGENT_TYPES: readonly CcAgentType[] = [
   'tmux',
 ];
 const SYSTEM_MANAGER_DESCRIPTION =
-  '项目级 Claude Code Admin Loop，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
+  '项目级 Claude Code Helm Loop，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
 
 function toCcAgentType(value: string | undefined): CcAgentType {
   return CC_AGENT_TYPES.includes(value as CcAgentType) ? (value as CcAgentType) : 'claudecode';
@@ -287,22 +293,14 @@ const systemManagerConfig = new SystemManagerConfigService(REPO_ROOT);
 const workflowPromptService = new WorkflowPromptService();
 
 async function getSystemManagerWorkDir(): Promise<string> {
-  try {
-    return (await systemManagerConfig.getConfig()).selectedWorkDir;
-  } catch {
-    return REPO_ROOT;
-  }
-}
-
-async function syncSystemManagerManifestWorkDir(workDir: string): Promise<void> {
-  try {
-    const manifest = await svc.readTeamManifest(SYSTEM_MANAGER_TEAM_NAME);
-    if (manifest.workDir !== workDir) {
-      await svc.updateTeam(SYSTEM_MANAGER_TEAM_NAME, { workDir });
-    }
-  } catch {
-    // The console team may not exist yet; ensureSystemManager() will create it later.
-  }
+  // Canonical, isolated Helm Loop runtime path. Dedicated (never shared with
+  // another team/project) so the admin agent can bootstrap its own CLAUDE.md
+  // here without colliding with project work. The manifest workDir is synced to
+  // this path by ensureSystemManagerUncached; selectedWorkDir only drives
+  // workflow-command discovery, not the runtime location.
+  const dir = adminWorkDir();
+  await fs.mkdir(dir, { recursive: true }).catch(() => undefined);
+  return dir;
 }
 
 let systemManagerEnsurePromise: Promise<SystemManagerSummary> | null = null;
@@ -370,6 +368,47 @@ async function ensureSystemManager(): Promise<SystemManagerSummary> {
     systemManagerEnsurePromise = null;
   });
   return systemManagerEnsurePromise;
+}
+
+/**
+ * Helm Loop bootstrap wrapper. On first open, fetch the ops guide and feed it to
+ * the admin lead session as the first turn so the agent seeds its own CLAUDE.md.
+ * Idempotent + failure-retrying (see AdminLoopInitializer). The bootstrap user
+ * message is also appended to the team inbox so it is visible in the console.
+ * Invoked fire-and-forget from the ensure endpoint — never blocks open.
+ */
+async function ensureAdminLoopInitialized(): Promise<void> {
+  const sessionKey = `${SYSTEM_MANAGER_TEAM_NAME}:lead`;
+  await runAdminLoopInit({
+    getConfig: () => systemManagerConfig.getConfig(),
+    updateConfig: (patch) => systemManagerConfig.updateConfig(patch),
+    fetchGuide: () => httpsGetFollowRedirects(HERMIT_OPS_GUIDE_URL),
+    log: (message) => app.log.warn({ sessionKey }, message),
+    dispatch: async ({ text, messageId }) => {
+      const workDir = await getSystemManagerWorkDir();
+      await svc
+        .appendMessage(SYSTEM_MANAGER_TEAM_NAME, {
+          from: 'user',
+          to: SYSTEM_MANAGER_TEAM_NAME,
+          role: 'user',
+          content: text,
+          meta: { sessionKey, source: 'admin-init' },
+        })
+        .catch((err) =>
+          app.log.warn({ err, sessionKey }, 'helm loop init: append user message failed')
+        );
+      await dispatchDirectCliMessage({
+        teamName: SYSTEM_MANAGER_TEAM_NAME,
+        sessionKey,
+        workDir,
+        from: SYSTEM_MANAGER_TEAM_NAME,
+        to: 'user',
+        text,
+        messageId,
+      });
+      broadcastSse('team-change', { type: 'inbox', teamName: SYSTEM_MANAGER_TEAM_NAME });
+    },
+  });
 }
 
 const conversationTelemetry = new ConversationTelemetryService({
@@ -454,7 +493,11 @@ const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
 // Worker Society —— 去中心化 worker 自治社交平台（替代派单的主路径）。
 // 状态持久化到 ~/.hermit/society/（声誉/关系/需求/消息跨重启存活）；REST 路由见下方 registerSocietyRoutes。
-const workerSociety = createWorkerSociety();
+// 成员花名册以 hermit 真实数字员工为单一事实源：注入 listDiscoverableWorkers（GET /api/workers 同款），
+// 社会层身份即真实团队；能力/声誉/并发由 ~/.hermit/society/profiles.json overlay 叠加（MergingProfileStore）。
+const workerSociety = createWorkerSociety(undefined, {
+  realWorkersProvider: listDiscoverableWorkers,
+});
 
 // Broadcast collab board changes via SSE
 taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
@@ -1355,10 +1398,14 @@ app.post('/api/cc-reload', async () => {
 // Teams — cc-connect projects 即团队，本地 ~/.hermit/teams/ 仅存 tasks + 额外元数据
 // ===========================================================================
 
-// POST /api/system-manager/ensure → 确保项目级 Admin Loop存在
+// POST /api/system-manager/ensure → 确保项目级 Helm Loop存在
 app.post('/api/system-manager/ensure', async (_request, reply) => {
   try {
-    return await ensureSystemManager();
+    const summary = await ensureSystemManager();
+    // Fire-and-forget the one-shot ops-guide bootstrap. Idempotent (skips once the
+    // marker is set) and retries on fetch failure each time the console opens.
+    void ensureAdminLoopInitialized();
+    return summary;
   } catch (err) {
     return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -1391,7 +1438,6 @@ app.put<{ Body: { selectedWorkDir?: string; workflowFolder?: string | null } }>(
   async (request, reply) => {
     try {
       const config = await systemManagerConfig.updateConfig(request.body ?? {});
-      await syncSystemManagerManifestWorkDir(config.selectedWorkDir);
       await seedBuiltinWorkflows(config.selectedWorkDir);
       return config;
     } catch (err) {
@@ -1942,7 +1988,7 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
   async (request, reply) => {
     const teamName = request.params.name;
     if (isReservedSystemTeamName(teamName)) {
-      return reply.code(403).send({ error: 'Admin Loop 不可删除' });
+      return reply.code(403).send({ error: 'Helm Loop 不可删除' });
     }
     try {
       let restartRequired = false;
@@ -1956,7 +2002,7 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
         // Team may only exist in cc-connect or local metadata may already be gone.
       }
       if (isReservedSystemTeamName(ccProjectName) || isReservedSystemTeamName(localTeamName)) {
-        return reply.code(403).send({ error: 'Admin Loop 不可删除' });
+        return reply.code(403).send({ error: 'Helm Loop 不可删除' });
       }
       try {
         const result = await cc.deleteProject(ccProjectName);
@@ -2362,7 +2408,7 @@ async function ensureLoopSessionProjectReady(teamName: string): Promise<{
   // Reconcile work_dir: cc-connect spawns the agent with chdir(work_dir), so a stale or
   // placeholder work_dir makes every session fail with "启动 Agent 会话失败" — the session
   // record is created (so the user sees the success message) but the agent never starts.
-  // This runs whether or not the project is "online": the Admin Loop's bind project is
+  // This runs whether or not the project is "online": the Helm Loop's bind project is
   // `my-project`, which is online via bridge yet still carries the template placeholder
   // work_dir, so the isOnline branch below would skip it. The PATCH updates the live agent
   // immediately and persists to config.toml (no restart required).

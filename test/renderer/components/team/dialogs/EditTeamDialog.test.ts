@@ -190,6 +190,19 @@ describe('EditTeamDialog', () => {
     act(() => root.unmount());
   });
 
+  it('does not render the migrated Loop 动态设置 section', () => {
+    const { host, root } = mountDialog();
+
+    // Loop 动态设置 migrated to RuntimeConfigDialog (#21) — these controls must
+    // no longer appear in the basic edit dialog.
+    expect(host.textContent).not.toContain('Loop 动态设置');
+    expect(host.textContent).not.toContain('飞书私聊权限');
+    expect(host.textContent).not.toContain('上下文指示');
+    expect(host.textContent).not.toContain('注入发送者');
+
+    act(() => root.unmount());
+  });
+
   it('allows editing the team name', () => {
     const { host, root } = mountDialog();
 
@@ -266,6 +279,16 @@ describe('EditTeamDialog', () => {
       'test-team',
       expect.objectContaining({ name: 'Test Team' })
     );
+    const savedPayload =
+      (vi.mocked(api.teams.updateConfig).mock.calls.at(-1)?.[1] as Record<string, unknown>) ?? {};
+    // Loop 动态设置 migrated to RuntimeConfigDialog — EditTeamDialog must not
+    // re-send these fields (#21).
+    expect(savedPayload).not.toHaveProperty('language');
+    expect(savedPayload).not.toHaveProperty('managedSources');
+    expect(savedPayload).not.toHaveProperty('showContextIndicator');
+    expect(savedPayload).not.toHaveProperty('replyFooter');
+    expect(savedPayload).not.toHaveProperty('injectSender');
+    expect(savedPayload).not.toHaveProperty('platformAllowFrom');
     expect(api.ccSettings.restart).not.toHaveBeenCalled();
 
     await act(async () => {

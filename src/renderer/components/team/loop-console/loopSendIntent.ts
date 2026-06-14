@@ -1,6 +1,8 @@
 import type { AttachmentPayload, SlashCommandMeta, TaskRef } from '@shared/types';
 import type { WorkflowPromptSummary } from '@shared/types/systemManager';
 
+import { parseTeamMentionDirective } from '@renderer/utils/teamMentionDirective';
+
 export type LoopSendIntentKind =
   | 'message'
   | 'runtime'
@@ -122,18 +124,17 @@ export function parseLoopSendIntent(options: LoopSendIntentParseOptions): LoopSe
     };
   }
 
-  const crossTeamMatch = text.match(/^@([^\s]+)\s+([\s\S]+)$/);
-  if (crossTeamMatch) {
-    const toTeam = normalizeTeamSlug(crossTeamMatch[1]);
-    const subject = crossTeamMatch[2]?.trim() ?? '';
+  const crossTeamDirective = parseTeamMentionDirective(text);
+  if (crossTeamDirective) {
+    const toTeam = normalizeTeamSlug(crossTeamDirective.mentioned);
     const knownTeam = options.teamSlugs?.some((team) => normalizeTeamSlug(team) === toTeam);
     if (knownTeam) {
       return {
         kind: 'cross-team-task',
         toTeam,
-        subject,
+        subject: crossTeamDirective.subject,
         text,
-        summary: subject,
+        summary: crossTeamDirective.subject,
         taskRefs,
       };
     }

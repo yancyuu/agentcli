@@ -2071,14 +2071,19 @@ export class HttpAPIClient implements ElectronAPI {
       if (forceRefresh) params.set('forceRefresh', 'true');
       const qs = params.toString();
       const result = await this.get<{ success: boolean; data?: EnrichedPlugin[]; error?: string }>(
-        `/api/extensions/plugins${qs ? `?${qs}` : ''}`
+        `/api/extensions/plugins${qs ? `?${qs}` : ''}`,
+        // Catalog assembly scans local installs + remote registries (GitHub),
+        // which routinely exceeds the default 10s — match the team-endpoint
+        // 30s budget so the Extensions store doesn't time out on first open.
+        30_000
       );
       if (!result.success) throw new Error(result.error ?? 'Failed to get plugins');
       return result.data ?? [];
     },
     getReadme: async (pluginId: string) => {
       const result = await this.get<{ success: boolean; data?: string | null; error?: string }>(
-        `/api/extensions/plugins/${encodeURIComponent(pluginId)}/readme`
+        `/api/extensions/plugins/${encodeURIComponent(pluginId)}/readme`,
+        30_000
       );
       if (!result.success) throw new Error(result.error ?? 'Failed to get readme');
       return result.data ?? null;

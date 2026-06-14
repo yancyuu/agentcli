@@ -249,38 +249,51 @@ const TaskOverviewPool = (): React.JSX.Element => {
         </button>
       </div>
 
-      {/* Kanban columns — reuse team kanban styling */}
-      <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-6">
-        <div className="grid min-w-[900px] grid-cols-3 items-start gap-3">
-          {COLUMNS.map((column) => {
-            const tasks = grouped.get(column.id) ?? [];
-            return (
-              <KanbanColumn
-                key={column.id}
-                title={column.title}
-                count={tasks.length}
-                icon={column.icon}
-                headerBg={column.headerBg}
-                bodyBg={column.bodyBg}
-              >
-                {tasks.length === 0 ? (
-                  <div className="py-6 text-center text-[11px] text-[var(--color-text-muted)] opacity-40">
-                    No tasks
-                  </div>
-                ) : (
-                  tasks.map((task) => (
-                    <GlobalOverviewTaskCard
-                      key={`${task.teamName}:${task.id}`}
-                      task={task}
-                      onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
-                    />
-                  ))
-                )}
-              </KanbanColumn>
-            );
-          })}
+      {overviewTasks.length === 0 ? (
+        // Genuinely empty task bus (not just hidden by filters) — show an
+        // explanatory empty state so a fresh user / QA reader doesn't mistake
+        // the light content for a rendering bug (QA F-3).
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+          <ClipboardList size={28} className="text-[var(--color-text-muted)] opacity-30" />
+          <p className="text-sm text-[var(--color-text-muted)]">暂无 Loop 任务</p>
+          <p className="max-w-sm text-[11px] leading-5 text-[var(--color-text-muted)] opacity-60">
+            各团队看板上 pending / in_progress / completed 的任务会自动汇总到这里。
+          </p>
         </div>
-      </div>
+      ) : (
+        /* Kanban columns — reuse team kanban styling */
+        <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-6">
+          <div className="grid min-w-[900px] grid-cols-3 items-start gap-3">
+            {COLUMNS.map((column) => {
+              const tasks = grouped.get(column.id) ?? [];
+              return (
+                <KanbanColumn
+                  key={column.id}
+                  title={column.title}
+                  count={tasks.length}
+                  icon={column.icon}
+                  headerBg={column.headerBg}
+                  bodyBg={column.bodyBg}
+                >
+                  {tasks.length === 0 ? (
+                    <div className="py-6 text-center text-[11px] text-[var(--color-text-muted)] opacity-40">
+                      No tasks
+                    </div>
+                  ) : (
+                    tasks.map((task) => (
+                      <GlobalOverviewTaskCard
+                        key={`${task.teamName}:${task.id}`}
+                        task={task}
+                        onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
+                      />
+                    ))
+                  )}
+                </KanbanColumn>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

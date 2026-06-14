@@ -28,6 +28,8 @@ export interface DiscoverableWorker extends WorkerIdentity {
   status: 'online' | 'offline';
   capabilities?: WorkerCapability[];
   description?: string;
+  /** Canonical project path, forwarded from the team manifest for /workers output. */
+  workDir?: string;
 }
 
 /** atomic worker 的 dispatch 立即响应（fire-and-forget，不阻塞长任务）。 */
@@ -58,5 +60,6 @@ export function discoverableTeamToWorker(team: DiscoverableTeam): DiscoverableWo
     status: team.status,
     capabilities: team.capabilities,
     description: team.description,
+    workDir: team.workDir,
   };
 }

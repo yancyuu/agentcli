@@ -3,14 +3,14 @@
  *
  * 这是用户核心诉求的最终形态：删掉看板后，整页就是一张全息 worker 社会图谱，所有交互
  * 都发生在图谱里——
- *   - 创建/全局动作（发布需求、注册成员、加载示例、触发自治、刷新）→ 浮于图谱顶部的工具条
+ *   - 创建/全局动作（发布需求、注册成员、触发自治、刷新）→ 浮于图谱顶部的工具条
  *     小弹层（避免把页面切成一堆卡片）。
  *   - 单个节点动作 → 点击 worker/need 节点，引擎弹出 SocietyNodeOverlay（成员→发消息；
  *     需求→按生命周期出操作；自荐改由「触发自治」自动完成，反派单）。
  *   - 声誉=节点大小、关系=发光边、在途任务=沿边流动粒子——信息全由图谱编码，不再有文字列表。
  *
  * 数据来自同源 /api/society/*（createSocietyApi() 默认相对路径）。纯展示 + store 驱动；
- * 节点交互的决策规则走已测的 societyOverlayActions（needLifecycleActions/clampOverlayPosition）。
+ * 节点交互的决策规则走已测的 societyOverlayActions（needLifecycleActions）；弹卡定位由引擎 Floating UI 负责。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -18,8 +18,8 @@ import type { GraphViewProps } from '@claude-teams/agent-graph';
 
 import { SocietyGraph } from './SocietyGraph';
 import { SocietyNodeOverlay } from './SocietyNodeOverlay';
-import { buildDemoSociety } from './societyDemo';
 import { createSocietyStore } from './societyStore';
+import { HUMAN_OPERATOR } from '../core/domain/models/society';
 
 /** 单例 store hook（renderer 内多处可复用同一份社会状态）。 */
 const useSocietyStore = createSocietyStore();
@@ -54,6 +54,14 @@ export function SocietyView() {
   const [regId, setRegId] = useState('');
   const [regCaps, setRegCaps] = useState('');
   const [tickBusy, setTickBusy] = useState(false);
+  const [autonomyNotice, setAutonomyNotice] = useState<string | null>(null);
+
+  // 自治反馈几秒后自动淡出（与 error/loading 同处工具条，避免常驻噪音）。
+  useEffect(() => {
+    if (!autonomyNotice) return;
+    const t = setTimeout(() => setAutonomyNotice(null), 4500);
+    return () => clearTimeout(t);
+  }, [autonomyNotice]);
 
   // 节点弹卡要用的查找表 / 概览（任意生命周期操作后 store 刷新即重算，弹卡内容实时同步）。
   const workerById = useMemo(() => new Map(workers.map((w) => [w.workerId, w])), [workers]);
@@ -69,7 +77,11 @@ export function SocietyView() {
 
   const handlePublish = async (): Promise<void> => {
     if (!pubSubject.trim()) return;
-    await publishNeed({ postedBy: 'user', subject: pubSubject, requiredCapabilities: pubCaps });
+    await publishNeed({
+      postedBy: HUMAN_OPERATOR,
+      subject: pubSubject,
+      requiredCapabilities: pubCaps,
+    });
     setPubSubject('');
     setPubCaps('');
     setShowPublish(false);
@@ -89,20 +101,17 @@ export function SocietyView() {
     setShowRegister(false);
   };
 
-  // 一键加载示例社会（演示/冷启动）：注册 3 个能力可互配的 worker + 发布 2 个 need，
-  // 之后「触发自治」即可走完整闭环。生产环境成员仍由真实团队经 gateway 流入。
-  const handleLoadDemo = async (): Promise<void> => {
-    const demo = buildDemoSociety();
-    for (const w of demo.workers) await registerWorker(w);
-    for (const n of demo.needs) await publishNeed(n);
-  };
-
   // 完整自治回路：先让 worker 自发投标，再按适配度择优选派——全程无人工指派。
   const handleTriggerAutonomy = useCallback(async (): Promise<void> => {
     setTickBusy(true);
+    setAutonomyNotice(null);
     try {
-      await runAutonomyTick();
-      await autoSelectPending();
+      const tick = await runAutonomyTick();
+      const sel = await autoSelectPending();
+      // 失败时 mutate 已把 error 写进 store（工具条红字显示），这里只在成功时给正向反馈。
+      if (tick && sel) {
+        setAutonomyNotice(`自治完成：${tick.applied} 个自荐 · 选派 ${sel.selected} 个`);
+      }
     } finally {
       setTickBusy(false);
     }
@@ -129,7 +138,7 @@ export function SocietyView() {
         onDeliverNeed={(needId) => void deliverNeed(needId, '已交付（请审核）')}
         onAcceptDelivery={(needId) => void acceptDelivery(needId)}
         onTriggerAutonomy={() => void handleTriggerAutonomy()}
-        onSendMessage={(toWorker, text) => void sendMessage('user', toWorker, text)}
+        onSendMessage={(toWorker, text) => void sendMessage(HUMAN_OPERATOR, toWorker, text)}
       />
     ),
     [
@@ -155,7 +164,6 @@ export function SocietyView() {
           needs={activeNeeds}
           relationships={relationships}
           onAddFirstWorker={() => setShowRegister(true)}
-          onLoadDemo={handleLoadDemo}
           renderOverlay={renderOverlay}
         />
       </div>
@@ -168,6 +176,7 @@ export function SocietyView() {
         error={error}
         loading={loading}
         tickBusy={tickBusy}
+        notice={autonomyNotice}
         showPublish={showPublish}
         showRegister={showRegister}
         onTogglePublish={() => {
@@ -179,7 +188,6 @@ export function SocietyView() {
           setShowPublish(false);
         }}
         onTriggerAutonomy={handleTriggerAutonomy}
-        onLoadDemo={handleLoadDemo}
         onRefresh={() => void loadAll()}
       />
 
@@ -222,12 +230,12 @@ function SocietyToolbar(props: {
   error: string | null;
   loading: boolean;
   tickBusy: boolean;
+  notice?: string | null;
   showPublish: boolean;
   showRegister: boolean;
   onTogglePublish: () => void;
   onToggleRegister: () => void;
   onTriggerAutonomy: () => void;
-  onLoadDemo: () => void;
   onRefresh: () => void;
 }) {
   const {
@@ -237,12 +245,12 @@ function SocietyToolbar(props: {
     error,
     loading,
     tickBusy,
+    notice,
     showPublish,
     showRegister,
     onTogglePublish,
     onToggleRegister,
     onTriggerAutonomy,
-    onLoadDemo,
     onRefresh,
   } = props;
 
@@ -263,6 +271,7 @@ function SocietyToolbar(props: {
         style={{ backgroundColor: 'rgba(5,5,16,0.72)' }}
       >
         {error && <span className="text-xs text-[#dc2626]">{error}</span>}
+        {notice && <span className="text-xs text-[#7ee787]">{notice}</span>}
         {loading && <span className="text-xs opacity-60">同步中…</span>}
         <ToolbarButton onClick={onTogglePublish} active={showPublish} title="向广场发布一个需求">
           ＋发布
@@ -282,9 +291,6 @@ function SocietyToolbar(props: {
         >
           {tickBusy ? '自治中…' : '触发自治'}
         </button>
-        <ToolbarButton onClick={onLoadDemo} title="一键加载示例社会（3 worker + 2 need）">
-          加载示例
-        </ToolbarButton>
         <ToolbarButton onClick={onRefresh} title="重新拉取全部数据">
           刷新
         </ToolbarButton>

@@ -21,7 +21,6 @@ import {
 } from './PlatformBindingDialog';
 import { buildPlatformAllowUpdatePayload, readStringRecord } from './platformAllowUtils';
 import { platformMeta } from './platformMeta';
-import { PERMISSION_MODE_OPTIONS } from './useTeamEditForm';
 
 import type { CcAgentType, CcProjectPlatform } from '@shared/types/ccConnect';
 import type { TeamUpdateConfigRequest } from '@shared/types/team';
@@ -54,6 +53,13 @@ function FormSection({
 const inputCls =
   'w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]';
 const labelCls = 'mb-1 block text-xs font-medium text-[var(--color-text-secondary)]';
+
+const PERMISSION_MODE_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'acceptEdits', label: '自动接受编辑' },
+  { value: 'bypassPermissions', label: '跳过权限确认' },
+  { value: 'plan', label: '计划模式' },
+] as const;
 
 function getPlatformLabel(type: string): string {
   if (type === 'feishu' || type === 'lark') return '飞书 / Lark';
@@ -156,6 +162,19 @@ export function RuntimeConfigDialog({
       managedSources:
         cfg?.managedSources ??
         (typeof rawSettings.admin_from === 'string' ? rawSettings.admin_from : '*'),
+      language:
+        cfg?.language ?? (typeof rawSettings.language === 'string' ? rawSettings.language : 'zh'),
+      showContextIndicator:
+        cfg?.showContextIndicator ??
+        (typeof rawSettings.show_context_indicator === 'boolean'
+          ? rawSettings.show_context_indicator
+          : true),
+      replyFooter:
+        cfg?.replyFooter ??
+        (typeof rawSettings.reply_footer === 'boolean' ? rawSettings.reply_footer : true),
+      injectSender:
+        cfg?.injectSender ??
+        (typeof rawSettings.inject_sender === 'boolean' ? rawSettings.inject_sender : false),
       platformAllowFrom:
         cfg?.platformAllowFrom ?? readStringRecord(rawSettings.platform_allow_from),
       platformAllowChat:
@@ -176,6 +195,11 @@ export function RuntimeConfigDialog({
   const [providerRef, setProviderRef] = useState(defaults.providerRefs[0] ?? '');
   const [platformAllowFrom, setPlatformAllowFrom] = useState(defaults.platformAllowFrom);
   const [platformAllowChat, setPlatformAllowChat] = useState(defaults.platformAllowChat);
+  const [language, setLanguage] = useState(defaults.language);
+  const [managedSources, setManagedSources] = useState(defaults.managedSources);
+  const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
+  const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
+  const [injectSender, setInjectSender] = useState(defaults.injectSender);
   const [savePhase, setSavePhase] = useState<'idle' | 'saving' | 'restarting' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
   const saving = savePhase === 'saving' || savePhase === 'restarting';
@@ -205,6 +229,11 @@ export function RuntimeConfigDialog({
     setProviderRef(d.providerRefs[0] ?? '');
     setPlatformAllowFrom(d.platformAllowFrom);
     setPlatformAllowChat(d.platformAllowChat);
+    setLanguage(d.language);
+    setManagedSources(d.managedSources);
+    setShowContextIndicator(d.showContextIndicator);
+    setReplyFooter(d.replyFooter);
+    setInjectSender(d.injectSender);
   }, [open]);
 
   // ── Computed ─────────────────────────────────────────────────
@@ -268,6 +297,11 @@ export function RuntimeConfigDialog({
       disabledCommands,
       platformAllowFrom: platformAllowFromPatch,
       platformAllowChat: platformAllowChatPatch,
+      language: language.trim() || undefined,
+      managedSources: managedSources.trim() || undefined,
+      showContextIndicator,
+      replyFooter,
+      injectSender,
       providerRefs: providerRef ? [providerRef] : [],
     };
   };
@@ -481,9 +515,8 @@ export function RuntimeConfigDialog({
                 </div>
               ) : null}
               <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                管理来源（当前：{defaults.managedSources || '未设置'}
-                ）控制谁可以管理团队；这里按渠道控制运行时入口。
-                留空代表未单独配置，不等于允许所有；只有显式填写 * 才表示放行所有。
+                按渠道控制运行时入口。留空代表未单独配置，不等于允许所有；只有显式填写 *
+                才表示放行所有。
               </p>
               <Button
                 variant="outline"
@@ -494,6 +527,84 @@ export function RuntimeConfigDialog({
                 {bindingSavePending && <Loader2 size={14} className="mr-1.5 animate-spin" />}
                 {bindingSavePending ? '保存配置中...' : '绑定新渠道'}
               </Button>
+            </FormSection>
+
+            {/* Loop 动态设置 — 语言/管理来源/消息格式，保存即生效 (#21) */}
+            <FormSection
+              title="Loop 动态设置"
+              description="语言、管理来源与消息格式，保存即生效（无需重启）。"
+            >
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className={labelCls}>语言</label>
+                  <input
+                    type="text"
+                    value={language}
+                    onChange={(e) => {
+                      markRuntimeEdited();
+                      setLanguage(e.target.value);
+                    }}
+                    className={inputCls}
+                    placeholder="zh"
+                    data-testid="loop-language"
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>管理来源</label>
+                  <input
+                    type="text"
+                    value={managedSources}
+                    onChange={(e) => {
+                      markRuntimeEdited();
+                      setManagedSources(e.target.value);
+                    }}
+                    className={inputCls}
+                    placeholder="user1,user2 或 *"
+                    data-testid="loop-managed-sources"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={showContextIndicator}
+                    onChange={(e) => {
+                      markRuntimeEdited();
+                      setShowContextIndicator(e.target.checked);
+                    }}
+                    className="size-3.5"
+                    data-testid="loop-show-context-indicator"
+                  />
+                  上下文指示
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={replyFooter}
+                    onChange={(e) => {
+                      markRuntimeEdited();
+                      setReplyFooter(e.target.checked);
+                    }}
+                    className="size-3.5"
+                    data-testid="loop-reply-footer"
+                  />
+                  回复尾部信息
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={injectSender}
+                    onChange={(e) => {
+                      markRuntimeEdited();
+                      setInjectSender(e.target.checked);
+                    }}
+                    className="size-3.5"
+                    data-testid="loop-inject-sender"
+                  />
+                  注入发送者
+                </label>
+              </div>
             </FormSection>
 
             {/* Provider */}

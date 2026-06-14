@@ -518,7 +518,7 @@ const SessionRow = ({
 
   // Fetch detail when expanded
   useEffect(() => {
-    if (!isExpanded) {
+    if (!isExpanded || session.hasLocalFile === false) {
       setDetail(null);
       setDetailError(null);
       setLoadingDetail(false);
@@ -556,7 +556,7 @@ const SessionRow = ({
   // refetch (no skeleton flash) so newly arrived messages show without needing
   // to collapse and reopen.
   useEffect(() => {
-    if (!isExpanded || !session.live) {
+    if (!isExpanded || !session.live || session.hasLocalFile === false) {
       return;
     }
     const intervalId = window.setInterval(() => {
@@ -579,7 +579,7 @@ const SessionRow = ({
   // this session's team, refresh the detail right away instead of waiting for
   // the next polling cycle. This makes agent replies appear in <100ms.
   useEffect(() => {
-    if (!isExpanded) {
+    if (!isExpanded || session.hasLocalFile === false) {
       return;
     }
     const unsubscribe = api.teams.onTeamChange?.((_event, change: TeamChangeEvent) => {
@@ -613,7 +613,7 @@ const SessionRow = ({
   useEffect(() => {
     const wasLive = prevLiveRef.current;
     prevLiveRef.current = session.live;
-    if (wasLive && !session.live && isExpanded) {
+    if (wasLive && !session.live && isExpanded && session.hasLocalFile !== false) {
       void (async () => {
         try {
           const d = await api.teams.getSessionDetail(session.teamName, session.id, historyLimit);
@@ -711,75 +711,87 @@ const SessionRow = ({
       {/* Inline expanded messages */}
       {isExpanded && (
         <div className="ml-5 border-l-2 border-[var(--color-border)]">
-          {loadingDetail && !detail && (
-            <div className="px-3 py-3">
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="h-3 animate-pulse rounded bg-[var(--color-surface-raised)]"
-                  />
-                ))}
-              </div>
+          {session.hasLocalFile === false ? (
+            // cc-only session (e.g. Feishu listening, no local JSONL yet) —
+            // no local history. Avoids the misleading "会话文件已不存在" 404
+            // path (#20). Same root cause as CcSessionsSection.
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-muted)]">
+              <Radio size={13} className="shrink-0 animate-pulse text-emerald-400" />
+              <span>监听中，暂无本地历史</span>
             </div>
-          )}
-          {detailError && !loadingDetail && (
-            <div className="flex items-center gap-2 px-3 py-2 text-xs text-red-400">
-              <AlertCircle size={13} className="shrink-0" />
-              <span>{detailError}</span>
-            </div>
-          )}
-          {detail && (
+          ) : (
             <>
-              {detail.history.length === 0 ? (
-                <div className="px-3 py-3 text-xs text-[var(--color-text-muted)]">暂无消息</div>
-              ) : (
-                <>
-                  <div className="divide-[var(--color-border)]/50 max-h-64 divide-y overflow-y-auto">
-                    {[...detail.history].reverse().map((msg, i) => (
-                      <div key={i} className="px-3 py-2 text-[11px]">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`shrink-0 text-[10px] font-medium ${
-                              msg.role === 'user'
-                                ? 'text-indigo-400'
-                                : 'text-[var(--color-text-muted)]'
-                            }`}
-                          >
-                            {msg.role === 'user' ? '用户' : 'Agent'}
-                          </span>
-                          <span className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-                            {formatMessageTime(msg.timestamp)}
-                          </span>
-                        </div>
-                        <div className="mt-1 whitespace-pre-wrap break-words text-[var(--color-text)]">
-                          {msg.content.slice(0, 500)}
-                          {msg.content.length > 500 ? '…' : ''}
-                        </div>
-                      </div>
+              {loadingDetail && !detail && (
+                <div className="px-3 py-3">
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        className="h-3 animate-pulse rounded bg-[var(--color-surface-raised)]"
+                      />
                     ))}
                   </div>
-                  {hasMoreHistory && (
-                    <div className="border-[var(--color-border)]/50 border-t px-3 py-2">
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                        onClick={handleLoadMoreHistory}
-                        disabled={loadingDetail || loadingMoreHistory}
-                      >
-                        {loadingMoreHistory ? (
-                          <>
-                            <Loader2 size={12} className="animate-spin" />
-                            正在加载更早消息...
-                          </>
-                        ) : (
-                          <>
-                            加载更早消息 ({Math.max(detail.historyCount - detail.history.length, 0)}{' '}
-                            条)
-                          </>
-                        )}
-                      </button>
-                    </div>
+                </div>
+              )}
+              {detailError && !loadingDetail && (
+                <div className="flex items-center gap-2 px-3 py-2 text-xs text-red-400">
+                  <AlertCircle size={13} className="shrink-0" />
+                  <span>{detailError}</span>
+                </div>
+              )}
+              {detail && (
+                <>
+                  {detail.history.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-[var(--color-text-muted)]">暂无消息</div>
+                  ) : (
+                    <>
+                      <div className="divide-[var(--color-border)]/50 max-h-64 divide-y overflow-y-auto">
+                        {[...detail.history].reverse().map((msg, i) => (
+                          <div key={i} className="px-3 py-2 text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`shrink-0 text-[10px] font-medium ${
+                                  msg.role === 'user'
+                                    ? 'text-indigo-400'
+                                    : 'text-[var(--color-text-muted)]'
+                                }`}
+                              >
+                                {msg.role === 'user' ? '用户' : 'Agent'}
+                              </span>
+                              <span className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+                                {formatMessageTime(msg.timestamp)}
+                              </span>
+                            </div>
+                            <div className="mt-1 whitespace-pre-wrap break-words text-[var(--color-text)]">
+                              {msg.content.slice(0, 500)}
+                              {msg.content.length > 500 ? '…' : ''}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {hasMoreHistory && (
+                        <div className="border-[var(--color-border)]/50 border-t px-3 py-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={handleLoadMoreHistory}
+                            disabled={loadingDetail || loadingMoreHistory}
+                          >
+                            {loadingMoreHistory ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin" />
+                                正在加载更早消息...
+                              </>
+                            ) : (
+                              <>
+                                加载更早消息 (
+                                {Math.max(detail.historyCount - detail.history.length, 0)} 条)
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </>
               )}

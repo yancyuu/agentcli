@@ -16,6 +16,13 @@ export type { AgentCapability };
 /** worker 在社会中的在线状态。 */
 export type WorkerSocietyStatus = 'online' | 'busy' | 'offline';
 
+/**
+ * 人类操作者的约定 id。不是注册 worker，但作为需求发布者（postedBy）与消息发送方
+ * （图谱 overlay「发消息」的 from）必须被各处一致接受——否则人类给 worker 发消息会
+ * 被 sendSocialMessage 当作 worker_not_found 静默丢弃。单一来源，杜绝散落的 'user' 字面量。
+ */
+export const HUMAN_OPERATOR = 'user';
+
 /** Worker 的社会档案 —— 身份 + 能力 + 偏好 + 容量 + 声誉。 */
 export interface WorkerProfile {
   /** 稳定身份，等于 teamName（composite）或服务自报 id（atomic）。 */
@@ -24,6 +31,8 @@ export interface WorkerProfile {
   kind: 'composite' | 'atomic';
   /** 运行时载体：'claudecode' | 'codex' | 'gemini' | ... */
   harness?: string;
+  /** 绑定的项目目录（取自真实团队 manifest；该会话实际工作的地方）。 */
+  workDir?: string;
   /** 能力清单，复用 AgentCapability。 */
   capabilities: AgentCapability[];
   /** 兴趣/偏好：worker *想*做的 skill，驱动自选（不只是能做）。 */

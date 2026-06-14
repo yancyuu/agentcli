@@ -2,7 +2,7 @@ import type { ExecutionTarget } from './api';
 import type { EnhancedChunk } from '@main/types';
 
 export const SYSTEM_MANAGER_TEAM_NAME = 'system-manager';
-export const SYSTEM_MANAGER_DISPLAY_NAME = 'Admin Loop';
+export const SYSTEM_MANAGER_DISPLAY_NAME = 'Helm Loop';
 export const SYSTEM_MANAGER_BIND_PROJECT = 'my-project';
 
 export interface SystemManagerSummary {
@@ -207,6 +207,8 @@ export interface DiscoverableTeam {
   capabilities?: AgentCapability[];
   description?: string;
   harness?: string;
+  /** Canonical project path — surfaced via /workers so admins know where each team lives. */
+  workDir?: string;
 }
 
 export interface TaskBusConfig {

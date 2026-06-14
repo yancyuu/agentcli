@@ -22,8 +22,8 @@ describe('loopSendIntent', () => {
   it('routes standalone slash commands to reusable sessions when configured', () => {
     const intent = parseLoopSendIntent({
       text: '/loop-scan',
-      recipient: 'Admin Loop',
-      leadRecipient: 'Admin Loop',
+      recipient: 'Helm Loop',
+      leadRecipient: 'Helm Loop',
       slashCommandMode: 'session',
     });
 
@@ -35,11 +35,11 @@ describe('loopSendIntent', () => {
     });
   });
 
-  it('routes /workers to the Admin Loop workers list intent', () => {
+  it('routes /workers to the Helm Loop workers list intent', () => {
     const intent = parseLoopSendIntent({
       text: '/workers',
-      recipient: 'Admin Loop',
-      leadRecipient: 'Admin Loop',
+      recipient: 'Helm Loop',
+      leadRecipient: 'Helm Loop',
       slashCommandMode: 'session',
     });
 
@@ -90,5 +90,48 @@ describe('loopSendIntent', () => {
       toTeam: 'ops',
       subject: '检查 Redis task bus',
     });
+  });
+
+  it('falls back to a plain message when @team is not a known team slug (TEAM-010-003)', () => {
+    // An unknown team slug must NOT silently become a cross-team dispatch —
+    // it would create a task for a non-existent team. It falls through to a
+    // normal lead message so the literal text stays visible.
+    const intent = parseLoopSendIntent({
+      text: '@ghost-team 这个团队不在列表里',
+      recipient: 'Lead',
+      leadRecipient: 'Lead',
+      teamSlugs: ['ops'],
+    });
+
+    expect(intent.kind).toBe('message');
+    expect(intent).not.toMatchObject({ kind: 'cross-team-task' });
+  });
+
+  it('validates a cross-team task even when the source team is offline (TEAM-010-004)', () => {
+    // Cross-team dispatch hands an async task to the TARGET team; it must NOT
+    // be blocked by the SOURCE team's runtime being offline (unlike
+    // runtime/session/attachment intents, which are gated on isTeamAlive).
+    const intent = parseLoopSendIntent({
+      text: '@ops 检查 Redis task bus',
+      recipient: 'Lead',
+      leadRecipient: 'Lead',
+      teamSlugs: ['ops'],
+    });
+    expect(intent.kind).toBe('cross-team-task');
+
+    expect(validateLoopSendIntent(intent, { isTeamAlive: false }).ok).toBe(true);
+    expect(validateLoopSendIntent(intent, { isTeamAlive: true }).ok).toBe(true);
+  });
+
+  it('rejects a cross-team task intent missing its target team (defensive guard)', () => {
+    // parseLoopSendIntent never emits this in practice (toTeam comes from a
+    // non-empty regex capture), but the validator must still defend the shape.
+    const intent = {
+      kind: 'cross-team-task' as const,
+      toTeam: '',
+      subject: '检查 Redis task bus',
+      text: '@ 检查 Redis task bus',
+    };
+    expect(validateLoopSendIntent(intent).ok).toBe(false);
   });
 });

@@ -82,6 +82,7 @@ interface CreateTeamDialogProps {
   clearProvisioningError?: (teamName?: string) => void;
   existingTeamNames: string[];
   existingBindProjects?: string[];
+  existingDisplayNames?: string[];
   provisioningTeamNames?: string[];
   activeTeams?: ActiveTeamRef[];
   initialData?: unknown;
@@ -98,6 +99,7 @@ export const CreateTeamDialog = ({
   clearProvisioningError,
   existingTeamNames,
   existingBindProjects = [],
+  existingDisplayNames = [],
   provisioningTeamNames = [],
   activeTeams,
   defaultProjectPath,
@@ -149,6 +151,13 @@ export const CreateTeamDialog = ({
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ teamName?: string; cwd?: string }>({});
+  // The slug ACTUALLY used at creation. The live `bindProject` re-derives once
+  // the parent's fetchTeams() refreshes existingBindProjects (the just-created
+  // slug is now taken) and its numeric-counter fallback can land on an
+  // UNRELATED existing team's slug — so the done step's "open" button must use
+  // this captured id, not the re-derived one. See the "opens the JUST-CREATED
+  // team" regression test.
+  const [createdTeamName, setCreatedTeamName] = useState<string | null>(null);
 
   // ── Name conflict detection ──────────────────────────────────────────
   const existingBindProjectSet = useMemo(
@@ -159,6 +168,23 @@ export const CreateTeamDialog = ({
     () => new Set(provisioningTeamNames.map((value) => value.trim().toLowerCase()).filter(Boolean)),
     [provisioningTeamNames]
   );
+  // displayName (the human-readable name) must be unique too. A duplicate name
+  // silently produced a ghost team (the 222-2 incident: draft-restored name +
+  // auto-collision-free bindProject + a second create click), so block it up front.
+  const existingDisplayNameSet = useMemo(
+    () => new Set(existingDisplayNames.map((value) => value.trim().toLowerCase()).filter(Boolean)),
+    [existingDisplayNames]
+  );
+  const isDisplayNameTaken =
+    Boolean(teamName.trim()) && existingDisplayNameSet.has(teamName.trim().toLowerCase());
+  // The collision check is reactive to the live `teams` list. The instant a
+  // create succeeds, the parent store adds the new team and `isDisplayNameTaken`
+  // trips on the just-created name for the one frame before the dialog moves to
+  // the success step — a false "该名称已存在" red-box flicker. Validation
+  // (validateCreateFields) runs pre-submit and still uses the raw check, but the
+  // *visual* red box / error text / disabled state is suppressed while a create
+  // is in flight, since by then the name has already been accepted.
+  const showDisplayNameTaken = isDisplayNameTaken && !isSubmitting;
 
   // bindProject is DERIVED, not state. The auto value is generated in the same
   // render as `existingBindProjectSet`, so it is collision-free BY CONSTRUCTION
@@ -173,6 +199,11 @@ export const CreateTeamDialog = ({
   const normalizedBindProject = bindProject.trim().toLowerCase();
 
   const isBindProjectTaken = existingBindProjectSet.has(normalizedBindProject);
+  // Slug the done-step "open" + provisioning-error lookup target: the one
+  // actually used at creation (captured), falling back to the live form value
+  // before creation. Never the re-derived `bindProject` once the parent list
+  // refreshes — that drifts to a different/colliding id (createdTeamName note).
+  const openTeamSlug = createdTeamName ?? bindProject;
   const isNameProvisioning =
     provisioningTeamNameSet.has(normalizedBindProject) && !isBindProjectTaken;
   const isBindProjectFormatInvalid =
@@ -291,7 +322,16 @@ export const CreateTeamDialog = ({
     setSelectedProviderRef(null);
     setManualBindProject('');
     setBindProjectManuallyEdited(false);
+    setCreatedTeamName(null);
     setStep('name');
+  };
+
+  // Every close path (overlay click, ✕, 取消) clears the persisted draft so a
+  // stale restored name can never seed a duplicate create on reopen.
+  const handleClose = () => {
+    clearDraft();
+    resetState();
+    onClose();
   };
 
   const buildCreateRequest = (): TeamCreateRequest => ({
@@ -312,6 +352,10 @@ export const CreateTeamDialog = ({
   const validateCreateFields = (): boolean => {
     if (!teamName.trim()) {
       setLocalError('请输入数字员工名称');
+      return false;
+    }
+    if (isDisplayNameTaken) {
+      setLocalError('该名称已存在，请换一个');
       return false;
     }
     if (!normalizedBindProject) {
@@ -339,8 +383,8 @@ export const CreateTeamDialog = ({
     return true;
   };
 
-  const createLocalTeam = async (): Promise<TeamCreateRequest | null> => {
-    if (!validateCreateFields()) return null;
+  const createLocalTeam = async (): Promise<boolean> => {
+    if (!validateCreateFields()) return false;
 
     setFieldErrors({});
     setLocalError(null);
@@ -349,19 +393,31 @@ export const CreateTeamDialog = ({
     try {
       const request = buildCreateRequest();
       await onCreate(request);
-      return request;
+      // Capture the slug that was actually persisted. The done step opens /
+      // surfaces errors for THIS team; the live `bindProject` would drift to a
+      // different id once the parent list refreshes (see createdTeamName note).
+      setCreatedTeamName(request.teamName);
+      // Advance to the success step in the SAME synchronous block as the
+      // `finally` that releases isSubmitting. The create just added this name
+      // to the parent's existingDisplayNames; if the name step re-rendered
+      // with isSubmitting already false, `showDisplayNameTaken` would trip on
+      // the just-created name for one frame — the false "该名称已存在"
+      // red-box flicker right before the success screen. Setting 'done' here
+      // (no await between it and the finally) batches with
+      // setIsSubmitting(false), so the name step is unmounted atomically and
+      // that transition window never opens.
+      setStep('done');
+      return true;
     } catch {
       // error shown via provisioningErrorsByTeam
-      return null;
+      return false;
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleCreate = async () => {
-    const request = await createLocalTeam();
-    if (!request) return;
-    setStep('done');
+    await createLocalTeam();
   };
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -369,10 +425,7 @@ export const CreateTeamDialog = ({
     <Dialog
       open={open}
       onOpenChange={(next: boolean) => {
-        if (!next) {
-          resetState();
-          onClose();
-        }
+        if (!next) handleClose();
       }}
     >
       <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl sm:w-[40rem]">
@@ -422,7 +475,8 @@ export const CreateTeamDialog = ({
                 required
                 className={cn(
                   'h-8 text-xs',
-                  fieldErrors.teamName && 'border-[var(--field-error-border)]'
+                  (fieldErrors.teamName || showDisplayNameTaken) &&
+                    'border-[var(--field-error-border)]'
                 )}
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
@@ -433,6 +487,9 @@ export const CreateTeamDialog = ({
                 <p className="text-[11px]" style={{ color: 'var(--warning-text)' }}>
                   同名数字员工正在启动中
                 </p>
+              )}
+              {showDisplayNameTaken && (
+                <p className="text-[11px] text-red-400">该名称已存在，请换一个</p>
               )}
             </div>
 
@@ -603,7 +660,7 @@ export const CreateTeamDialog = ({
                 {localError}
               </p>
             )}
-            {provisioningErrorsByTeam[bindProject] && (
+            {provisioningErrorsByTeam[openTeamSlug] && (
               <p
                 className="mt-1 rounded border p-2 text-xs"
                 style={{
@@ -612,7 +669,7 @@ export const CreateTeamDialog = ({
                   backgroundColor: 'var(--field-error-bg)',
                 }}
               >
-                {provisioningErrorsByTeam[bindProject]}
+                {provisioningErrorsByTeam[openTeamSlug]}
               </p>
             )}
           </div>
@@ -634,7 +691,7 @@ export const CreateTeamDialog = ({
                 <Button
                   size="sm"
                   onClick={() => {
-                    onOpenTeam(bindProject, effectiveCwd || undefined, {
+                    onOpenTeam(openTeamSlug, effectiveCwd || undefined, {
                       displayName: teamName.trim() || undefined,
                     });
                     clearDraft();
@@ -647,7 +704,7 @@ export const CreateTeamDialog = ({
               </>
             ) : (
               <>
-                <Button variant="outline" size="sm" onClick={onClose}>
+                <Button variant="outline" size="sm" onClick={handleClose}>
                   取消
                 </Button>
                 <Button
@@ -658,6 +715,7 @@ export const CreateTeamDialog = ({
                     !effectiveCwd ||
                     isBindProjectFormatInvalid ||
                     isBindProjectTaken ||
+                    showDisplayNameTaken ||
                     isNameProvisioning ||
                     isSubmitting
                   }

@@ -84,6 +84,25 @@ export function canVolunteer(need: PublishedNeed, worker: WorkerProfile): boolea
   return capabilityMatchScore(need.requiredCapabilities, worker) > 0;
 }
 
+/**
+ * 开放需求「为何无人自荐」的停滞归因（供弹卡给用户可操作的反馈，而非让 need 永远卡 open）。
+ * 复用 canVolunteer 判「是否还有人能接」；无人能接时再区分：没人有能力 vs 有能力但都满载。
+ * 返回 null = 未停滞（非 open / 已有自荐者 / 仍有 worker 可接，只是还没触发自治）。
+ */
+export type NeedStallReason = 'no_matching_worker' | 'workers_at_capacity';
+
+export function classifyOpenNeedStall(
+  need: PublishedNeed,
+  workers: readonly WorkerProfile[]
+): NeedStallReason | null {
+  if (need.status !== 'open' || need.volunteers.length > 0) return null;
+  if (workers.some((w) => canVolunteer(need, w))) return null;
+  const capable = workers.filter(
+    (w) => w.workerId !== need.postedBy && capabilityMatchScore(need.requiredCapabilities, w) > 0
+  );
+  return capable.length > 0 ? 'workers_at_capacity' : 'no_matching_worker';
+}
+
 // ── 适配度 ──────────────────────────────────────────────────────────
 
 /**
@@ -437,11 +456,16 @@ export function recordCollaboration(
   return relationships.map((r, i) => (i === idx ? next : r));
 }
 
+/** 把声誉值夹取到领域不变量 [REPUTATION_MIN, REPUTATION_MAX]。 */
+export function clampReputation(value: number): number {
+  return clamp(value, REPUTATION_MIN, REPUTATION_MAX);
+}
+
 /** 声誉增量，夹取到 [0,100]。 */
 export function applyReputationDelta(profile: WorkerProfile, delta: number): WorkerProfile {
   return {
     ...profile,
-    reputation: clamp(profile.reputation + delta, REPUTATION_MIN, REPUTATION_MAX),
+    reputation: clampReputation(profile.reputation + delta),
   };
 }
 

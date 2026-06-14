@@ -15,9 +15,11 @@ import type {
   WorkerDiscoveryQuery,
   WorkerProfile,
 } from '../domain/models/society';
+import { HUMAN_OPERATOR } from '../domain/models/society';
 import {
   applyReputationDelta,
   autonomousVolunteers,
+  clampReputation,
   computeFitScore,
   discoverWorkers as discoverWorkersPolicy,
   recordCollaboration,
@@ -86,9 +88,12 @@ export class WorkerSocietyService {
       harness: cmd.harness ?? existing?.harness,
       capabilities: cmd.capabilities ?? existing?.capabilities ?? [],
       interests: cmd.interests ?? existing?.interests ?? [],
-      maxConcurrent: cmd.maxConcurrent ?? existing?.maxConcurrent ?? 3,
+      // 夹取到 ≥1：maxConcurrent:0 会让 isAtCapacity(activeTaskCount>=maxConcurrent) 永真，
+      // worker 被自荐/选派闸门永久拒之门外（不可用由 status 建模，非 maxConcurrent:0）。
+      maxConcurrent: Math.max(1, cmd.maxConcurrent ?? existing?.maxConcurrent ?? 3),
       activeTaskCount: existing?.activeTaskCount ?? 0,
-      reputation: cmd.reputation ?? existing?.reputation ?? 50,
+      // 输入边界即夹取到 [0,100]——与 applyReputationDelta 同一不变量，否则注册 150/-20 会持久化出界原值。
+      reputation: clampReputation(cmd.reputation ?? existing?.reputation ?? 50),
       status: existing?.status ?? 'online',
       description: cmd.description ?? existing?.description,
     };
@@ -281,6 +286,12 @@ export class WorkerSocietyService {
     const t = transitionNeed(need, 'cancelled', this.clock.now());
     if (!t.ok) return { ok: false, reason: t.reason };
     await this.needs.upsert(t.need);
+    // 释放执行者并发槽：assigned→cancelled 是合法转换，selectAssignee 已占用一槽，
+    // 不释放则 activeTaskCount 永久虚高，最终 isAtCapacity 误判、worker 接不了新活。
+    // open→cancelled 无 assignee，get('') 返回 undefined 自然跳过。
+    const w = await this.profiles.get(need.assignee ?? '');
+    if (w)
+      await this.profiles.upsert({ ...w, activeTaskCount: Math.max(0, w.activeTaskCount - 1) });
     return { ok: true };
   }
 
@@ -349,12 +360,14 @@ export class WorkerSocietyService {
   /** worker 自由发送一条社交消息（非任务交付）；仅投递消息 + 发事件，不变更声誉/关系。 */
   async sendSocialMessage(fromWorker: string, toWorker: string, text: string): Promise<Outcome> {
     const from = await this.profiles.get(fromWorker);
-    if (!from) return { ok: false, reason: 'worker_not_found' };
+    // HUMAN_OPERATOR（'user'）不是注册 worker，但作为人类操作者必须允许发送——
+    // 否则图谱 overlay 的「发消息」（from='user'）会被静默丢弃。
+    if (!from && fromWorker !== HUMAN_OPERATOR) return { ok: false, reason: 'worker_not_found' };
     const res = await this.messages.send({ fromWorker, toWorker, text });
     this.emit({
       type: 'message',
       actors: [fromWorker, toWorker],
-      summary: `${from.name} → ${toWorker}：${text.slice(0, 60)}`,
+      summary: `${from?.name ?? fromWorker} → ${toWorker}：${text.slice(0, 60)}`,
     });
     return { ok: res.delivered };
   }

@@ -118,9 +118,7 @@ export const SettingsView = (): React.JSX.Element | null => {
                 <SlidersHorizontal className="size-4" />
               </div>
               <div>
-                <h2 className="text-base font-semibold text-[var(--color-text)]">
-                  设置 Admin Loop
-                </h2>
+                <h2 className="text-base font-semibold text-[var(--color-text)]">设置 Helm Loop</h2>
                 <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                   配置 Hermit 运行时、外观、数字员工渠道和本地控制行为。
                 </p>

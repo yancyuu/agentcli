@@ -80,7 +80,7 @@ export const BUILTIN_WORKFLOWS: BuiltinWorkflowDefinition[] = [
     order: 5,
     content: `${BUILTIN_WORKFLOW_MARKER}\n# Loop Scan — 循环资产扫描
 
-你是 Hermit Admin Loop 的 Loop Engineering 资产扫描员。目标不是写一次提示词，而是找出哪些资产会影响 Agent 自己循环运行。
+你是 Hermit Helm Loop 的 Loop Engineering 资产扫描员。目标不是写一次提示词，而是找出哪些资产会影响 Agent 自己循环运行。
 
 ${READ_ONLY_SAFETY_RULES}
 
@@ -112,7 +112,7 @@ ${LOOP_ASSET_SCAN_SCOPE}
     order: 8,
     content: `${BUILTIN_WORKFLOW_MARKER}\n# Daily Folder Hygiene — 每日目录整洁巡检
 
-你是 Hermit Admin Loop 的工作区整洁巡检助手。目标是每天只读扫一遍文件夹是否变乱：临时文件、重复报告、陈旧 worktree、未知状态目录、未归档产物。
+你是 Hermit Helm Loop 的工作区整洁巡检助手。目标是每天只读扫一遍文件夹是否变乱：临时文件、重复报告、陈旧 worktree、未知状态目录、未归档产物。
 
 ${READ_ONLY_SAFETY_RULES}
 
@@ -144,7 +144,7 @@ ${READ_ONLY_SAFETY_RULES}
     order: 9,
     content: `${BUILTIN_WORKFLOW_MARKER}\n# Daily Memory Conflict Check — 每日记忆冲突巡检
 
-你是 Hermit Admin Loop 的记忆一致性巡检助手。目标是每天只读检查长期指令、项目记忆、设置和状态是否互相冲突或过期。
+你是 Hermit Helm Loop 的记忆一致性巡检助手。目标是每天只读检查长期指令、项目记忆、设置和状态是否互相冲突或过期。
 
 ${READ_ONLY_SAFETY_RULES}
 
@@ -176,7 +176,7 @@ ${READ_ONLY_SAFETY_RULES}
     order: 10,
     content: `${BUILTIN_WORKFLOW_MARKER}\n# Daily Workflow Extraction — 每日重复流程提取
 
-你是 Hermit Admin Loop 的 workflow 提取助手。目标是每天只读看最近聊天、会话、任务和报告，把重复的人肉流程提取成下次可执行的 loop、skill、slash command 或 schedule。
+你是 Hermit Helm Loop 的 workflow 提取助手。目标是每天只读看最近聊天、会话、任务和报告，把重复的人肉流程提取成下次可执行的 loop、skill、slash command 或 schedule。
 
 ${READ_ONLY_SAFETY_RULES}
 
@@ -208,7 +208,7 @@ ${READ_ONLY_SAFETY_RULES}
     order: 10,
     content: `${BUILTIN_WORKFLOW_MARKER}\n# Loop Ops Summary — 循环运维摘要
 
-你是 Hermit Admin Loop 的 Loop Ops 摘要助手。请从 Loop Engineering 角度总结当前工作区状态：循环是否能自己找活、派活、验证、记录状态、推进下一步。
+你是 Hermit Helm Loop 的 Loop Ops 摘要助手。请从 Loop Engineering 角度总结当前工作区状态：循环是否能自己找活、派活、验证、记录状态、推进下一步。
 
 ${READ_ONLY_SAFETY_RULES}
 

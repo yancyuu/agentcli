@@ -54,6 +54,17 @@ describe('createSocietyStore', () => {
     expect(s.error).toBeNull();
   });
 
+  it('refresh reloads all data (loadAllInto alias)', async () => {
+    // refresh 是 loadAll 的公开别名（两者都调 loadAllInto），此前无测试调用 → funcs 覆盖缺口。
+    const api = mockApi({
+      listWorkers: vi.fn().mockResolvedValue([{ workerId: 'a' }]),
+    });
+    const store = createSocietyStore(api);
+    await store.getState().refresh();
+    expect(store.getState().workers).toEqual([{ workerId: 'a' }]);
+    expect(store.getState().loading).toBe(false);
+  });
+
   it('sets error and clears loading when loadAll fails', async () => {
     const api = mockApi({ listWorkers: vi.fn().mockRejectedValue(new Error('down')) });
     const store = createSocietyStore(api);
@@ -145,5 +156,63 @@ describe('createSocietyStore', () => {
     expect(api.autoSelectPending).toHaveBeenCalledTimes(1);
     expect(api.listOpenNeeds).toHaveBeenCalledTimes(1); // 选派改变需求状态
     expect(api.getFeed).toHaveBeenCalledTimes(1); // 选派产生通知消息
+  });
+
+  it('startNeed and cancelNeed each reload BOTH open and active needs (graph stays in sync)', async () => {
+    // reloadNeeds（旧名 reloadOpenNeeds）同时刷新 open + active：画布据 activeNeeds 渲染
+    // worker→task 锚点。锁住「需求生命周期 mutation 后两切片都刷新」——否则 cancel 一个
+    // assigned 需求（assigned→cancelled 合法，见 iter-9）会让画布 activeNeeds 留陈旧节点，
+    // 或诱导后人把 reload「优化」成只刷 open（函数名曾误导，本轮已正名）。
+    const api = mockApi({
+      listOpenNeeds: vi.fn().mockResolvedValue([{ needId: 'n1' }]),
+      listActiveNeeds: vi.fn().mockResolvedValue([{ needId: 'a1', status: 'in_progress' }]),
+    });
+    const store = createSocietyStore(api);
+
+    await store.getState().startNeed('n1', 'dev');
+    expect(api.startNeed).toHaveBeenCalledWith('n1', 'dev');
+    expect(api.listOpenNeeds).toHaveBeenCalledTimes(1);
+    expect(api.listActiveNeeds).toHaveBeenCalledTimes(1); // ← 关键：active 也刷新
+
+    await store.getState().cancelNeed('n1');
+    expect(api.cancelNeed).toHaveBeenCalledWith('n1');
+    expect(api.listOpenNeeds).toHaveBeenCalledTimes(2);
+    expect(api.listActiveNeeds).toHaveBeenCalledTimes(2); // ← cancel 同样双切片刷新
+  });
+
+  it('sets error (and preserves prior data, leaves loading untouched) when a mutation fails', async () => {
+    // iter-3 标记的缺口：此前只测了 loadAll 失败；mutation 失败的 error 契约未覆盖。
+    // mutate 捕获异常 → 写 error；不触碰数据切片（既有数据保留）；mutations 不动 loading。
+    const api = mockApi({
+      listWorkers: vi.fn().mockResolvedValue([{ workerId: 'a' }]),
+      registerWorker: vi.fn().mockRejectedValue(new Error('already exists')),
+    });
+    const store = createSocietyStore(api);
+    await store.getState().loadAll(); // 先装好数据
+    expect(store.getState().workers).toEqual([{ workerId: 'a' }]);
+
+    await store.getState().registerWorker({ workerId: 'a', name: 'A', capabilities: '' });
+
+    const s = store.getState();
+    expect(s.error).toBe('already exists'); // 失败 → 写 error（mutate 的 catch 分支）
+    expect(s.loading).toBe(false); // mutation 不动 loading（loadAll 已结束为 false）
+    expect(s.workers).toEqual([{ workerId: 'a' }]); // 既有数据未被清空
+  });
+
+  it('stringifies a non-Error thrown value into the error state (loadAll and mutations)', async () => {
+    // store 的 catch 兜底 `e instanceof Error ? e.message : String(e)`：非 Error 抛值（裸字符串/
+    // 数字等）须 String() 化——error 状态恒为 string 是 UI 渲染前提（否则 React 渲染 number/对象报错）。
+    // 现有 loadAll/mutation 失败用例都用 new Error（真臂 e.message）；本测补两处 false 臂 String(e)。
+    const api = mockApi({
+      listWorkers: vi.fn().mockRejectedValue('network down'), // 非 Error（裸字符串）
+      registerWorker: vi.fn().mockRejectedValue(42), // 非 Error（数字）
+    });
+    const store = createSocietyStore(api);
+
+    await store.getState().loadAll();
+    expect(store.getState().error).toBe('network down'); // String('network down') → L63 兜底
+
+    await store.getState().registerWorker({ workerId: 'x', name: 'X' });
+    expect(store.getState().error).toBe('42'); // String(42) → L96 兜底
   });
 });

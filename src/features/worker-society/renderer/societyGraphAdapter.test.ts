@@ -136,7 +136,7 @@ describe('projectSocietyGraph', () => {
     expect(particle?.color).toMatch(/^#[0-9a-f]{6}$/i);
   });
 
-  it('renders an open, unclaimed need as a waiting task with no owner edge and no particle', () => {
+  it('anchors an open, unclaimed need to the agora (not orphaned): waiting task, no owner/particle', () => {
     const out = projectSocietyGraph({
       workers: [worker({ workerId: 'alice' })],
       needs: [need({ needId: 'n-open', status: 'open' })],
@@ -144,8 +144,28 @@ describe('projectSocietyGraph', () => {
     });
     const task = out.nodes.find((n) => n.id === 'need:n-open');
     expect(task).toMatchObject({ kind: 'task', state: 'waiting', ownerId: null });
-    expect(out.edges.some((e) => e.target === 'need:n-open')).toBe(false);
+    // 无指派人 → 锚定到广场（parent-child），不再是孤立浮点；但仍无 ownership 边、无粒子。
+    expect(
+      out.edges.find(
+        (e) =>
+          e.source === `agora:${TEAM}` && e.target === 'need:n-open' && e.type === 'parent-child'
+      )
+    ).toBeTruthy();
+    expect(out.edges.some((e) => e.type === 'ownership' && e.target === 'need:n-open')).toBe(false);
     expect(out.particles.some((p) => p.edgeId.includes('need:n-open'))).toBe(false);
+  });
+
+  it("joins a visible need's required capabilities into the task sublabel", () => {
+    // L166 真臂：`need.requiredCapabilities.length > 0 ? join(' · ') : undefined`。既有可见 need
+    // 测试都用 need() 默认 []（假臂→sublabel undefined），真臂（带能力→拼成 sublabel）未覆盖。
+    const out = projectSocietyGraph({
+      workers: [worker({ workerId: 'alice' })],
+      needs: [
+        need({ needId: 'n-cap', status: 'open', requiredCapabilities: ['frontend', 'design'] }),
+      ],
+      relationships: [],
+    });
+    expect(out.nodes.find((n) => n.id === 'need:n-cap')?.sublabel).toBe('frontend · design');
   });
 
   it('maps delivered needs to a complete task state with no in-flight particle', () => {
@@ -202,6 +222,17 @@ describe('projectSocietyGraph', () => {
     expect(out.edges.filter((e) => e.type === 'related')).toHaveLength(0);
   });
 
+  it('skips a self-relationship (fromWorker === toWorker) — no self-loop edge', () => {
+    // L198 真臂 `if (r.fromWorker === r.toWorker) continue`：自指关系跳过，不产生自环 related 边。
+    // 既有关系测试都用不同 worker（假臂：alice↔bob / alice→ghost），自指真臂未覆盖。
+    const out = projectSocietyGraph({
+      workers: [worker({ workerId: 'alice' })],
+      needs: [],
+      relationships: [rel('alice', 'alice')],
+    });
+    expect(out.edges.filter((e) => e.type === 'related')).toHaveLength(0);
+  });
+
   it('produces a radial layout port whose owner order is the worker node ids', () => {
     const out = projectSocietyGraph({
       workers: [worker({ workerId: 'alice' }), worker({ workerId: 'bob' })],
@@ -252,7 +283,7 @@ describe('projectSocietyGraph', () => {
     expect(out.nodes.find((n) => n.id === 'worker:alice')?.avatarUrl).toBeUndefined();
   });
 
-  it('ignores an assignee that references an unknown worker — orphan task, no edge, no particle', () => {
+  it('ignores an unknown-worker assignee — task anchors to the agora, no ownership edge, no particle', () => {
     // A need whose assignee points to a workerId that is not registered
     // (e.g. worker unregistered mid-flight, or a stale assignee ref).
     const out = projectSocietyGraph({
@@ -262,9 +293,15 @@ describe('projectSocietyGraph', () => {
     });
     const task = out.nodes.find((n) => n.id === 'need:orphan');
     expect(task).toMatchObject({ kind: 'task', state: 'active', ownerId: null });
-    // no ownership edge to a nonexistent worker:ghost
+    // 无有效指派人 → 不产生指向不存在的 worker:ghost 的 ownership 边，改锚定到广场。
     expect(out.edges.some((e) => e.type === 'ownership')).toBe(false);
-    // no particle can travel an edge that does not exist
+    expect(
+      out.edges.some(
+        (e) =>
+          e.source === `agora:${TEAM}` && e.target === 'need:orphan' && e.type === 'parent-child'
+      )
+    ).toBe(true);
+    // no particle can travel an ownership edge that does not exist
     expect(out.particles.some((p) => p.id.includes('orphan'))).toBe(false);
   });
 

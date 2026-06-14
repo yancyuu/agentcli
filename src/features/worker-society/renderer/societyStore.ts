@@ -31,17 +31,17 @@ export interface SocietyStoreState {
 
   loadAll(): Promise<void>;
   refresh(): Promise<void>;
-  registerWorker(input: RegisterWorkerInput): Promise<void>;
-  publishNeed(input: PublishNeedInput): Promise<void>;
-  volunteer(needId: string, workerId: string): Promise<void>;
-  selectAssignee(needId: string): Promise<void>;
-  startNeed(needId: string, workerId: string): Promise<void>;
-  deliverNeed(needId: string, result: string): Promise<void>;
-  acceptDelivery(needId: string): Promise<void>;
-  cancelNeed(needId: string): Promise<void>;
-  sendMessage(fromWorker: string, toWorker: string, text: string): Promise<void>;
-  runAutonomyTick(): Promise<void>;
-  autoSelectPending(): Promise<void>;
+  registerWorker(input: RegisterWorkerInput): Promise<WorkerProfile | undefined>;
+  publishNeed(input: PublishNeedInput): Promise<PublishedNeed | undefined>;
+  volunteer(needId: string, workerId: string): Promise<unknown>;
+  selectAssignee(needId: string): Promise<unknown>;
+  startNeed(needId: string, workerId: string): Promise<unknown>;
+  deliverNeed(needId: string, result: string): Promise<unknown>;
+  acceptDelivery(needId: string): Promise<unknown>;
+  cancelNeed(needId: string): Promise<unknown>;
+  sendMessage(fromWorker: string, toWorker: string, text: string): Promise<unknown>;
+  runAutonomyTick(): Promise<{ ok: boolean; applied: number } | undefined>;
+  autoSelectPending(): Promise<{ ok: boolean; selected: number } | undefined>;
 }
 
 /** 拉取四类数据并写入 store；统一管理 loading/error。 */
@@ -74,7 +74,7 @@ export function createSocietyStore(api: SocietyApiClient = createSocietyApi()) {
     const reloadWorkers = async (): Promise<void> => set({ workers: await api.listWorkers() });
     // 需求切片刷新：open（看板的待办）与 active（画布的生命周期）同源，一起刷新，
     // 这样任意状态流转（自荐/选派/执行/交付）后两处视图都同步。
-    const reloadOpenNeeds = async (): Promise<void> => {
+    const reloadNeeds = async (): Promise<void> => {
       const [openNeeds, activeNeeds] = await Promise.all([
         api.listOpenNeeds(),
         api.listActiveNeeds(),
@@ -83,17 +83,19 @@ export function createSocietyStore(api: SocietyApiClient = createSocietyApi()) {
     };
     const reloadFeed = async (): Promise<void> => set({ feed: await api.getFeed() });
 
-    // 统一 mutation：调命令 → 捕获错误 → 仅刷受影响切片。
-    const mutate = async (
-      run: () => Promise<unknown>,
+    // 统一 mutation：调命令 → 捕获错误 → 仅刷受影响切片 → 回传命令结果（供调用方给反馈）。
+    const mutate = async <T>(
+      run: () => Promise<T>,
       after: () => Promise<void>
-    ): Promise<void> => {
+    ): Promise<T | undefined> => {
       set({ error: null });
       try {
-        await run();
+        const result = await run();
         await after();
+        return result;
       } catch (e) {
         set({ error: e instanceof Error ? e.message : String(e) });
+        return undefined;
       }
     };
 
@@ -110,16 +112,13 @@ export function createSocietyStore(api: SocietyApiClient = createSocietyApi()) {
       refresh: () => loadAllInto(set, api),
 
       registerWorker: (input) => mutate(() => api.registerWorker(input), reloadWorkers),
-      publishNeed: (input) => mutate(() => api.publishNeed(input), reloadOpenNeeds),
-      volunteer: (needId, workerId) =>
-        mutate(() => api.volunteer(needId, workerId), reloadOpenNeeds),
-      selectAssignee: (needId) => mutate(() => api.selectAssignee(needId), reloadOpenNeeds),
-      startNeed: (needId, workerId) =>
-        mutate(() => api.startNeed(needId, workerId), reloadOpenNeeds),
-      deliverNeed: (needId, result) =>
-        mutate(() => api.deliverNeed(needId, result), reloadOpenNeeds),
-      acceptDelivery: (needId) => mutate(() => api.acceptDelivery(needId), reloadOpenNeeds),
-      cancelNeed: (needId) => mutate(() => api.cancelNeed(needId), reloadOpenNeeds),
+      publishNeed: (input) => mutate(() => api.publishNeed(input), reloadNeeds),
+      volunteer: (needId, workerId) => mutate(() => api.volunteer(needId, workerId), reloadNeeds),
+      selectAssignee: (needId) => mutate(() => api.selectAssignee(needId), reloadNeeds),
+      startNeed: (needId, workerId) => mutate(() => api.startNeed(needId, workerId), reloadNeeds),
+      deliverNeed: (needId, result) => mutate(() => api.deliverNeed(needId, result), reloadNeeds),
+      acceptDelivery: (needId) => mutate(() => api.acceptDelivery(needId), reloadNeeds),
+      cancelNeed: (needId) => mutate(() => api.cancelNeed(needId), reloadNeeds),
       sendMessage: (fromWorker, toWorker, text) =>
         mutate(() => api.sendMessage(fromWorker, toWorker, text), reloadFeed),
       runAutonomyTick: () =>
@@ -127,7 +126,7 @@ export function createSocietyStore(api: SocietyApiClient = createSocietyApi()) {
           () => api.runAutonomyTick(),
           // 自治自荐同时改变「需求的自荐者」与「社交活动流」。
           async () => {
-            await reloadOpenNeeds();
+            await reloadNeeds();
             await reloadFeed();
           }
         ),
@@ -136,7 +135,7 @@ export function createSocietyStore(api: SocietyApiClient = createSocietyApi()) {
           () => api.autoSelectPending(),
           // 选派改变需求状态并产生通知消息。
           async () => {
-            await reloadOpenNeeds();
+            await reloadNeeds();
             await reloadFeed();
           }
         ),

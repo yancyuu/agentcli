@@ -5,12 +5,12 @@
  * 这是 worker-society 从纯库走向「持久化社交平台」的关键证据。
  */
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createWorkerSociety } from './societyComposition';
+import { createWorkerSociety, defaultSocietyRoot } from './societyComposition';
 
 describe('createWorkerSociety (composition root)', () => {
   let root: string;
@@ -64,5 +64,11 @@ describe('createWorkerSociety (composition root)', () => {
     expect(c.profiles).toBeTruthy();
     expect(c.needs).toBeTruthy();
     expect(c.relationships).toBeTruthy();
+  });
+
+  it('defaultSocietyRoot resolves to ~/.hermit/society (the canonical on-disk data root)', () => {
+    // createWorkerSociety 的默认参数 = defaultSocietyRoot()，但既有测试都传显式 tmpdir →
+    // 该导出从未被调用（FNDA:0）。这是声誉/关系/需求/消息跨重启落盘的规范路径，锁定防漂移。
+    expect(defaultSocietyRoot()).toBe(join(homedir(), '.hermit', 'society'));
   });
 });

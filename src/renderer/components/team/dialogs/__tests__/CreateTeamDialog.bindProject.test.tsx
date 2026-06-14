@@ -248,4 +248,152 @@ describe('CreateTeamDialog bindProject invariant', () => {
 
     await unmount();
   });
+
+  it('blocks create when the display name already exists', async () => {
+    const { host, unmount } = await renderDialog({
+      ...baseProps([]),
+      existingDisplayNames: [draftState.teamName],
+    });
+
+    // Same name as an existing worker → red error on the name field, create disabled.
+    expect(host.textContent).toContain('该名称已存在，请换一个');
+    const nameInput = host.querySelector<HTMLInputElement>('#team-name');
+    expect(nameInput?.className).toContain('border-[var(--field-error-border)]');
+    expect(findCreateButton(host)?.disabled).toBe(true);
+
+    await unmount();
+  });
+
+  it('allows create when the display name is unique', async () => {
+    const { host, unmount } = await renderDialog({
+      ...baseProps([]),
+      existingDisplayNames: ['其他不重名的员工'],
+    });
+
+    expect(host.textContent).not.toContain('该名称已存在，请换一个');
+    expect(findCreateButton(host)?.disabled).toBe(false);
+
+    await unmount();
+  });
+
+  it('does NOT flash "该名称已存在" mid-create when the name lands in the list', async () => {
+    // Regression: clicking create updates the parent team list, so the
+    // just-created name momentarily appears in existingDisplayNames while the
+    // dialog still renders the name step. The duplicate-name red box must stay
+    // hidden throughout the in-flight create — no one-frame flicker right
+    // before the success screen.
+    let resolveCreate: (() => void) | undefined;
+    const onCreate = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCreate = resolve;
+        })
+    );
+
+    const { host, rerender, unmount } = await renderDialog({
+      ...baseProps([]),
+      existingDisplayNames: [],
+      onCreate,
+    });
+
+    // Click create on a unique name → enters submitting state, onCreate pending.
+    const createBtn = findCreateButton(host);
+    expect(createBtn, 'create button rendered').not.toBeNull();
+    await act(async () => {
+      createBtn?.click();
+      await Promise.resolve();
+    });
+
+    // Button now reads "创建中..." → proves isSubmitting === true mid-create.
+    const submittingBtn = Array.from(host.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('创建中')
+    );
+    expect(submittingBtn, 'create entered submitting state').toBeTruthy();
+
+    // Parent now reports the just-created name as existing (store caught up).
+    await rerender({
+      ...baseProps([]),
+      existingDisplayNames: [draftState.teamName],
+      onCreate,
+    });
+
+    // No flicker: the duplicate-name red box must NOT appear mid-create.
+    expect(host.textContent).not.toContain('该名称已存在');
+
+    // Finish the create → success step. setStep('done') is batched with
+    // setIsSubmitting(false) inside createLocalTeam's success block, so the
+    // name step unmounts atomically: the just-created name (now in the list)
+    // never re-renders the name field, and "该名称已存在" never surfaces.
+    await act(async () => {
+      resolveCreate?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.textContent).toContain('数字员工已创建成功');
+    expect(host.textContent).not.toContain('该名称已存在');
+
+    await unmount();
+  });
+
+  it('opens the JUST-CREATED team, not a regenerated id, after the list refreshes', async () => {
+    // Regression: after create succeeds the parent's fetchTeams() refresh adds
+    // the just-created slug to existingBindProjects. The live `bindProject`
+    // re-derives (its candidate is now taken) and the numeric-counter fallback
+    // landed on an UNRELATED existing team's slug (e.g. "team-2"), so the done
+    // step's "打开数字员工" button opened the WRONG team. The dialog must capture
+    // the slug actually used at creation and open THAT one.
+    const createdSlug = generateBindProject(draftState.teamName, new Set());
+    // What the live derivation would regenerate to once `createdSlug` is taken:
+    // the counter walk lands on "team-2" (an unrelated existing team's slug).
+    const regeneratedAfterRefresh = generateBindProject(
+      draftState.teamName,
+      new Set([createdSlug])
+    );
+    expect(regeneratedAfterRefresh).not.toBe(createdSlug);
+
+    const onCreate = vi.fn(async () => undefined);
+    const onOpenTeam = vi.fn();
+
+    const { host, rerender, unmount } = await renderDialog({
+      ...baseProps([]),
+      onCreate,
+      onOpenTeam,
+    });
+
+    // Create the team with the unique auto slug → success step.
+    const createBtn = findCreateButton(host);
+    expect(createBtn, 'create button rendered').not.toBeNull();
+    await act(async () => {
+      createBtn?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ teamName: createdSlug }));
+    expect(host.textContent).toContain('数字员工已创建成功');
+
+    // Parent list refreshes and now reports the just-created slug as existing.
+    await rerender({
+      ...baseProps([createdSlug]),
+      onCreate,
+      onOpenTeam,
+    });
+
+    // The done step's "open" button must use the captured created slug, not the
+    // regenerated counter value that collides with an unrelated existing team.
+    const openBtn = Array.from(host.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('打开数字员工')
+    );
+    expect(openBtn, 'open button rendered in done step').toBeTruthy();
+    await act(async () => {
+      openBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(onOpenTeam).toHaveBeenCalledTimes(1);
+    expect(onOpenTeam.mock.calls[0][0]).toBe(createdSlug);
+
+    await unmount();
+  });
 });

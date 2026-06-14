@@ -48,7 +48,7 @@ vi.mock('@renderer/store', () => {
 vi.mock('@renderer/components/team/loop-console/LoopConsolePanel', () => ({
   LoopConsolePanel: (props: { commandSuggestions?: Array<{ command?: string; name?: string }> }) => {
     loopConsolePanelPropsMock(props);
-    return <div data-testid="admin-loop-panel">Embedded Admin Loop Panel</div>;
+    return <div data-testid="admin-loop-panel">Embedded Helm Loop Panel</div>;
   },
 }));
 
@@ -91,9 +91,14 @@ function renderSystemManager(): { host: HTMLDivElement; root: ReturnType<typeof 
 
 function baseStatus() {
   return {
-    displayName: 'Admin Loop' as const,
+    displayName: 'Helm Loop' as const,
     defaultWorkDir: '/repo',
     selectedWorkDir: '/repo',
+    // getStatus() always returns adminWorkDir (computed from hermitHome in
+    // SystemManagerConfigService), and candidateFolders derives the admin
+    // command/workflow folders from it via joinPath — so the mock must set it
+    // or joinPath(undefined, …) throws and aborts workflow loading.
+    adminWorkDir: '/repo',
     globalHermitWorkflowFolder: '/Users/test/.claude/commands/hermit',
     claudeCommand: 'claude' as const,
     localStatus: 'ready' as const,
@@ -114,7 +119,7 @@ function baseTeamData(workDir = '/repo') {
     teamName: 'system-manager',
     config: {
       teamName: 'system-manager',
-      displayName: 'Admin Loop',
+      displayName: 'Helm Loop',
       projectPath: workDir,
       members: [],
       leadSessionId: 'lead-session',
@@ -136,11 +141,11 @@ function baseTeamData(workDir = '/repo') {
 function mockAdminLoopRuntime(workDir = '/repo') {
   ensureSystemManagerMock.mockResolvedValue({
     teamName: 'system-manager',
-    displayName: 'Admin Loop',
+    displayName: 'Helm Loop',
     bindProject: 'my-project',
     workDir,
     projectPath: workDir,
-    description: 'Admin Loop',
+    description: 'Helm Loop',
     localStatus: 'ready',
     ccConnectProjectStatus: 'bound',
     feishuStatus: 'unbound',
@@ -171,7 +176,7 @@ describe('SystemManagerView', () => {
     vi.clearAllMocks();
   });
 
-  it('renders embedded Admin Loop panel and loads workflow commands', async () => {
+  it('renders embedded Helm Loop panel and loads workflow commands', async () => {
     getStatusMock.mockResolvedValue(baseStatus());
     getConfigMock.mockResolvedValue(baseConfig());
     updateConfigMock.mockImplementation(async (patch: { selectedWorkDir?: string }) =>
@@ -210,8 +215,8 @@ describe('SystemManagerView', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Admin Loop 指令台');
-    expect(host.textContent).toContain('Embedded Admin Loop Panel');
+    expect(host.textContent).toContain('helm 指令台');
+    expect(host.textContent).toContain('Embedded Helm Loop Panel');
     expect(host.textContent).toContain('运行时');
     expect(host.textContent).not.toContain('打开终端');
     expect(host.textContent).not.toContain('Loop Scan');
@@ -239,7 +244,7 @@ describe('SystemManagerView', () => {
     });
   });
 
-  it('loads Admin Loop sessions only after the system manager team exists', async () => {
+  it('loads Helm Loop sessions only after the system manager team exists', async () => {
     getStatusMock.mockResolvedValue(baseStatus());
     getConfigMock.mockResolvedValue(baseConfig());
     updateConfigMock.mockResolvedValue(baseConfig('/repo'));
@@ -251,11 +256,11 @@ describe('SystemManagerView', () => {
       order.push('ensure');
       return {
         teamName: 'system-manager',
-        displayName: 'Admin Loop',
+        displayName: 'Helm Loop',
         bindProject: 'my-project',
         workDir: '/repo',
         projectPath: '/repo',
-        description: 'Admin Loop',
+        description: 'Helm Loop',
         localStatus: 'ready',
         ccConnectProjectStatus: 'bound',
         feishuStatus: 'bound',
@@ -270,7 +275,7 @@ describe('SystemManagerView', () => {
       return [
         {
           id: 'oc_admin',
-          title: 'Admin Loop 飞书',
+          title: 'Helm Loop 飞书',
           projectId: 'system-manager',
           sessionKey: 'feishu:chat_admin:ou_admin',
           platform: 'feishu',

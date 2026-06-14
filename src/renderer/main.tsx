@@ -7,7 +7,8 @@ import ReactDOM from 'react-dom/client';
 
 import { App } from './App';
 import { initSentryRenderer } from './sentry';
-import { initializeNotificationListeners } from './store';
+import { initializeNotificationListeners, useStore } from './store';
+import { restoreInitialRoute } from './utils/initialRoute';
 
 declare global {
   interface Window {
@@ -22,6 +23,11 @@ if (!window.__claudeTeamsUiDidInit) {
   window.__claudeTeamsUiDidInit = true;
   initializeNotificationListeners();
 }
+
+// Restore the URL route into the store BEFORE first render so the initial paint
+// already shows the correct tab. This closes the first-load blank-content race
+// (e.g. /teams rendering empty until a post-mount effect opened the tab).
+restoreInitialRoute(useStore.getState(), window.location.pathname);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

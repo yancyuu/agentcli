@@ -54,6 +54,17 @@ describe('societyApi', () => {
     ]);
   });
 
+  it('POSTs register with interests split from csv into a string array', async () => {
+    // L111 的 `input.interests ? csvToArray(...) : undefined` 真臂：传 interests 时拆成 string[]
+    // （注意与 capabilities 的「对象数组」语义不同——interests 是纯 skill 名）。
+    // 既有 register 测试不传 interests（走 :undefined 假臂），本用例补真臂。
+    fetchMock.mockResolvedValueOnce(res({ workerId: 'dev', interests: [] }));
+    const api = createSocietyApi();
+    await api.registerWorker({ workerId: 'dev', name: 'Dev', interests: 'design, ui' });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.interests).toEqual(['design', 'ui']);
+  });
+
   it('POSTs publishNeed with requiredCapabilities split from csv into an array', async () => {
     fetchMock.mockResolvedValueOnce(res({ needId: 'n1', status: 'open' }));
     const api = createSocietyApi();
@@ -61,6 +72,16 @@ describe('societyApi', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body).toMatchObject({ postedBy: 'u', subject: 'X' });
     expect(body.requiredCapabilities).toEqual(['code', 'qa']);
+  });
+
+  it('POSTs publishNeed with an empty requiredCapabilities array when none are given', async () => {
+    // csvToArray L24 的 `(value ?? '')` 空值假臂：publish 不传 requiredCapabilities → csvToArray(undefined) → []。
+    // 既有 publish 测试恒传 'code,qa'（真臂），本用例补空值假臂，收尾 societyApi csv 辅助分支。
+    fetchMock.mockResolvedValueOnce(res({ needId: 'n1', status: 'open' }));
+    const api = createSocietyApi();
+    await api.publishNeed({ postedBy: 'u', subject: 'X' }); // 不传 requiredCapabilities
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.requiredCapabilities).toEqual([]);
   });
 
   it('lists open needs', async () => {
@@ -133,6 +154,44 @@ describe('societyApi', () => {
     fetchMock.mockResolvedValueOnce(empty);
     const api = createSocietyApi();
     await expect(api.listWorkers()).rejects.toThrow('HTTP 502');
+  });
+
+  it('wraps a non-JSON error body (e.g. an HTML gateway page) into an HTTP-prefixed message', async () => {
+    // 反代/网关 502 常返回 HTML 错误页（非 JSON）。parseResponse 的 SyntaxError 分支须把它包成
+    // `HTTP {status}: {body 前 200 字符}`，而非让原始 SyntaxError 冒泡——否则客户端拿到的是
+    // 不可读的 `Unexpected token <` 而非带状态码的可用错误。本用例补齐错误路径三分支的最后一支
+    // （空体 / JSON {error} / 非 JSON），characterization（绿现），与 iter-3/7/8/12 同类。
+    const html = {
+      ok: false,
+      status: 502,
+      text: () => Promise.resolve('<html><body>502 Bad Gateway</body></html>'),
+    } as unknown as Response;
+    fetchMock.mockResolvedValueOnce(html);
+    const api = createSocietyApi();
+    await expect(api.listWorkers()).rejects.toThrow(/HTTP 502:.*502 Bad Gateway/);
+  });
+
+  it('falls back to an HTTP-status message when a non-2xx JSON body has no {error} field', async () => {
+    // parseResponse L77 的 `parsed.error ?? \`HTTP ${status}\`` false 臂：服务器/网关返回非 2xx 且
+    // JSON 体但无 error 字段（如 502 {"upstream":"timeout"} 或 400 {}）→ 回退 `HTTP {status}`，
+    // 不把 body 字段当 message、也不崩。既有 3 个错误用例覆盖「JSON 有 error / 空体 / 非 JSON」，
+    // 唯独「JSON 无 error」这一支漏——补齐错误路径四分支的最后一块。
+    fetchMock.mockResolvedValueOnce(res({ upstream: 'timeout' }, 502));
+    const api = createSocietyApi();
+    await expect(api.listWorkers()).rejects.toThrow(/^HTTP 502$/);
+  });
+
+  it('returns undefined for a 2xx response with an empty body', async () => {
+    // parseResponse L83：2xx 但 body 空/纯空白 → 返回 undefined（而非 JSON.parse('') 崩）。
+    // 路由理论上都返 JSON，但客户端须对空体健壮（代理截断、204 No Content、空 200 等）。
+    const empty = {
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(''),
+    } as unknown as Response;
+    fetchMock.mockResolvedValueOnce(empty);
+    const api = createSocietyApi();
+    expect(await api.listWorkers()).toBeUndefined();
   });
 
   it('GETs a single worker by id', async () => {

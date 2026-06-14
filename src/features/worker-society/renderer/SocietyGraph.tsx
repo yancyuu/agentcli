@@ -15,7 +15,7 @@
  * Pure projection (projectSocietyGraph) is unit-tested separately; this file
  * is a thin React mount with no logic of its own.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { GraphView } from '@claude-teams/agent-graph';
@@ -23,6 +23,7 @@ import type { GraphViewProps } from '@claude-teams/agent-graph';
 import { PARTICIPANT_AVATAR_URLS } from '@renderer/utils/memberAvatarCatalog';
 
 import { projectSocietyGraph } from './societyGraphAdapter';
+import { SocietyNodeLabels, type SocietyLabelNode } from './SocietyNodeLabels';
 import { pickAvatarUrl } from './societyViewUtils';
 import type { PublishedNeed, Relationship, WorkerProfile } from '../core/domain/models/society';
 
@@ -33,8 +34,6 @@ export interface SocietyGraphProps {
   relationships: Relationship[];
   /** Called when the user wants to bootstrap the empty society (add the first worker). */
   onAddFirstWorker?: () => void;
-  /** Called when the user wants to seed a demo society (instant demoability). */
-  onLoadDemo?: () => void;
   /**
    * 自定义节点弹卡渲染器（透传给引擎 GraphView.renderOverlay）。点开 worker/need 节点时
    * 引擎以 {node, screenPos, onClose} 调用之；返回的卡片即「纯图谱」的唯一交互入口。
@@ -55,7 +54,6 @@ export function SocietyGraph({
   needs,
   relationships,
   onAddFirstWorker,
-  onLoadDemo,
   renderOverlay,
 }: SocietyGraphProps): React.JSX.Element {
   const [fullscreen, setFullscreen] = useState(false);
@@ -67,6 +65,30 @@ export function SocietyGraph({
         { resolveAvatarUrl: (id) => pickAvatarUrl(id, PARTICIPANT_AVATAR_URLS) }
       ),
     [workers, needs, relationships]
+  );
+
+  // 引擎 canvas 标签字号固定、在 fit 缩放下对人类不可读 → 改用 HTML 标签层渲染。
+  // 给引擎喂 label='' 抑制 canvas 文本；HTML 层（SocietyNodeLabels）用同一份 graphData
+  // 的标签复用引擎 getNodeWorldPosition/worldToScreen 定位（不重算坐标）。两份视图同源。
+  const engineData = useMemo(
+    () => ({ ...graphData, nodes: graphData.nodes.map((n) => ({ ...n, label: '' })) }),
+    [graphData]
+  );
+  const labelNodes = useMemo<SocietyLabelNode[]>(
+    () => graphData.nodes.map((n) => ({ id: n.id, label: n.label, kind: n.kind, state: n.state })),
+    [graphData]
+  );
+  const renderHud = useCallback<NonNullable<GraphViewProps['renderHud']>>(
+    (hud) => (
+      <SocietyNodeLabels
+        nodes={labelNodes}
+        getNodeWorldPosition={hud.getNodeWorldPosition}
+        worldToScreen={hud.worldToScreen}
+        getViewportSize={hud.getViewportSize}
+        focusNodeIds={hud.focusNodeIds}
+      />
+    ),
+    [labelNodes]
   );
 
   // An empty society (no agora hub, nothing to render) shows a guiding overlay
@@ -91,12 +113,13 @@ export function SocietyGraph({
       >
         {fullscreen ? null : (
           <GraphView
-            data={graphData}
+            data={engineData}
             className="society-graph-view size-full"
             isSurfaceActive
             onRequestFullscreen={() => setFullscreen(true)}
             config={GRAPH_CONFIG}
             renderOverlay={renderOverlay}
+            renderHud={renderHud}
           />
         )}
 
@@ -116,14 +139,6 @@ export function SocietyGraph({
                     去添加成员 →
                   </button>
                 ) : null}
-                {onLoadDemo ? (
-                  <button
-                    onClick={onLoadDemo}
-                    className="rounded-md border border-[var(--color-border)] px-3 py-1 text-xs hover:opacity-80"
-                  >
-                    加载示例社会
-                  </button>
-                ) : null}
               </div>
             </div>
           </div>
@@ -134,12 +149,13 @@ export function SocietyGraph({
         ? createPortal(
             <div className="fixed inset-0 z-[1000]" style={{ background: '#050510' }}>
               <GraphView
-                data={graphData}
+                data={engineData}
                 className="society-graph-view size-full"
                 isSurfaceActive
                 onRequestClose={() => setFullscreen(false)}
                 config={GRAPH_CONFIG}
                 renderOverlay={renderOverlay}
+                renderHud={renderHud}
               />
             </div>,
             document.body

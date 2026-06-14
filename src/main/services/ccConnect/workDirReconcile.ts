@@ -5,7 +5,7 @@
  * which cc-connect surfaces as "❌ 错误: 启动 Agent 会话失败". The session record is
  * created fine, so the user sees the success message AND the failure.
  *
- * This hit the Admin Loop hardest: its bind project is `my-project`, the same name
+ * This hit the Helm Loop hardest: its bind project is `my-project`, the same name
  * cc-connect ships as an unconfigured template (`work_dir = /path/to/your/project`).
  */
 

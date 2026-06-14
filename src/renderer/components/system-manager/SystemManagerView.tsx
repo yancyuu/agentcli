@@ -8,20 +8,18 @@ import {
   collectSlashSuggestionAliases,
 } from '@renderer/utils/slashCommandRegistry';
 import { buildWorkflowCommandSuggestion } from '@renderer/utils/workflowCommandSuggestions';
-import { Input } from '@renderer/components/ui/input';
 import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import type {
   SystemManagerConfig,
   SystemManagerStatus,
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
-import { Loader2, RefreshCw, Settings2, TerminalSquare } from 'lucide-react';
+import { Settings2, TerminalSquare } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 
 import { LoopConsolePanel } from '../team/loop-console/LoopConsolePanel';
 import { RuntimeConfigDialog } from '../team/dialogs/RuntimeConfigDialog';
-import { FolderBrowser } from './FolderBrowser';
 
 import type {
   CcSession,
@@ -80,8 +78,6 @@ export const SystemManagerView = ({
   isActive: _isActive = true,
 }: SystemManagerViewProps): React.JSX.Element => {
   const [status, setStatus] = useState<SystemManagerStatus | null>(null);
-  const [config, setConfig] = useState<SystemManagerConfig | null>(null);
-  const [workDirInput, setWorkDirInput] = useState('');
   const [workflowPrompts, setWorkflowPrompts] = useState<WorkflowPromptSummary[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +86,6 @@ export const SystemManagerView = ({
   const [pendingRepliesByMember, setPendingRepliesByMember] = useState<Record<string, number>>({});
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fetchTeams = useStore((state) => state.fetchTeams);
   const capabilityPacks = useStore((state) => state.capabilityPacks ?? EMPTY_CAPABILITY_PACKS);
   const fetchCapabilityPacks = useStore(
     (state) => state.fetchCapabilityPacks ?? NOOP_FETCH_CAPABILITY_PACKS
@@ -111,15 +106,13 @@ export const SystemManagerView = ({
         api.teams.getTeamSessions(SYSTEM_MANAGER_TEAM_NAME),
       ]);
       setStatus(nextStatus);
-      setConfig(nextConfig);
       setAdminTeamData(nextTeamData);
       setAdminSessions(nextSessions);
-      setWorkDirInput(nextConfig.selectedWorkDir);
       const candidateFolders = [
         nextStatus.globalHermitWorkflowFolder,
-        joinPath(nextConfig.selectedWorkDir, '.claude/commands'),
+        joinPath(nextStatus.adminWorkDir, '.claude/commands'),
         nextConfig.workflowFolder,
-        joinPath(nextConfig.selectedWorkDir, 'workflows'),
+        joinPath(nextStatus.adminWorkDir, 'workflows'),
       ].filter((folder): folder is string => Boolean(folder));
       const seenFolders = new Set<string>();
       const seenPrompts = new Set<string>();
@@ -130,9 +123,6 @@ export const SystemManagerView = ({
         seenFolders.add(folder);
         try {
           const workflowResult = await api.systemManager.listWorkflowPrompts(folder);
-          setConfig((current) =>
-            current ? { ...current, workflowFolder: workflowResult.folder } : current
-          );
           for (const prompt of workflowResult.prompts) {
             const basename = prompt.filename.replace(/\.[^.]+$/, '');
             const key = prompt.commandName ?? basename;
@@ -161,24 +151,6 @@ export const SystemManagerView = ({
     void load();
   }, [load]);
 
-  const refreshConsole = useCallback(async () => {
-    const nextConfig = await load();
-    const effectiveWorkDir = workDirInput || nextConfig?.selectedWorkDir;
-    if (effectiveWorkDir && effectiveWorkDir !== nextConfig?.selectedWorkDir) {
-      const updatedConfig = await api.systemManager.updateConfig({
-        selectedWorkDir: effectiveWorkDir,
-      });
-      setConfig(updatedConfig);
-      setWorkDirInput(updatedConfig.selectedWorkDir);
-      void fetchTeams();
-    }
-  }, [fetchTeams, load, workDirInput]);
-
-  const titlePath = useMemo(
-    () =>
-      formatPathForTitle(config?.selectedWorkDir ?? (workDirInput || status?.defaultWorkDir || '')),
-    [config?.selectedWorkDir, status?.defaultWorkDir, workDirInput]
-  );
   const adminWorkflowCommandSuggestions = useMemo(() => {
     const workflowSuggestions = [...workflowPrompts]
       .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
@@ -204,35 +176,7 @@ export const SystemManagerView = ({
             <TerminalSquare size={14} className="text-[var(--color-text-muted)]" />
             {SYSTEM_MANAGER_DISPLAY_NAME}
           </div>
-          <Input
-            value={workDirInput}
-            onChange={(event) => setWorkDirInput(event.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void refreshConsole();
-            }}
-            className="h-8 min-w-[220px] flex-1 border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-xs text-[var(--color-text)]"
-            placeholder={titlePath || '工作目录'}
-          />
-          <FolderBrowser
-            value={workDirInput}
-            onChange={(newPath) => {
-              setWorkDirInput(newPath);
-              if (newPath && newPath !== workDirInput) {
-                void api.systemManager
-                  .updateConfig({ selectedWorkDir: newPath })
-                  .then((nextConfig) => {
-                    setConfig(nextConfig);
-                    setWorkDirInput(nextConfig.selectedWorkDir);
-                    void fetchTeams();
-                    void load();
-                  })
-                  .catch((err: unknown) =>
-                    setError(err instanceof Error ? err.message : String(err))
-                  );
-              }
-            }}
-          />
-          <div className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
+          <div className="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]">
             {status?.localStatus ?? 'ready'}
           </div>
           <Button
@@ -244,16 +188,6 @@ export const SystemManagerView = ({
             <Settings2 size={13} />
             运行时
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 shrink-0 border-[var(--color-border)]"
-            disabled={loading}
-            onClick={() => void refreshConsole()}
-          >
-            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            刷新
-          </Button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-surface)] p-4">
@@ -261,9 +195,7 @@ export const SystemManagerView = ({
             <div className="rounded-xl border border-indigo-500/20 bg-[var(--color-surface-raised)] p-4 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-mono text-sm text-[var(--color-text)]">
-                    Admin Loop 指令台
-                  </div>
+                  <div className="font-mono text-sm text-[var(--color-text)]">helm 指令台</div>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
                     全局巡检、诊断、复盘、治理和改进提案。团队消息、runtime 注入和派单在 Team Loop
                     指令台。
@@ -275,7 +207,7 @@ export const SystemManagerView = ({
               </div>
               <div className="mt-3 grid gap-2 text-[11px] text-[var(--color-text-muted)] sm:grid-cols-3">
                 <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
-                  作用域：{formatPathForTitle(config?.selectedWorkDir ?? workDirInput)}
+                  作用域：{formatPathForTitle(status?.adminWorkDir ?? '—')}
                 </div>
                 <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
                   命令源：全局 Hermit / 团队 `.claude/commands` / workflows
@@ -293,7 +225,7 @@ export const SystemManagerView = ({
                 ) : null}
                 {error ? <div className="text-red-300">{error}</div> : null}
                 {loading ? (
-                  <div className="text-[var(--color-text-muted)]">加载 Admin Loop 配置中...</div>
+                  <div className="text-[var(--color-text-muted)]">加载 Helm Loop 配置中...</div>
                 ) : null}
               </div>
             )}
@@ -315,7 +247,7 @@ export const SystemManagerView = ({
 
             {!workflowPrompts.length && !loading ? (
               <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 text-center text-sm text-[var(--color-text-muted)]">
-                当前没有可用 Admin Loop workflow。Hermit 默认命令会预装到
+                当前没有可用 Helm Loop workflow。Hermit 默认命令会预装到
                 `~/.claude/commands/hermit`；团队自定义命令可添加到 `.claude/commands` 或
                 workflows。
               </div>

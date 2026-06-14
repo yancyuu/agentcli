@@ -85,13 +85,13 @@ describe('mergeLocalAndCcSessions', () => {
     });
   });
 
-  it('shows Admin Loop cc-connect sessions from the shared my-project binding', () => {
+  it('shows Helm Loop cc-connect sessions from the shared my-project binding', () => {
     const result = mergeLocalAndCcSessions(
       [],
       [
         ccSession({
           id: 'oc_admin',
-          name: 'Admin Loop',
+          name: 'Helm Loop',
           session_key: 'feishu:chat_admin:ou_admin',
           updated_at: '2026-06-11T02:00:00.000Z',
         }),
@@ -102,7 +102,7 @@ describe('mergeLocalAndCcSessions', () => {
     expect(result).toEqual([
       expect.objectContaining({
         id: 'oc_admin',
-        title: 'Admin Loop',
+        title: 'Helm Loop',
         projectId: 'system-manager',
         sessionKey: 'feishu:chat_admin:ou_admin',
         platform: 'feishu',

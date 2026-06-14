@@ -156,6 +156,23 @@ npx playwright test
 | TEAM-009-004 | 跨团队消息带 @mention | 目标团队正确解析 | 失效/解析错 | integration | P1 |
 | TEAM-009-005 | 零宽元数据编码任务引用 `#task-id​` | 蓝色高亮 + 光标对齐 + 持久身份 | 光标错乱/身份漂移 | unit | P1 |
 
+### [TEAM-010] @team 提及派单（团队协作冒烟 · 用户面入口）
+- **文件**:`src/renderer/components/team/loop-console/loopSendIntent.ts`(`@team`→cross-team-task)、`useLoopCommandSuggestions.ts`(teamSlugs 候选)、`components/team/messages/MessageComposer.tsx`、`src/main/ipc/crossTeam.ts` + `services/teams-mvp/TaskDispatchService.ts`(实际派单)·**已有测试**:`loopSendIntent.test.ts`(2 份互补:`test/renderer/...` 解析路由 + `@team`、`src/renderer/...` validation 门控)已覆盖 **001 / 003 / 004**:`@已知团队`→cross-team-task(001)、`@未知团队` 不在 teamSlugs→回退 message 不误派(003)、cross-team-task **源团队离线仍可派单** + 防御性 `!toTeam` 守卫(004)。005(integration)/ 006(e2e)/ 007 需 gstack 实测,不在单测范围
+- **与 TEAM-004 的区别**:TEAM-004 测**后端派单生命周期 API**(send/start/deliver/approve);本节测**用户在团队内 `@别的团队` 提及 → 真实派单 → 对端处理 → 回流**的端到端协作冒烟,把「解析 / 候选 / 校验 / 派单 / 双侧可见性」串成一条用户路径。
+
+| ID | 场景 | 验收通过 | 验收失败 | 类型 | 优先级 |
+|---|---|---|---|---|---|
+| TEAM-010-001 | 团队内 `@teamB <任务>` 解析为跨团队意图 | `parseLoopSendIntent` → kind=`cross-team-task`、toTeam=`teamB`、subject=`<任务>` | 误判为普通消息/runtime | unit | P0 |
+| TEAM-010-002 | `@` 触发团队候选 | 候选列出已知 teamSlugs,选中后插入 | 无候选/列错 | unit | P1 |
+| TEAM-010-003 | `@未知团队` 不派单 | slug 不在 teamSlugs → 回退普通消息,不创建跨团队任务 | 误派单到不存在的团队 | unit | P1 |
+| TEAM-010-004 | `validateLoopSendIntent` 跨团队校验 | cross-team-task **源团队离线仍可派单**(异步交给对端,不受 isTeamAlive 拦)+ 缺 toTeam 时防御性拒绝(非静默失败) | 源团队离线误拦派单 / 静默失败 | unit | P1 |
+| TEAM-010-005 | 提交 `@teamB 任务` → 真实派单 | teamB 收 TODO、dispatchMeta.status=`received`、collab board 记录(衔接 TEAM-004-001) | 未派单/目标未收 | integration | P0 |
+| TEAM-010-006 | 端到端:teamB 处理 → deliver → teamA approve | received→in_progress→done→delivered→approved 全链路 + 双方通知 | 中断/状态错/通知缺 | e2e | P0 |
+| TEAM-010-007 | 来源团队"外部派单"面板可见性 | 派出任务在 teamA 侧可见,状态实时同步 | 不见/状态滞后 | integration | P1 |
+
+- **覆盖状态(2026-06-14)**:**001 ✅ live**(gstack 实测:输入 `@team-4` 后标签实时变 `派单到 team-4`)、**003 / 004 ✅ 单测**(`pnpm vitest run loopSendIntent` 16 例绿)、**005 ✅ integration**(gstack 实测:team-4 收 TODO `t_mqdisw1j_l7gza0`、`dispatchMeta.status=received`、collab-board 记录);**007 ⚠️ 发现 F-4**(派单落盘正确但 `/api/teams/:team/board`+「外部派单」面板读不到 → 见 QA 报告 F-4,待修复);006 e2e 待补。001/003/004 已纳入只读 cron `955ac08b`(v3)每 10 分钟回归。
+- **风险点**:`@team` 解析依赖 teamSlugs 完整性(未知团队静默回退,见 003);意图解析→派单 API 之间脱节(解析对但没真派单,见 005);来源/目标双侧任务可见性不同步(007);与 TEAM-004 生命周期护栏的衔接。**冒烟最小集 = 001 + 005 + 006(P0)。**
+
 ---
 
 ## 2. 会话分析与上下文追踪（SESS-*）
@@ -384,6 +401,12 @@ npx playwright test
 | UI-009-D | 拖拽 tab 重排/跨 pane | 顺序/归属正确更新 | 错乱 | integration | P1 |
 | UI-009-E | pane 缩放(ResizeHandle) | 宽度更新 | 不变 | integration | P2 |
 | UI-009-F | tab/pane 刷新后恢复 | layout + tab 状态恢复 | 丢失 | e2e | P1 |
+| UI-010 | 团队列表卡片统计完整性(各团队 session/msg/token/耗时 独立) | 不同团队统计互不雷同、随各自活动实时增长 | 跨团队统计完全雷同/串数据(见 N-1) | e2e | P2 🔶待核实 |
+| UI-011 | 团队名重复歧义 | 重名可区分或建时禁止 | 同名多条致歧义(见 N-2) | e2e | P3 🔶待核实 |
+
+- **实测发现(gstack 巡检 2026-06-14,详见 `docs/测试用例/gstack-qa-report.md`)**:
+  - **UI-003-A / N-4(P2)**:首屏 `/teams` 空白为**间歇性首屏竞态**,非必现(本轮一次 `goto /teams` 直接出内容)。原 F-1"必现空白"结论已修正。
+  - **UI-003-B / N-3(P3)**:多 tab 下异常点击(失效 ref)触发选中态从"团队"漂到"Worker 社会"(`/society`),需复核 tab 焦点/路由竞态(亦可能 gstack ref 解析落到他 tab,需隔离)。
 
 ### [STORE/HOOKS] Zustand 与 Hooks（多数已覆盖）
 | ID | 场景 | 验收通过 | 验收失败 | 类型 | 优先级 |

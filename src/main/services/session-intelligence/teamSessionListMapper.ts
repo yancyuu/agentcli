@@ -32,6 +32,7 @@ function mapCcOnlySession(session: CcSessionListItem, projectId: string): CcSess
     createdAt: session.created_at,
     updatedAt: session.updated_at,
     lastMessage: toLastMessage(session),
+    hasLocalFile: false,
   };
 }
 
@@ -63,6 +64,7 @@ export function mergeLocalAndCcSessions(
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastMessage: ccMeta ? toLastMessage(ccMeta) : null,
+      hasLocalFile: true,
     };
   });
 
