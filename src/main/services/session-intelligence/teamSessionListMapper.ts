@@ -36,6 +36,26 @@ function mapCcOnlySession(session: CcSessionListItem, projectId: string): CcSess
   };
 }
 
+export function filterHiddenTeamSessions(
+  localSessions: LocalSessionSummary[],
+  ccSessions: CcSessionListItem[],
+  hiddenIds: ReadonlySet<string>
+): { localSessions: LocalSessionSummary[]; ccSessions: CcSessionListItem[] } {
+  if (hiddenIds.size === 0) {
+    return { localSessions, ccSessions };
+  }
+
+  return {
+    localSessions: localSessions.filter((session) => !hiddenIds.has(session.id)),
+    ccSessions: ccSessions.filter((session) => {
+      const ids = [session.id, session.agent_session_id].filter(
+        (id): id is string => typeof id === 'string' && id.length > 0
+      );
+      return ids.every((id) => !hiddenIds.has(id));
+    }),
+  };
+}
+
 export function mergeLocalAndCcSessions(
   localSessions: LocalSessionSummary[],
   ccSessions: CcSessionListItem[],

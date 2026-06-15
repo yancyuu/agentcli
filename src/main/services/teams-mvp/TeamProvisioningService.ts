@@ -289,6 +289,18 @@ export class TeamProvisioningService {
   }
 
   // ===========================================================================
+  // Session archive (passthrough to workspace)
+  // ===========================================================================
+
+  readHiddenSessionIds(teamSlug: string) {
+    return this.workspace.readHiddenSessionIds(teamSlug);
+  }
+
+  hideSession(teamSlug: string, sessionId: string) {
+    return this.workspace.hideSession(teamSlug, sessionId);
+  }
+
+  // ===========================================================================
   // Messages (passthrough to workspace)
   // ===========================================================================
 

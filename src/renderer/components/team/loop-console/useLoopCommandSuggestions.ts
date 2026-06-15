@@ -2,7 +2,10 @@ import { useEffect, useMemo } from 'react';
 
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
-import { useProjectWorkflowCommands } from '@renderer/hooks/useProjectWorkflowCommands';
+import {
+  useHermitWorkflowCommands,
+  useProjectWorkflowCommands,
+} from '@renderer/hooks/useProjectWorkflowCommands';
 import { useStore } from '@renderer/store';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { getLoopShortcutMentionSuggestions } from '@renderer/utils/loopShortcutSuggestions';
@@ -97,6 +100,7 @@ export function useLoopCommandSuggestions({
   const projectWorkflowSuggestions = useProjectWorkflowCommands(
     scopedCommandSuggestions ? null : projectPath
   );
+  const hermitWorkflowSuggestions = useHermitWorkflowCommands();
   const capabilityPacks = useStore((state) => state.capabilityPacks);
   const fetchCapabilityPacks = useStore((state) => state.fetchCapabilityPacks);
 
@@ -119,6 +123,7 @@ export function useLoopCommandSuggestions({
     ).filter(isLoopFocusedSuggestion);
 
     const hermitBase = scopedCommandSuggestions ?? getLoopShortcutMentionSuggestions();
+    const hermitWorkflowBase = scopedCommandSuggestions ? [] : hermitWorkflowSuggestions;
     // 能力包归入 hermit 组；别名冲突检测仍覆盖全部已有命令（本项目+hermit+claude），
     // 与改动前集合等价，仅调整展示顺序。
     const packSuggestions = scopedCommandSuggestions
@@ -126,13 +131,16 @@ export function useLoopCommandSuggestions({
       : buildCapabilityPackCommandSuggestions(capabilityPacks, 'team-loop', {
           forceNamespacedAliases: collectSlashSuggestionAliases([
             ...projectWorkflowSuggestions,
+            ...hermitWorkflowBase,
             ...hermitBase,
             ...baseSuggestions,
           ]),
         });
-    // 排序：本项目 → hermit(快捷指令+能力包) → claude。
+    // 排序：本项目 → hermit(真实 workflow → 快捷兜底 → 能力包) → claude。
+    // 真实 `/hermit:*` workflow 必须排在快捷兜底前，否则去重会留下不可展开的快捷项。
     const localSuggestions = [
       ...projectWorkflowSuggestions,
+      ...hermitWorkflowBase,
       ...hermitBase,
       ...packSuggestions,
       ...baseSuggestions,
@@ -144,7 +152,7 @@ export function useLoopCommandSuggestions({
       seen.add(key);
       return true;
     });
-  }, [capabilityPacks, leadProviderId, scopedCommandSuggestions]);
+  }, [capabilityPacks, hermitWorkflowSuggestions, leadProviderId, scopedCommandSuggestions]);
 
   const teamSlugs = useMemo(
     () =>

@@ -58,7 +58,7 @@ class FakeCollabBoard {
 class FakeWorkspace {
   manifests = new Map<string, TeamManifest>();
   tasks = new Map<string, Task[]>();
-  messages: { teamSlug: string; content: string }[] = [];
+  messages: { teamSlug: string; content: string; meta?: Record<string, unknown> }[] = [];
   nextTaskId = 1;
 
   constructor(teamSlugs: string[]) {
@@ -129,8 +129,11 @@ class FakeWorkspace {
     return next;
   }
 
-  async appendMessage(teamSlug: string, msg: { content: string }): Promise<unknown> {
-    this.messages.push({ teamSlug, content: msg.content });
+  async appendMessage(
+    teamSlug: string,
+    msg: { content: string; meta?: Record<string, unknown> }
+  ): Promise<unknown> {
+    this.messages.push({ teamSlug, content: msg.content, meta: msg.meta });
     return { id: `msg-${this.messages.length}` };
   }
 }
@@ -227,6 +230,48 @@ describe('TaskDispatchService local dispatch start gate', () => {
     expect(onRuntimeStart).not.toHaveBeenCalled();
   });
 
+  it('rolls a cross-team task back to TODO when runtime start fails', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockRejectedValue(new Error('runtime offline'));
+
+    await service.dispatchTask('origin', { subject: 'Rollback failed start' }, 'target', {
+      dispatchId: 'dispatch-4',
+    });
+    const [queued] = await workspace.readTasks('target');
+
+    await expect(service.startDispatchedTask('target', queued.id)).rejects.toThrow(
+      'runtime offline'
+    );
+
+    const [rolledBack] = await workspace.readTasks('target');
+    expect(rolledBack.status).toBe('todo');
+    expect(rolledBack.dispatchMeta).toMatchObject({
+      dispatchId: 'dispatch-4',
+      status: 'received',
+    });
+    expect(rolledBack.dispatchMeta).not.toHaveProperty('remoteTaskId');
+    expect(collabBoard.getTask('dispatch-4')?.status).toBe('received');
+    expect(service.onRuntimeStart).toHaveBeenCalledTimes(1);
+    expect(workspace.messages).toHaveLength(0);
+  });
+
+  it('rejects a second start after a task has already moved to doing', async () => {
+    const { service, workspace } = createService();
+    const onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+    service.onRuntimeStart = onRuntimeStart;
+
+    await service.dispatchTask('origin', { subject: 'Start once' }, 'target', {
+      dispatchId: 'dispatch-5',
+    });
+    const [queued] = await workspace.readTasks('target');
+
+    await service.startDispatchedTask('target', queued.id);
+    await expect(service.startDispatchedTask('target', queued.id)).rejects.toThrow(
+      'cross-team task has already been started or completed'
+    );
+    expect(onRuntimeStart).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects delivery before the target agent marks the local task done', async () => {
     const { service, workspace, collabBoard } = createService();
     service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
@@ -276,6 +321,34 @@ describe('TaskDispatchService local dispatch start gate', () => {
         content: expect.stringContaining('[跨团队任务待审核]'),
       })
     );
+  });
+
+  it('keeps the local lifecycle finite and emits each review/approval notification once', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+
+    await service.dispatchTask('origin', { subject: 'Notify exactly once' }, 'target', {
+      dispatchId: 'dispatch-7',
+      needsHumanReview: true,
+    });
+    const [queued] = await workspace.readTasks('target');
+    await service.startDispatchedTask('target', queued.id);
+    await workspace.patchTask('target', queued.id, { status: 'done', result: 'finished' });
+    await service.onTaskCompleted('target', queued.id);
+    await service.deliverTask('target', 'dispatch-7', 'finished');
+    await service.approveTask('origin', 'dispatch-7');
+
+    expect(collabBoard.getTask('dispatch-7')?.status).toBe('approved');
+    expect(workspace.messages.map((message) => message.meta?.source)).toEqual([
+      'cross_team_started',
+      'cross_team_delivered',
+      'cross_team_approved',
+      'cross_team_approved_target',
+    ]);
+    expect(
+      workspace.messages.filter((message) => message.meta?.source === 'cross_team_approved_target')
+    ).toHaveLength(1);
+    expect(workspace.messages.filter((message) => message.teamSlug === 'target')).toHaveLength(1);
   });
 
   it('rejects re-delivery after approval before callback side effects', async () => {

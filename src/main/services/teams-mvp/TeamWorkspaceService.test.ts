@@ -127,6 +127,59 @@ describe('TeamWorkspaceService.appendMessage — message pipeline', () => {
   });
 });
 
+describe('TeamWorkspaceService hidden sessions', () => {
+  it('persists an archived session id and reads it back', async () => {
+    const s = svc();
+
+    await s.hideSession('alpha', 'session-1');
+
+    expect(await s.readHiddenSessionIds('alpha')).toEqual(new Set(['session-1']));
+    const file = path.join(tmpHome, 'teams', 'alpha', 'sessions', 'hidden.json');
+    const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as {
+      sessions: Record<string, { sessionId: string; reason: string }>;
+    };
+    expect(raw.sessions['session-1']).toMatchObject({
+      sessionId: 'session-1',
+      reason: 'archived',
+    });
+  });
+
+  it('is idempotent for the same archived session id', async () => {
+    const s = svc();
+
+    await s.hideSession('alpha', 'session-1');
+    await s.hideSession('alpha', 'session-1');
+
+    const file = path.join(tmpHome, 'teams', 'alpha', 'sessions', 'hidden.json');
+    const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as {
+      sessions: Record<string, unknown>;
+    };
+    expect(Object.keys(raw.sessions)).toEqual(['session-1']);
+    expect(await s.readHiddenSessionIds('alpha')).toEqual(new Set(['session-1']));
+  });
+
+  it('returns an empty set when the hidden-session index is missing or corrupted', async () => {
+    const s = svc();
+
+    await expect(s.readHiddenSessionIds('alpha')).resolves.toEqual(new Set());
+
+    const file = path.join(tmpHome, 'teams', 'alpha', 'sessions', 'hidden.json');
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    await fs.promises.writeFile(file, '{ not valid json');
+
+    await expect(s.readHiddenSessionIds('alpha')).resolves.toEqual(new Set());
+  });
+
+  it('does not delete team message history when archiving a session', async () => {
+    const s = svc();
+    await s.appendMessage('alpha', { id: 'm1', from: 'user', content: 'keep me' });
+
+    await s.hideSession('alpha', 'session-1');
+
+    expect((await s.readMessages('alpha')).map((message) => message.id)).toEqual(['m1']);
+  });
+});
+
 describe('TeamWorkspaceService task board', () => {
   it('createTask requires a title', async () => {
     await expect(svc().createTask('alpha', { title: '' } as never)).rejects.toThrow('title');

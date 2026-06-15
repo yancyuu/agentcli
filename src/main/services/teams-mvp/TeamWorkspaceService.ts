@@ -90,6 +90,18 @@ export interface GroupMessage {
   meta?: Record<string, unknown> | null;
 }
 
+interface HiddenSessionRecord {
+  sessionId: string;
+  hiddenAt: string;
+  reason: 'archived';
+}
+
+interface HiddenSessionsIndex {
+  version: 1;
+  updatedAt: string;
+  sessions: Record<string, HiddenSessionRecord>;
+}
+
 export interface AppendGroupMessageInput {
   id?: string;
   from: string;
@@ -362,6 +374,52 @@ export class TeamWorkspaceService {
       await fs.promises.rename(root, archive);
     }
     logger.info(`deleted team ${manifest.slug} (deleteFiles=${opts.deleteFiles ?? false})`);
+  }
+
+  // ---- 会话归档 ----
+
+  private async hiddenSessionsIndexPath(teamSlug: string): Promise<string> {
+    const storageSlug = await this.resolveStorageSlug(teamSlug);
+    return path.join(teamRoot(storageSlug), 'sessions', 'hidden.json');
+  }
+
+  async readHiddenSessionIds(teamSlug: string): Promise<Set<string>> {
+    const file = await this.hiddenSessionsIndexPath(teamSlug);
+    const index = await readJson<HiddenSessionsIndex>(file, {
+      version: 1,
+      updatedAt: new Date(0).toISOString(),
+      sessions: {},
+    });
+    return new Set(
+      Object.values(index.sessions ?? {})
+        .map((record) => record.sessionId?.trim())
+        .filter((sessionId): sessionId is string => Boolean(sessionId))
+    );
+  }
+
+  async hideSession(teamSlug: string, sessionId: string): Promise<void> {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) throw new Error('sessionId is required');
+
+    const file = await this.hiddenSessionsIndexPath(teamSlug);
+    const existing = await readJson<HiddenSessionsIndex>(file, {
+      version: 1,
+      updatedAt: new Date(0).toISOString(),
+      sessions: {},
+    });
+    const now = new Date().toISOString();
+    await writeJson(file, {
+      version: 1,
+      updatedAt: now,
+      sessions: {
+        ...(existing.sessions ?? {}),
+        [normalizedSessionId]: {
+          sessionId: normalizedSessionId,
+          hiddenAt: existing.sessions?.[normalizedSessionId]?.hiddenAt ?? now,
+          reason: 'archived',
+        },
+      },
+    } satisfies HiddenSessionsIndex);
   }
 
   // ---- 消息记录 ----

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeLocalAndCcSessions } from '@main/services/session-intelligence/teamSessionListMapper';
+import {
+  filterHiddenTeamSessions,
+  mergeLocalAndCcSessions,
+} from '@main/services/session-intelligence/teamSessionListMapper';
 
 import type { LocalSessionSummary } from '@main/services/session-intelligence/LocalSessionScanner';
 import type { CcSessionListItem } from '@shared/types/ccConnect';
@@ -47,6 +50,45 @@ function ccSession(overrides: Partial<CcSessionListItem>): CcSessionListItem {
     ...overrides,
   };
 }
+
+describe('filterHiddenTeamSessions', () => {
+  it('filters archived local sessions by local id', () => {
+    const result = filterHiddenTeamSessions(
+      [localSession('keep-local'), localSession('archived-local')],
+      [],
+      new Set(['archived-local'])
+    );
+
+    expect(result.localSessions.map((session) => session.id)).toEqual(['keep-local']);
+    expect(result.ccSessions).toEqual([]);
+  });
+
+  it('filters cc-connect sessions by agent_session_id', () => {
+    const result = filterHiddenTeamSessions(
+      [],
+      [
+        ccSession({ id: 'oc_keep', agent_session_id: 'keep-local' }),
+        ccSession({ id: 'oc_archived', agent_session_id: 'archived-local' }),
+      ],
+      new Set(['archived-local'])
+    );
+
+    expect(result.ccSessions.map((session) => session.id)).toEqual(['oc_keep']);
+  });
+
+  it('filters cc-only sessions by cc session id', () => {
+    const result = filterHiddenTeamSessions(
+      [],
+      [
+        ccSession({ id: 'oc_keep', agent_session_id: undefined }),
+        ccSession({ id: 'oc_archived', agent_session_id: undefined }),
+      ],
+      new Set(['oc_archived'])
+    );
+
+    expect(result.ccSessions.map((session) => session.id)).toEqual(['oc_keep']);
+  });
+});
 
 describe('mergeLocalAndCcSessions', () => {
   it('uses agent_session_id as the local session id and keeps oc_* only as sessionKey', () => {

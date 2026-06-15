@@ -92,6 +92,38 @@ describe('loopSendIntent', () => {
     });
   });
 
+  it('parses full-width ＠ team mentions through the loop console path', () => {
+    const intent = parseLoopSendIntent({
+      text: '＠ops　检查中文输入法团队派单',
+      recipient: 'Lead',
+      leadRecipient: 'Lead',
+      teamSlugs: ['ops'],
+    });
+
+    expect(intent).toMatchObject({
+      kind: 'cross-team-task',
+      toTeam: 'ops',
+      subject: '检查中文输入法团队派单',
+    });
+  });
+
+  it('preserves structured task refs on cross-team task intents', () => {
+    const taskRefs = [{ taskId: 'task-123', displayId: 'ABC123', teamName: 'source' }];
+    const intent = parseLoopSendIntent({
+      text: '@ops 继续处理 #ABC123',
+      recipient: 'Lead',
+      leadRecipient: 'Lead',
+      teamSlugs: ['ops'],
+      taskRefs,
+    });
+
+    expect(intent).toMatchObject({
+      kind: 'cross-team-task',
+      toTeam: 'ops',
+      taskRefs,
+    });
+  });
+
   it('falls back to a plain message when @team is not a known team slug (TEAM-010-003)', () => {
     // An unknown team slug must NOT silently become a cross-team dispatch —
     // it would create a task for a non-existent team. It falls through to a

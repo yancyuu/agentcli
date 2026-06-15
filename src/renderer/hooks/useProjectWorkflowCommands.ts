@@ -14,16 +14,20 @@ import { buildWorkflowCommandSuggestion } from '@renderer/utils/workflowCommandS
 import type { MentionSuggestion } from '@renderer/types/mention';
 
 const EMPTY: MentionSuggestion[] = [];
+const GLOBAL_HERMIT_COMMANDS_FOLDER = '~/.claude/commands/hermit';
 
 function commandsFolder(projectPath: string): string {
   return `${projectPath.replace(/[\\/]+$/, '')}/.claude/commands`;
 }
 
-export function useProjectWorkflowCommands(projectPath?: string | null): MentionSuggestion[] {
+function useWorkflowCommandsFolder(
+  folder: string | null | undefined,
+  idPrefix: string
+): MentionSuggestion[] {
   const [suggestions, setSuggestions] = useState<MentionSuggestion[]>(EMPTY);
 
   useEffect(() => {
-    const trimmed = projectPath?.trim();
+    const trimmed = folder?.trim();
     if (!trimmed) {
       setSuggestions(EMPTY);
       return;
@@ -31,11 +35,11 @@ export function useProjectWorkflowCommands(projectPath?: string | null): Mention
     let cancelled = false;
     void (async () => {
       try {
-        const result = await api.systemManager.listWorkflowPrompts(commandsFolder(trimmed));
+        const result = await api.systemManager.listWorkflowPrompts(trimmed);
         if (cancelled) return;
         const seen = new Set<string>();
         const next = result.prompts
-          .map((prompt) => buildWorkflowCommandSuggestion(prompt, 'team-workflow'))
+          .map((prompt) => buildWorkflowCommandSuggestion(prompt, idPrefix))
           .filter((suggestion) => {
             const key = suggestion.command ?? suggestion.id;
             if (seen.has(key)) return false;
@@ -44,14 +48,23 @@ export function useProjectWorkflowCommands(projectPath?: string | null): Mention
           });
         setSuggestions(next);
       } catch {
-        // Missing .claude/commands is normal — the project simply has no custom commands.
+        // Missing command folders are normal — the project/user simply has no custom commands yet.
         if (!cancelled) setSuggestions(EMPTY);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [projectPath]);
+  }, [folder, idPrefix]);
 
   return suggestions;
+}
+
+export function useProjectWorkflowCommands(projectPath?: string | null): MentionSuggestion[] {
+  const trimmed = projectPath?.trim();
+  return useWorkflowCommandsFolder(trimmed ? commandsFolder(trimmed) : null, 'team-workflow');
+}
+
+export function useHermitWorkflowCommands(): MentionSuggestion[] {
+  return useWorkflowCommandsFolder(GLOBAL_HERMIT_COMMANDS_FOLDER, 'hermit-workflow');
 }

@@ -178,33 +178,36 @@ export const ToolApprovalSheet: React.FC = () => {
     setSelectedOptions(new Set());
   }, [current?.requestId]);
 
-  const handleRespond = useCallback(
-    (allow: boolean) => {
+  const buildAskQuestionAnswersMessage = useCallback((): string | undefined => {
+    if (!current || current.toolName !== 'AskUserQuestion' || selectedOptions.size === 0) {
+      return undefined;
+    }
+
+    // For AskUserQuestion, build per-question answers from selected options.
+    // Key format in selectedOptions: "qi:label" — parse question index to map correctly.
+    const questions = Array.isArray(current.toolInput.questions)
+      ? (current.toolInput.questions as { question?: string }[])
+      : [];
+    const answersByQuestion: Record<string, string> = {};
+    for (const key of selectedOptions) {
+      const colonIdx = key.indexOf(':');
+      if (colonIdx < 0) continue;
+      const qi = parseInt(key.slice(0, colonIdx), 10);
+      const label = key.slice(colonIdx + 1);
+      const questionText = questions[qi]?.question ?? `Question ${qi + 1}`;
+      const existing = answersByQuestion[questionText];
+      answersByQuestion[questionText] = existing ? `${existing}, ${label}` : label;
+    }
+    return JSON.stringify(answersByQuestion);
+  }, [current, selectedOptions]);
+
+  const respondToCurrentApproval = useCallback(
+    (allow: boolean, beforeRespond?: () => Promise<void>) => {
       if (!current || disabled) return;
       setDisabled(true);
       setError(null);
 
-      // For AskUserQuestion, build per-question answers from selected options
-      // Key format in selectedOptions: "qi:label" — parse question index to map correctly
-      const answersMessage =
-        allow && current.toolName === 'AskUserQuestion' && selectedOptions.size > 0
-          ? (() => {
-              const questions = Array.isArray(current.toolInput.questions)
-                ? (current.toolInput.questions as { question?: string }[])
-                : [];
-              const answersByQuestion: Record<string, string> = {};
-              for (const key of selectedOptions) {
-                const colonIdx = key.indexOf(':');
-                if (colonIdx < 0) continue;
-                const qi = parseInt(key.slice(0, colonIdx), 10);
-                const label = key.slice(colonIdx + 1);
-                const questionText = questions[qi]?.question ?? `Question ${qi + 1}`;
-                const existing = answersByQuestion[questionText];
-                answersByQuestion[questionText] = existing ? `${existing}, ${label}` : label;
-              }
-              return JSON.stringify(answersByQuestion);
-            })()
-          : undefined;
+      const answersMessage = allow ? buildAskQuestionAnswersMessage() : undefined;
 
       // Safety timeout — if IPC hangs (e.g. stdin.write callback never fires),
       // re-enable the button so the user isn't stuck forever.
@@ -213,13 +216,18 @@ export const ToolApprovalSheet: React.FC = () => {
         setError('Response timed out — process may be unresponsive. Try again or stop the team.');
       }, RESPOND_TIMEOUT_MS);
 
-      respondToToolApproval(
-        current.teamName,
-        current.runId,
-        current.requestId,
-        allow,
-        answersMessage
-      )
+      (async () => {
+        if (beforeRespond) {
+          await beforeRespond();
+        }
+        await respondToToolApproval(
+          current.teamName,
+          current.runId,
+          current.requestId,
+          allow,
+          answersMessage
+        );
+      })()
         .then(() => {
           clearTimeout(safetyTimer);
           // Small delay before re-enabling to prevent accidental double-clicks
@@ -232,8 +240,22 @@ export const ToolApprovalSheet: React.FC = () => {
           setDisabled(false);
         });
     },
-    [current, disabled, respondToToolApproval, selectedOptions]
+    [buildAskQuestionAnswersMessage, current, disabled, respondToToolApproval]
   );
+
+  const handleRespond = useCallback(
+    (allow: boolean) => {
+      respondToCurrentApproval(allow);
+    },
+    [respondToCurrentApproval]
+  );
+
+  const handleAllowAll = useCallback(() => {
+    if (!current) return;
+    respondToCurrentApproval(true, () =>
+      updateToolApprovalSettings({ autoAllowAll: true }, current.teamName)
+    );
+  }, [current, respondToCurrentApproval, updateToolApprovalSettings]);
 
   const isAskQuestion = current?.toolName === 'AskUserQuestion';
   const hasSelection = selectedOptions.size > 0;
@@ -422,10 +444,9 @@ export const ToolApprovalSheet: React.FC = () => {
 
             <button
               type="button"
-              onClick={() =>
-                void updateToolApprovalSettings({ autoAllowAll: true }, current.teamName)
-              }
-              className="rounded-md border px-3.5 py-1.5 text-xs font-medium transition-colors"
+              disabled={disabled}
+              onClick={handleAllowAll}
+              className="rounded-md border px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
               style={{
                 color: 'var(--color-text-muted)',
                 borderColor: 'var(--color-border-emphasis)',

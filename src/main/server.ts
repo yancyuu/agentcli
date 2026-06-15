@@ -104,7 +104,10 @@ import {
   shouldIncludeContent,
 } from './services/session-intelligence/ConversationTelemetryService';
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
-import { mergeLocalAndCcSessions } from './services/session-intelligence/teamSessionListMapper';
+import {
+  filterHiddenTeamSessions,
+  mergeLocalAndCcSessions,
+} from './services/session-intelligence/teamSessionListMapper';
 import type { CcSession } from '@shared/types/api';
 import { discoverableTeamToWorker, type DiscoverableWorker } from '@shared/types/worker';
 import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
@@ -4560,6 +4563,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (reques
   try {
     const team = await svc.readTeamManifest(request.params.name);
     const workDir = team.workDir || team.bindProject || request.params.name;
+    const hiddenSessionIds = await svc.readHiddenSessionIds(request.params.name);
     const localSessions = await localSessionScanner.scanSummaries(workDir, request.params.name);
 
     // Merge cc-connect sessions into the response. External platform sessions (Feishu/Lark/etc.)
@@ -4572,7 +4576,12 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (reques
       /* cc-connect unavailable — local-only data */
     }
 
-    return mergeLocalAndCcSessions(localSessions, ccSessions, request.params.name);
+    const visibleSessions = filterHiddenTeamSessions(localSessions, ccSessions, hiddenSessionIds);
+    return mergeLocalAndCcSessions(
+      visibleSessions.localSessions,
+      visibleSessions.ccSessions,
+      request.params.name
+    );
   } catch {
     return [];
   }
@@ -4595,18 +4604,29 @@ app.get<{
   return detail;
 });
 
-// DELETE session — 关闭 cc-connect live session，使其从运行中转为历史会话。
+// DELETE session — archive in Hermit and best-effort close cc-connect live session.
 app.delete<{ Params: { name: string; sessionId: string } }>(
   '/api/teams/:name/sessions/:sessionId',
   async (request, reply) => {
     try {
-      const bindProject = await resolveRouteCcProjectName(request.params.name);
-      await cc.deleteSession(bindProject, request.params.sessionId);
-      return { ok: true };
+      await svc.hideSession(request.params.name, request.params.sessionId);
     } catch (err) {
       return reply
         .code(500)
         .send({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+
+    try {
+      const bindProject = await resolveRouteCcProjectName(request.params.name);
+      await cc.deleteSession(bindProject, request.params.sessionId);
+      return { ok: true, archived: true, ccDeleted: true };
+    } catch (err) {
+      const warning = err instanceof Error ? err.message : String(err);
+      app.log.warn(
+        { err, teamName: request.params.name, sessionId: request.params.sessionId },
+        'archived session locally but cc-connect delete failed'
+      );
+      return { ok: true, archived: true, ccDeleted: false, warning };
     }
   }
 );
