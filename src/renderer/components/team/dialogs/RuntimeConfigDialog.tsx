@@ -19,7 +19,12 @@ import {
   PlatformBindingContent,
   type PlatformBindingCompleteOptions,
 } from './PlatformBindingDialog';
-import { buildPlatformAllowUpdatePayload, readStringRecord } from './platformAllowUtils';
+import {
+  buildPlatformAllowUpdatePayload,
+  getPlatformAllowValue,
+  readStringRecord,
+  withPlatformAllowValue,
+} from './platformAllowUtils';
 import { platformMeta } from './platformMeta';
 
 import type { CcAgentType, CcProjectPlatform } from '@shared/types/ccConnect';
@@ -61,15 +66,22 @@ const PERMISSION_MODE_OPTIONS = [
   { value: 'plan', label: '计划模式' },
 ] as const;
 
+function canonicalPlatformType(type: string): string {
+  return type === 'wechat' ? 'weixin' : type;
+}
+
 function getPlatformLabel(type: string): string {
-  if (type === 'feishu' || type === 'lark') return '飞书 / Lark';
-  if (type === 'weixin') return '微信';
-  return platformMeta[type]?.label ?? type;
+  const canonical = canonicalPlatformType(type);
+  if (canonical === 'feishu' || canonical === 'lark') return '飞书 / Lark';
+  if (canonical === 'weixin') return '微信';
+  return platformMeta[canonical]?.label ?? type;
 }
 
 function getPlatformAllowPlaceholder(platformType: string, kind: 'from' | 'chat'): string {
   const fieldKey = kind === 'from' ? 'allow_from' : 'allow_chat';
-  const field = platformMeta[platformType]?.fields.find((item) => item.key === fieldKey);
+  const field = platformMeta[canonicalPlatformType(platformType)]?.fields.find(
+    (item) => item.key === fieldKey
+  );
   if (field?.placeholder) return `留空表示未单独配置；${field.placeholder}`;
   return kind === 'from'
     ? '留空表示未单独配置；输入 * 表示允许所有用户'
@@ -261,7 +273,7 @@ export function RuntimeConfigDialog({
   ): void => {
     markRuntimeEdited();
     const setter = kind === 'from' ? setPlatformAllowFrom : setPlatformAllowChat;
-    setter((current) => ({ ...current, [platformType]: value }));
+    setter((current) => withPlatformAllowValue(current, platformType, value));
   };
 
   const markRuntimeEdited = (): void => {
@@ -489,7 +501,7 @@ export function RuntimeConfigDialog({
                           <label className={labelCls}>允许用户</label>
                           <input
                             type="text"
-                            value={platformAllowFrom[platformType] ?? ''}
+                            value={getPlatformAllowValue(platformAllowFrom, platformType)}
                             onChange={(event) =>
                               updatePlatformAllowValue('from', platformType, event.target.value)
                             }
@@ -501,7 +513,7 @@ export function RuntimeConfigDialog({
                           <label className={labelCls}>允许群聊/频道</label>
                           <input
                             type="text"
-                            value={platformAllowChat[platformType] ?? ''}
+                            value={getPlatformAllowValue(platformAllowChat, platformType)}
                             onChange={(event) =>
                               updatePlatformAllowValue('chat', platformType, event.target.value)
                             }

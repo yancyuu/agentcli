@@ -194,7 +194,7 @@ export function LoopConsolePanel({
     if (activityMessages.length === 0) return;
     void confirm({
       title: '清空指令台消息',
-      message: `确定清空当前显示的 ${activityMessages.length} 条消息？历史记录仍在服务端保留，仅清除当前界面显示。`,
+      message: `确定清空当前显示的 ${activityMessages.length} 条消息？旧消息会在本机持续隐藏，服务端历史记录仍会保留。`,
       confirmLabel: '清空',
       variant: 'danger',
     }).then((confirmed) => {

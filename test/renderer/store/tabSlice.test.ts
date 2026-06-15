@@ -370,6 +370,69 @@ describe('tabSlice', () => {
 
       expect(selectTeamSpy).toHaveBeenCalledWith('team-b');
     });
+
+    it('should refresh teams and global tasks when reselecting the teams tab', () => {
+      const fetchTeamsSpy = vi.fn(async () => undefined);
+      const fetchAllTasksSpy = vi.fn(async () => undefined);
+      store.setState({
+        fetchTeams: fetchTeamsSpy,
+        fetchAllTasks: fetchAllTasksSpy,
+      } as never);
+
+      store.getState().openTab({ type: 'teams', label: '团队' });
+      const teamsTabId = store.getState().activeTabId!;
+
+      store.getState().setActiveTab(teamsTabId);
+
+      expect(fetchTeamsSpy).toHaveBeenCalledTimes(1);
+      expect(fetchAllTasksSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should refresh same-team detail data when reselecting the active team tab', async () => {
+      const selectTeamSpy = vi.fn(async () => undefined);
+      const refreshTeamDataSpy = vi.fn(async () => undefined);
+      const refreshTeamMessagesHeadSpy = vi.fn(async () => ({
+        feedChanged: true,
+        headChanged: true,
+        feedRevision: 'rev-2',
+      }));
+      const refreshMemberActivityMetaSpy = vi.fn(async () => undefined);
+      const fetchDeletedTasksSpy = vi.fn(async () => undefined);
+      store.setState({
+        selectedTeamName: 'team-a',
+        selectedTeamData: {
+          teamName: 'team-a',
+          config: { name: 'Team A', projectPath: '/repo/a' },
+          members: [],
+          tasks: [],
+          messages: [],
+          kanbanState: { teamName: 'team-a', reviewers: [], tasks: {} },
+          processes: [],
+          isAlive: true,
+        },
+        selectTeam: selectTeamSpy,
+        refreshTeamData: refreshTeamDataSpy,
+        refreshTeamMessagesHead: refreshTeamMessagesHeadSpy,
+        refreshMemberActivityMeta: refreshMemberActivityMetaSpy,
+        fetchDeletedTasks: fetchDeletedTasksSpy,
+      } as never);
+
+      store.getState().openTab({
+        type: 'team',
+        teamName: 'team-a',
+        label: 'Team A',
+      });
+      const teamTabId = store.getState().activeTabId!;
+
+      store.getState().setActiveTab(teamTabId);
+      await Promise.resolve();
+
+      expect(selectTeamSpy).not.toHaveBeenCalled();
+      expect(refreshTeamDataSpy).toHaveBeenCalledWith('team-a', { withDedup: true });
+      expect(refreshTeamMessagesHeadSpy).toHaveBeenCalledWith('team-a');
+      expect(refreshMemberActivityMetaSpy).toHaveBeenCalledWith('team-a');
+      expect(fetchDeletedTasksSpy).toHaveBeenCalledWith('team-a');
+    });
   });
 
   describe('saveTabScrollPosition', () => {

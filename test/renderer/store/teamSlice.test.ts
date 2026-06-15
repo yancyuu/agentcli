@@ -4484,6 +4484,27 @@ describe('teamSlice actions', () => {
       expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
     });
 
+    it('persists the clear cutoff so a recreated message cache stays empty after refresh', async () => {
+      const store = createSliceStore();
+      seedHydratedEntry(store);
+
+      store.getState().clearTeamMessages('my-team');
+      expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
+
+      store.setState({ teamMessagesByName: {} });
+      hoisted.getMessagesPage.mockResolvedValueOnce({
+        messages: oldMessages.map((m) => ({ ...m })),
+        nextCursor: null,
+        hasMore: false,
+        feedRevision: 'rev-1',
+      });
+
+      await store.getState().refreshTeamMessagesHead('my-team');
+
+      expect(store.getState().teamMessagesByName['my-team']?.clearedAt).toEqual(expect.any(Number));
+      expect(selectTeamMessages(store.getState(), 'my-team')).toEqual([]);
+    });
+
     it('reveals only messages newer than the cutoff after a clear', () => {
       const store = createSliceStore();
       seedHydratedEntry(store);

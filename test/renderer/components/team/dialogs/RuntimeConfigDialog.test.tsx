@@ -192,6 +192,75 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
   });
+
+  it('displays Lark-keyed values in the Feishu/Lark permission row', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    mockStoreState.selectedTeamData = {
+      ...(mockStoreState.selectedTeamData as Record<string, unknown>),
+      config: {
+        agentType: 'claudecode',
+        projectPath: '/tmp/project',
+        permissionMode: 'default',
+        disabledCommands: [],
+        platformAllowFrom: { lark: 'ou_lark' },
+        platformAllowChat: { lark: 'chat_lark' },
+      },
+      platforms: [{ type: 'feishu', connected: true }],
+    };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<RuntimeConfigDialog open teamName="test-team" onClose={vi.fn()} />);
+      await Promise.resolve();
+    });
+
+    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement | null;
+    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
+    expect(allowFromInput?.value).toBe('ou_lark');
+    expect(allowChatInput?.value).toBe('chat_lark');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('displays legacy WeChat-keyed values in the Weixin permission row', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    mockStoreState.selectedTeamData = {
+      ...(mockStoreState.selectedTeamData as Record<string, unknown>),
+      config: {
+        agentType: 'claudecode',
+        projectPath: '/tmp/project',
+        permissionMode: 'default',
+        disabledCommands: [],
+        platformAllowFrom: { wechat: 'wx_user' },
+        platformAllowChat: { wechat: 'wx_chat' },
+      },
+      platforms: [{ type: 'weixin', connected: true }],
+    };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<RuntimeConfigDialog open teamName="test-team" onClose={vi.fn()} />);
+      await Promise.resolve();
+    });
+
+    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement | null;
+    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
+    expect(host.textContent).toContain('微信 入口权限');
+    expect(allowFromInput?.value).toBe('wx_user');
+    expect(allowChatInput?.value).toBe('wx_chat');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
   afterEach(() => {
     document.body.innerHTML = '';
     vi.clearAllMocks();

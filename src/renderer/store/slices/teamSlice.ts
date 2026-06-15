@@ -807,21 +807,28 @@ export interface RefreshTeamMessagesHeadResult {
   feedRevision: string | null;
 }
 
-const EMPTY_TEAM_MESSAGES_CACHE_ENTRY: TeamMessagesCacheEntry = {
-  canonicalMessages: [],
-  optimisticMessages: [],
-  feedRevision: null,
-  nextCursor: null,
-  hasMore: false,
-  lastFetchedAt: null,
-  loadingHead: false,
-  loadingOlder: false,
-  headHydrated: false,
-  olderHydrated: false,
-  clearedAt: null,
-};
+const TEAM_MESSAGES_CLEAR_PREFIX = 'team:messagesClearedAt:';
 
-function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
+function loadTeamMessagesClearedAt(teamName: string): number | null {
+  try {
+    const raw = localStorage?.getItem?.(TEAM_MESSAGES_CLEAR_PREFIX + teamName);
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTeamMessagesClearedAt(teamName: string, clearedAt: number): void {
+  try {
+    localStorage?.setItem?.(TEAM_MESSAGES_CLEAR_PREFIX + teamName, String(clearedAt));
+  } catch {
+    // best-effort local UI persistence
+  }
+}
+
+function createEmptyTeamMessagesCacheEntry(teamName?: string): TeamMessagesCacheEntry {
   return {
     canonicalMessages: [],
     optimisticMessages: [],
@@ -833,7 +840,7 @@ function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
     loadingOlder: false,
     headHydrated: false,
     olderHydrated: false,
-    clearedAt: null,
+    clearedAt: teamName ? loadTeamMessagesClearedAt(teamName) : null,
   };
 }
 
@@ -841,7 +848,7 @@ function getTeamMessagesCacheEntry(
   state: Pick<TeamSlice, 'teamMessagesByName'>,
   teamName: string
 ): TeamMessagesCacheEntry {
-  return state.teamMessagesByName[teamName] ?? EMPTY_TEAM_MESSAGES_CACHE_ENTRY;
+  return state.teamMessagesByName[teamName] ?? createEmptyTeamMessagesCacheEntry(teamName);
 }
 
 function upsertOptimisticTeamMessage(
@@ -3918,6 +3925,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   clearTeamMessages: (teamName: string) => {
     const clearedAt = Date.now();
+    saveTeamMessagesClearedAt(teamName, clearedAt);
     mergedMessagesSelectorCache.delete(teamName);
     set((state) => {
       const existing = getTeamMessagesCacheEntry(state, teamName);

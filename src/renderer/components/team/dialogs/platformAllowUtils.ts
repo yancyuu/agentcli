@@ -1,4 +1,10 @@
 const FEISHU_LARK_KEYS = new Set(['feishu', 'lark']);
+const PLATFORM_ALLOW_ALIASES: Record<string, readonly string[]> = {
+  feishu: ['lark'],
+  lark: ['feishu'],
+  weixin: ['wechat'],
+  wechat: ['weixin'],
+};
 
 export function readStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -9,37 +15,57 @@ export function readStringRecord(value: unknown): Record<string, string> {
   );
 }
 
-export function getFeishuLarkAllowValue(record: Record<string, string>): string {
-  return record.lark ?? record.feishu ?? '';
+function getPlatformAllowKeys(platform: string): string[] {
+  return [platform, ...(PLATFORM_ALLOW_ALIASES[platform] ?? [])];
 }
 
-function getFeishuLarkWriteKey(record: Record<string, string>): 'feishu' | 'lark' {
-  if (record.lark !== undefined) return 'lark';
-  if (record.feishu !== undefined) return 'feishu';
-  return 'feishu';
+function hasAnyPlatformAllowKey(record: Record<string, string>, platform: string): boolean {
+  return getPlatformAllowKeys(platform).some((key) => record[key] !== undefined);
+}
+
+export function getPlatformAllowValue(record: Record<string, string>, platform: string): string {
+  const source = readStringRecord(record);
+  for (const key of getPlatformAllowKeys(platform)) {
+    if (source[key] !== undefined) return source[key];
+  }
+  return '';
+}
+
+export function withPlatformAllowValue(
+  base: Record<string, string>,
+  platform: string,
+  value: string
+): Record<string, string> {
+  const source = readStringRecord(base);
+  const next = { ...source };
+  const trimmed = value.trim();
+  const keys = getPlatformAllowKeys(platform);
+  const writeKey = keys.find((key) => source[key] !== undefined) ?? platform;
+
+  for (const key of keys) {
+    delete next[key];
+  }
+
+  if (trimmed) {
+    next[writeKey] = trimmed;
+  }
+
+  return next;
+}
+
+export function getFeishuLarkAllowValue(record: Record<string, string>): string {
+  return getPlatformAllowValue(record, 'lark');
 }
 
 function hasFeishuLarkKey(record: Record<string, string>): boolean {
-  return record.feishu !== undefined || record.lark !== undefined;
+  return hasAnyPlatformAllowKey(record, 'feishu');
 }
 
 export function withFeishuLarkAllowValue(
   base: Record<string, string>,
   value: string
 ): Record<string, string> {
-  const source = readStringRecord(base);
-  const next = { ...source };
-  const trimmed = value.trim();
-  const aliasKey = getFeishuLarkWriteKey(source);
-
-  delete next.feishu;
-  delete next.lark;
-
-  if (trimmed) {
-    next[aliasKey] = trimmed;
-  }
-
-  return next;
+  return withPlatformAllowValue(base, 'lark', value);
 }
 
 export function buildFeishuLarkAllowUpdatePayload(

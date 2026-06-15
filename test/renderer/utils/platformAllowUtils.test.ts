@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFeishuLarkAllowUpdatePayload,
   getFeishuLarkAllowValue,
+  getPlatformAllowValue,
   omitEmptyAllowMap,
   readStringRecord,
   withFeishuLarkAllowValue,
+  withPlatformAllowValue,
 } from '@renderer/components/team/dialogs/platformAllowUtils';
 
 describe('platformAllowUtils', () => {
@@ -48,6 +50,23 @@ describe('platformAllowUtils', () => {
 
   it('keeps unrelated keys when Feishu/Lark fields are blank', () => {
     expect(withFeishuLarkAllowValue({ telegram: '123', feishu: 'ou_old' }, '')).toEqual({
+      telegram: '123',
+    });
+  });
+
+  it('reads generic platform allow aliases for Feishu/Lark and WeChat/Weixin', () => {
+    expect(getPlatformAllowValue({ lark: 'ou_lark' }, 'feishu')).toBe('ou_lark');
+    expect(getPlatformAllowValue({ feishu: 'ou_feishu' }, 'lark')).toBe('ou_feishu');
+    expect(getPlatformAllowValue({ wechat: 'wx_user' }, 'weixin')).toBe('wx_user');
+    expect(getPlatformAllowValue({ weixin: 'wx_user' }, 'wechat')).toBe('wx_user');
+  });
+
+  it('updates platform allow aliases without creating duplicate sibling keys', () => {
+    expect(withPlatformAllowValue({ telegram: '123', lark: 'old' }, 'feishu', 'new')).toEqual({
+      telegram: '123',
+      lark: 'new',
+    });
+    expect(withPlatformAllowValue({ telegram: '123', wechat: 'old' }, 'weixin', '')).toEqual({
       telegram: '123',
     });
   });

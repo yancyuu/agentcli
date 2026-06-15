@@ -191,6 +191,14 @@ async function writeJson(p: string, data: unknown): Promise<void> {
   await fs.promises.rename(tmp, p);
 }
 
+function nextIsoTimestamp(previous?: string): string {
+  const previousTime = previous ? Date.parse(previous) : NaN;
+  const nextTime = Number.isFinite(previousTime)
+    ? Math.max(Date.now(), previousTime + 1)
+    : Date.now();
+  return new Date(nextTime).toISOString();
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -487,7 +495,7 @@ export class TeamWorkspaceService {
       ...patch,
       id: board.tasks[idx].id,
       teamSlug: board.tasks[idx].teamSlug,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nextIsoTimestamp(board.tasks[idx].updatedAt),
     };
     board.tasks[idx] = next;
     await this.writeBoard(teamSlug, board);
