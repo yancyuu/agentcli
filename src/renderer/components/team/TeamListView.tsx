@@ -31,9 +31,13 @@ import {
   getProjectSelectionResetState,
   getWorktreeNavigationState,
 } from '@renderer/store/utils/stateResetHelpers';
-import { agentAvatarUrl, buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { buildMemberColorMap, teamAvatarUrl } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
-import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
+import {
+  emitOpenHermitEvent,
+  getCreateTeamFromProjectPath,
+  OPEN_HERMIT_EVENTS,
+} from '@renderer/utils/openHermitEvents';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { formatRelativeTime, formatTokensCompact } from '@renderer/utils/formatters';
@@ -311,6 +315,7 @@ export const TeamListView = (): React.JSX.Element => {
   const [teamTemplates, setTeamTemplates] = useState<TeamTemplateSummary[]>([]);
   const [newTemplateSourceUrl, setNewTemplateSourceUrl] = useState('');
   const [copyData, setCopyData] = useState<TeamCopyData | null>(null);
+  const [createDialogProjectPath, setCreateDialogProjectPath] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<TeamListFilterState>(EMPTY_TEAM_FILTER);
   const [deletingTeamName, setDeletingTeamName] = useState<string | null>(null);
@@ -483,6 +488,26 @@ export const TeamListView = (): React.JSX.Element => {
     ]
   );
   const currentProjectPath = currentProjectSelection.projectPath;
+  const effectiveCreateProjectPath = createDialogProjectPath ?? currentProjectPath;
+
+  useEffect(() => {
+    const openCreateDialogFromProject = (event: Event): void => {
+      const projectPath = getCreateTeamFromProjectPath(event);
+      if (!projectPath) return;
+
+      setCopyData(null);
+      setCreateDialogProjectPath(projectPath);
+      setShowCreateDialog(true);
+    };
+
+    window.addEventListener(OPEN_HERMIT_EVENTS.createTeamFromProject, openCreateDialogFromProject);
+    return () => {
+      window.removeEventListener(
+        OPEN_HERMIT_EVENTS.createTeamFromProject,
+        openCreateDialogFromProject
+      );
+    };
+  }, []);
 
   const filteredTeams = useMemo<TeamSummary[]>(() => {
     let result = teamsWithProvisioning;
@@ -668,6 +693,11 @@ export const TeamListView = (): React.JSX.Element => {
     [permanentlyDeleteTeam, teams]
   );
 
+  const openCreateDialog = useCallback((): void => {
+    setCreateDialogProjectPath(null);
+    setShowCreateDialog(true);
+  }, []);
+
   const handleCopyTeam = useCallback(
     (teamName: string, e: React.MouseEvent) => {
       e.stopPropagation();
@@ -681,13 +711,13 @@ export const TeamListView = (): React.JSX.Element => {
             description: data.config.description,
             color: data.config.color,
           });
-          setShowCreateDialog(true);
+          openCreateDialog();
         } catch {
           // silently ignore — team data may be unavailable
         }
       })();
     },
-    [teams]
+    [openCreateDialog, teams]
   );
 
   const [launchingTeamName, setLaunchingTeamName] = useState<string | null>(null);
@@ -771,6 +801,7 @@ export const TeamListView = (): React.JSX.Element => {
   const handleCreateDialogClose = useCallback(() => {
     setShowCreateDialog(false);
     setCopyData(null);
+    setCreateDialogProjectPath(null);
   }, []);
 
   const loadTemplates = useCallback(async (refresh = false): Promise<void> => {
@@ -870,9 +901,9 @@ export const TeamListView = (): React.JSX.Element => {
         templateDirectoryId: template.templateDirectoryId,
       });
       setShowTemplateDialog(false);
-      setShowCreateDialog(true);
+      openCreateDialog();
     },
-    [teams]
+    [openCreateDialog, teams]
   );
 
   const handleCreateSubmit = useCallback(
@@ -900,7 +931,7 @@ export const TeamListView = (): React.JSX.Element => {
       provisioningTeamNames={provisioningTeamNames}
       activeTeams={activeTeams}
       initialData={copyData ?? undefined}
-      defaultProjectPath={currentProjectPath}
+      defaultProjectPath={effectiveCreateProjectPath}
       onClose={handleCreateDialogClose}
       onCreate={handleCreateSubmit}
       onOpenTeam={openTeamTab}
@@ -1079,7 +1110,7 @@ export const TeamListView = (): React.JSX.Element => {
             variant="outline"
             size="sm"
             disabled={!canCreate}
-            onClick={() => setShowCreateDialog(true)}
+            onClick={() => openCreateDialog()}
           >
             创建数字员工
           </Button>
@@ -1179,8 +1210,8 @@ export const TeamListView = (): React.JSX.Element => {
       return (
         <TeamEmptyState
           canCreate={canCreate}
-          onCreateTeam={() => setShowCreateDialog(true)}
-          onSelectHarness={() => setShowCreateDialog(true)}
+          onCreateTeam={() => openCreateDialog()}
+          onSelectHarness={() => openCreateDialog()}
         />
       );
     }
@@ -1242,7 +1273,7 @@ export const TeamListView = (): React.JSX.Element => {
                   {/* Row 1: Avatar + Name + Status + Actions */}
                   <div className="flex items-center gap-2.5">
                     <img
-                      src={agentAvatarUrl(team.teamName)}
+                      src={teamAvatarUrl(team.teamName, team.displayName)}
                       alt={team.displayName}
                       className="size-8 shrink-0 rounded-md border border-transparent"
                       style={teamColorSet ? { borderColor: teamColorSet.border + '60' } : undefined}

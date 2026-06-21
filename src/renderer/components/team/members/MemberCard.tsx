@@ -211,6 +211,7 @@ export const MemberCard = ({
       launchVisualState === 'registered_only' ||
       launchVisualState === 'stale_runtime');
   const launchBadgeLabel = presenceLabel === 'starting' ? presenceLabel : displayPresenceLabel;
+  const showGenericPresenceBadge = isRemoved || displayPresenceLabel !== 'idle';
   const launchDiagnosticsPayload = useMemo(
     () =>
       buildMemberLaunchDiagnosticsPayload({
@@ -579,7 +580,7 @@ export const MemberCard = ({
                 {runtimeAdvisoryTitle ?? runtimeAdvisoryLabel}
               </TooltipContent>
             </Tooltip>
-          ) : !activityTask ? (
+          ) : !activityTask && showGenericPresenceBadge ? (
             <Badge
               variant="secondary"
               className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${isRemoved ? 'bg-zinc-600 text-zinc-300' : 'text-[var(--color-text-muted)]'}`}

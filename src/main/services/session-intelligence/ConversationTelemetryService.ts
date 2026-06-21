@@ -1,7 +1,6 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type { CcConnectClient } from '@main/services/ccConnect/CcConnectClient';
@@ -14,7 +13,13 @@ import type {
   ConversationTelemetryExportResponse,
   ConversationTelemetryMessage,
 } from '@shared/types/api';
-import type { TeamManifest } from '../teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from '../team-management/TeamWorkspaceService';
+
+import {
+  ConversationIdentityResolver,
+  type ResolvedConversationIdentity,
+} from './ConversationIdentityResolver';
+import type { ConversationIdentityRecord } from './ConversationIdentityStore';
 
 interface ClaudeSessionSummary {
   sessionId: string;
@@ -43,25 +48,11 @@ interface CachedClaudeSession {
   parsed: ClaudeSessionSummary;
 }
 
-interface ConversationIdentityRecord {
-  teamName: string;
-  projectName: string;
-  platform: string;
-  sessionKey: string;
-  ccSessionId?: string;
-  userId?: string;
-  chatId?: string;
-  userName?: string;
-  chatName?: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  source: 'cc-session-name';
-}
-
 interface ConversationTelemetryServiceOptions {
   cc: CcConnectClient;
   listTeams: () => Promise<TeamManifest[]>;
   readTeamManifest: (teamName: string) => Promise<TeamManifest>;
+  identityResolver?: ConversationIdentityResolver;
 }
 
 interface ConversationProject {
@@ -73,14 +64,6 @@ interface ConversationProject {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100_000;
 
-function telemetryRoot(): string {
-  return path.join(process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit'), 'telemetry');
-}
-
-function identityStorePath(): string {
-  return path.join(telemetryRoot(), 'conversation-identities.json');
-}
-
 function toNumber(value: unknown): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -88,38 +71,6 @@ function toNumber(value: unknown): number {
 
 function normalizeOptional(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function parseSessionIdentity(sessionKey: string): {
-  platform?: string;
-  chatId?: string;
-  userId?: string;
-} {
-  const [platform, ...ids] = sessionKey.split(':').filter(Boolean);
-  const chatId =
-    ids.find((id) => /^(oc|chat|group|room)_/i.test(id)) ?? (ids.length >= 2 ? ids[0] : undefined);
-  const userId =
-    ids.find((id) => /^(ou|on|union|user|u)_/i.test(id)) ?? (ids.length >= 2 ? ids[1] : undefined);
-  return { platform: normalizeOptional(platform), chatId, userId };
-}
-
-function looksLikeChannelId(value: string | undefined): boolean {
-  return !!value && /^[A-Za-z]+_[A-Za-z0-9_-]+$/.test(value);
-}
-
-function formatIdentityFallback(
-  platform: string | undefined,
-  type: 'conversation' | 'group' | 'person',
-  id: string
-): string {
-  const prefix = platform ? `${platform} ` : '';
-  const label = type === 'group' ? '未解析群聊' : type === 'person' ? '未解析用户' : '未解析会话';
-  return `${prefix}${label} ${shortId(id)}`;
-}
-
-function shortId(value: string): string {
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 6)}…${value.slice(-6)}`;
 }
 
 function extractText(content: unknown): string {
@@ -198,12 +149,14 @@ export class ConversationTelemetryService {
   private readonly cc: CcConnectClient;
   private readonly listTeams: () => Promise<TeamManifest[]>;
   private readonly readTeamManifest: (teamName: string) => Promise<TeamManifest>;
+  private readonly identityResolver: ConversationIdentityResolver;
   private readonly claudeCache = new Map<string, CachedClaudeSession>();
 
   constructor(options: ConversationTelemetryServiceOptions) {
     this.cc = options.cc;
     this.listTeams = options.listTeams;
     this.readTeamManifest = options.readTeamManifest;
+    this.identityResolver = options.identityResolver ?? new ConversationIdentityResolver();
   }
 
   async getConversations(
@@ -224,7 +177,7 @@ export class ConversationTelemetryService {
       this.buildClaudeIndex(),
       this.resolveConversationProjects(query.teamName),
     ]);
-    const identities = await this.readIdentities();
+    const identities = await this.identityResolver.readIdentityRecords();
     const rows: ConversationTelemetryRow[] = [];
 
     // Track which claude session IDs were already matched by cc-connect
@@ -248,17 +201,16 @@ export class ConversationTelemetryService {
           continue;
         }
 
-        await this.upsertIdentityRecord(identities, {
+        this.identityResolver.observeCcSession(identities, {
           teamName: team.slug,
           projectName,
           platform: session.platform,
           sessionKey: session.session_key,
           ccSessionId: session.id,
-          userName: normalizeOptional(session.user_name),
-          chatName: normalizeOptional(session.chat_name),
-          firstSeenAt: session.created_at,
-          lastSeenAt: session.updated_at,
-          source: 'cc-session-name',
+          userName: session.user_name,
+          chatName: session.chat_name,
+          createdAt: session.created_at,
+          updatedAt: session.updated_at,
         });
 
         const row = await this.buildRow(team, projectName, session, identities, claudeIndex, {
@@ -288,7 +240,7 @@ export class ConversationTelemetryService {
       }
     }
 
-    await this.writeIdentities(identities);
+    await this.identityResolver.writeIdentityRecords(identities);
 
     const isRunning = (row: ConversationTelemetryRow): boolean =>
       row.session.live === true || row.session.active === true;
@@ -498,30 +450,18 @@ export class ConversationTelemetryService {
           ? 'ambiguous'
           : 'matched';
     const matched = matchStatus === 'matched' ? matches[0] : undefined;
-    const identity = identities.get(this.identityKey(team.slug, session.session_key));
-    const parsedIdentity = parseSessionIdentity(session.session_key);
-    const platform = parsedIdentity.platform ?? session.platform;
-    const rawUserName = identity?.userName ?? normalizeOptional(session.user_name);
-    const rawChatName = identity?.chatName ?? normalizeOptional(session.chat_name);
-    const userId = identity?.userId ?? parsedIdentity.userId;
-    const chatId = identity?.chatId ?? parsedIdentity.chatId;
-    const chatName = rawChatName && !looksLikeChannelId(rawChatName) ? rawChatName : undefined;
-    const userName = rawUserName && !looksLikeChannelId(rawUserName) ? rawUserName : undefined;
-    const type = chatName
-      ? 'group'
-      : chatId
-        ? 'unknown'
-        : userId || userName
-          ? 'person'
-          : 'unknown';
-    const identityId = chatId ?? userId;
-    const displayName =
-      chatName ??
-      userName ??
-      (chatId ? formatIdentityFallback(platform, 'conversation', chatId) : undefined) ??
-      (userId ? formatIdentityFallback(platform, 'person', userId) : undefined) ??
-      session.name ??
-      session.session_key;
+    const resolvedIdentity = this.identityResolver.resolve(identities, {
+      teamName: team.slug,
+      projectName,
+      sessionKey: session.session_key,
+      ccSessionId: session.id,
+      platform: session.platform,
+      sessionName: session.name,
+      userName: session.user_name,
+      chatName: session.chat_name,
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+    });
 
     const messages = this.filterMessages(matched?.messages ?? [], options);
     const userMessages = messages.filter(
@@ -556,21 +496,7 @@ export class ConversationTelemetryService {
         live: session.live,
         matchStatus,
       },
-      identity: {
-        platform,
-        type,
-        id: identityId,
-        userId,
-        chatId,
-        displayName,
-        userName,
-        chatName,
-        confidence: identityId
-          ? 'exact-id'
-          : displayName === session.session_key
-            ? 'session-key-only'
-            : 'name-only',
-      },
+      identity: this.toApiIdentity(resolvedIdentity),
       content: {
         messageCount: matched?.messageCount ?? session.history_count ?? 0,
         userMessageCount: matched?.userMessageCount ?? 0,
@@ -608,11 +534,11 @@ export class ConversationTelemetryService {
       includeContent: 'none' | 'summary' | 'full';
       includeToolResults: boolean;
       includeSystemMessages: boolean;
-    },
+    }
   ): ConversationTelemetryRow {
     const messages = this.filterMessages(summary.messages, options);
     const userMessages = messages.filter(
-      (message) => message.role === 'user' && message.content.trim(),
+      (message) => message.role === 'user' && message.content.trim()
     );
     const firstUserMessage = userMessages[0];
     const lastUserMessage = userMessages[userMessages.length - 1];
@@ -892,49 +818,20 @@ export class ConversationTelemetryService {
       .join('\n\n');
   }
 
-  private identityKey(teamName: string, sessionKey: string): string {
-    return `${teamName}\0${sessionKey}`;
-  }
-
-  private async readIdentities(): Promise<Map<string, ConversationIdentityRecord>> {
-    try {
-      const raw = await readFile(identityStorePath(), 'utf-8');
-      const parsed = JSON.parse(raw) as { records?: ConversationIdentityRecord[] };
-      const records = Array.isArray(parsed.records) ? parsed.records : [];
-      return new Map(
-        records.map((record) => [this.identityKey(record.teamName, record.sessionKey), record])
-      );
-    } catch {
-      return new Map();
-    }
-  }
-
-  private async writeIdentities(records: Map<string, ConversationIdentityRecord>): Promise<void> {
-    const filePath = identityStorePath();
-    await mkdir(path.dirname(filePath), { recursive: true });
-    const tmp = `${filePath}.${process.pid}.tmp`;
-    await writeFile(
-      tmp,
-      JSON.stringify({ schemaVersion: 1, records: [...records.values()] }, null, 2),
-      'utf-8'
-    );
-    await rename(tmp, filePath);
-  }
-
-  private async upsertIdentityRecord(
-    records: Map<string, ConversationIdentityRecord>,
-    next: ConversationIdentityRecord
-  ): Promise<void> {
-    const key = this.identityKey(next.teamName, next.sessionKey);
-    const existing = records.get(key);
-    records.set(key, {
-      ...existing,
-      ...next,
-      userName: next.userName ?? existing?.userName,
-      chatName: next.chatName ?? existing?.chatName,
-      firstSeenAt: existing?.firstSeenAt ?? next.firstSeenAt,
-      lastSeenAt: next.lastSeenAt || existing?.lastSeenAt || new Date().toISOString(),
-    });
+  private toApiIdentity(
+    identity: ResolvedConversationIdentity
+  ): ConversationTelemetryRow['identity'] {
+    return {
+      platform: identity.platform,
+      type: identity.type,
+      id: identity.id,
+      userId: identity.userId,
+      chatId: identity.chatId,
+      displayName: identity.displayName,
+      userName: identity.userName,
+      chatName: identity.chatName,
+      confidence: identity.confidence,
+    };
   }
 
   private toCsv(rows: ConversationTelemetryRow[]): string {

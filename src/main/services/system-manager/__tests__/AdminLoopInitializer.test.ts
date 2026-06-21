@@ -12,6 +12,8 @@ import type { SystemManagerConfig, SystemManagerConfigPatch } from '@shared/type
 interface Recorder {
   getConfig: ReturnType<typeof vi.fn>;
   updateConfig: ReturnType<typeof vi.fn>;
+  hasExistingBootstrap?: ReturnType<typeof vi.fn>;
+  writeBootstrapArtifact?: ReturnType<typeof vi.fn>;
   fetchGuide: ReturnType<typeof vi.fn>;
   dispatch: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
@@ -29,6 +31,7 @@ function makeDeps(overrides?: Partial<Recorder>): Recorder & AdminLoopInitDeps {
           ...patch,
         }) as SystemManagerConfig
     ),
+    writeBootstrapArtifact: vi.fn(async () => undefined),
     fetchGuide: vi.fn(async () => ({ statusCode: 200, body: '<p>hello manual</p>' })),
     dispatch: vi.fn(async () => undefined),
     log: vi.fn(),
@@ -61,7 +64,7 @@ describe('buildAdminInitMessage', () => {
 describe('ensureAdminLoopInitialized', () => {
   afterEach(() => vi.clearAllMocks());
 
-  it('is idempotent: skips fetch + dispatch + updateConfig when already initialized', async () => {
+  it('is idempotent: skips fetch + dispatch + updateConfig when the artifact exists and the marker is already set', async () => {
     const deps = makeDeps({
       getConfig: vi.fn(async () => ({
         schemaVersion: 1,
@@ -69,13 +72,54 @@ describe('ensureAdminLoopInitialized', () => {
         updatedAt: 't',
         adminInitialized: true,
       })),
+      hasExistingBootstrap: vi.fn(async () => true),
     });
 
     await ensureAdminLoopInitialized(deps);
 
+    expect(deps.hasExistingBootstrap).toHaveBeenCalledTimes(1);
     expect(deps.fetchGuide).not.toHaveBeenCalled();
     expect(deps.dispatch).not.toHaveBeenCalled();
+    expect(deps.writeBootstrapArtifact).not.toHaveBeenCalled();
     expect(deps.updateConfig).not.toHaveBeenCalled();
+  });
+
+  it('treats an existing CLAUDE.md bootstrap as initialized without fetching the guide', async () => {
+    const deps = makeDeps({
+      hasExistingBootstrap: vi.fn(async () => true),
+    });
+
+    await ensureAdminLoopInitialized(deps);
+
+    expect(deps.hasExistingBootstrap).toHaveBeenCalledTimes(1);
+    expect(deps.fetchGuide).not.toHaveBeenCalled();
+    expect(deps.dispatch).not.toHaveBeenCalled();
+    expect(deps.updateConfig).toHaveBeenCalledWith({ adminInitialized: true });
+  });
+
+  it('re-bootstraps when adminInitialized is true but the CLAUDE.md artifact is missing', async () => {
+    // Regression for "每次进来都会初始化 / 不会检测我到底有没有初始化": the persisted
+    // boolean alone must NOT short-circuit — a missing artifact means not initialized.
+    const deps = makeDeps({
+      getConfig: vi.fn(async () => ({
+        schemaVersion: 1,
+        selectedWorkDir: '/x',
+        updatedAt: 't',
+        adminInitialized: true,
+      })),
+      hasExistingBootstrap: vi.fn(async () => false),
+    });
+
+    await ensureAdminLoopInitialized(deps);
+
+    expect(deps.hasExistingBootstrap).toHaveBeenCalledTimes(1);
+    expect(deps.fetchGuide).toHaveBeenCalledTimes(1);
+    expect(deps.writeBootstrapArtifact).toHaveBeenCalledWith('hello manual');
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      text: buildAdminInitMessage('hello manual'),
+      messageId: ADMIN_INIT_MESSAGE_ID,
+    });
+    expect(deps.updateConfig).toHaveBeenCalledWith({ adminInitialized: true });
   });
 
   it('does NOT set the marker when the guide fetch rejects', async () => {
@@ -114,16 +158,22 @@ describe('ensureAdminLoopInitialized', () => {
     expect(deps.updateConfig).not.toHaveBeenCalled();
   });
 
-  it('on success dispatches the wrapped guide and sets adminInitialized=true', async () => {
+  it('on success writes the CLAUDE.md artifact, dispatches the wrapped guide, then sets the marker', async () => {
     const deps = makeDeps();
 
     await ensureAdminLoopInitialized(deps);
 
     expect(deps.fetchGuide).toHaveBeenCalledTimes(1);
+    expect(deps.writeBootstrapArtifact).toHaveBeenCalledWith('hello manual');
     expect(deps.dispatch).toHaveBeenCalledWith({
       text: buildAdminInitMessage('hello manual'),
       messageId: ADMIN_INIT_MESSAGE_ID,
     });
     expect(deps.updateConfig).toHaveBeenCalledWith({ adminInitialized: true });
+    // The durable marker is written BEFORE the dispatch, so a failed agent
+    // session still leaves the gate satisfied.
+    expect(deps.writeBootstrapArtifact!.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.dispatch.mock.invocationCallOrder[0]
+    );
   });
 });

@@ -2,9 +2,8 @@
  * CcSessionsSection — cc-only session expand regression (#20).
  *
  * A Feishu listening session with no local Claude JSONL yet is listed so the
- * user sees it is listening. Expanding it must NOT call the local-only detail
- * endpoint (which 404s and surfaces the misleading "会话文件已不存在"). Instead
- * it shows an inline "监听中，暂无本地历史" state.
+ * user sees it is listening. Expanding it now fetches the team session detail
+ * endpoint, which falls back to cc-connect history when local JSONL is absent.
  */
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -87,7 +86,7 @@ describe('CcSessionsSection — cc-only session expand (#20)', () => {
     document.body.innerHTML = '';
   });
 
-  it('shows "监听中" and does NOT fetch local detail for a cc-only session', async () => {
+  it('fetches detail for a cc-only session so cc-connect history can render', async () => {
     const { host } = await renderSection({ sessions: [ccOnlySession()] });
 
     // The row header is a button carrying the session label.
@@ -102,9 +101,10 @@ describe('CcSessionsSection — cc-only session expand (#20)', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('监听中，暂无本地历史');
+    expect(host.textContent).not.toContain('监听中，暂无本地历史');
     expect(host.textContent).not.toContain('会话文件已不存在');
-    expect(getSessionDetail).not.toHaveBeenCalled();
+    expect(getSessionDetail).toHaveBeenCalledTimes(1);
+    expect(getSessionDetail).toHaveBeenCalledWith('team-x', 'oc_feishu_only', expect.any(Number));
   });
 
   it('fetches local detail normally for a local-file session', async () => {

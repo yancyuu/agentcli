@@ -102,6 +102,51 @@ describe('formatClaudeStdinUserTurn', () => {
       message: { role: 'user', content: [{ type: 'text', text: 'fix the bug' }] },
     });
   });
+
+  it('includes supported attachments as stream-json content blocks', () => {
+    const out = formatClaudeStdinUserTurn('review these', [
+      {
+        id: 'img-1',
+        filename: 'screen.png',
+        mimeType: 'image/png',
+        size: 10,
+        data: 'image-base64',
+      },
+      {
+        id: 'pdf-1',
+        filename: 'spec.pdf',
+        mimeType: 'application/pdf',
+        size: 20,
+        data: 'pdf-base64',
+      },
+      {
+        id: 'txt-1',
+        filename: 'notes.txt',
+        mimeType: 'text/plain',
+        size: 5,
+        data: Buffer.from('hello').toString('base64'),
+      },
+    ]);
+
+    expect(JSON.parse(out.trim())).toEqual({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'review these' },
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'image-base64' },
+          },
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: 'pdf-base64' },
+          },
+          { type: 'text', text: '\n\n[Attachment: notes.txt]\nhello' },
+        ],
+      },
+    });
+  });
 });
 
 describe('DirectCliSessionManager', () => {

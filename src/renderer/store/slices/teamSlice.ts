@@ -1102,10 +1102,12 @@ function detectClarificationNotifications(
   newTasks: GlobalTask[],
   notifyEnabled: boolean
 ): void {
+  const oldTaskMap = new Map(oldTasks.map((task) => [`${task.teamName}:${task.id}`, task]));
+
   for (const task of newTasks) {
     const key = `${task.teamName}:${task.id}`;
     if (task.needsClarification === 'user') {
-      const oldTask = oldTasks.find((t) => t.teamName === task.teamName && t.id === task.id);
+      const oldTask = oldTaskMap.get(key);
       if (oldTask?.needsClarification !== 'user' && !notifiedClarificationTaskKeys.has(key)) {
         notifiedClarificationTaskKeys.add(key);
         // Always store in-app; suppress OS toast when per-type toggle is off
@@ -1151,9 +1153,10 @@ function detectStatusChangeNotifications(
   if (statuses.length === 0) return;
 
   const onlySolo = config?.notifications?.statusChangeOnlySolo ?? true;
+  const oldTaskMap = new Map(oldTasks.map((task) => [`${task.teamName}:${task.id}`, task]));
 
   for (const task of newTasks) {
-    const oldTask = oldTasks.find((t) => t.teamName === task.teamName && t.id === task.id);
+    const oldTask = oldTaskMap.get(`${task.teamName}:${task.id}`);
     if (!oldTask) continue;
 
     // Detect kanbanColumn change to 'approved' (status stays 'completed', column changes)

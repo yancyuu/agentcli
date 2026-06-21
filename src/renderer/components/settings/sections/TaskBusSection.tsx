@@ -34,6 +34,7 @@ interface TelemetryStatus {
     displayName?: string;
     teamSlug?: string;
     bindProject?: string;
+    deletedAt?: string;
     sessions: number;
     messages: number;
     tokensIn: number;
@@ -41,6 +42,26 @@ interface TelemetryStatus {
     tokensTotal: number;
   }>;
   workSecondsByDay: Record<string, number>;
+  localUsers?: UsageUserRow[];
+  externalUsers?: UsageUserRow[];
+  unresolvedUsage?: { sessions: number; messages: number; tokensTotal: number };
+}
+
+interface UsageUserRow {
+  key: string;
+  kind: 'local' | 'external-im' | 'unresolved';
+  identity: {
+    platform: string;
+    type: 'person' | 'group' | 'unknown';
+    displayName: string;
+    confidence: string;
+  };
+  teamDisplayName?: string;
+  projectName?: string;
+  sessions: number;
+  messages: number;
+  tokensTotal: number;
+  lastActiveAt?: string;
 }
 
 function formatNum(n: number | undefined): string {
@@ -159,28 +180,86 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
         <div>
           <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">项目吞吐</div>
           {/* Header row */}
-          <div className="grid grid-cols-[1fr_72px_80px] items-center gap-2 pb-1 text-[10px] text-[var(--color-text-muted)]">
+          <div className="grid grid-cols-[minmax(180px,1fr)_88px_96px] items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
             <span>名称</span>
             <span className="text-right">Messages</span>
             <span className="text-right">Total Tokens</span>
           </div>
-          <div className="max-h-40 space-y-1 overflow-y-auto">
-            {status.projects.slice(0, 10).map((proj, i) => (
-              <div key={i} className="grid grid-cols-[1fr_72px_80px] items-center gap-2 text-xs">
-                <span className="truncate text-[var(--color-text-secondary)]" title={proj.cwd}>
-                  {proj.displayName || proj.cwd.split('/').pop() || proj.cwd}
-                </span>
-                <span className="text-right text-[var(--color-text-muted)]">
-                  {formatNum(proj.messages)}
-                </span>
-                <span className="text-right text-[var(--color-text-muted)]">
-                  {formatNum(proj.tokensTotal)}
-                </span>
-              </div>
-            ))}
+          <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
+            {status.projects
+              .filter((proj) => !proj.deletedAt)
+              .map((proj) => (
+                <div
+                  key={proj.cwd || proj.displayName}
+                  className="grid grid-cols-[minmax(180px,1fr)_88px_96px] items-center gap-3 text-xs"
+                >
+                  <span className="break-words text-[var(--color-text-secondary)]" title={proj.cwd}>
+                    {proj.displayName || proj.cwd.split('/').pop() || proj.cwd}
+                  </span>
+                  <span className="text-right text-[var(--color-text-muted)]">
+                    {formatNum(proj.messages)}
+                  </span>
+                  <span className="text-right text-[var(--color-text-muted)]">
+                    {formatNum(proj.tokensTotal)}
+                  </span>
+                </div>
+              ))}
           </div>
         </div>
       )}
+
+      <UsageUserTable title="本地会话用量" rows={status.localUsers ?? []} />
+      <UsageUserTable title="外部 IM 用户用量" rows={status.externalUsers ?? []} />
+      {status.unresolvedUsage && status.unresolvedUsage.sessions > 0 && (
+        <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+          未映射会话：{status.unresolvedUsage.sessions} sessions ·{' '}
+          {formatNum(status.unresolvedUsage.messages)} messages ·{' '}
+          {formatNum(status.unresolvedUsage.tokensTotal)} tokens
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UsageUserTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: UsageUserRow[];
+}): React.JSX.Element {
+  if (rows.length === 0) return <></>;
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">{title}</div>
+      <div className="grid grid-cols-[minmax(160px,1fr)_72px_88px_96px] items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
+        <span>用户</span>
+        <span>平台</span>
+        <span className="text-right">Messages</span>
+        <span className="text-right">Total Tokens</span>
+      </div>
+      <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="grid grid-cols-[minmax(160px,1fr)_72px_88px_96px] items-center gap-3 text-xs"
+          >
+            <span className="min-w-0 text-[var(--color-text-secondary)]" title={row.key}>
+              <span className="block truncate">{row.identity.displayName}</span>
+              <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
+                {row.teamDisplayName || row.projectName || row.identity.confidence}
+              </span>
+            </span>
+            <span className="truncate text-[var(--color-text-muted)]">{row.identity.platform}</span>
+            <span className="text-right text-[var(--color-text-muted)]">
+              {formatNum(row.messages)}
+            </span>
+            <span className="text-right text-[var(--color-text-muted)]">
+              {formatNum(row.tokensTotal)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -216,7 +295,7 @@ export function TaskBusSection(): React.JSX.Element {
   const [message, setMessage] = useState<string | null>(null);
 
   const [collectionEnabled, setCollectionEnabled] = useState(false);
-  const [uploadEnabled, setUploadEnabled] = useState(false);
+  const [uploadEnabled, setUploadEnabled] = useState(true);
   const [collaborationEnabled, setCollaborationEnabled] = useState(false);
   const [telemetryPlatform, setTelemetryPlatform] = useState('claudecode');
   const [scanning, setScanning] = useState(false);
@@ -235,7 +314,7 @@ export function TaskBusSection(): React.JSX.Element {
         }
         if (data.telemetry) {
           setCollectionEnabled(data.telemetry.enabled);
-          setUploadEnabled(data.telemetry.uploadEnabled ?? false);
+          setUploadEnabled(data.telemetry.uploadEnabled ?? true);
           setTelemetryPlatform(data.telemetry.platform ?? 'claudecode');
         }
         setCollaborationEnabled(data.collaboration ?? false);
@@ -357,7 +436,7 @@ export function TaskBusSection(): React.JSX.Element {
       redisReady = await testRedisConnection();
       if (!redisReady) {
         setUploadEnabled(false);
-        setMessage('Redis 连接失败，无法启用数据上报');
+        setMessage('Redis 连接失败，无法启用 IM 用量上报');
         return;
       }
     }
@@ -507,7 +586,7 @@ export function TaskBusSection(): React.JSX.Element {
 
       <SettingRow
         label="启用团队总线"
-        description="用于 Redis 连接、数据上报和跨团队协作；本地数据采集不依赖它"
+        description="用于 Redis 连接、IM 用量上报和跨团队协作；本地数据采集不依赖它"
       >
         <SettingsToggle enabled={enabled} onChange={toggle} />
       </SettingRow>
@@ -598,9 +677,12 @@ export function TaskBusSection(): React.JSX.Element {
             </div>
           </div>
 
-          {/* 数据上报 - 依赖 Redis，最下面 */}
+          {/* IM 用量上报 - 依赖 Redis，最下面 */}
           <div>
-            <SettingRow label="数据上报" description="将采集数据上报到 Redis，供团队看板使用">
+            <SettingRow
+              label="IM 用量上报"
+              description="将飞书等 IM 桥接的每轮 token 用量上报到 Redis，供团队看板统计；不会上传 IM 消息正文，关闭后只保留本地采集"
+            >
               <SettingsToggle
                 enabled={uploadEnabled}
                 onChange={(value) => void toggleUpload(value)}
@@ -610,7 +692,7 @@ export function TaskBusSection(): React.JSX.Element {
             {!connected && (
               <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
                 <AlertCircle size={12} />
-                <span>数据上报需要 Redis；请先配置并测试 Redis 连接。</span>
+                <span>IM 用量上报需要 Redis；请先配置并测试 Redis 连接。</span>
               </div>
             )}
           </div>

@@ -20,6 +20,8 @@ import { randomUUID } from 'crypto';
 import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
 
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+
+import type { AttachmentPayload } from '@shared/types';
 import { spawnCli } from '@main/utils/childProcess';
 import { type DirectCliSessionRepository, DirectCliSessionStore } from './DirectCliSessionStore';
 
@@ -64,13 +66,59 @@ export function buildClaudeStreamArgs(options: ClaudeStreamArgsOptions = {}): st
  * Format a user turn as the NDJSON line claude's stream-json stdin expects.
  * Mirrors what cc-connect writes to the harness stdin.
  */
-export function formatClaudeStdinUserTurn(text: string): string {
+function attachmentToContentBlock(attachment: AttachmentPayload): Record<string, unknown> | null {
+  if (!attachment.data) return null;
+
+  if (attachment.mimeType.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: attachment.mimeType,
+        data: attachment.data,
+      },
+    };
+  }
+
+  if (attachment.mimeType === 'application/pdf') {
+    return {
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: 'application/pdf',
+        data: attachment.data,
+      },
+    };
+  }
+
+  if (attachment.mimeType === 'text/plain') {
+    const decoded = Buffer.from(attachment.data, 'base64').toString('utf8');
+    return {
+      type: 'text',
+      text: `\n\n[Attachment: ${attachment.filename}]\n${decoded}`,
+    };
+  }
+
+  return null;
+}
+
+export function formatClaudeStdinUserTurn(
+  text: string,
+  attachments: AttachmentPayload[] = []
+): string {
+  const content = [
+    { type: 'text', text },
+    ...attachments
+      .map(attachmentToContentBlock)
+      .filter((block): block is Record<string, unknown> => block !== null),
+  ];
+
   return (
     JSON.stringify({
       type: 'user',
       message: {
         role: 'user',
-        content: [{ type: 'text', text }],
+        content,
       },
     }) + '\n'
   );
@@ -89,6 +137,7 @@ export interface DirectCliSpawnParams {
 
 export interface DirectCliSendParams {
   text: string;
+  attachments?: AttachmentPayload[];
   /** Optimistic id used to route stream deltas to the right in-progress message. */
   messageId: string;
   /** cwd used to (lazily) spawn the subprocess if the session doesn't exist yet. */
@@ -440,7 +489,7 @@ export class DirectCliSessionManager extends EventEmitter {
     }
     handle.activeMessageId = params.messageId;
     handle.accumulatedText = '';
-    handle.child.stdin.write(formatClaudeStdinUserTurn(params.text));
+    handle.child.stdin.write(formatClaudeStdinUserTurn(params.text, params.attachments));
   }
 
   /** Per-spawn run id for a live session (for dismissing stale approvals on respawn). */

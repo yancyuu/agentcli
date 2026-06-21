@@ -82,5 +82,5 @@ export function shouldExcludeInboxTextFromReplyCandidates(text: string): boolean
 export function getIdleGraphLabel(text: string): string | null {
   const classified = classifyIdleNotificationText(text);
   if (!classified) return null;
-  return classified.hasPeerSummary && classified.peerSummary ? classified.peerSummary : 'idle';
+  return classified.hasPeerSummary && classified.peerSummary ? classified.peerSummary : null;
 }

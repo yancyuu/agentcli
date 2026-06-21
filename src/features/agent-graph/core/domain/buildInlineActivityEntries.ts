@@ -86,9 +86,6 @@ export function buildInlineActivityEntries({
     }
 
     const idleLabel = getIdleGraphLabel(message.text ?? '');
-    if (idleLabel === 'idle') {
-      continue;
-    }
     if (!idleLabel && isInboxNoiseMessage(message.text ?? '')) {
       continue;
     }

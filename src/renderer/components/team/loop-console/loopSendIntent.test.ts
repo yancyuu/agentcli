@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseLoopSendIntent, validateLoopSendIntent } from './loopSendIntent';
+import {
+  getLoopSendIntentLabel,
+  parseLoopSendIntent,
+  validateLoopSendIntent,
+} from './loopSendIntent';
 
 function messageIntent(text = 'do the thing') {
   return parseLoopSendIntent({ text, recipient: 'lead', leadRecipient: 'lead' });
@@ -29,7 +33,7 @@ describe('validateLoopSendIntent', () => {
     expect(result.reason).toMatch(/启动/);
   });
 
-  it('blocks runtime/session intents when the team is offline', () => {
+  it('blocks runtime injection but allows session creation when the team is offline', () => {
     const runtime = parseLoopSendIntent({
       text: '!runtime do something',
       recipient: 'lead',
@@ -45,7 +49,7 @@ describe('validateLoopSendIntent', () => {
       slashCommandMode: 'session',
     });
     expect(session.kind).toBe('session');
-    expect(validateLoopSendIntent(session, { isTeamAlive: false }).ok).toBe(false);
+    expect(validateLoopSendIntent(session, { isTeamAlive: false }).ok).toBe(true);
   });
 
   it('allows a runtime intent when the team is alive', () => {
@@ -81,5 +85,136 @@ describe('parseLoopSendIntent /workers', () => {
       slashCommandMode: 'message',
     });
     expect(intent.kind).toBe('workers-list');
+  });
+});
+
+describe('parseLoopSendIntent directives', () => {
+  it('strips a !message directive down to its body', () => {
+    const intent = parseLoopSendIntent({
+      text: '!message ship the feature',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+    });
+    expect(intent.kind).toBe('message');
+    if (intent.kind !== 'message') return;
+    expect(intent.text).toBe('ship the feature');
+    expect(intent.recipient).toBe('lead');
+  });
+
+  it('parses a !session directive with --name and --reuse', () => {
+    const intent = parseLoopSendIntent({
+      text: '!session --name "my session" --reuse run the scan',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+    });
+    expect(intent.kind).toBe('session');
+    if (intent.kind !== 'session') return;
+    expect(intent.sessionName).toBe('my session');
+    expect(intent.reuse).toBe(true);
+    expect(intent.text).toBe('run the scan');
+  });
+
+  it('parses a bare --name token without quotes', () => {
+    const intent = parseLoopSendIntent({
+      text: '!session --name quick do work',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+    });
+    expect(intent.kind).toBe('session');
+    if (intent.kind !== 'session') return;
+    expect(intent.sessionName).toBe('quick');
+    expect(intent.reuse).toBe(false);
+    expect(intent.text).toBe('do work');
+  });
+
+  it('promotes a slash command to a session intent in session mode', () => {
+    const intent = parseLoopSendIntent({
+      text: '/loop-scan',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+      slashCommandMode: 'session',
+    });
+    expect(intent.kind).toBe('session');
+    if (intent.kind !== 'session') return;
+    expect(intent.sessionName).toBe('loop-scan');
+    expect(intent.reuse).toBe(true);
+  });
+
+  it('dispatches a known @team mention as a cross-team task', () => {
+    const intent = parseLoopSendIntent({
+      text: '@hermit please fix the kanban',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+      teamSlugs: ['hermit', 'other'],
+    });
+    expect(intent.kind).toBe('cross-team-task');
+    if (intent.kind !== 'cross-team-task') return;
+    expect(intent.toTeam).toBe('hermit');
+    expect(intent.subject).toContain('fix the kanban');
+  });
+
+  it('falls back to a plain message when the mentioned team is unknown', () => {
+    const intent = parseLoopSendIntent({
+      text: '@ghost-team do something',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+      teamSlugs: ['hermit'],
+    });
+    expect(intent.kind).not.toBe('cross-team-task');
+  });
+});
+
+describe('validateLoopSendIntent edge cases', () => {
+  it('rejects attachments while the team is offline', () => {
+    const intent = parseLoopSendIntent({
+      text: 'see attached',
+      recipient: 'lead',
+      leadRecipient: 'lead',
+      attachments: [{ kind: 'file', path: '/tmp/a.txt' }] as never,
+    });
+    expect(intent.kind).toBe('message');
+    const result = validateLoopSendIntent(intent, { isTeamAlive: false });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/附件|离线/);
+  });
+
+  it('requires a target team for a cross-team task', () => {
+    const result = validateLoopSendIntent(
+      { kind: 'cross-team-task', toTeam: '', subject: 'x', text: 'x' },
+      { isTeamAlive: true }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/团队/);
+  });
+});
+
+describe('getLoopSendIntentLabel', () => {
+  it('labels a runtime intent', () => {
+    expect(getLoopSendIntentLabel({ kind: 'runtime', text: 'x' })).toBe('注入运行时');
+  });
+
+  it('labels a reused vs new session intent', () => {
+    expect(getLoopSendIntentLabel({ kind: 'session', text: 'x', reuse: true })).toBe(
+      '复用本地会话'
+    );
+    expect(getLoopSendIntentLabel({ kind: 'session', text: 'x', reuse: false })).toBe(
+      '新建本地会话'
+    );
+  });
+
+  it('labels a cross-team task with the target team', () => {
+    expect(
+      getLoopSendIntentLabel({ kind: 'cross-team-task', toTeam: 'hermit', subject: 'x', text: 'x' })
+    ).toBe('跨团队派单：hermit');
+  });
+
+  it('labels a workers-list intent', () => {
+    expect(getLoopSendIntentLabel({ kind: 'workers-list', text: 'x' })).toBe('查看数字员工');
+  });
+
+  it('labels a message intent with its recipient', () => {
+    expect(getLoopSendIntentLabel({ kind: 'message', recipient: 'lead', text: 'x' })).toBe(
+      '发送给 lead'
+    );
   });
 });

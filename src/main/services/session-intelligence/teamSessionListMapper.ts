@@ -17,6 +17,55 @@ function timestampMs(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeFeishuLarkChatId(value: string): string {
+  return value.replace(/^oc_/i, 'c_');
+}
+
+function externalSessionIdentity(session: CcSessionListItem): string | null {
+  const [platform, chatId, userId] = session.session_key.split(':');
+  if (!platform || !chatId || !userId) return null;
+  if (platform !== 'feishu' && platform !== 'lark') return null;
+  return `feishu:${normalizeFeishuLarkChatId(chatId)}:${userId}`;
+}
+
+function pickPreferredCcSession(
+  current: CcSessionListItem,
+  candidate: CcSessionListItem
+): CcSessionListItem {
+  const currentHasLocal = Boolean(current.agent_session_id);
+  const candidateHasLocal = Boolean(candidate.agent_session_id);
+  if (currentHasLocal !== candidateHasLocal) return candidateHasLocal ? candidate : current;
+
+  if (current.history_count !== candidate.history_count) {
+    return candidate.history_count > current.history_count ? candidate : current;
+  }
+
+  return timestampMs(candidate.updated_at) > timestampMs(current.updated_at) ? candidate : current;
+}
+
+function dedupeCcSessionsByExternalIdentity(ccSessions: CcSessionListItem[]): CcSessionListItem[] {
+  const byIdentity = new Map<string, CcSessionListItem>();
+  const result: CcSessionListItem[] = [];
+
+  for (const session of ccSessions) {
+    const identity = externalSessionIdentity(session);
+    if (!identity) {
+      result.push(session);
+      continue;
+    }
+
+    const existing = byIdentity.get(identity);
+    if (!existing) {
+      byIdentity.set(identity, session);
+      continue;
+    }
+
+    byIdentity.set(identity, pickPreferredCcSession(existing, session));
+  }
+
+  return [...result, ...byIdentity.values()];
+}
+
 function mapCcOnlySession(session: CcSessionListItem, projectId: string): CcSession {
   return {
     id: session.agent_session_id || session.id,
@@ -61,9 +110,10 @@ export function mergeLocalAndCcSessions(
   ccSessions: CcSessionListItem[],
   projectId: string
 ): CcSession[] {
+  const dedupedCcSessions = dedupeCcSessionsByExternalIdentity(ccSessions);
   const localSessionIds = new Set(localSessions.map((session) => session.id));
   const ccByLocalSessionId = new Map(
-    ccSessions
+    dedupedCcSessions
       .map((session) => [session.agent_session_id || session.id, session] as const)
       .filter(([localSessionId]) => localSessionIds.has(localSessionId))
   );
@@ -88,7 +138,7 @@ export function mergeLocalAndCcSessions(
     };
   });
 
-  const ccOnlyResults = ccSessions
+  const ccOnlyResults = dedupedCcSessions
     .filter((session) => !localSessionIds.has(session.agent_session_id || session.id))
     .map((session) => mapCcOnlySession(session, projectId));
 

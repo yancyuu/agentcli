@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from 'react';
 
-import { getSnapshot, getUnreadCount, subscribe } from '@renderer/services/commentReadStorage';
+import {
+  getTaskSnapshot,
+  getUnreadCount,
+  subscribeTask,
+} from '@renderer/services/commentReadStorage';
 
 import type { TaskComment } from '@shared/types';
 
@@ -9,6 +13,15 @@ export function useUnreadCommentCount(
   taskId: string,
   comments: TaskComment[] | undefined
 ): number {
-  const readState = useSyncExternalStore(subscribe, getSnapshot);
-  return getUnreadCount(readState, teamName, taskId, comments ?? []);
+  const taskReadEntry = useSyncExternalStore(
+    (listener) => subscribeTask(teamName, taskId, listener),
+    () => getTaskSnapshot(teamName, taskId),
+    () => getTaskSnapshot(teamName, taskId)
+  );
+  return getUnreadCount(
+    taskReadEntry ? { [`${teamName}/${taskId}`]: taskReadEntry } : {},
+    teamName,
+    taskId,
+    comments ?? []
+  );
 }

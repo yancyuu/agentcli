@@ -14,57 +14,62 @@ import { buildWorkflowCommandSuggestion } from '@renderer/utils/workflowCommandS
 import type { MentionSuggestion } from '@renderer/types/mention';
 
 const EMPTY: MentionSuggestion[] = [];
-const GLOBAL_HERMIT_COMMANDS_FOLDER = '~/.claude/commands/hermit';
 
-function commandsFolder(projectPath: string): string {
-  return `${projectPath.replace(/[\\/]+$/, '')}/.claude/commands`;
+function workspaceWorkflowFolders(workspacePath: string): string[] {
+  const root = workspacePath.replace(/[\\/]+$/, '');
+  return [`${root}/.claude/commands`];
 }
 
-function useWorkflowCommandsFolder(
-  folder: string | null | undefined,
+function useWorkflowCommandFolders(
+  folders: readonly string[] | null | undefined,
   idPrefix: string
 ): MentionSuggestion[] {
   const [suggestions, setSuggestions] = useState<MentionSuggestion[]>(EMPTY);
+  const folderKey =
+    folders
+      ?.map((folder) => folder.trim())
+      .filter(Boolean)
+      .join('\n') ?? '';
 
   useEffect(() => {
-    const trimmed = folder?.trim();
-    if (!trimmed) {
+    const trimmedFolders = folderKey.split('\n').filter(Boolean);
+    if (!trimmedFolders.length) {
       setSuggestions(EMPTY);
       return;
     }
     let cancelled = false;
     void (async () => {
-      try {
-        const result = await api.systemManager.listWorkflowPrompts(trimmed);
-        if (cancelled) return;
-        const seen = new Set<string>();
-        const next = result.prompts
-          .map((prompt) => buildWorkflowCommandSuggestion(prompt, idPrefix))
-          .filter((suggestion) => {
+      const seen = new Set<string>();
+      const next: MentionSuggestion[] = [];
+      for (const folder of trimmedFolders) {
+        try {
+          const result = await api.systemManager.listWorkflowPrompts(folder);
+          if (cancelled) return;
+          for (const prompt of result.prompts) {
+            const suggestion = buildWorkflowCommandSuggestion(prompt, idPrefix);
             const key = suggestion.command ?? suggestion.id;
-            if (seen.has(key)) return false;
+            if (seen.has(key)) continue;
             seen.add(key);
-            return true;
-          });
-        setSuggestions(next);
-      } catch {
-        // Missing command folders are normal — the project/user simply has no custom commands yet.
-        if (!cancelled) setSuggestions(EMPTY);
+            next.push(suggestion);
+          }
+        } catch {
+          // Missing command/workflow folders are normal — the workspace simply has no commands there.
+        }
       }
+      if (!cancelled) setSuggestions(next.length ? next : EMPTY);
     })();
     return () => {
       cancelled = true;
     };
-  }, [folder, idPrefix]);
+  }, [folderKey, idPrefix]);
 
   return suggestions;
 }
 
 export function useProjectWorkflowCommands(projectPath?: string | null): MentionSuggestion[] {
   const trimmed = projectPath?.trim();
-  return useWorkflowCommandsFolder(trimmed ? commandsFolder(trimmed) : null, 'team-workflow');
-}
-
-export function useHermitWorkflowCommands(): MentionSuggestion[] {
-  return useWorkflowCommandsFolder(GLOBAL_HERMIT_COMMANDS_FOLDER, 'hermit-workflow');
+  return useWorkflowCommandFolders(
+    trimmed ? workspaceWorkflowFolders(trimmed) : null,
+    'team-workflow'
+  );
 }

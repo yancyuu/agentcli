@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
@@ -20,6 +20,10 @@ import type { GlobalTask, TeamTaskStatus } from '@shared/types';
 
 type TasksSubTab = 'overview' | 'schedules';
 type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
+type OverviewTaskEntry = {
+  task: GlobalTask;
+  updatedAtMs: number;
+};
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Loop 任务总览', icon: <Columns3 size={13} /> },
@@ -60,9 +64,9 @@ function isOverviewStatus(status: TeamTaskStatus): status is OverviewStatus {
   return status === 'pending' || status === 'in_progress' || status === 'completed';
 }
 
-function getTaskUpdatedAt(task: GlobalTask): number {
-  const raw = task.updatedAt ?? task.createdAt;
-  const time = raw ? new Date(raw).getTime() : 0;
+function toTimestamp(raw: string | Date | null | undefined): number {
+  if (!raw) return 0;
+  const time = raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -126,9 +130,20 @@ const TaskOverviewPool = (): React.JSX.Element => {
     void fetchAllTasks();
   }, [fetchAllTasks]);
 
-  const overviewTasks = useMemo(
-    () => globalTasks.filter((task) => isOverviewStatus(task.status) && !task.teamDeleted),
+  const overviewTaskEntries = useMemo<OverviewTaskEntry[]>(
+    () =>
+      globalTasks
+        .filter((task) => isOverviewStatus(task.status) && !task.teamDeleted)
+        .map((task) => ({
+          task,
+          updatedAtMs: toTimestamp(task.updatedAt ?? task.createdAt),
+        })),
     [globalTasks]
+  );
+
+  const overviewTasks = useMemo(
+    () => overviewTaskEntries.map((entry) => entry.task),
+    [overviewTaskEntries]
   );
 
   const teamOptions = useMemo(
@@ -149,12 +164,13 @@ const TaskOverviewPool = (): React.JSX.Element => {
 
   const filteredTasks = useMemo(
     () =>
-      overviewTasks
-        .filter((task) => teamFilter === 'all' || task.teamName === teamFilter)
-        .filter((task) => statusFilter === 'all' || task.status === statusFilter)
-        .filter((task) => ownerFilter === 'all' || task.owner === ownerFilter)
-        .sort((a, b) => getTaskUpdatedAt(b) - getTaskUpdatedAt(a)),
-    [overviewTasks, ownerFilter, statusFilter, teamFilter]
+      overviewTaskEntries
+        .filter(({ task }) => teamFilter === 'all' || task.teamName === teamFilter)
+        .filter(({ task }) => statusFilter === 'all' || task.status === statusFilter)
+        .filter(({ task }) => ownerFilter === 'all' || task.owner === ownerFilter)
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        .map((entry) => entry.task),
+    [overviewTaskEntries, ownerFilter, statusFilter, teamFilter]
   );
 
   const grouped = useMemo(() => {
@@ -284,7 +300,7 @@ const TaskOverviewPool = (): React.JSX.Element => {
                       <GlobalOverviewTaskCard
                         key={`${task.teamName}:${task.id}`}
                         task={task}
-                        onOpen={() => openGlobalTaskDetail(task.teamName, task.id)}
+                        onOpenTask={openGlobalTaskDetail}
                       />
                     ))
                   )}
@@ -298,16 +314,19 @@ const TaskOverviewPool = (): React.JSX.Element => {
   );
 };
 
-const GlobalOverviewTaskCard = ({
+const GlobalOverviewTaskCard = memo(function GlobalOverviewTaskCard({
   task,
-  onOpen,
+  onOpenTask,
 }: {
   task: GlobalTask;
-  onOpen: () => void;
-}): React.JSX.Element => {
+  onOpenTask: (teamName: string, taskId: string) => void;
+}): React.JSX.Element {
   const ownerLabel = buildOptionLabel(task.owner, '未分配');
   const dispatchFrom = task.dispatchMeta?.originTeam;
   const dispatchTo = task.dispatchMeta?.targetTeam;
+  const handleOpen = useCallback(() => {
+    onOpenTask(task.teamName, task.id);
+  }, [onOpenTask, task.id, task.teamName]);
   return (
     <button
       type="button"
@@ -316,7 +335,7 @@ const GlobalOverviewTaskCard = ({
         borderColor: 'var(--color-border)',
         backgroundColor: 'var(--color-surface-raised)',
       }}
-      onClick={onOpen}
+      onClick={handleOpen}
     >
       <div className="flex items-start gap-1.5">
         <span className="mt-0.5 shrink-0 text-[9px] tabular-nums text-[var(--color-text-muted)] opacity-50">
@@ -344,4 +363,4 @@ const GlobalOverviewTaskCard = ({
       </div>
     </button>
   );
-};
+});

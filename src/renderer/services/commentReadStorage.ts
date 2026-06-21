@@ -96,6 +96,11 @@ let loaded = Object.keys(cache).length > 0;
 let idbAvailable = true; // flips to false on first IndexedDB failure
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
+const taskListeners = new Map<string, Set<() => void>>();
+
+function buildTaskKey(teamName: string, taskId: string): string {
+  return `${teamName}/${taskId}`;
+}
 
 // --- useSyncExternalStore API ---
 export function subscribe(listener: () => void): () => void {
@@ -106,8 +111,29 @@ export function subscribe(listener: () => void): () => void {
   };
 }
 
+export function subscribeTask(teamName: string, taskId: string, listener: () => void): () => void {
+  const key = buildTaskKey(teamName, taskId);
+  let listenersForTask = taskListeners.get(key);
+  if (!listenersForTask) {
+    listenersForTask = new Set();
+    taskListeners.set(key, listenersForTask);
+  }
+  listenersForTask.add(listener);
+  if (!loaded) void load();
+  return () => {
+    listenersForTask?.delete(listener);
+    if (listenersForTask?.size === 0) {
+      taskListeners.delete(key);
+    }
+  };
+}
+
 export function getSnapshot(): ReadState {
   return cache;
+}
+
+export function getTaskSnapshot(teamName: string, taskId: string): TaskReadEntry | undefined {
+  return cache[buildTaskKey(teamName, taskId)];
 }
 
 // --- Mutations ---
@@ -117,7 +143,7 @@ export function getSnapshot(): ReadState {
  */
 export function markCommentsRead(teamName: string, taskId: string, commentIds: string[]): void {
   if (commentIds.length === 0) return;
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   const prev = cache[key];
   const prevSet = new Set(prev?.readIds ?? []);
   let changed = false;
@@ -135,7 +161,7 @@ export function markCommentsRead(teamName: string, taskId: string, commentIds: s
       lastUpdated: Date.now(),
     },
   };
-  notify();
+  notify(key);
   scheduleSave();
 }
 
@@ -144,7 +170,7 @@ export function markCommentsRead(teamName: string, taskId: string, commentIds: s
  * with code that hasn't migrated yet (e.g. flush fallback).
  */
 export function markAsRead(teamName: string, taskId: string, latestTimestamp: number): void {
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   const prev = cache[key];
   // Update lastUpdated to at least this timestamp (for legacy migration support)
   const prevLastUpdated = prev?.lastUpdated ?? 0;
@@ -156,7 +182,7 @@ export function markAsRead(teamName: string, taskId: string, latestTimestamp: nu
       lastUpdated: Math.max(prevLastUpdated, latestTimestamp),
     },
   };
-  notify();
+  notify(key);
   scheduleSave();
 }
 
@@ -178,7 +204,7 @@ export function getUnreadCount(
   comments: { id?: string; createdAt: string }[]
 ): number {
   if (!comments || comments.length === 0) return 0;
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   const entry = readState[key];
   if (!entry) return comments.length;
 
@@ -207,7 +233,7 @@ export function getUnreadCount(
  * Get the set of read comment IDs for a team/task pair.
  */
 export function getReadCommentIds(teamName: string, taskId: string): Set<string> {
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   const entry = cache[key];
   return new Set(entry?.readIds ?? []);
 }
@@ -220,7 +246,7 @@ export function getReadCommentIds(teamName: string, taskId: string): Set<string>
  * would incorrectly mark all comments as read.
  */
 export function getLegacyCutoff(teamName: string, taskId: string): number {
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   const entry = cache[key];
   if (!entry) return 0;
   // Only honour the timestamp when no per-ID tracking exists (pure legacy data).
@@ -230,7 +256,7 @@ export function getLegacyCutoff(teamName: string, taskId: string): number {
 
 /** @deprecated Use getReadCommentIds() + getLegacyCutoff() instead. */
 export function getLastReadTimestamp(teamName: string, taskId: string): number {
-  const key = `${teamName}/${taskId}`;
+  const key = buildTaskKey(teamName, taskId);
   return cache[key]?.lastUpdated ?? 0;
 }
 
@@ -239,8 +265,13 @@ function hasIndexedDB(): boolean {
   return typeof indexedDB !== 'undefined';
 }
 
-function notify(): void {
+function notify(taskKey?: string): void {
   listeners.forEach((l) => l());
+  if (!taskKey) {
+    taskListeners.forEach((listenersForTask) => listenersForTask.forEach((l) => l()));
+    return;
+  }
+  taskListeners.get(taskKey)?.forEach((l) => l());
 }
 
 function scheduleSave(): void {

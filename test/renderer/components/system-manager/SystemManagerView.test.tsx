@@ -6,8 +6,6 @@ const {
   getStatusMock,
   getConfigMock,
   updateConfigMock,
-  listWorkflowPromptsMock,
-  readWorkflowPromptMock,
   terminalOpenExternalMock,
   fetchTeamsMock,
   ensureSystemManagerMock,
@@ -21,8 +19,6 @@ const {
   getStatusMock: vi.fn(),
   getConfigMock: vi.fn(),
   updateConfigMock: vi.fn(),
-  listWorkflowPromptsMock: vi.fn(),
-  readWorkflowPromptMock: vi.fn(),
   terminalOpenExternalMock: vi.fn(),
   fetchTeamsMock: vi.fn(),
   ensureSystemManagerMock: vi.fn(),
@@ -65,8 +61,6 @@ vi.mock('@renderer/api', () => ({
       getStatus: getStatusMock,
       getConfig: getConfigMock,
       updateConfig: updateConfigMock,
-      listWorkflowPrompts: listWorkflowPromptsMock,
-      readWorkflowPrompt: readWorkflowPromptMock,
     },
     teams: {
       ensureSystemManager: ensureSystemManagerMock,
@@ -94,12 +88,7 @@ function baseStatus() {
     displayName: 'Helm Loop' as const,
     defaultWorkDir: '/repo',
     selectedWorkDir: '/repo',
-    // getStatus() always returns adminWorkDir (computed from hermitHome in
-    // SystemManagerConfigService), and candidateFolders derives the admin
-    // command/workflow folders from it via joinPath — so the mock must set it
-    // or joinPath(undefined, …) throws and aborts workflow loading.
     adminWorkDir: '/repo',
-    globalHermitWorkflowFolder: '/Users/test/.claude/commands/hermit',
     claudeCommand: 'claude' as const,
     localStatus: 'ready' as const,
   };
@@ -109,7 +98,6 @@ function baseConfig(workDir = '/repo') {
   return {
     schemaVersion: 1 as const,
     selectedWorkDir: workDir,
-    workflowFolder: `${workDir}/workflows`,
     updatedAt: '2026-06-05T00:00:00.000Z',
   };
 }
@@ -176,35 +164,13 @@ describe('SystemManagerView', () => {
     vi.clearAllMocks();
   });
 
-  it('renders embedded Helm Loop panel and loads workflow commands', async () => {
+  it('renders embedded Helm Loop panel and exposes only capability-pack commands', async () => {
     getStatusMock.mockResolvedValue(baseStatus());
     getConfigMock.mockResolvedValue(baseConfig());
     updateConfigMock.mockImplementation(async (patch: { selectedWorkDir?: string }) =>
       baseConfig(patch.selectedWorkDir ?? '/repo')
     );
     mockAdminLoopRuntime();
-    listWorkflowPromptsMock.mockResolvedValueOnce({
-      folder: '/repo/.claude/commands',
-      warnings: [],
-      prompts: [
-        {
-          id: 'loop-scan',
-          label: 'Loop Scan',
-          filename: 'loop-scan.md',
-          path: '/repo/.claude/commands/loop-scan.md',
-          folder: '/repo/.claude/commands',
-          sizeBytes: 12,
-          updatedAt: '2026-06-05T00:00:00.000Z',
-          source: 'claude-command',
-          commandName: '/loop-scan',
-          safety: 'read-only',
-          description: '扫描循环资产',
-          builtin: true,
-          order: 5,
-        },
-      ],
-    });
-    listWorkflowPromptsMock.mockResolvedValue({ folder: '/repo/workflows', warnings: [], prompts: [] });
     fetchTeamsMock.mockResolvedValue(undefined);
 
     const { host, root } = renderSystemManager();
@@ -220,17 +186,13 @@ describe('SystemManagerView', () => {
     expect(host.textContent).toContain('运行时');
     expect(host.textContent).not.toContain('打开终端');
     expect(host.textContent).not.toContain('Loop Scan');
+    // workflow 列表已移除：不再展示按 .claude/commands 扫描的 workflow 命令。
     expect(host.textContent).not.toContain('read-only');
     expect(loopConsolePanelPropsMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         slashCommandMode: 'session',
-        commandSuggestions: expect.arrayContaining([
-          expect.objectContaining({ command: '/loop-scan', name: 'loop-scan' }),
-        ]),
       })
     );
-    expect(listWorkflowPromptsMock).toHaveBeenCalledWith(expect.stringContaining('/.claude/commands/hermit'));
-    expect(listWorkflowPromptsMock).toHaveBeenCalledWith('/repo/.claude/commands');
     expect(ensureSystemManagerMock).toHaveBeenCalled();
     expect(runtimeConfigDialogPropsMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -248,7 +210,6 @@ describe('SystemManagerView', () => {
     getStatusMock.mockResolvedValue(baseStatus());
     getConfigMock.mockResolvedValue(baseConfig());
     updateConfigMock.mockResolvedValue(baseConfig('/repo'));
-    listWorkflowPromptsMock.mockResolvedValue({ folder: '/repo/workflows', warnings: [], prompts: [] });
     fetchTeamsMock.mockResolvedValue(undefined);
 
     const order: string[] = [];
@@ -306,100 +267,6 @@ describe('SystemManagerView', () => {
         sessions: [expect.objectContaining({ sessionKey: 'feishu:chat_admin:ou_admin' })],
       })
     );
-
-    await act(async () => {
-      root.unmount();
-    });
-  });
-
-  it('passes workflow commands to slash suggestions by priority', async () => {
-    getStatusMock.mockResolvedValue(baseStatus());
-    getConfigMock.mockResolvedValue(baseConfig());
-    updateConfigMock.mockResolvedValue(baseConfig('/repo'));
-    mockAdminLoopRuntime();
-    listWorkflowPromptsMock.mockResolvedValueOnce({
-      folder: '/Users/test/.claude/commands/hermit',
-      warnings: [],
-      prompts: [
-        {
-          id: 'daily-workflow-extraction',
-          label: 'Daily Workflow Extraction',
-          filename: 'daily-workflow-extraction.md',
-          path: '/Users/test/.claude/commands/hermit/daily-workflow-extraction.md',
-          folder: '/Users/test/.claude/commands/hermit',
-          sizeBytes: 12,
-          updatedAt: '2026-06-05T00:00:00.000Z',
-          source: 'claude-command',
-          commandName: '/hermit:daily-workflow-extraction',
-          safety: 'read-only',
-          description: '提炼 workflow',
-          builtin: true,
-          order: 5,
-        },
-      ],
-    });
-    listWorkflowPromptsMock.mockResolvedValueOnce({
-      folder: '/repo/.claude/commands',
-      warnings: [],
-      prompts: [
-        {
-          id: 'loop-design',
-          label: 'Loop Design',
-          filename: 'loop-design.md',
-          path: '/repo/.claude/commands/loop-design.md',
-          folder: '/repo/.claude/commands',
-          sizeBytes: 12,
-          updatedAt: '2026-06-05T00:00:00.000Z',
-          source: 'claude-command',
-          commandName: '/loop-design',
-          safety: 'proposal-only',
-          description: '设计循环',
-          builtin: true,
-          order: 70,
-        },
-      ],
-    });
-    listWorkflowPromptsMock.mockResolvedValueOnce({
-      folder: '/repo/workflows',
-      warnings: [],
-      prompts: [
-        {
-          id: 'nightly-triage',
-          label: 'Nightly Triage',
-          filename: 'nightly-triage.md',
-          path: '/repo/workflows/nightly-triage.md',
-          folder: '/repo/workflows',
-          sizeBytes: 48,
-          updatedAt: '2026-06-05T00:00:00.000Z',
-          source: 'workflow-folder',
-          description: 'Triage loop',
-          order: 10,
-        },
-      ],
-    });
-    listWorkflowPromptsMock.mockResolvedValue({ folder: '/repo/workflows', warnings: [], prompts: [] });
-    fetchTeamsMock.mockResolvedValue(undefined);
-
-    const { host, root } = renderSystemManager();
-
-    await act(async () => {
-      root.render(<SystemManagerView />);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const lastProps = loopConsolePanelPropsMock.mock.calls.at(-1)?.[0] as {
-      commandSuggestions?: Array<{ command?: string }>;
-    };
-    expect(lastProps.commandSuggestions?.map((suggestion) => suggestion.command)).toEqual([
-      '/hermit:daily-workflow-extraction',
-      '/nightly-triage',
-      '/loop-design',
-    ]);
-    expect(host.textContent).not.toContain('Nightly Triage');
-    expect(createLoopSessionMock).not.toHaveBeenCalled();
-    expect(readWorkflowPromptMock).not.toHaveBeenCalled();
-    expect(terminalOpenExternalMock).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();

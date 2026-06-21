@@ -1,5 +1,5 @@
 /**
- * Worker Society — 应用层测试用 Fake 实现（仿 teams-mvp/TaskDispatchService.test.ts）
+ * Worker Society — 应用层测试用 Fake 实现（仿 team-management/TaskDispatchService.test.ts）
  *
  * 供 application use case / adapter mapping / renderer utility 测试复用。
  * 不含业务规则，只是 Map/数组的薄封装。

@@ -59,8 +59,8 @@ const PLATFORM_OPTIONS: PlatformOption[] = [
     icon: 'settings',
   },
   {
-    key: 'wecom',
-    label: '企业微信',
+    key: 'wecom_im',
+    label: '企业微信 / IM',
     color: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400',
     icon: 'settings',
   },
@@ -90,7 +90,26 @@ const PLATFORM_OPTIONS: PlatformOption[] = [
   },
 ];
 
-type BindingStep = 'platform' | 'qr' | 'form';
+const WECOM_IM_PLATFORM_KEY = 'wecom_im';
+
+const WECOM_MODE_OPTIONS = [
+  {
+    key: 'wecom_ws',
+    label: '企业微信智能机器人',
+    description: '使用 Bot ID / Bot Secret，通过 WebSocket 长连接接入。',
+  },
+  {
+    key: 'wecom',
+    label: '企业微信自建应用（Callback）',
+    description: '使用 Corp ID / Agent ID / Callback Token，通过 HTTPS 回调接入。',
+  },
+] as const;
+
+type WeComModeKey = (typeof WECOM_MODE_OPTIONS)[number]['key'];
+
+const isWeComModeKey = (key: string): key is WeComModeKey => key === 'wecom_ws' || key === 'wecom';
+
+type BindingStep = 'platform' | 'wecom-mode' | 'qr' | 'form';
 
 export interface PlatformBindingCompleteOptions {
   restartHandled?: boolean;
@@ -124,8 +143,19 @@ export function PlatformBindingContent({
   }, [projectName, workDir, agentType]);
 
   const handlePlatformSelect = (key: string): void => {
+    if (key === WECOM_IM_PLATFORM_KEY) {
+      setSelectedPlatform('');
+      setStep('wecom-mode');
+      return;
+    }
+
     setSelectedPlatform(key);
     setStep(isQRPlatform(key) ? 'qr' : 'form');
+  };
+
+  const handleWeComModeSelect = (key: WeComModeKey): void => {
+    setSelectedPlatform(key);
+    setStep('form');
   };
 
   const initialFormValues = useMemo((): Record<string, unknown> => {
@@ -147,6 +177,35 @@ export function PlatformBindingContent({
     }
     return values;
   }, [platformAllowChat, platformAllowFrom, selectedPlatform]);
+
+  if (step === 'wecom-mode') {
+    return (
+      <div className="space-y-3 py-2">
+        <div className="bg-[var(--color-surface-raised)]/60 relative overflow-hidden rounded-xl border border-[var(--color-border-subtle)] px-3 py-2.5 text-xs text-[var(--color-text-muted)] shadow-sm shadow-black/10">
+          <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
+          <p>选择企业微信接入方式。不同模式需要的参数不同，配置会复用 cc-connect 的现有协议。</p>
+        </div>
+        <div className="grid gap-2">
+          {WECOM_MODE_OPTIONS.map(({ key, label, description }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleWeComModeSelect(key)}
+              className="group rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3 text-left shadow-sm shadow-black/5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-accent-border)] hover:bg-[var(--color-accent-soft)] hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+            >
+              <div className="text-sm font-medium text-[var(--color-text)]">{label}</div>
+              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{description}</div>
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-start pt-2">
+          <Button variant="outline" size="sm" onClick={() => setStep('platform')}>
+            返回
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (
     step === 'qr' &&
@@ -174,7 +233,7 @@ export function PlatformBindingContent({
         agentType={agentType}
         initialValues={initialFormValues}
         onComplete={onComplete}
-        onCancel={() => setStep('platform')}
+        onCancel={() => setStep(isWeComModeKey(selectedPlatform) ? 'wecom-mode' : 'platform')}
       />
     );
   }

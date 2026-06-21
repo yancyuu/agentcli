@@ -31,6 +31,10 @@ import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 import { AGENT_TYPE_LABELS } from '../HarnessCards';
 import { HarnessSelect } from '../HarnessSelect';
+import {
+  buildSelectableProjectsWithDefaultPath,
+  findProjectPathMatch,
+} from './createTeamDefaultProject';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import type {
   EffortLevel,
@@ -243,6 +247,10 @@ export const CreateTeamDialog = ({
     const norm = normalizePath(effectiveCwd);
     return activeTeams.find((t) => normalizePath(t.projectPath) === norm) ?? null;
   }, [activeTeams, effectiveCwd]);
+  const selectableProjects = useMemo(
+    () => buildSelectableProjectsWithDefaultPath(projects, defaultProjectPath),
+    [projects, defaultProjectPath]
+  );
   const [conflictDismissed, setConflictDismissed] = useState(false);
   useEffect(() => {
     setConflictDismissed(false);
@@ -293,20 +301,31 @@ export const CreateTeamDialog = ({
 
   // ── Auto-select default project path ─────────────────────────────────
   useEffect(() => {
-    if (!open || cwdMode !== 'project' || selectedProjectPath) return;
-    const selectable = projects.filter((p) => !isEphemeralProjectPath(p.path));
-    if (selectable.length === 0) return;
-    if (defaultProjectPath && !isEphemeralProjectPath(defaultProjectPath)) {
-      const match = selectable.find(
-        (p) => normalizePath(p.path) === normalizePath(defaultProjectPath)
-      );
-      if (match) {
-        setSelectedProjectPath(match.path);
-        return;
+    if (!open || !defaultProjectPath || isEphemeralProjectPath(defaultProjectPath)) return;
+    setCwdMode('project');
+  }, [open, defaultProjectPath, setCwdMode]);
+
+  useEffect(() => {
+    if (!open || cwdMode !== 'project' || selectableProjects.length === 0) return;
+    const defaultMatch = findProjectPathMatch(selectableProjects, defaultProjectPath);
+    if (defaultMatch) {
+      if (normalizePath(selectedProjectPath) !== normalizePath(defaultMatch)) {
+        setSelectedProjectPath(defaultMatch);
       }
+      return;
     }
-    setSelectedProjectPath(selectable[0].path);
-  }, [open, cwdMode, projects, selectedProjectPath, defaultProjectPath]);
+    if (!selectedProjectPath) {
+      setSelectedProjectPath(selectableProjects[0].path);
+    }
+  }, [
+    open,
+    cwdMode,
+    selectableProjects,
+    selectedProjectPath,
+    defaultProjectPath,
+    setCwdMode,
+    setSelectedProjectPath,
+  ]);
 
   // ── Clear provisioning error on open ─────────────────────────────────
   useEffect(() => {
@@ -547,7 +566,7 @@ export const CreateTeamDialog = ({
               onSelectedProjectPathChange={setSelectedProjectPath}
               customCwd={customCwd}
               onCustomCwdChange={setCustomCwd}
-              projects={projects}
+              projects={selectableProjects}
               projectsLoading={projectsLoading}
               projectsError={projectsError}
               fieldError={fieldErrors.cwd}

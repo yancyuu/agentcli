@@ -21,7 +21,10 @@ import type {
   SkillWatcherEvent,
 } from '@shared/types/extensions';
 
-import { CapabilityPackLoaderService } from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
+import {
+  CapabilityPackLoaderService,
+  type LocalCapabilityPackSource,
+} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
 import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
 import { ExtensionFacadeService } from '@main/services/extensions/ExtensionFacadeService';
 import { McpLibraryService } from '@main/services/extensions/library/McpLibraryService';
@@ -79,6 +82,10 @@ function getMcpLibrary(): McpLibraryService {
 function getCapabilityPacks(): CapabilityPackLoaderService {
   if (!capabilityPacks) capabilityPacks = new CapabilityPackLoaderService();
   return capabilityPacks;
+}
+
+export function setCapabilityPackLocalSource(source: LocalCapabilityPackSource): void {
+  getCapabilityPacks().setLocalSource(source);
 }
 
 function getSkillsCatalog(): SkillsCatalogService {

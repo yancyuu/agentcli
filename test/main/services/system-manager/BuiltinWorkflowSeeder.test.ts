@@ -5,73 +5,106 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  getGlobalHermitWorkflowDir,
-  seedGlobalHermitWorkflows,
+  ensureGlobalWorkflows,
+  getHermitWorkflowScanDir,
+  migrateLegacyWorkflowFolder,
+  scanHermitWorkflows,
 } from '@main/services/system-manager/BuiltinWorkflowSeeder';
 
 let tmpDir: string;
+let originalHermitHome: string | undefined;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-builtin-workflows-'));
+  originalHermitHome = process.env.HERMIT_HOME;
+  process.env.HERMIT_HOME = tmpDir;
 });
 
 afterEach(() => {
+  process.env.HERMIT_HOME = originalHermitHome;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe('BuiltinWorkflowSeeder', () => {
-  it('seeds built-in workflows into the global Hermit command namespace', async () => {
-    const copied = await seedGlobalHermitWorkflows(tmpDir);
-    const hermitWorkflowDir = getGlobalHermitWorkflowDir(tmpDir);
+  it('seeds built-in workflows into ~/.hermit/.claude/workflow/', async () => {
+    await ensureGlobalWorkflows();
+    const scanDir = getHermitWorkflowScanDir();
 
-    expect(copied).toBeGreaterThan(0);
-    expect(fs.existsSync(path.join(hermitWorkflowDir, 'daily-workflow-extraction.md'))).toBe(true);
-    expect(fs.readFileSync(path.join(hermitWorkflowDir, 'daily-workflow-extraction.md'), 'utf8')).toContain(
+    const workflows = await scanHermitWorkflows(scanDir);
+    expect(workflows.length).toBeGreaterThan(0);
+    expect(workflows.some((workflow) => workflow.id === 'daily-workflow-extraction')).toBe(true);
+    expect(fs.readFileSync(path.join(scanDir, 'daily-workflow-extraction.md'), 'utf8')).toContain(
       'hermit-builtin-workflow:v2-loop'
     );
   });
 
   it('seeds the create-team workflow that provisions a team via the HTTP API', async () => {
-    const copied = await seedGlobalHermitWorkflows(tmpDir);
-    const hermitWorkflowDir = getGlobalHermitWorkflowDir(tmpDir);
-    const target = path.join(hermitWorkflowDir, 'create-team.md');
+    await ensureGlobalWorkflows();
+    const content = fs.readFileSync(path.join(getHermitWorkflowScanDir(), 'create-team.md'), 'utf8');
 
-    expect(copied).toBeGreaterThan(0);
-    expect(fs.existsSync(target)).toBe(true);
-    const content = fs.readFileSync(target, 'utf8');
     expect(content).toContain('hermit-builtin-workflow:v2-loop');
-    // Points at the local Hermit server with an env override.
     expect(content).toContain('/api/teams/create');
     expect(content).toContain('${HERMIT_API_URL:-http://127.0.0.1:5680}');
-    // bindProject slug rule is surfaced for the admin agent.
     expect(content).toContain('^[a-z0-9][a-z0-9_-]*$');
-    // Provision-only safety boundary: must not auto-start agents.
     expect(content).toMatch(/不自动启动|不要.*启动.*agent/);
   });
 
-  it('refreshes managed command files when bundled content changes', async () => {
-    const hermitWorkflowDir = getGlobalHermitWorkflowDir(tmpDir);
-    fs.mkdirSync(hermitWorkflowDir, { recursive: true });
+  it('refreshes managed workflow files when bundled content changes', async () => {
+    const scanDir = getHermitWorkflowScanDir();
+    fs.mkdirSync(scanDir, { recursive: true });
     fs.writeFileSync(
-      path.join(hermitWorkflowDir, 'doctor.md'),
+      path.join(scanDir, 'doctor.md'),
       '<!-- hermit-builtin-workflow:v2-loop -->\n# Stale Doctor\n',
       'utf8'
     );
 
-    await seedGlobalHermitWorkflows(tmpDir);
+    await ensureGlobalWorkflows();
 
-    const content = fs.readFileSync(path.join(hermitWorkflowDir, 'doctor.md'), 'utf8');
+    const content = fs.readFileSync(path.join(scanDir, 'doctor.md'), 'utf8');
     expect(content).toContain('# Loop Runtime Doctor');
     expect(content).not.toContain('# Stale Doctor');
   });
 
-  it('does not overwrite user-edited command files', async () => {
-    const hermitWorkflowDir = getGlobalHermitWorkflowDir(tmpDir);
-    fs.mkdirSync(hermitWorkflowDir, { recursive: true });
-    fs.writeFileSync(path.join(hermitWorkflowDir, 'doctor.md'), '# Custom Doctor\n', 'utf8');
+  it('does not overwrite user-edited workflow files', async () => {
+    const scanDir = getHermitWorkflowScanDir();
+    fs.mkdirSync(scanDir, { recursive: true });
+    fs.writeFileSync(path.join(scanDir, 'doctor.md'), '# Custom Doctor\n', 'utf8');
 
-    await seedGlobalHermitWorkflows(tmpDir);
+    await ensureGlobalWorkflows();
 
-    expect(fs.readFileSync(path.join(hermitWorkflowDir, 'doctor.md'), 'utf8')).toBe('# Custom Doctor\n');
+    expect(fs.readFileSync(path.join(scanDir, 'doctor.md'), 'utf8')).toBe('# Custom Doctor\n');
+  });
+
+  it('moves legacy workspace workflows into native .claude/commands without a second live source', async () => {
+    const workspaceDir = path.join(tmpDir, 'workspace');
+    const legacyDir = path.join(workspaceDir, 'workflows');
+    const commandDir = path.join(workspaceDir, '.claude', 'commands');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, 'nightly-triage.md'), '# Nightly Triage\n', 'utf8');
+
+    const moved = await migrateLegacyWorkflowFolder(workspaceDir);
+
+    expect(moved).toBe(1);
+    expect(fs.existsSync(path.join(commandDir, 'nightly-triage.md'))).toBe(true);
+    expect(fs.existsSync(legacyDir)).toBe(false);
+  });
+
+  it('renames conflicting legacy workflows while still removing the legacy folder', async () => {
+    const workspaceDir = path.join(tmpDir, 'conflict-workspace');
+    const legacyDir = path.join(workspaceDir, 'workflows');
+    const commandDir = path.join(workspaceDir, '.claude', 'commands');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.mkdirSync(commandDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, 'doctor.md'), '# Legacy Doctor\n', 'utf8');
+    fs.writeFileSync(path.join(commandDir, 'doctor.md'), '# Current Doctor\n', 'utf8');
+
+    const moved = await migrateLegacyWorkflowFolder(workspaceDir);
+
+    expect(moved).toBe(1);
+    expect(fs.readFileSync(path.join(commandDir, 'doctor.md'), 'utf8')).toBe('# Current Doctor\n');
+    expect(fs.readFileSync(path.join(commandDir, 'doctor.legacy-workflow.md'), 'utf8')).toBe(
+      '# Legacy Doctor\n'
+    );
+    expect(fs.existsSync(legacyDir)).toBe(false);
   });
 });

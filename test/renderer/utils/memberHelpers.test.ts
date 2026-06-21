@@ -1,4 +1,5 @@
 import {
+  agentAvatarUrl,
   buildMemberLaunchPresentation,
   getLaunchAwarePresenceLabel,
   getSpawnAwareDotClass,
@@ -6,6 +7,7 @@ import {
   getSpawnCardClass,
   getMemberRuntimeAdvisoryLabel,
   getMemberRuntimeAdvisoryTitle,
+  teamAvatarUrl,
 } from '@renderer/utils/memberHelpers';
 
 import type { ResolvedTeamMember } from '@shared/types';
@@ -23,6 +25,18 @@ const member: ResolvedTeamMember = {
   providerId: 'gemini',
   removedAt: undefined,
 };
+
+describe('memberHelpers team avatars', () => {
+  it('uses one deterministic display-name seed for team list and detail avatars', () => {
+    expect(teamAvatarUrl('222-11io', '你好222')).toBe(agentAvatarUrl('你好222'));
+    expect(teamAvatarUrl('222-11io', ' 你好222 ')).toBe(teamAvatarUrl('different-slug', '你好222'));
+  });
+
+  it('falls back to the team slug when no display name exists', () => {
+    expect(teamAvatarUrl('222-11io', '')).toBe(agentAvatarUrl('222-11io'));
+    expect(teamAvatarUrl('222-11io', null)).toBe(agentAvatarUrl('222-11io'));
+  });
+});
 
 describe('memberHelpers spawn-aware presence', () => {
   it('shows process-online teammates as online with a green dot', () => {

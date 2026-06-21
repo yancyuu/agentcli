@@ -96,10 +96,8 @@ describe('idleNotificationSemantics', () => {
     ).toBe(true);
   });
 
-  it('keeps pure heartbeat as compact noise but not heartbeat with payload summary', () => {
-    expect(getIdleNoiseLabel('{"type":"idle_notification","idleReason":"available"}')).toBe(
-      'Idle (available)'
-    );
+  it('does not build a visible label for pure heartbeat or peer-summary idle payloads', () => {
+    expect(getIdleNoiseLabel('{"type":"idle_notification","idleReason":"available"}')).toBeNull();
     expect(
       getIdleNoiseLabel(
         JSON.stringify({

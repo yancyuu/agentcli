@@ -47,3 +47,31 @@ export function buildWorkflowCommandSuggestion(
       .join(' '),
   };
 }
+
+/** Reserved runtime namespaces that must never appear as user-runnable console commands. */
+const RESERVED_ADMIN_COMMAND_SUFFIXES = [':loop', ':system'] as const;
+
+function isAdminCommandReserved(name: string): boolean {
+  const raw = name.trim().toLowerCase().replace(/^\//, '');
+  return (
+    raw === 'loop' ||
+    raw === 'system' ||
+    RESERVED_ADMIN_COMMAND_SUFFIXES.some((suffix) => raw.endsWith(suffix))
+  );
+}
+
+/**
+ * Merge local-project workflow suggestions with capability-pack ("Claude common")
+ * suggestions for the Helm Loop console. Local-project commands always take
+ * priority — an operator's own `.claude/commands` surface ahead of the builtin
+ * pack commands — and the reserved `loop` / `system` runtime namespaces are
+ * dropped so they cannot be dispatched from the console.
+ */
+export function mergeAdminCommandSuggestions(
+  localSuggestions: MentionSuggestion[],
+  packSuggestions: MentionSuggestion[]
+): MentionSuggestion[] {
+  return [...localSuggestions, ...packSuggestions].filter(
+    (suggestion) => !isAdminCommandReserved(suggestion.command ?? suggestion.name)
+  );
+}

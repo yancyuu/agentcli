@@ -101,4 +101,26 @@ describe('mergeLocalAndCcSessions — hasLocalFile flag (#20)', () => {
     expect(byId.get('feishu-c')).toBe(false);
     expect(byId.get('feishu-d')).toBe(false);
   });
+
+  it('dedupes equivalent Feishu oc_/c_ cc-only sessions and keeps the richer history', () => {
+    const older = {
+      ...ccItem('feishu-old'),
+      session_key: 'feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_user',
+      history_count: 0,
+      updated_at: '2026-06-14T10:00:00Z',
+    };
+    const richer = {
+      ...ccItem('feishu-rich'),
+      session_key: 'feishu:c_efa2fbf5d5bd75da117eaebb6bbc730d:ou_user',
+      history_count: 17,
+      updated_at: '2026-06-14T11:00:00Z',
+    };
+
+    const merged = mergeLocalAndCcSessions([], [older, richer], PROJECT);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('feishu-rich');
+    expect(merged[0].historyCount).toBe(17);
+    expect(merged[0].sessionKey).toBe('feishu:c_efa2fbf5d5bd75da117eaebb6bbc730d:ou_user');
+  });
 });

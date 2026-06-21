@@ -17,6 +17,7 @@ import type {
   CcBridgeOutgoingMessage,
   CcBridgeReplyMessage,
   CcBridgeReplyStreamMessage,
+  CcBridgeUsageMessage,
   CcBridgeUserMessage,
   CcConnectConfig,
 } from '@shared/types/ccConnect';
@@ -33,6 +34,7 @@ export interface CcConnectBridgeEvents {
   disconnected: [error?: Error];
   reply: [message: CcBridgeReplyMessage];
   reply_stream: [message: CcBridgeReplyStreamMessage];
+  usage: [message: CcBridgeUsageMessage];
   message: [message: CcBridgeIncomingMessage];
 }
 
@@ -204,6 +206,7 @@ export class CcConnectBridge extends EventEmitter {
         platform: 'hermit',
         capabilities: BRIDGE_CAPABILITIES,
         metadata: { version: '1.0.0' },
+        observe_usage: true,
       });
 
       this.startPing();
@@ -241,6 +244,9 @@ export class CcConnectBridge extends EventEmitter {
         break;
       case 'reply_stream':
         this.emit('reply_stream', msg);
+        break;
+      case 'usage':
+        this.emit('usage', msg);
         break;
       default:
         this.emit('message', msg);

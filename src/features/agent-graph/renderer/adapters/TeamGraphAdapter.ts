@@ -959,11 +959,11 @@ export class TeamGraphAdapter {
       // Skip comment notifications — #buildCommentParticles handles them with real text
       if (msg.summary?.startsWith('Comment on ')) continue;
 
-      // Handle noise messages: idle uses semantic label, others (shutdown, terminated) skip entirely
+      // Handle noise messages: skip pure heartbeat/shutdown/terminated rows; keep idle only when it carries a peer summary.
       const msgText = msg.text ?? '';
-      const idleSemantic = classifyIdleNotificationText(msgText);
-      if (!idleSemantic && isInboxNoiseMessage(msgText)) {
-        continue; // skip shutdown_approved, teammate_terminated, shutdown_request
+      const idleLabel = getIdleGraphLabel(msgText);
+      if (!idleLabel && (classifyIdleNotificationText(msgText) || isInboxNoiseMessage(msgText))) {
+        continue;
       }
 
       // Cross-team messages: create ghost node + edge + particle
@@ -997,9 +997,7 @@ export class TeamGraphAdapter {
           kind: 'inbox_message',
           color: '#cc88ff',
           label,
-          preview:
-            getIdleGraphLabel(msg.text ?? '') ??
-            TeamGraphAdapter.#buildParticlePreview(msg.summary ?? cleanText),
+          preview: idleLabel ?? TeamGraphAdapter.#buildParticlePreview(msg.summary ?? cleanText),
           reverse: !isIncoming, // ghost→lead edge: incoming = forward, sent = reverse
         });
         continue;
@@ -1025,8 +1023,7 @@ export class TeamGraphAdapter {
       const isFromTeammate = fromId !== leadId;
 
       const particleLabel =
-        getIdleGraphLabel(msgText) ??
-        TeamGraphAdapter.#buildParticleLabel(msg.summary ?? msg.text, 'inbox');
+        idleLabel ?? TeamGraphAdapter.#buildParticleLabel(msg.summary ?? msg.text, 'inbox');
 
       particles.push({
         id: `particle:msg:${teamName}:${msgKey}`,
@@ -1035,9 +1032,7 @@ export class TeamGraphAdapter {
         kind: 'inbox_message',
         color: msg.color ?? '#66ccff',
         label: particleLabel,
-        preview:
-          getIdleGraphLabel(msgText) ??
-          TeamGraphAdapter.#buildParticlePreview(msg.summary ?? msg.text),
+        preview: idleLabel ?? TeamGraphAdapter.#buildParticlePreview(msg.summary ?? msg.text),
         reverse: isFromTeammate,
       });
     }

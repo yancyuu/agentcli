@@ -189,7 +189,7 @@ export function validateLoopSendIntent(
     return { ok: false, reason: 'Loop runtime 正在启动中，稍后再下发指令。' };
   }
 
-  if ((intent.kind === 'runtime' || intent.kind === 'session') && context.isTeamAlive === false) {
+  if (intent.kind === 'runtime' && context.isTeamAlive === false) {
     return { ok: false, reason: 'Loop runtime 离线，无法直接注入运行时。' };
   }
 
@@ -209,7 +209,7 @@ export function getLoopSendIntentLabel(intent: LoopSendIntent): string {
     case 'runtime':
       return '注入运行时';
     case 'session':
-      return intent.reuse ? '复用 Loop 会话' : '新建 Loop 会话';
+      return intent.reuse ? '复用本地会话' : '新建本地会话';
     case 'cross-team-task':
       return `跨团队派单：${intent.toTeam}`;
     case 'workers-list':

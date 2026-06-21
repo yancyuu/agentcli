@@ -1,11 +1,9 @@
 export interface SystemManagerStatus {
   displayName: 'Helm Loop';
-  /** Canonical, isolated runtime path for the admin loop (~/.hermit/admin-workspace). */
+  /** Canonical runtime path for the admin loop (~/.hermit). */
   adminWorkDir: string;
   defaultWorkDir: string;
   selectedWorkDir: string;
-  workflowFolder?: string;
-  globalHermitWorkflowFolder?: string;
   claudeCommand: 'claude';
   localStatus: 'ready' | 'missing-claude' | 'error';
   error?: string;
@@ -14,7 +12,6 @@ export interface SystemManagerStatus {
 export interface SystemManagerConfig {
   schemaVersion: 1;
   selectedWorkDir: string;
-  workflowFolder?: string;
   /** One-shot marker: the ops-guide bootstrap has been fed into the admin lead session. */
   adminInitialized?: boolean;
   updatedAt: string;
@@ -22,11 +19,10 @@ export interface SystemManagerConfig {
 
 export interface SystemManagerConfigPatch {
   selectedWorkDir?: string;
-  workflowFolder?: string | null;
   adminInitialized?: boolean;
 }
 
-export type WorkflowPromptSource = 'claude-command' | 'workflow-folder';
+export type WorkflowPromptSource = 'claude-command';
 
 export type WorkflowPromptSafety =
   | 'read-only'

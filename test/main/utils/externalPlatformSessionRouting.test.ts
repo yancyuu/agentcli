@@ -6,7 +6,7 @@ import {
   resolveExternalPlatformSessionTeamSlug,
 } from '@main/utils/externalPlatformSessionRouting';
 
-import type { TeamManifest } from '@main/services/teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from '@main/services/team-management/TeamWorkspaceService';
 
 function manifest(
   slug: string,
@@ -62,6 +62,20 @@ describe('external platform session routing', () => {
     expect(teamSlug).toBe('hermit-team');
   });
 
+  it('treats Feishu oc_ and c_ chat IDs as the same allow_chat target', () => {
+    const teamSlug = resolveExternalPlatformSessionTeamSlug(
+      'feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_user',
+      [
+        manifest('hermit-team', {
+          platformAllowChat: { feishu: 'c_efa2fbf5d5bd75da117eaebb6bbc730d' },
+          platformAllowFrom: { feishu: 'ou_user' },
+        }),
+      ]
+    );
+
+    expect(teamSlug).toBe('hermit-team');
+  });
+
   it('routes an Helm Loop Feishu session through QR-persisted owner metadata', () => {
     const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_admin:ou_admin', [
       manifest('system-manager', {
@@ -79,5 +93,40 @@ describe('external platform session routing', () => {
     ]);
 
     expect(teamSlug).toBeNull();
+  });
+
+  it('returns undefined chatId/userId when the session key omits them', () => {
+    expect(parseExternalPlatformSessionKey('feishu:')).toEqual({
+      platform: 'feishu',
+      chatId: undefined,
+      userId: undefined,
+    });
+    expect(parseExternalPlatformSessionKey('lark:chat_A')).toEqual({
+      platform: 'lark',
+      chatId: 'chat_A',
+      userId: undefined,
+    });
+  });
+
+  it('returns null for an unknown platform prefix', () => {
+    expect(isExternalPlatformSessionKey('unknown:chat:user')).toBe(false);
+    expect(parseExternalPlatformSessionKey('unknown:chat:user')).toBeNull();
+  });
+
+  it('falls back to bindProject when the winning manifest has no slug', () => {
+    const manifestNoSlug = manifest('', {
+      platformAllowFrom: { feishu: 'ou_user' },
+    });
+    const bindProject = (manifestNoSlug as TeamManifest).bindProject;
+    const teamSlug = resolveExternalPlatformSessionTeamSlug(
+      'feishu:chat_A:ou_user',
+      [manifestNoSlug]
+    );
+
+    expect(teamSlug).toBe(bindProject);
+  });
+
+  it('resolves to null when no manifests are provided', () => {
+    expect(resolveExternalPlatformSessionTeamSlug('feishu:chat_A:ou_user', [])).toBeNull();
   });
 });

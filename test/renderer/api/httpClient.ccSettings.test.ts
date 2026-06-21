@@ -16,6 +16,27 @@ describe('HttpAPIClient cc settings', () => {
     vi.restoreAllMocks();
   });
 
+  it('loads message attachments from the team message attachment route', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify([{ id: 'a1', data: 'base64', mimeType: 'image/png' }]), {
+          status: 200,
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new HttpAPIClient('http://localhost:9999');
+    await expect(client.teams.getAttachments('team one', 'msg/1')).resolves.toEqual([
+      { id: 'a1', data: 'base64', mimeType: 'image/png' },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9999/api/teams/team%20one/messages/msg%2F1/attachments',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
   it('allows cc-connect restart to take longer than the default 10 second request timeout', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('EventSource', MockEventSource);

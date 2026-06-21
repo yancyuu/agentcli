@@ -203,6 +203,7 @@ export function initializeNotificationListeners(): () => void {
     // Remaining fetches have no data dependency on each other — run in parallel
     // to avoid blocking teams/notifications behind a slow repository scan.
     await Promise.all([
+      useStore.getState().fetchProjects(),
       useStore.getState().fetchRepositoryGroups(),
       useStore.getState().fetchAllTasks(),
       useStore.getState().fetchTeams(),

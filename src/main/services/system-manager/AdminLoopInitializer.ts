@@ -4,9 +4,11 @@ import type { SystemManagerConfig, SystemManagerConfigPatch } from '@shared/type
  * Helm Loop bootstrap.
  *
  * On first open of the admin console, the GitHub Pages ops guide is fetched and
- * fed to the admin lead session as its first turn, so the agent can seed its own
- * CLAUDE.md from the manual. After a successful feed the `adminInitialized`
- * marker is set so it never repeats.
+ * persisted as the workspace CLAUDE.md (the durable bootstrap marker), then fed
+ * to the admin lead session as its first turn. The source of truth for "already
+ * initialized" is the CLAUDE.md artifact itself — not a persisted boolean — so
+ * deleting or losing the file reliably re-triggers the bootstrap, and a failed
+ * agent session can never leave the marker set while the file is missing.
  *
  * Extracted from server.ts as a pure, dependency-injected unit so the
  * idempotency and failure semantics are unit-testable without spawning the
@@ -51,6 +53,14 @@ export function buildAdminInitMessage(guideText: string): string {
 export interface AdminLoopInitDeps {
   getConfig: () => Promise<SystemManagerConfig>;
   updateConfig: (patch: SystemManagerConfigPatch) => Promise<SystemManagerConfig>;
+  /** Existing persistent bootstrap artifact, e.g. workspace CLAUDE.md. */
+  hasExistingBootstrap?: () => Promise<boolean>;
+  /**
+   * Persist the bootstrap guide as the workspace CLAUDE.md so the artifact —
+   * and therefore the gate — survives even when the dispatched agent session
+   * fails to start. The plain-text guide body is passed through unchanged.
+   */
+  writeBootstrapArtifact?: (guideText: string) => Promise<void>;
   /** Fetch the ops guide. Resolves with statusCode + raw body; rejects on network error. */
   fetchGuide: () => Promise<{ statusCode: number; body: string }>;
   /** Deliver the bootstrap message to the admin lead session. */
@@ -60,17 +70,22 @@ export interface AdminLoopInitDeps {
 }
 
 /**
- * Run the one-shot bootstrap if it hasn't run yet.
+ * Run the one-shot bootstrap when the workspace CLAUDE.md artifact is missing.
  *
- * - Idempotent: returns immediately when `adminInitialized` is already set —
- *   does NOT fetch or dispatch.
+ * - Artifact-gated: `hasExistingBootstrap` (CLAUDE.md presence) is the single
+ *   source of truth — present → done, absent → (re)bootstrap, even if the
+ *   persisted `adminInitialized` boolean is already `true`. This makes init
+ *   detection reflect reality instead of a flag that can drift out of sync
+ *   (e.g. a failed agent session that set the flag but never produced the file).
  * - Failure-tolerant: a network error, non-2xx status, or empty body returns
- *   WITHOUT setting the marker, so the next console open retries. Only a
- *   successful fetch + dispatch sets the flag.
+ *   WITHOUT writing the artifact, dispatching, or setting the flag, so the next
+ *   console open retries.
  */
 export async function ensureAdminLoopInitialized(deps: AdminLoopInitDeps): Promise<void> {
-  const config = await deps.getConfig();
-  if (config.adminInitialized) return;
+  if (await deps.hasExistingBootstrap?.()) {
+    await syncAdminInitializedMarker(deps);
+    return;
+  }
 
   let body = '';
   try {
@@ -90,6 +105,16 @@ export async function ensureAdminLoopInitialized(deps: AdminLoopInitDeps): Promi
     return;
   }
 
+  // Write the durable CLAUDE.md marker before dispatching, so the gate is
+  // satisfied even if the agent session fails to start on this pass.
+  await deps.writeBootstrapArtifact?.(body);
   await deps.dispatch({ text: buildAdminInitMessage(body), messageId: ADMIN_INIT_MESSAGE_ID });
   await deps.updateConfig({ adminInitialized: true });
+}
+
+/** Keep the persisted `adminInitialized` hint in sync with an existing artifact (idempotent write). */
+async function syncAdminInitializedMarker(deps: AdminLoopInitDeps): Promise<void> {
+  if (!(await deps.getConfig()).adminInitialized) {
+    await deps.updateConfig({ adminInitialized: true });
+  }
 }

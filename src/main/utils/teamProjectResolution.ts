@@ -1,4 +1,4 @@
-import type { TeamManifest } from '@main/services/teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from '@main/services/team-management/TeamWorkspaceService';
 
 export async function resolveCcProjectName(
   routeTeamName: string,

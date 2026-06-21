@@ -9,11 +9,6 @@ import type {
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
 
-import {
-  getBuiltinWorkflowByFilename,
-  type BuiltinWorkflowDefinition,
-} from './BuiltinWorkflowSeeder';
-
 const SUPPORTED_EXTENSIONS = new Set(['.md', '.txt', '.prompt', '.workflow']);
 const MAX_PROMPT_BYTES = 256 * 1024;
 
@@ -46,23 +41,6 @@ function commandNameFromRelativePath(relativePath: string): `/${string}` {
   return `/${commandName}`;
 }
 
-function applyBuiltinMetadata(
-  summary: WorkflowPromptSummary,
-  builtin: BuiltinWorkflowDefinition | undefined
-): WorkflowPromptSummary {
-  if (!builtin) return summary;
-  return {
-    ...summary,
-    label: builtin.label,
-    commandName: summary.commandName ?? builtin.commandName,
-    description: builtin.description,
-    category: builtin.category,
-    safety: builtin.safety,
-    builtin: true,
-    order: builtin.order,
-  };
-}
-
 export class WorkflowPromptService {
   async list(folderInput: string): Promise<WorkflowPromptListResponse> {
     const folder = path.resolve(expandHome(folderInput));
@@ -73,38 +51,46 @@ export class WorkflowPromptService {
 
     const warnings: string[] = [];
     const prompts: WorkflowPromptSummary[] = [];
-    const entries = await readdir(folder, { withFileTypes: true });
     const commandRoot = getClaudeCommandRoot(folder);
+    if (!commandRoot) {
+      throw new Error(`Claude command folder 必须位于 .claude/commands 下: ${folder}`);
+    }
+    const pendingDirs = [folder];
 
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name.startsWith('.')) continue;
-      const ext = path.extname(entry.name).toLowerCase();
-      if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
-      const filePath = path.join(folder, entry.name);
-      const fileStat = await stat(filePath);
-      if (fileStat.size > MAX_PROMPT_BYTES) {
-        warnings.push(`${entry.name} 超过 256 KiB，已跳过`);
-        continue;
+    for (const currentDir of pendingDirs) {
+      const entries = await readdir(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        const filePath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          pendingDirs.push(filePath);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
+        const fileStat = await stat(filePath);
+        if (fileStat.size > MAX_PROMPT_BYTES) {
+          warnings.push(`${path.relative(folder, filePath)} 超过 256 KiB，已跳过`);
+          continue;
+        }
+
+        const relativeCommandPath = path.relative(commandRoot, filePath);
+        const commandName = commandNameFromRelativePath(relativeCommandPath);
+        const summary: WorkflowPromptSummary = {
+          id: promptId(filePath),
+          label: labelFromFilename(entry.name),
+          filename: path.relative(folder, filePath),
+          path: filePath,
+          folder,
+          sizeBytes: fileStat.size,
+          updatedAt: fileStat.mtime.toISOString(),
+          source: 'claude-command',
+          commandName,
+          safety: 'unknown',
+        };
+        prompts.push(summary);
       }
-
-      const relativeCommandPath = commandRoot ? path.relative(commandRoot, filePath) : entry.name;
-      const commandName = commandRoot
-        ? commandNameFromRelativePath(relativeCommandPath)
-        : undefined;
-      const builtin = commandRoot ? getBuiltinWorkflowByFilename(entry.name) : undefined;
-      const summary: WorkflowPromptSummary = {
-        id: promptId(filePath),
-        label: labelFromFilename(entry.name),
-        filename: entry.name,
-        path: filePath,
-        folder,
-        sizeBytes: fileStat.size,
-        updatedAt: fileStat.mtime.toISOString(),
-        source: commandRoot ? 'claude-command' : 'workflow-folder',
-        commandName,
-        safety: commandRoot ? 'unknown' : undefined,
-      };
-      prompts.push(applyBuiltinMetadata(summary, builtin));
     }
 
     prompts.sort((a, b) => {

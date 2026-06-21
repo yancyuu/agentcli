@@ -7,6 +7,7 @@ import {
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { getWorktreeNavigationState } from '@renderer/store/utils/stateResetHelpers';
+import { emitCreateTeamFromProjectIntent } from '@renderer/utils/openHermitEvents';
 import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { createLogger } from '@shared/utils/logger';
 import { useShallow } from 'zustand/react/shallow';
@@ -108,6 +109,7 @@ export function useOpenRecentProject(): {
     async (project: DashboardRecentProject): Promise<void> => {
       try {
         await openTarget(project.openTarget, project.associatedPaths);
+        emitCreateTeamFromProjectIntent(project.primaryPath);
         recordRecentProjectOpenPaths([project.primaryPath, ...project.associatedPaths]);
       } catch (error) {
         logger.error('Failed to open recent project', error);

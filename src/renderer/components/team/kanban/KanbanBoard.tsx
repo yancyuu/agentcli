@@ -99,6 +99,12 @@ const COLUMNS: { id: KanbanColumnId; title: string }[] = [
   { id: 'done', title: 'DONE' },
 ];
 
+function toTimestamp(raw: string | Date | null | undefined): number {
+  if (!raw) return 0;
+  const time = raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 function getTaskColumn(task: TeamTask, kanbanState: KanbanState): KanbanColumnId | null {
   // Kanban state is authoritative for review/approved placement.
   // When clearKanban removes a task, the entry is deleted — so we must NOT
@@ -156,25 +162,21 @@ function sortColumnTasksByField(
     return sortColumnTasksByOrder(columnTasks, order);
   }
 
+  if (field === 'updatedAt' || field === 'createdAt') {
+    const timestampByTaskId = new Map(
+      columnTasks.map((task) => [
+        task.id,
+        field === 'updatedAt'
+          ? toTimestamp(task.updatedAt ?? task.createdAt)
+          : toTimestamp(task.createdAt),
+      ])
+    );
+    return [...columnTasks].sort(
+      (a, b) => (timestampByTaskId.get(b.id) ?? 0) - (timestampByTaskId.get(a.id) ?? 0)
+    );
+  }
+
   return [...columnTasks].sort((a, b) => {
-    if (field === 'updatedAt') {
-      const tsA = a.updatedAt
-        ? new Date(a.updatedAt).getTime()
-        : a.createdAt
-          ? new Date(a.createdAt).getTime()
-          : 0;
-      const tsB = b.updatedAt
-        ? new Date(b.updatedAt).getTime()
-        : b.createdAt
-          ? new Date(b.createdAt).getTime()
-          : 0;
-      return tsB - tsA; // desc — свежие вверху
-    }
-    if (field === 'createdAt') {
-      const tsA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const tsB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return tsB - tsA; // desc — новые вверху
-    }
     if (field === 'owner') {
       const ownerA = (a.owner ?? '').toLowerCase();
       const ownerB = (b.owner ?? '').toLowerCase();

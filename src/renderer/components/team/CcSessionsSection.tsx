@@ -289,17 +289,6 @@ function CcSessionRow({
       return;
     }
 
-    // cc-only sessions (e.g. a Feishu listening session with no local Claude
-    // JSONL yet) have no local detail to read — the detail endpoint would 404
-    // and surface a misleading "会话文件已不存在" (#20). Skip the fetch; the
-    // render branch shows an inline listening state instead.
-    if (session.hasLocalFile === false) {
-      setDetail(null);
-      setDetailError(null);
-      setLoadingDetail(false);
-      return;
-    }
-
     let cancelled = false;
     const isIncrementalLoad = historyLimit > SESSION_DETAIL_PAGE_SIZE;
     setDetailError(null);
@@ -405,110 +394,93 @@ function CcSessionRow({
 
       {isExpanded && (
         <div className="px-3 pb-3">
-          {session.hasLocalFile === false ? (
-            // cc-only session (e.g. Feishu listening, no local JSONL yet) —
-            // no local history to show. Avoids the misleading
-            // "会话文件已不存在" 404 path (#20).
-            <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
-              <Radio size={13} className="shrink-0 animate-pulse text-emerald-400" />
-              <span>监听中，暂无本地历史</span>
+          {loadingDetail && !detail && (
+            <div className="rounded-lg bg-[var(--color-surface)] px-3 py-3">
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="h-3 animate-pulse rounded bg-[var(--color-surface-raised)]"
+                  />
+                ))}
+              </div>
             </div>
-          ) : (
-            <>
-              {loadingDetail && !detail && (
-                <div className="rounded-lg bg-[var(--color-surface)] px-3 py-3">
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        className="h-3 animate-pulse rounded bg-[var(--color-surface-raised)]"
-                      />
-                    ))}
+          )}
+          {detailError && !loadingDetail && (
+            <div className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <AlertCircle size={13} className="shrink-0" />
+              <span>{detailError}</span>
+            </div>
+          )}
+          {detail && (
+            <div className="rounded-lg bg-[var(--color-surface)] p-2">
+              {detail.history.length === 0 ? (
+                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">暂无动态</div>
+              ) : (
+                <>
+                  <div className="mb-2 flex items-center justify-between px-1 text-[10px] text-[var(--color-text-muted)]">
+                    <span>会话历史</span>
+                    <span>
+                      已显示 {detail.history.length} / {detail.historyCount}
+                    </span>
                   </div>
-                </div>
-              )}
-              {detailError && !loadingDetail && (
-                <div className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  <AlertCircle size={13} className="shrink-0" />
-                  <span>{detailError}</span>
-                </div>
-              )}
-              {detail && (
-                <div className="rounded-lg bg-[var(--color-surface)] p-2">
-                  {detail.history.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">暂无动态</div>
-                  ) : (
-                    <>
-                      <div className="mb-2 flex items-center justify-between px-1 text-[10px] text-[var(--color-text-muted)]">
-                        <span>会话历史</span>
-                        <span>
-                          已显示 {detail.history.length} / {detail.historyCount}
-                        </span>
-                      </div>
-                      <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                        {[...detail.history].reverse().map((msg, i) => {
-                          const isUserMessage = msg.role === 'user';
-                          return (
-                            <div
-                              key={`${msg.timestamp}-${i}`}
-                              className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
-                                isUserMessage
-                                  ? 'bg-indigo-500/10 text-[var(--color-text)]'
-                                  : 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
+                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {[...detail.history].reverse().map((msg, i) => {
+                      const isUserMessage = msg.role === 'user';
+                      return (
+                        <div
+                          key={`${msg.timestamp}-${i}`}
+                          className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
+                            isUserMessage
+                              ? 'bg-indigo-500/10 text-[var(--color-text)]'
+                              : 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
+                          }`}
+                        >
+                          <div className="mb-1 flex items-center gap-2">
+                            <span
+                              className={`shrink-0 text-[10px] font-medium ${
+                                isUserMessage ? 'text-indigo-400' : 'text-[var(--color-text-muted)]'
                               }`}
                             >
-                              <div className="mb-1 flex items-center gap-2">
-                                <span
-                                  className={`shrink-0 text-[10px] font-medium ${
-                                    isUserMessage
-                                      ? 'text-indigo-400'
-                                      : 'text-[var(--color-text-muted)]'
-                                  }`}
-                                >
-                                  {isUserMessage ? '用户' : 'Agent'}
-                                </span>
-                                <span className="text-[10px] text-[var(--color-text-muted)] opacity-60">
-                                  {formatMessageTime(msg.timestamp)}
-                                </span>
-                              </div>
-                              <div className="whitespace-pre-wrap break-words">
-                                {msg.content.slice(0, 500)}
-                                {msg.content.length > 500 ? '…' : ''}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {hasMoreHistory && (
-                        <div className="mt-2 flex items-center justify-between gap-2 px-1">
-                          <span className="text-[10px] text-[var(--color-text-muted)]">
-                            每次加载 {SESSION_DETAIL_PAGE_SIZE} 条
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-raised)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={handleLoadMoreHistory}
-                            disabled={loadingDetail || loadingMoreHistory}
-                          >
-                            {loadingMoreHistory ? (
-                              <>
-                                <Loader2 size={12} className="animate-spin" />
-                                加载中...
-                              </>
-                            ) : (
-                              <>
-                                加载更早 ({Math.max(detail.historyCount - detail.history.length, 0)}
-                                )
-                              </>
-                            )}
-                          </button>
+                              {isUserMessage ? '用户' : 'Agent'}
+                            </span>
+                            <span className="text-[10px] text-[var(--color-text-muted)] opacity-60">
+                              {formatMessageTime(msg.timestamp)}
+                            </span>
+                          </div>
+                          <div className="whitespace-pre-wrap break-words">
+                            {msg.content.slice(0, 500)}
+                            {msg.content.length > 500 ? '…' : ''}
+                          </div>
                         </div>
-                      )}
-                    </>
+                      );
+                    })}
+                  </div>
+                  {hasMoreHistory && (
+                    <div className="mt-2 flex items-center justify-between gap-2 px-1">
+                      <span className="text-[10px] text-[var(--color-text-muted)]">
+                        每次加载 {SESSION_DETAIL_PAGE_SIZE} 条
+                      </span>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-raised)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={handleLoadMoreHistory}
+                        disabled={loadingDetail || loadingMoreHistory}
+                      >
+                        {loadingMoreHistory ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin" />
+                            加载中...
+                          </>
+                        ) : (
+                          <>加载更早 ({Math.max(detail.historyCount - detail.history.length, 0)})</>
+                        )}
+                      </button>
+                    </div>
                   )}
-                </div>
+                </>
               )}
-            </>
+            </div>
           )}
         </div>
       )}

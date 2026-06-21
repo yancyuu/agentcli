@@ -3,17 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { Button } from '@renderer/components/ui/button';
-import {
-  buildCapabilityPackCommandSuggestions,
-  collectSlashSuggestionAliases,
-} from '@renderer/utils/slashCommandRegistry';
-import { buildWorkflowCommandSuggestion } from '@renderer/utils/workflowCommandSuggestions';
+import { buildCapabilityPackCommandSuggestions } from '@renderer/utils/slashCommandRegistry';
 import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
-import type {
-  SystemManagerConfig,
-  SystemManagerStatus,
-  WorkflowPromptSummary,
-} from '@shared/types/systemManager';
+import type { SystemManagerConfig, SystemManagerStatus } from '@shared/types/systemManager';
 import { Settings2, TerminalSquare } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -39,11 +31,6 @@ function formatPathForTitle(pathValue: string): string {
   return pathValue;
 }
 
-function joinPath(basePath: string, childPath: string): string {
-  const trimmedBase = basePath.replace(/[\\/]+$/, '');
-  return `${trimmedBase}/${childPath}`;
-}
-
 const EMPTY_ADMIN_TASKS: TeamTaskWithKanban[] = [];
 const EMPTY_CAPABILITY_PACKS = [] as const;
 const NOOP_FETCH_CAPABILITY_PACKS = () => Promise.resolve();
@@ -52,7 +39,7 @@ function buildAdminLoopMember(teamData: TeamViewSnapshot | null): ResolvedTeamMe
   const lead = teamData?.members[0];
   return [
     {
-      name: lead?.name ?? SYSTEM_MANAGER_DISPLAY_NAME,
+      name: SYSTEM_MANAGER_TEAM_NAME,
       agentId: lead?.agentId,
       status: teamData?.isAlive ? 'active' : 'idle',
       currentTaskId: null,
@@ -78,8 +65,6 @@ export const SystemManagerView = ({
   isActive: _isActive = true,
 }: SystemManagerViewProps): React.JSX.Element => {
   const [status, setStatus] = useState<SystemManagerStatus | null>(null);
-  const [workflowPrompts, setWorkflowPrompts] = useState<WorkflowPromptSummary[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [adminTeamData, setAdminTeamData] = useState<TeamViewSnapshot | null>(null);
   const [adminSessions, setAdminSessions] = useState<CcSession[]>([]);
@@ -108,36 +93,6 @@ export const SystemManagerView = ({
       setStatus(nextStatus);
       setAdminTeamData(nextTeamData);
       setAdminSessions(nextSessions);
-      const candidateFolders = [
-        nextStatus.globalHermitWorkflowFolder,
-        joinPath(nextStatus.adminWorkDir, '.claude/commands'),
-        nextConfig.workflowFolder,
-        joinPath(nextStatus.adminWorkDir, 'workflows'),
-      ].filter((folder): folder is string => Boolean(folder));
-      const seenFolders = new Set<string>();
-      const seenPrompts = new Set<string>();
-      const nextPrompts: WorkflowPromptSummary[] = [];
-      const nextWarnings: string[] = [];
-      for (const folder of candidateFolders) {
-        if (seenFolders.has(folder)) continue;
-        seenFolders.add(folder);
-        try {
-          const workflowResult = await api.systemManager.listWorkflowPrompts(folder);
-          for (const prompt of workflowResult.prompts) {
-            const basename = prompt.filename.replace(/\.[^.]+$/, '');
-            const key = prompt.commandName ?? basename;
-            if (seenPrompts.has(key) || seenPrompts.has(basename)) continue;
-            seenPrompts.add(key);
-            seenPrompts.add(basename);
-            nextPrompts.push(prompt);
-          }
-          nextWarnings.push(...workflowResult.warnings);
-        } catch {
-          // Common commands are optional; missing folders should not interrupt opening the console.
-        }
-      }
-      setWorkflowPrompts(nextPrompts);
-      setWarnings(nextWarnings);
       return nextConfig;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -151,15 +106,10 @@ export const SystemManagerView = ({
     void load();
   }, [load]);
 
-  const adminWorkflowCommandSuggestions = useMemo(() => {
-    const workflowSuggestions = [...workflowPrompts]
-      .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
-      .map((prompt) => buildWorkflowCommandSuggestion(prompt, 'admin-workflow'));
-    const packSuggestions = buildCapabilityPackCommandSuggestions(capabilityPacks, 'admin-loop', {
-      forceNamespacedAliases: collectSlashSuggestionAliases(workflowSuggestions),
-    });
-    return [...workflowSuggestions, ...packSuggestions];
-  }, [capabilityPacks, workflowPrompts]);
+  const adminWorkflowCommandSuggestions = useMemo(
+    () => buildCapabilityPackCommandSuggestions(capabilityPacks, 'admin-loop', {}),
+    [capabilityPacks]
+  );
   const adminMembers = useMemo(() => buildAdminLoopMember(adminTeamData), [adminTeamData]);
   const adminTasks = adminTeamData?.tasks ?? EMPTY_ADMIN_TASKS;
 
@@ -201,16 +151,13 @@ export const SystemManagerView = ({
                     指令台。
                   </p>
                 </div>
-                <span className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-                  {workflowPrompts.length} workflows
-                </span>
               </div>
               <div className="mt-3 grid gap-2 text-[11px] text-[var(--color-text-muted)] sm:grid-cols-3">
                 <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
                   作用域：{formatPathForTitle(status?.adminWorkDir ?? '—')}
                 </div>
                 <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
-                  命令源：全局 Hermit / 团队 `.claude/commands` / workflows
+                  命令源：当前工作空间 `.claude/commands`
                 </div>
                 <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2">
                   默认边界：只读/报告/提案优先
@@ -218,11 +165,8 @@ export const SystemManagerView = ({
               </div>
             </div>
 
-            {(warnings.length || error || loading) && (
+            {(error || loading) && (
               <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-xs">
-                {warnings.length ? (
-                  <div className="text-amber-300">{warnings.join('；')}</div>
-                ) : null}
                 {error ? <div className="text-red-300">{error}</div> : null}
                 {loading ? (
                   <div className="text-[var(--color-text-muted)]">加载 Helm Loop 配置中...</div>
@@ -234,7 +178,9 @@ export const SystemManagerView = ({
               teamName={SYSTEM_MANAGER_TEAM_NAME}
               members={adminMembers}
               tasks={adminTasks}
-              isTeamAlive={adminTeamData?.isAlive}
+              isTeamAlive={status?.localStatus === 'ready'}
+              statusLabel={status?.localStatus === 'ready' ? '本地可用' : '本地异常'}
+              sessionPendingRecipient={SYSTEM_MANAGER_TEAM_NAME}
               isProvisioning={loading}
               currentLeadSessionId={adminTeamData?.config.leadSessionId}
               leadProjectPath={adminTeamData?.config.projectPath}
@@ -244,14 +190,6 @@ export const SystemManagerView = ({
               pendingRepliesByMember={pendingRepliesByMember}
               onPendingReplyChange={setPendingRepliesByMember}
             />
-
-            {!workflowPrompts.length && !loading ? (
-              <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 text-center text-sm text-[var(--color-text-muted)]">
-                当前没有可用 Helm Loop workflow。Hermit 默认命令会预装到
-                `~/.claude/commands/hermit`；团队自定义命令可添加到 `.claude/commands` 或
-                workflows。
-              </div>
-            ) : null}
           </div>
         </div>
       </div>

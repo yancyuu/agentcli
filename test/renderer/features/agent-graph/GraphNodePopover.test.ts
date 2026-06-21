@@ -110,6 +110,32 @@ describe('GraphNodePopover spawn badge labels', () => {
     });
   });
 
+  it('hides the generic idle status badge for available members', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(GraphNodePopover, {
+          node: makeMemberNode(undefined),
+          teamName: 'northstar-core',
+          onClose: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('alice');
+    expect(host.textContent).not.toContain('idle');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('shows compact exception badge for member abnormal states', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');

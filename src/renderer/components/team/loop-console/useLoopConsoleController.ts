@@ -11,6 +11,7 @@ import type { DiscoverableWorker, InboxMessage } from '@shared/types';
 interface UseLoopConsoleControllerOptions {
   teamName: string;
   sessionKey?: string | null;
+  sessionPendingRecipient?: string;
   onPendingReplyChange: (updater: (prev: Record<string, number>) => Record<string, number>) => void;
 }
 
@@ -60,6 +61,7 @@ function formatWorkersList(workers: DiscoverableWorker[]): string {
 export function useLoopConsoleController({
   teamName,
   sessionKey,
+  sessionPendingRecipient,
   onPendingReplyChange,
 }: UseLoopConsoleControllerOptions): UseLoopConsoleControllerResult {
   const [localSending, setLocalSending] = useState(false);
@@ -162,7 +164,7 @@ export function useLoopConsoleController({
             addOptimisticTeamMessage(
               teamName,
               buildOptimisticSystemMessage(
-                `${verb} ${result.worker.name} 的 Loop 会话并直接下发指令，无需审批。`
+                `${verb} ${result.worker.name} 的本地会话并直接下发指令，无需审批。`
               )
             );
             await refreshTeamMessagesHead(teamName).catch(() => undefined);
@@ -212,6 +214,8 @@ export function useLoopConsoleController({
       }
 
       setLocalSending(true);
+      const sentAtMs = Date.now();
+      const pendingRecipient = sessionPendingRecipient ?? teamName;
       try {
         if (intent.kind === 'runtime') {
           await api.teams.processSend(teamName, intent.text);
@@ -224,6 +228,7 @@ export function useLoopConsoleController({
           return true;
         }
 
+        onPendingReplyChange((prev) => ({ ...prev, [pendingRecipient]: sentAtMs }));
         const response = await api.teams.createLoopSession(teamName, {
           sessionName: intent.sessionName,
           message: intent.text,
@@ -233,13 +238,19 @@ export function useLoopConsoleController({
         addOptimisticTeamMessage(
           teamName,
           buildOptimisticSystemMessage(
-            `${verb} Loop 会话「${response.session.title || response.session.sessionKey}」并下发初始指令。`,
+            `${verb}本地会话「${response.session.title || response.session.sessionKey}」并下发初始指令，正在等待 Claude 回复。`,
             'cc'
           )
         );
         await refreshTeamMessagesHead(teamName).catch(() => undefined);
         return true;
       } catch (error) {
+        onPendingReplyChange((prev) => {
+          if (prev[pendingRecipient] !== sentAtMs) return prev;
+          const next = { ...prev };
+          delete next[pendingRecipient];
+          return next;
+        });
         const message = error instanceof Error ? error.message : 'Loop runtime 操作失败';
         setStatusMessage(message);
         addOptimisticTeamMessage(teamName, buildOptimisticSystemMessage(message));
@@ -254,6 +265,7 @@ export function useLoopConsoleController({
       refreshTeamMessagesHead,
       sendTeamMessage,
       sessionKey,
+      sessionPendingRecipient,
       teamName,
     ]
   );

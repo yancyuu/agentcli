@@ -63,14 +63,7 @@ export function getIdleNoiseLabel(
   const classified = classifyIdleNotification(value);
   if (!classified) return null;
 
-  if (classified.uiPresentation !== 'heartbeat') {
-    return null;
-  }
-
-  const reason =
-    typeof classified.payload.idleReason === 'string' &&
-    classified.payload.idleReason.trim().length > 0
-      ? classified.payload.idleReason.trim()
-      : null;
-  return reason ? `Idle (${reason})` : 'Idle';
+  // Pure heartbeat idle notifications are control-plane noise. Keep the
+  // classification for filtering, but do not render a visible "idle" tag.
+  return null;
 }

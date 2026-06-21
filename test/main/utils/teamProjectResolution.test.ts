@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveCcProjectName } from '../../../src/main/utils/teamProjectResolution';
 
-import type { TeamManifest } from '../../../src/main/services/teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from '../../../src/main/services/team-management/TeamWorkspaceService';
 
 const manifest: TeamManifest = {
   schemaVersion: 2,
@@ -32,5 +32,25 @@ describe('resolveCcProjectName', () => {
     });
 
     expect(projectName).toBe('external-project');
+  });
+
+  it('falls back to the route name when bindProject is blank', async () => {
+    const projectName = await resolveCcProjectName('blank-bind', async () => ({
+      ...manifest,
+      slug: 'blank-bind',
+      bindProject: '   ',
+    }));
+
+    expect(projectName).toBe('blank-bind');
+  });
+
+  it('trims a populated bindProject before returning it', async () => {
+    const projectName = await resolveCcProjectName('padded', async () => ({
+      ...manifest,
+      slug: 'padded',
+      bindProject: '  real-project  ',
+    }));
+
+    expect(projectName).toBe('real-project');
   });
 });

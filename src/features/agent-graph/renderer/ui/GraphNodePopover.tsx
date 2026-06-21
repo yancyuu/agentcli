@@ -356,6 +356,7 @@ const MemberPopoverContent = ({
           : node.state === 'tool_calling'
             ? 'running tool'
             : node.state);
+  const showStatusLabel = statusLabel !== 'idle';
   const statusDotClass =
     launchPresentation?.dotClass ??
     (node.spawnStatus === 'spawning'
@@ -405,9 +406,11 @@ const MemberPopoverContent = ({
 
       {/* Status badges */}
       <div className="mt-2 flex flex-wrap gap-1">
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          {statusLabel}
-        </Badge>
+        {showStatusLabel ? (
+          <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+            {statusLabel}
+          </Badge>
+        ) : null}
         {node.kind === 'lead' && (
           <Badge
             variant="outline"

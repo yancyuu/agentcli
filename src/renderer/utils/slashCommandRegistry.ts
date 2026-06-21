@@ -21,6 +21,11 @@ export const RESERVED_SLASH_COMMANDS = new Set([
   'agents',
   'hooks',
   'memory',
+  // Reserved runtime names that should not be exposed as short capability-pack aliases.
+  // They are intentionally not part of KNOWN_SLASH_COMMANDS so regular command boards
+  // can omit them while still forcing pack commands to use namespaced forms.
+  'loop',
+  'system',
 ]);
 
 interface SlashRegistryInput {

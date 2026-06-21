@@ -17,6 +17,7 @@ vi.mock('@renderer/api', () => ({
         notifications: { enabled: true, triggers: [] },
       })),
     },
+    getProjects: vi.fn(async () => []),
     getRepositoryGroups: vi.fn(async () => []),
     notifications: {
       onNew: vi.fn(() => () => undefined),
@@ -120,6 +121,10 @@ describe('team change throttling', () => {
     __resetTeamSliceModuleStateForTests();
     vi.mocked(console.warn).mockRestore();
     vi.useRealTimers();
+  });
+
+  it('loads flat projects during centralized startup initialization', () => {
+    expect(api.getProjects).toHaveBeenCalledTimes(1);
   });
 
   it('throttles both team list and detail refresh', async () => {

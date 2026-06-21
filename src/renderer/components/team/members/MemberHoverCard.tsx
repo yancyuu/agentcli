@@ -154,6 +154,7 @@ export const MemberHoverCard = ({
           launchVisualState === 'stale_runtime'
         ? (launchStatusLabel ?? presenceLabel)
         : presenceLabel;
+  const showBadgeLabel = badgeLabel !== 'idle';
   const launchDiagnosticsPayload = buildMemberLaunchDiagnosticsPayload({
     teamName: effectiveTeamName,
     runId: runtimeRunId ?? memberSpawnSnapshot?.runId ?? progress?.runId,
@@ -204,27 +205,29 @@ export const MemberHoverCard = ({
                 >
                   {displayMemberName(member.name)}
                 </span>
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 px-1.5 py-0 text-[10px] font-normal leading-tight"
-                  title={runtimeAdvisoryTitle}
-                  style={{
-                    backgroundColor:
-                      runtimeAdvisoryTone === 'error'
-                        ? 'rgba(239, 68, 68, 0.16)'
-                        : getThemedBadge(colors, isLight),
-                    color:
-                      runtimeAdvisoryTone === 'error'
-                        ? 'rgb(252, 165, 165)'
-                        : getThemedText(colors, isLight),
-                    border:
-                      runtimeAdvisoryTone === 'error'
-                        ? '1px solid rgba(248, 113, 113, 0.35)'
-                        : `1px solid ${getThemedBorder(colors, isLight)}40`,
-                  }}
-                >
-                  {badgeLabel}
-                </Badge>
+                {showBadgeLabel ? (
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 px-1.5 py-0 text-[10px] font-normal leading-tight"
+                    title={runtimeAdvisoryTitle}
+                    style={{
+                      backgroundColor:
+                        runtimeAdvisoryTone === 'error'
+                          ? 'rgba(239, 68, 68, 0.16)'
+                          : getThemedBadge(colors, isLight),
+                      color:
+                        runtimeAdvisoryTone === 'error'
+                          ? 'rgb(252, 165, 165)'
+                          : getThemedText(colors, isLight),
+                      border:
+                        runtimeAdvisoryTone === 'error'
+                          ? '1px solid rgba(248, 113, 113, 0.35)'
+                          : `1px solid ${getThemedBorder(colors, isLight)}40`,
+                    }}
+                  >
+                    {badgeLabel}
+                  </Badge>
+                ) : null}
               </div>
               {roleLabel && (
                 <span className="text-xs text-[var(--color-text-muted)]">{roleLabel}</span>

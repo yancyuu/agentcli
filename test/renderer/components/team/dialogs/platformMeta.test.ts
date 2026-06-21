@@ -89,4 +89,17 @@ describe('platformMeta data structure', () => {
     expect(knownPlatforms).toContain('slack');
     expect(knownPlatforms).toContain('dingtalk');
   });
+
+  it('keeps WeCom websocket and callback metadata separate for concrete modes', () => {
+    expect(platformMeta.wecom.label).toBe('企业微信自建应用（Callback）');
+    expect(platformMeta.wecom_ws.submitType).toBe('wecom');
+    expect(platformMeta.wecom_ws.defaultOptions).toEqual({ mode: 'websocket' });
+    expect(platformMeta.wecom_ws.fields.map((field) => field.key)).toEqual([
+      'bot_id',
+      'bot_secret',
+      'allow_from',
+    ]);
+    expect(platformMeta.wecom.fields.map((field) => field.key)).toContain('corp_id');
+    expect(platformMeta.wecom.fields.map((field) => field.key)).not.toContain('bot_id');
+  });
 });

@@ -45,8 +45,15 @@ import { Cron } from 'croner';
 import Fastify from 'fastify';
 
 import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
-import type { CcAgentType, CcProjectPlatform, CcSessionListItem } from '../shared/types/ccConnect';
+import type {
+  CcAgentType,
+  CcBridgeUsageMessage,
+  CcProjectPlatform,
+  CcSessionDetail as CcConnectSessionDetail,
+  CcSessionListItem,
+} from '../shared/types/ccConnect';
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
+import { mapUsageEventToReportInput } from './services/ccConnect/usageEventMapper';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
 import { isPlaceholderWorkDir, needsWorkDirReconcile } from './services/ccConnect/workDirReconcile';
 import {
@@ -54,10 +61,10 @@ import {
   buildDirectReplyMessageId,
   type DirectCliEvent,
 } from './services/direct-cli';
-import { TeamProvisioningService } from './services/teams-mvp';
-import { TaskDispatchService } from './services/teams-mvp/TaskDispatchService';
+import { TeamProvisioningService } from './services/team-management';
+import { TaskDispatchService } from './services/team-management/TaskDispatchService';
 import { resolveCcProjectName } from './utils/teamProjectResolution';
-import { CollaborationBoardService } from './services/teams-mvp/CollaborationBoardService';
+import { CollaborationBoardService } from './services/team-management/CollaborationBoardService';
 import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
 import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
 import {
@@ -70,18 +77,18 @@ import {
 } from './services/system-manager/SystemManagerConfigService';
 import { ensureAdminLoopInitialized as runAdminLoopInit } from './services/system-manager/AdminLoopInitializer';
 import { httpsGetFollowRedirects } from './services/extensions/catalog/PluginCatalogService';
-import { HERMIT_OPS_GUIDE_URL } from './services/teams-mvp/OpsRunbookContext';
+import { HERMIT_OPS_GUIDE_URL } from './services/team-management/OpsRunbookContext';
 import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
-import {
-  ensureGlobalWorkflows,
-  seedBuiltinWorkflows,
-} from './services/system-manager/BuiltinWorkflowSeeder';
+import { ensureGlobalWorkflows } from './services/system-manager/BuiltinWorkflowSeeder';
 import {
   SYSTEM_MANAGER_BIND_PROJECT,
   SYSTEM_MANAGER_DISPLAY_NAME,
   SYSTEM_MANAGER_TEAM_NAME,
 } from '@shared/types/team';
 import type {
+  AttachmentFileData,
+  AttachmentMeta,
+  AttachmentPayload,
   SystemManagerSummary,
   TaskBusConfig,
   TeamLaunchRequest,
@@ -91,7 +98,7 @@ import type {
 } from '@shared/types/team';
 import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
-import type { TeamManifest } from './services/teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from './services/team-management/TeamWorkspaceService';
 import { UpdateService } from './services/UpdateService';
 import {
   startTelemetry,
@@ -103,14 +110,24 @@ import {
   ConversationTelemetryService,
   shouldIncludeContent,
 } from './services/session-intelligence/ConversationTelemetryService';
+import { ExternalImUsageReporter } from './services/session-intelligence/ExternalImUsageReporter';
+import type {
+  UserUsageTelemetryRow,
+  UsageUnresolvedSummary,
+} from './services/session-intelligence/usageTypes';
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
 import {
   filterHiddenTeamSessions,
   mergeLocalAndCcSessions,
 } from './services/session-intelligence/teamSessionListMapper';
-import type { CcSession } from '@shared/types/api';
+import {
+  DEFAULT_HERMIT_CC_SETTINGS,
+  HermitCcSettingsService,
+} from './services/settings/HermitCcSettingsService';
+import type { CcSession, CcSessionDetail } from '@shared/types/api';
 import { discoverableTeamToWorker, type DiscoverableWorker } from '@shared/types/worker';
 import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
+import { createDashboardRecentProjectsLoader } from '@features/recent-projects/main/composition/dashboardRecentProjects';
 import {
   scanProjectStats,
   type ProjectUsageStats,
@@ -119,6 +136,7 @@ import {
   isExternalPlatformSessionKey,
   resolveExternalPlatformSessionTeamSlug,
 } from './utils/externalPlatformSessionRouting';
+import { isImUsageUploadEnabled } from './utils/imUsageGate';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
@@ -155,6 +173,40 @@ function isReservedSystemTeamName(teamName: string): boolean {
     teamName === SYSTEM_MANAGER_BIND_PROJECT ||
     teamName === SYSTEM_MANAGER_TEAM_NAME
   );
+}
+
+function isAttachmentPayload(value: unknown): value is AttachmentPayload {
+  if (!value || typeof value !== 'object') return false;
+  const attachment = value as Partial<AttachmentPayload>;
+  return (
+    typeof attachment.id === 'string' &&
+    typeof attachment.filename === 'string' &&
+    typeof attachment.mimeType === 'string' &&
+    typeof attachment.size === 'number' &&
+    typeof attachment.data === 'string'
+  );
+}
+
+function toAttachmentMeta(attachment: AttachmentPayload): AttachmentMeta {
+  return {
+    id: attachment.id,
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    filePath: attachment.filePath,
+  };
+}
+
+function toAttachmentFileData(attachment: AttachmentPayload): AttachmentFileData {
+  return {
+    id: attachment.id,
+    data: attachment.data,
+    mimeType: attachment.mimeType,
+  };
+}
+
+function shouldSendAttachmentsToAgent(settings: Record<string, unknown>): boolean {
+  return settings.attachment_send !== 'off';
 }
 
 // ===========================================================================
@@ -301,15 +353,13 @@ const bridge = new CcConnectBridge({
 const svc = new TeamProvisioningService(cc, bridge, undefined, {
   restartCcConnect: restartCcConnectAndReconnectBridge,
 });
-const systemManagerConfig = new SystemManagerConfigService(REPO_ROOT);
+const systemManagerConfig = new SystemManagerConfigService();
 const workflowPromptService = new WorkflowPromptService();
 
 async function getSystemManagerWorkDir(): Promise<string> {
-  // Canonical, isolated Helm Loop runtime path. Dedicated (never shared with
-  // another team/project) so the admin agent can bootstrap its own CLAUDE.md
-  // here without colliding with project work. The manifest workDir is synced to
-  // this path by ensureSystemManagerUncached; selectedWorkDir only drives
-  // workflow-command discovery, not the runtime location.
+  // Canonical Helm Loop runtime path. System Manager is a normal Claude Code
+  // workspace rooted at ~/.hermit: commands are read from .claude/commands and
+  // CLAUDE.md from the same root, with no separate system-only command source.
   const dir = adminWorkDir();
   await fs.mkdir(dir, { recursive: true }).catch(() => undefined);
   return dir;
@@ -394,6 +444,22 @@ async function ensureAdminLoopInitialized(): Promise<void> {
   await runAdminLoopInit({
     getConfig: () => systemManagerConfig.getConfig(),
     updateConfig: (patch) => systemManagerConfig.updateConfig(patch),
+    hasExistingBootstrap: async () => {
+      const workDir = await getSystemManagerWorkDir();
+      try {
+        const content = await fs.readFile(path.join(workDir, 'CLAUDE.md'), 'utf8');
+        return content.trim().length > 0;
+      } catch {
+        return false;
+      }
+    },
+    writeBootstrapArtifact: async (guideText: string) => {
+      // Persist the guide as the workspace CLAUDE.md directly — the durable
+      // marker the gate keys on — so init is recorded even if the agent session
+      // fails to start on this pass.
+      const workDir = await getSystemManagerWorkDir();
+      await fs.writeFile(path.join(workDir, 'CLAUDE.md'), guideText, 'utf8');
+    },
     fetchGuide: () => httpsGetFollowRedirects(HERMIT_OPS_GUIDE_URL),
     log: (message) => app.log.warn({ sessionKey }, message),
     dispatch: async ({ text, messageId }) => {
@@ -429,6 +495,9 @@ const conversationTelemetry = new ConversationTelemetryService({
   readTeamManifest: (teamName) => svc.readTeamManifest(teamName),
 });
 const localSessionScanner = new LocalSessionScanner();
+const externalImUsageReporter = new ExternalImUsageReporter({
+  getRedisConfig: getImUplinkRedisConfig,
+});
 const loopAssetsScanner = new LoopAssetsScannerService();
 const TEAM_STATS_CACHE_TTL_MS = 30_000;
 const teamStatsCache = new Map<
@@ -580,6 +649,23 @@ async function resolveTeamSlugForMention(rawName: string): Promise<string | null
   return matched?.slug ?? null;
 }
 
+function mapCcSessionDetail(detail: CcConnectSessionDetail): CcSessionDetail {
+  return {
+    id: detail.agent_session_id || detail.id,
+    name: detail.name || detail.session_key,
+    sessionKey: detail.session_key,
+    agentSessionId: detail.agent_session_id,
+    agentType: detail.agent_type,
+    active: detail.active,
+    live: detail.live,
+    historyCount: detail.history_count,
+    createdAt: detail.created_at,
+    updatedAt: detail.updated_at,
+    platform: detail.platform,
+    history: detail.history ?? [],
+  };
+}
+
 function normalizePlatformAllowFrom(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
@@ -713,6 +799,17 @@ bridge.start();
 // bridge reply handler), so the existing renderer refresh Just Works.
 // ---------------------------------------------------------------------------
 const directCliManager = new DirectCliSessionManager();
+const hermitCcSettings = new HermitCcSettingsService(HERMIT_SETTINGS_FILE);
+
+async function readEffectiveCcSettings(): Promise<Record<string, unknown>> {
+  const localSettings = await hermitCcSettings.read();
+  try {
+    const remoteSettings = await cc.getGlobalSettings();
+    return { ...DEFAULT_HERMIT_CC_SETTINGS, ...remoteSettings, ...localSettings };
+  } catch {
+    return { ...DEFAULT_HERMIT_CC_SETTINGS, ...localSettings };
+  }
+}
 
 /** Routes a sessionKey → the team inbox + reply sender/recipient it belongs to. */
 interface DirectCliRoute {
@@ -838,6 +935,41 @@ directCliManager.on('event', (event: DirectCliEvent) => {
   });
 });
 
+/**
+ * Consume a cc-connect per-turn usage event → Redis. The bridge registers with
+ * observe_usage:true, so it fans out token counts for every platform turn
+ * (Feishu, ...). The event carries NO message content; identity is parsed from
+ * session_key inside reportTurn, so no project/session lookup is needed here.
+ * reportTurn applies the team-bus + telemetry gate itself.
+ */
+function reportBridgeUsageEvent(msg: CcBridgeUsageMessage): void {
+  const input = mapUsageEventToReportInput(msg);
+  if (!input) return;
+  void externalImUsageReporter
+    .reportTurn(input)
+    .then((result) => {
+      if (result.reported) {
+        app.log.info({ sessionKey: msg.session_key }, 'external IM usage reported');
+      } else if (
+        result.reason &&
+        result.reason !== 'not-external-im' &&
+        result.reason !== 'duplicate'
+      ) {
+        app.log.warn(
+          { reason: result.reason, sessionKey: msg.session_key },
+          'external IM usage report skipped'
+        );
+      }
+    })
+    .catch((err) => {
+      app.log.warn({ err, sessionKey: msg.session_key }, 'bridge usage report failed');
+    });
+}
+
+bridge.on('usage', (msg) => {
+  reportBridgeUsageEvent(msg);
+});
+
 bridge.on('reply', (msg) => {
   const sessionKey: string = (msg as { session_key?: string }).session_key ?? '';
 
@@ -863,23 +995,25 @@ bridge.on('reply_stream', (msg) => {
   const done = (msg as { done?: boolean }).done ?? false;
 
   void (async () => {
-    const teamName = await resolveTeamFromBridgeMessageWithRetry(msg);
-    if (!teamName) return;
     if (done) {
+      const resolvedTeamName = await resolveTeamFromBridgeMessageWithRetry(msg);
+      if (!resolvedTeamName) return;
       // 流式结束，存储完整回复
       const fullText = (msg as { full_text?: string }).full_text ?? '';
       if (fullText) {
-        await svc.appendMessage(teamName, {
-          from: teamName,
+        await svc.appendMessage(resolvedTeamName, {
+          from: resolvedTeamName,
           to: 'user',
           role: 'agent',
           content: fullText,
           meta: { sessionKey },
         });
       }
-      broadcastSse('team-change', { type: 'inbox', teamName });
+      broadcastSse('team-change', { type: 'inbox', teamName: resolvedTeamName });
       return;
     }
+    const teamName = await resolveTeamFromBridgeMessageWithRetry(msg);
+    if (!teamName) return;
     broadcastSse('team-change', { type: 'lead-message', teamName });
   })().catch((err) => {
     app.log.warn({ err, sessionKey }, 'bridge stream reply persistence failed');
@@ -1025,6 +1159,15 @@ function parseHermitTeamFromSessionKey(sessionKey: string): string | null {
 const app = Fastify({
   logger: { level: process.env.HERMIT_LOG_LEVEL ?? 'warn' },
   disableRequestLogging: true,
+});
+
+const dashboardRecentProjectsLoader = createDashboardRecentProjectsLoader({
+  extraRoots: [REPO_ROOT, adminWorkDir()],
+  logger: {
+    info: (...args: unknown[]) => app.log.info({ args }, 'recent-projects'),
+    warn: (...args: unknown[]) => app.log.warn({ args }, 'recent-projects'),
+    error: (...args: unknown[]) => app.log.error({ args }, 'recent-projects'),
+  },
 });
 
 // ===========================================================================
@@ -1436,18 +1579,24 @@ app.get('/api/status', async () => {
 // ===========================================================================
 
 app.get('/api/cc-settings', async () => {
-  try {
-    const data = await cc.getGlobalSettings();
-    return { ok: true, data };
-  } catch (err) {
-    return reply500(err);
-  }
+  const data = await readEffectiveCcSettings();
+  return { ok: true, data };
 });
 
-app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request) => {
+app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request, reply) => {
+  const patch = request.body ?? {};
   try {
-    const data = await cc.patchGlobalSettings(request.body ?? {});
-    return { ok: true, data };
+    const localSettings = await hermitCcSettings.patch(patch);
+    let remoteSettings: Record<string, unknown> = {};
+    try {
+      remoteSettings = await cc.patchGlobalSettings(patch);
+    } catch (err) {
+      app.log.warn({ err }, 'cc-connect settings patch failed; saved Hermit settings locally');
+    }
+    return {
+      ok: true,
+      data: { ...DEFAULT_HERMIT_CC_SETTINGS, ...remoteSettings, ...localSettings },
+    };
   } catch (err) {
     return reply500(err);
   }
@@ -1500,23 +1649,17 @@ app.get('/api/system-manager/status', async (_request, reply) => {
 app.get('/api/system-manager/config', async (_request, reply) => {
   try {
     const config = await systemManagerConfig.getConfig();
-    // Seed builtin commands into workspace's .claude/commands/ if missing.
-    // Await so the control console can list quick workflow buttons immediately.
-    if (config.selectedWorkDir) {
-      await seedBuiltinWorkflows(config.selectedWorkDir);
-    }
     return config;
   } catch (err) {
     return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
-app.put<{ Body: { selectedWorkDir?: string; workflowFolder?: string | null } }>(
+app.put<{ Body: { selectedWorkDir?: string } }>(
   '/api/system-manager/config',
   async (request, reply) => {
     try {
       const config = await systemManagerConfig.updateConfig(request.body ?? {});
-      await seedBuiltinWorkflows(config.selectedWorkDir);
       return config;
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1530,12 +1673,13 @@ app.post<{ Body: { folder?: string } }>(
     try {
       assertTrustedBrowserOrigin(request);
       const config = await systemManagerConfig.getConfig();
+      const workspaceRoot = config.selectedWorkDir.replace(/[\\/]+$/, '');
       const folder =
-        typeof request.body?.folder === 'string' ? request.body.folder : config.workflowFolder;
+        typeof request.body?.folder === 'string' && request.body.folder.trim().length > 0
+          ? request.body.folder
+          : path.join(workspaceRoot, '.claude', 'commands');
       if (!folder) return { folder: '', prompts: [], warnings: [] };
-      const result = await workflowPromptService.list(folder);
-      await systemManagerConfig.updateConfig({ workflowFolder: result.folder });
-      return result;
+      return await workflowPromptService.list(folder);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.startsWith('Forbidden origin:')) {
@@ -1552,11 +1696,12 @@ app.post<{ Body: { folder?: string; id?: string } }>(
     try {
       assertTrustedBrowserOrigin(request);
       const config = await systemManagerConfig.getConfig();
+      const workspaceRoot = config.selectedWorkDir.replace(/[\\/]+$/, '');
       const folder =
         typeof request.body?.folder === 'string' && request.body.folder.trim().length > 0
           ? request.body.folder
-          : config.workflowFolder;
-      if (!folder) return reply.code(400).send({ error: 'workflowFolder is not configured' });
+          : path.join(workspaceRoot, '.claude', 'commands');
+      if (!folder) return reply.code(400).send({ error: 'command folder is not configured' });
       const id = typeof request.body?.id === 'string' ? request.body.id : '';
       return await workflowPromptService.read(folder, id);
     } catch (err) {
@@ -1703,7 +1848,6 @@ app.get('/api/teams', async () => {
         .filter((meta) => {
           const bindProject = meta.bindProject || meta.slug;
           return (
-            meta.pendingDelete !== true &&
             !isReservedSystemTeamName(meta.slug) &&
             !shouldHideProject(bindProject) &&
             !meta.slug.startsWith('feishu:')
@@ -1737,20 +1881,23 @@ app.get('/api/teams', async () => {
             projectPath: projectPath || undefined,
             sessionsCount: project?.sessions_count ?? 0,
             heartbeatEnabled: project?.heartbeat_enabled ?? false,
+            deletedAt: meta.deletedAt,
             pendingDelete: meta.pendingDelete === true,
             restartRequired: meta.restartRequired === true,
-            stats: usageStats
-              ? {
-                  sessions: usageStats.sessions,
-                  messages: usageStats.messages,
-                  tokens: usageStats.totalTokens,
-                  tokensIn: usageStats.tokensIn,
-                  tokensOut: usageStats.tokensOut,
-                  cacheRead: usageStats.cacheRead,
-                  cacheCreation: usageStats.cacheCreation,
-                  durationMs: usageStats.durationMs,
-                }
-              : undefined,
+            stats: meta.deletedAt
+              ? undefined
+              : usageStats
+                ? {
+                    sessions: usageStats.sessions,
+                    messages: usageStats.messages,
+                    tokens: usageStats.totalTokens,
+                    tokensIn: usageStats.tokensIn,
+                    tokensOut: usageStats.tokensOut,
+                    cacheRead: usageStats.cacheRead,
+                    cacheCreation: usageStats.cacheCreation,
+                    durationMs: usageStats.durationMs,
+                  }
+                : undefined,
           };
         })
     );
@@ -2082,16 +2229,6 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
       if (isReservedSystemTeamName(ccProjectName) || isReservedSystemTeamName(localTeamName)) {
         return reply.code(403).send({ error: 'Helm Loop 不可删除' });
       }
-      try {
-        const result = await cc.deleteProject(ccProjectName);
-        restartRequired = result.restart_required === true;
-      } catch (err) {
-        request.log.warn(
-          { err, teamName, ccProjectName },
-          'delete cc-connect project failed or project missing'
-        );
-      }
-
       try {
         await svc.deleteTeam(localTeamName, { deleteFiles: request.query.deleteFiles === 'true' });
       } catch (err) {
@@ -2573,6 +2710,7 @@ async function dispatchDirectCliMessage(params: {
   from: string;
   to: string;
   text: string;
+  attachments?: AttachmentPayload[];
   messageId: string;
 }): Promise<void> {
   directCliRoutes.set(params.sessionKey, {
@@ -2582,6 +2720,7 @@ async function dispatchDirectCliMessage(params: {
   });
   await directCliManager.send(params.sessionKey, {
     text: params.text,
+    attachments: params.attachments,
     messageId: params.messageId,
     workDir: params.workDir,
   });
@@ -3287,11 +3426,7 @@ app.post('/api/update/apply', async (request, reply) => {
   }
 });
 
-// 主仓有"recent projects"概念,mvp 不实现,返回空
-app.get('/api/dashboard/recent-projects', async () => ({
-  recentProjects: [],
-  pinnedSessions: [],
-}));
+app.get('/api/dashboard/recent-projects', async () => dashboardRecentProjectsLoader());
 
 app.get('/api/projects', async () => []);
 app.get('/api/repository-groups', async () => []);
@@ -4425,6 +4560,23 @@ app.get('/api/editor/search', async () => ({ results: [], totalMatches: 0, trunc
 // ===========================================================================
 
 // 消息分页 — store 期望 MessagesPage 结构
+app.get<{ Params: { name: string; messageId: string } }>(
+  '/api/teams/:name/messages/:messageId/attachments',
+  async (request) => {
+    const msgs = await svc.readMessages(request.params.name, { limit: 5000 });
+    const message = msgs.find((msg) => msg.id === request.params.messageId);
+    const attachments = Array.isArray(message?.meta?.attachmentData)
+      ? (message.meta.attachmentData as AttachmentFileData[])
+      : [];
+    return attachments.filter(
+      (attachment): attachment is AttachmentFileData =>
+        typeof attachment?.id === 'string' &&
+        typeof attachment.data === 'string' &&
+        typeof attachment.mimeType === 'string'
+    );
+  }
+);
+
 app.get<{ Params: { name: string }; Querystring: { cursor?: string; limit?: string } }>(
   '/api/teams/:name/messages',
   async (request) => {
@@ -4475,6 +4627,9 @@ app.get<{ Params: { name: string }; Querystring: { cursor?: string; limit?: stri
             typeof m.meta?.replyToConversationId === 'string'
               ? m.meta.replyToConversationId
               : undefined,
+          attachments: Array.isArray(m.meta?.attachments)
+            ? (m.meta.attachments as AttachmentMeta[])
+            : undefined,
           session: sessionKey
             ? {
                 id: session?.id,
@@ -4600,8 +4755,15 @@ app.get<{
     offset,
     limit,
   });
-  if (!detail) return reply.code(404).send({ error: 'Session not found' });
-  return detail;
+  if (detail) return detail;
+
+  try {
+    const bindProject = await resolveRouteCcProjectName(request.params.name);
+    const ccDetail = await cc.getSession(bindProject, request.params.sessionId, limit);
+    return mapCcSessionDetail(ccDetail);
+  } catch {
+    return reply.code(404).send({ error: 'Session not found' });
+  }
 });
 
 // DELETE session — archive in Hermit and best-effort close cc-connect live session.
@@ -4932,8 +5094,45 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/claude-logs', async () =
 }));
 
 // restore / permanent delete
-app.post<{ Params: { name: string } }>('/api/teams/:name/restore', async () => ({ ok: true }));
-app.delete<{ Params: { name: string } }>('/api/teams/:name/permanent', async () => ({ ok: true }));
+app.post<{ Params: { name: string } }>('/api/teams/:name/restore', async (request, reply) => {
+  try {
+    await svc.restoreTeam(request.params.name);
+    return { ok: true };
+  } catch (err) {
+    return reply.code(404).send(reply500(err));
+  }
+});
+app.delete<{ Params: { name: string } }>('/api/teams/:name/permanent', async (request, reply) => {
+  const teamName = request.params.name;
+  if (isReservedSystemTeamName(teamName)) {
+    return reply.code(403).send({ error: 'Helm Loop 不可删除' });
+  }
+  try {
+    const manifest = await svc.readTeamManifestByProject(teamName);
+    const ccProjectName = manifest.bindProject || teamName;
+    if (isReservedSystemTeamName(ccProjectName) || isReservedSystemTeamName(manifest.slug)) {
+      return reply.code(403).send({ error: 'Helm Loop 不可删除' });
+    }
+    let restartRequired = false;
+    try {
+      const result = await cc.deleteProject(ccProjectName);
+      restartRequired = result.restart_required === true;
+    } catch (err) {
+      if (isCcProjectNotFoundError(err)) {
+        request.log.info(
+          { teamName, ccProjectName },
+          'cc-connect project already missing while permanently deleting team'
+        );
+      } else {
+        request.log.warn({ err, teamName, ccProjectName }, 'delete cc-connect project failed');
+      }
+    }
+    await svc.deleteTeam(manifest.slug, { deleteFiles: true });
+    return { ok: true, restartRequired };
+  } catch (err) {
+    return reply.code(500).send(reply500(err));
+  }
+});
 
 // config operations
 async function applyTeamConfigUpdate(
@@ -5253,6 +5452,7 @@ app.post<{
     summary?: string;
     sessionKey?: string;
     messageId?: string;
+    attachments?: unknown;
   };
 }>('/api/teams/:name/send-message', async (request, reply) => {
   const teamName = request.params.name;
@@ -5319,6 +5519,13 @@ app.post<{
   const requestedSessionKey =
     typeof request.body?.sessionKey === 'string' ? request.body.sessionKey.trim() : '';
   const sessionKey = requestedSessionKey || buildFallbackSessionKey(teamName);
+  const attachments = Array.isArray(request.body?.attachments)
+    ? request.body.attachments.filter(isAttachmentPayload)
+    : [];
+  const attachmentMeta = attachments.map(toAttachmentMeta);
+  const attachmentData = attachments.map(toAttachmentFileData);
+  const ccSettings = await readEffectiveCcSettings();
+  const attachmentsForAgent = shouldSendAttachmentsToAgent(ccSettings) ? attachments : [];
 
   // 本地存储用户消息
   const userMsg = await svc
@@ -5328,7 +5535,11 @@ app.post<{
       to: teamName,
       role: 'user',
       content: text,
-      meta: { sessionKey },
+      meta: {
+        sessionKey,
+        attachments: attachmentMeta.length > 0 ? attachmentMeta : undefined,
+        attachmentData: attachmentData.length > 0 ? attachmentData : undefined,
+      },
     })
     .catch(() => null);
 
@@ -5351,6 +5562,7 @@ app.post<{
       from: member || teamName,
       to: 'user',
       text,
+      attachments: attachmentsForAgent,
       // The agent reply needs its OWN id — distinct from the user message's
       // `msgId`. Reusing `msgId` persisted the reply with the user message's id,
       // colliding in the inbox so the renderer's id-keyed dedup dropped it
@@ -6079,7 +6291,7 @@ app.get('/api/settings/task-bus', async () => {
       settings.taskBus ?? {
         enabled: false,
         redis: { host: '127.0.0.1', port: 6379 },
-        telemetry: { enabled: false, platform: 'claudecode' },
+        telemetry: { enabled: false, uploadEnabled: true, platform: 'claudecode' },
       }
     );
   } catch {
@@ -6182,6 +6394,7 @@ type TelemetryProjectRow = {
   displayName?: string;
   teamSlug?: string;
   bindProject?: string;
+  deletedAt?: string;
   sessions: number;
   messages: number;
   tokensIn: number;
@@ -6190,6 +6403,7 @@ type TelemetryProjectRow = {
 };
 
 type TelemetryStatusShape = {
+  ok?: boolean;
   connected: boolean;
   lastScan: string | null;
   sessions: number;
@@ -6203,6 +6417,9 @@ type TelemetryStatusShape = {
   hourly: number[];
   projects: TelemetryProjectRow[];
   workSecondsByDay: Record<string, number>;
+  localUsers?: UserUsageTelemetryRow[];
+  externalUsers?: UserUsageTelemetryRow[];
+  unresolvedUsage?: UsageUnresolvedSummary;
 };
 
 async function readTaskBusSettings(): Promise<TaskBusConfig> {
@@ -6217,37 +6434,194 @@ async function readTaskBusSettings(): Promise<TaskBusConfig> {
   return (settings.taskBus ?? {}) as TaskBusConfig;
 }
 
+/**
+ * IM "digital employee" usage is reported to the team-bus Redis only when the
+ * operator has enabled the team bus (this box is part of a distributed Hermit
+ * fleet — Redis itself is the collaboration bus) AND turned on usage reporting.
+ * No secret gate: the bus being on already means usage uplink is just another
+ * message on the shared bus. Local JSONL scans are never routed through here.
+ */
+async function getImUplinkRedisConfig(): Promise<TaskBusConfig['redis'] | null> {
+  const taskBus = await readTaskBusSettings();
+  // All three gates (bus on + telemetry on + IM-usage upload opt-in) must be on.
+  // This single choke point feeds both the report pre-check and the reporter's
+  // own getRedisConfig, so every switch takes effect everywhere reporting runs.
+  if (!isImUsageUploadEnabled(taskBus)) return null;
+  return taskBus.redis ?? null;
+}
+
+function sanitizeDownloadFilename(value: string): string {
+  return (
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'download'
+  );
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let i = 0; i < 8; i++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date: Date): { date: number; time: number } {
+  const year = Math.max(1980, date.getFullYear());
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+  };
+}
+
+async function zipDirectoryForDownload(rootDir: string): Promise<Buffer> {
+  const files: Array<{ relativePath: string; data: Buffer; mtime: Date }> = [];
+  const visit = async (dir: string): Promise<void> => {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        await visit(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const stat = await fs.stat(fullPath);
+      files.push({
+        relativePath: path.relative(rootDir, fullPath).replace(/\\/g, '/'),
+        data: await fs.readFile(fullPath),
+        mtime: stat.mtime,
+      });
+    }
+  };
+  await visit(rootDir);
+
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+  for (const file of files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))) {
+    const name = Buffer.from(file.relativePath, 'utf8');
+    const crc = crc32(file.data);
+    const { date, time } = dosDateTime(file.mtime);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(time, 10);
+    local.writeUInt16LE(date, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(file.data.length, 18);
+    local.writeUInt32LE(file.data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    localParts.push(local, name, file.data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(time, 12);
+    central.writeUInt16LE(date, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(file.data.length, 20);
+    central.writeUInt32LE(file.data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, name);
+    offset += local.length + name.length + file.data.length;
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
 async function enrichTelemetryProjectNames<T extends { projects: TelemetryProjectRow[] }>(
   status: T
 ): Promise<T> {
   const teams = await svc.listTeams().catch(() => []);
+  const activeTeams = teams.filter(
+    (team) =>
+      !team.deletedAt &&
+      !isExternalPlatformSessionKey(team.slug) &&
+      !isExternalPlatformSessionKey(team.bindProject || '')
+  );
   const byWorkDir = new Map<string, TeamManifest>();
   const byBindProject = new Map<string, TeamManifest>();
-  for (const team of teams) {
-    if (team.slug === SYSTEM_MANAGER_TEAM_NAME) continue;
+  for (const team of activeTeams) {
     const workDir = (team.workDir || '').trim();
     if (workDir) byWorkDir.set(path.resolve(workDir), team);
     if (team.bindProject) byBindProject.set(team.bindProject, team);
     byBindProject.set(team.slug, team);
   }
 
-  return {
-    ...status,
-    projects: status.projects.map((project) => {
-      const cwd = (project.cwd || '').trim();
-      const team =
-        (cwd ? byWorkDir.get(path.resolve(cwd)) : undefined) ??
-        byBindProject.get(cwd) ??
-        byBindProject.get(path.basename(cwd));
-      if (!team) return project;
-      return {
+  const seenTeamSlugs = new Set<string>();
+  const projects = status.projects.flatMap((project) => {
+    const cwd = (project.cwd || '').trim();
+    const team =
+      (cwd ? byWorkDir.get(path.resolve(cwd)) : undefined) ??
+      byBindProject.get(cwd) ??
+      byBindProject.get(path.basename(cwd));
+    if (team?.deletedAt) return [];
+    // Team Bus usage should only surface active Hermit teams. Raw Claude project
+    // folders, deleted team leftovers, and external-platform session keys remain
+    // in ~/.claude/projects history but should not reappear as team rows.
+    if (!team) return [];
+    seenTeamSlugs.add(team.slug);
+    return [
+      {
         ...project,
         displayName: team.displayName || team.slug,
         teamSlug: team.slug,
         bindProject: team.bindProject,
-      };
-    }),
+      },
+    ];
+  });
+
+  for (const team of activeTeams) {
+    if (seenTeamSlugs.has(team.slug)) continue;
+    projects.push({
+      cwd: team.workDir || team.bindProject || team.slug,
+      displayName: team.displayName || team.slug,
+      teamSlug: team.slug,
+      bindProject: team.bindProject,
+      sessions: 0,
+      messages: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      tokensTotal: 0,
+    });
+  }
+
+  return {
+    ...status,
+    projects,
   };
+}
+
+async function enrichTelemetryStatus(status: TelemetryStatusShape): Promise<TelemetryStatusShape> {
+  return enrichTelemetryProjectNames(status);
 }
 
 function telemetryEmptyStatus(): TelemetryStatusShape {
@@ -6329,6 +6703,48 @@ function buildUsageTelemetryExport(status: TelemetryStatusShape, format: 'csv' |
       '',
       project.cwd,
     ]),
+    ...(status.localUsers ?? []).map((user) => [
+      'local-user',
+      user.identity.displayName,
+      user.sessions,
+      user.messages,
+      user.tokensIn,
+      user.tokensOut,
+      user.cacheRead,
+      user.cacheCreation,
+      user.tokensTotal,
+      '',
+      '',
+      user.projectName ?? user.teamName ?? '',
+    ]),
+    ...(status.externalUsers ?? []).map((user) => [
+      'external-user',
+      user.identity.displayName,
+      user.sessions,
+      user.messages,
+      user.tokensIn,
+      user.tokensOut,
+      user.cacheRead,
+      user.cacheCreation,
+      user.tokensTotal,
+      '',
+      '',
+      user.identity.userId ?? user.identity.id ?? user.key,
+    ]),
+    [
+      'unresolved-usage',
+      '未映射会话',
+      status.unresolvedUsage?.sessions ?? 0,
+      status.unresolvedUsage?.messages ?? 0,
+      '',
+      '',
+      '',
+      '',
+      status.unresolvedUsage?.tokensTotal ?? 0,
+      '',
+      '',
+      '',
+    ],
   ];
 
   return {
@@ -6349,21 +6765,9 @@ app.post('/api/telemetry/scan', async (request, reply) => {
     if (!result) {
       return reply.code(503).send({ error: 'Telemetry scan failed' });
     }
-    return await enrichTelemetryProjectNames({
+    return await enrichTelemetryStatus({
+      ...result,
       ok: true,
-      connected: taskBus.telemetry.uploadEnabled === true,
-      lastScan: new Date().toISOString(),
-      sessions: result.aggregate.sessions,
-      messages: result.aggregate.messages,
-      tokensIn: result.aggregate.tokens.input,
-      tokensOut: result.aggregate.tokens.output,
-      cacheRead: result.aggregate.tokens.cacheRead,
-      cacheCreation: result.aggregate.tokens.cacheCreation,
-      totalTokens: result.aggregate.tokens.total,
-      activeDays: result.aggregate.activeDays,
-      hourly: result.aggregate.hourly,
-      projects: result.aggregate.projects,
-      workSecondsByDay: result.aggregate.workSecondsByDay,
     });
   } catch (err) {
     return reply.code(500).send({ error: String(err) });
@@ -6376,10 +6780,8 @@ app.get<{ Querystring: { format?: 'csv' | 'json' | string } }>(
   async (request, reply) => {
     try {
       const format = request.query.format === 'json' ? 'json' : 'csv';
-      const taskBus = await readTaskBusSettings();
-      const redisCfg = taskBus.enabled ? taskBus.redis : undefined;
-      const status = await enrichTelemetryProjectNames(
-        (await getTelemetryStatus(redisCfg)) ?? telemetryEmptyStatus()
+      const status = await enrichTelemetryStatus(
+        (await getTelemetryStatus()) ?? telemetryEmptyStatus()
       );
       return buildUsageTelemetryExport(status, format);
     } catch (err) {
@@ -6485,10 +6887,14 @@ app.get<{
 // GET /api/telemetry/status → current telemetry status (full stats)
 app.get('/api/telemetry/status', async (request, reply) => {
   try {
-    const taskBus = await readTaskBusSettings();
-    const redisCfg = taskBus.enabled ? taskBus.redis : undefined;
-    const status = await getTelemetryStatus(redisCfg);
-    return await enrichTelemetryProjectNames(status ?? telemetryEmptyStatus());
+    const status = await enrichTelemetryStatus(
+      (await getTelemetryStatus()) ?? telemetryEmptyStatus()
+    );
+    // `connected` drives the Redis status badge in the UI. The local scan never
+    // knows about Redis, so reflect the live team-bus connection instead of
+    // leaving the hardcoded `false` — otherwise a healthy bus always shows red.
+    status.connected = taskDispatch.isRedisConnected();
+    return status;
   } catch {
     return telemetryEmptyStatus();
   }
@@ -6578,7 +6984,27 @@ const SSE_FALLBACK_RE = /^\/api\/(.*\/(events|stream|notifications\/stream))$/;
 
 // ── Extension Store routes (wired to extensionHandlers) ────────────────
 
-import { extensionHandlers as ext, setSkillsWatcherEmitter } from './ipc/extensions';
+import {
+  extensionHandlers as ext,
+  setCapabilityPackLocalSource,
+  setSkillsWatcherEmitter,
+} from './ipc/extensions';
+
+setCapabilityPackLocalSource({
+  projectPath: REPO_ROOT,
+  listCronJobs: () => cc.listCronJobs(),
+  listTeams: async () => {
+    const manifests = await svc.listTeams().catch(() => []);
+    return manifests
+      .filter((team) => !team.deletedAt)
+      .map((team) => ({
+        slug: team.slug,
+        displayName: team.displayName,
+        workDir: team.workDir,
+        bindProject: team.bindProject,
+      }));
+  },
+});
 
 // Broadcast skill file-watcher changes to connected frontends via SSE.
 setSkillsWatcherEmitter((event) => broadcastSse('skills:changed', event));
@@ -6661,6 +7087,36 @@ app.post('/api/extensions/capability-packs/import', async (request) => {
 
 app.post('/api/extensions/capability-packs/export', async (request) => {
   return ext.capabilityPacksExport((request.body ?? {}) as any);
+});
+
+app.post('/api/extensions/capability-packs/export/download', async (request, reply) => {
+  const result = (await ext.capabilityPacksExport((request.body ?? {}) as any)) as {
+    success: boolean;
+    data?: { pack?: { packDir?: string; manifest?: { id?: string } }; warnings?: string[] };
+    error?: string;
+  };
+  if (!result.success) {
+    return reply
+      .code(400)
+      .send({ success: false, error: result.error ?? 'Export capability pack failed' });
+  }
+
+  const packDir = result.data?.pack?.packDir;
+  if (!packDir) {
+    return reply
+      .code(500)
+      .send({ success: false, error: 'Exported capability pack directory is missing' });
+  }
+
+  const zip = await zipDirectoryForDownload(packDir);
+  const filename = `${sanitizeDownloadFilename(result.data?.pack?.manifest?.id ?? 'capability-pack')}.zip`;
+  reply.header('Content-Type', 'application/zip');
+  reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+  reply.header(
+    'X-Capability-Pack-Warnings',
+    encodeURIComponent(JSON.stringify(result.data?.warnings ?? []))
+  );
+  return reply.send(zip);
 });
 
 app.post('/api/extensions/capability-packs/command-prompt', async (request) => {

@@ -45,11 +45,6 @@ export const KNOWN_SLASH_COMMANDS: readonly KnownSlashCommandDefinition[] = [
     description: 'Enter plan mode with an optional task description.',
   },
   {
-    name: 'loop',
-    command: '/loop',
-    description: 'Run a prompt or slash command repeatedly as a Loop.',
-  },
-  {
     name: 'model',
     command: '/model',
     description: 'Select or change the Claude model.',

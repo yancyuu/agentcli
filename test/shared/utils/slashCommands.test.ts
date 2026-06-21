@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildSlashCommandMeta,
+  buildStandaloneSlashCommandMeta,
   getKnownSlashCommand,
   isSupportedSlashCommandName,
   KNOWN_SLASH_COMMANDS,
@@ -15,7 +17,6 @@ describe('slashCommands', () => {
       '/reset',
       '/new',
       '/plan',
-      '/loop',
       '/model',
       '/effort',
       '/fast',
@@ -62,5 +63,69 @@ describe('slashCommands', () => {
     expect(isSupportedSlashCommandName('skill:name')).toBe(true);
     expect(isSupportedSlashCommandName('my_skill')).toBe(false);
     expect(isSupportedSlashCommandName('my skill')).toBe(false);
+  });
+});
+
+describe('buildSlashCommandMeta', () => {
+  it('lowercases and derives the command from the name when omitted', () => {
+    expect(buildSlashCommandMeta('COMPACT')).toEqual({
+      name: 'compact',
+      command: '/compact',
+      knownDescription: 'Compact conversation with optional focus instructions.',
+    });
+  });
+
+  it('keeps a caller-provided command verbatim instead of deriving from name', () => {
+    const meta = buildSlashCommandMeta('plan', 'fix the bug', '/plan');
+    expect(meta.command).toBe('/plan');
+    expect(meta.name).toBe('plan');
+    expect(meta.args).toBe('fix the bug');
+  });
+
+  it('omits args and knownDescription when both are absent for an unknown command', () => {
+    expect(buildSlashCommandMeta('foo')).toEqual({ name: 'foo', command: '/foo' });
+  });
+
+  it('trims surrounding whitespace in the name before lookup', () => {
+    const meta = buildSlashCommandMeta('  workers  ');
+    expect(meta.name).toBe('workers');
+    expect(meta.knownDescription).toBeTruthy();
+  });
+
+  it('attaches knownDescription for a known command even without args', () => {
+    const meta = buildSlashCommandMeta('model');
+    expect(meta.knownDescription).toContain('Claude model');
+  });
+});
+
+describe('buildStandaloneSlashCommandMeta', () => {
+  it('returns null for non-command text', () => {
+    expect(buildStandaloneSlashCommandMeta('just a message')).toBeNull();
+    expect(buildStandaloneSlashCommandMeta('')).toBeNull();
+    expect(buildStandaloneSlashCommandMeta('   ')).toBeNull();
+  });
+
+  it('parses a known command with args into full metadata', () => {
+    expect(buildStandaloneSlashCommandMeta('/plan rebuild the api')).toEqual({
+      name: 'plan',
+      command: '/plan',
+      args: 'rebuild the api',
+      knownDescription: 'Enter plan mode with an optional task description.',
+    });
+  });
+
+  it('parses an unknown command without knownDescription', () => {
+    expect(buildStandaloneSlashCommandMeta('/custom')).toEqual({
+      name: 'custom',
+      command: '/custom',
+    });
+  });
+
+  it('normalizes an uppercase command name', () => {
+    expect(buildStandaloneSlashCommandMeta('/CLEAR')).toEqual({
+      name: 'clear',
+      command: '/clear',
+      knownDescription: expect.any(String),
+    });
   });
 });

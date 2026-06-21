@@ -39,7 +39,7 @@ import {
 } from '@renderer/store/slices/teamSlice';
 import { createChipFromSelection } from '@renderer/utils/chipUtils';
 import { sumContextInjectionTokens } from '@renderer/utils/contextMath';
-import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { buildMemberColorMap, teamAvatarUrl } from '@renderer/utils/memberHelpers';
 import {
   hasUnresolvedMemberSpawnStatus,
   MEMBER_SPAWN_STATUS_REFRESH_MS,
@@ -2205,7 +2205,7 @@ export const TeamDetailView = ({
 
     const headerColorSet = data.config.color
       ? getTeamColorSet(data.config.color)
-      : nameColorSet(data.config.name);
+      : nameColorSet(displayTeamName);
 
     return (
       <>
@@ -2237,28 +2237,39 @@ export const TeamDetailView = ({
                     headerColorSet && 'relative z-10'
                   )}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-base font-semibold text-[var(--color-text)]">
-                        {displayTeamName}
-                      </h2>
-                      {data.platforms
-                        ?.filter((pl) => pl.type !== 'bridge')
-                        .map((pl) => (
-                          <span
-                            key={pl.type}
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
-                          >
-                            <span className="size-1.5 rounded-full bg-emerald-400" />
-                            {pl.type}
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <img
+                      src={teamAvatarUrl(teamName, displayTeamName)}
+                      alt={displayTeamName}
+                      className="size-8 shrink-0 rounded-md border border-transparent bg-[var(--color-surface-raised)]"
+                      style={
+                        headerColorSet ? { borderColor: headerColorSet.border + '60' } : undefined
+                      }
+                      draggable={false}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-[var(--color-text)]">
+                          {displayTeamName}
+                        </h2>
+                        {data.platforms
+                          ?.filter((pl) => pl.type !== 'bridge')
+                          .map((pl) => (
+                            <span
+                              key={pl.type}
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                            >
+                              <span className="size-1.5 rounded-full bg-emerald-400" />
+                              {pl.type}
+                            </span>
+                          ))}
+                        {isTeamProvisioning && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
+                            <span className="size-1.5 animate-pulse rounded-full bg-yellow-400" />
+                            启动中...
                           </span>
-                        ))}
-                      {isTeamProvisioning && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
-                          <span className="size-1.5 animate-pulse rounded-full bg-yellow-400" />
-                          启动中...
-                        </span>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">

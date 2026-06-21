@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -8,8 +8,6 @@ import type {
   SystemManagerStatus,
 } from '@shared/types/systemManager';
 
-import { getGlobalHermitWorkflowDir } from './BuiltinWorkflowSeeder';
-
 const CONFIG_FILE = 'system-manager.json';
 
 function hermitHome(): string {
@@ -17,28 +15,13 @@ function hermitHome(): string {
 }
 
 /**
- * Canonical, isolated runtime path for the Helm Loop. Dedicated (never shared
- * with another team/project) so the admin agent can bootstrap its own CLAUDE.md
- * here without colliding with project work. Single source of truth — reused by
- * `getSystemManagerWorkDir` (runtime) and `getStatus` (UI scope display).
+ * Canonical runtime path for the Helm Loop. The admin loop is a normal Claude
+ * Code workspace rooted at ~/.hermit: commands are read from .claude/commands
+ * and CLAUDE.md from the same root. This is fixed — the workspace is not
+ * user-selectable, so the Helm Loop always reports ~/.hermit as its scope.
  */
 export function adminWorkDir(): string {
-  return path.join(hermitHome(), 'admin-workspace');
-}
-
-function expandHome(input: string): string {
-  const normalized = input.trim().replace(/^～/, '~');
-  if (normalized === '~') return os.homedir();
-  if (normalized.startsWith('~/')) return path.join(os.homedir(), normalized.slice(2));
-  return normalized;
-}
-
-async function isDirectory(dirPath: string): Promise<boolean> {
-  try {
-    return (await stat(dirPath)).isDirectory();
-  } catch {
-    return false;
-  }
+  return hermitHome();
 }
 
 async function commandExists(command: string): Promise<boolean> {
@@ -57,34 +40,23 @@ async function commandExists(command: string): Promise<boolean> {
 export class SystemManagerConfigService {
   private readonly configPath = path.join(hermitHome(), CONFIG_FILE);
 
-  constructor(private readonly defaultWorkDir: string) {}
-
   async getConfig(): Promise<SystemManagerConfig> {
-    try {
-      const raw = await readFile(this.configPath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<SystemManagerConfig>;
-      const selectedWorkDir = await this.normalizeDirectory(
-        parsed.selectedWorkDir || this.defaultWorkDir,
-        'selectedWorkDir'
-      );
-      const workflowFolder = parsed.workflowFolder
-        ? await this.normalizeDirectory(parsed.workflowFolder, 'workflowFolder')
-        : undefined;
-      return {
-        schemaVersion: 1,
-        selectedWorkDir,
-        ...(workflowFolder ? { workflowFolder } : {}),
-        ...(parsed.adminInitialized ? { adminInitialized: true } : {}),
-        updatedAt:
-          typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
-      };
-    } catch {
-      return {
-        schemaVersion: 1,
-        selectedWorkDir: this.defaultWorkDir,
-        updatedAt: new Date().toISOString(),
-      };
+    const parsed = await this.readPersisted();
+    const config: SystemManagerConfig = {
+      schemaVersion: 1,
+      selectedWorkDir: adminWorkDir(),
+      ...(parsed.adminInitialized ? { adminInitialized: true } : {}),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    };
+
+    // Self-heal: the Helm Loop workspace is fixed at ~/.hermit and intentionally
+    // not configurable, so any other persisted selectedWorkDir is stale drift.
+    // Rewrite it once so the file stops advertising a misleading path.
+    if (parsed.selectedWorkDir !== undefined && parsed.selectedWorkDir !== adminWorkDir()) {
+      await this.persist(config);
     }
+
+    return config;
   }
 
   async updateConfig(patch: SystemManagerConfigPatch): Promise<SystemManagerConfig> {
@@ -94,47 +66,39 @@ export class SystemManagerConfigService {
       updatedAt: new Date().toISOString(),
     };
 
-    if (typeof patch.selectedWorkDir === 'string') {
-      next.selectedWorkDir = await this.normalizeDirectory(
-        patch.selectedWorkDir,
-        'selectedWorkDir'
-      );
-    }
-    if (patch.workflowFolder === null) {
-      delete next.workflowFolder;
-    } else if (typeof patch.workflowFolder === 'string') {
-      next.workflowFolder = await this.normalizeDirectory(patch.workflowFolder, 'workflowFolder');
-    }
+    // Only adminInitialized is mutable. selectedWorkDir is the canonical
+    // ~/.hermit workspace and is intentionally not configurable.
     if (typeof patch.adminInitialized === 'boolean') {
       next.adminInitialized = patch.adminInitialized;
     }
 
-    await mkdir(path.dirname(this.configPath), { recursive: true });
-    await writeFile(this.configPath, JSON.stringify(next, null, 2), 'utf-8');
+    await this.persist(next);
     return next;
   }
 
+  private async persist(config: SystemManagerConfig): Promise<void> {
+    await mkdir(path.dirname(this.configPath), { recursive: true });
+    await writeFile(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
+  }
+
   async getStatus(): Promise<SystemManagerStatus> {
-    const config = await this.getConfig();
     const hasClaude = await commandExists('claude');
     return {
       displayName: 'Helm Loop',
       adminWorkDir: adminWorkDir(),
-      defaultWorkDir: this.defaultWorkDir,
-      selectedWorkDir: config.selectedWorkDir,
-      ...(config.workflowFolder ? { workflowFolder: config.workflowFolder } : {}),
-      globalHermitWorkflowFolder: getGlobalHermitWorkflowDir(),
+      defaultWorkDir: adminWorkDir(),
+      selectedWorkDir: adminWorkDir(),
       claudeCommand: 'claude',
       localStatus: hasClaude ? 'ready' : 'missing-claude',
       ...(hasClaude ? {} : { error: '未在 PATH 中找到 claude 命令' }),
     };
   }
 
-  private async normalizeDirectory(input: string, fieldName: string): Promise<string> {
-    const resolved = path.resolve(expandHome(input));
-    if (!(await isDirectory(resolved))) {
-      throw new Error(`${fieldName} 不是有效目录: ${resolved}`);
+  private async readPersisted(): Promise<Partial<SystemManagerConfig>> {
+    try {
+      return JSON.parse(await readFile(this.configPath, 'utf-8')) as Partial<SystemManagerConfig>;
+    } catch {
+      return {};
     }
-    return resolved;
   }
 }

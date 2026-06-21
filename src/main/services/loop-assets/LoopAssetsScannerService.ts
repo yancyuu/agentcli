@@ -325,7 +325,7 @@ export class LoopAssetsScannerService {
       details,
       gap:
         status === 'missing'
-          ? '缺少 heartbeat：添加 /loop、schedule、hook 或 CI。'
+          ? '缺少 heartbeat：添加 schedule、hook 或 CI。'
           : '补齐自动验证与停止条件，避免只会运行不会收敛。',
       sources,
       actions: this.automationActions(),

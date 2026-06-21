@@ -1,6 +1,9 @@
-import type { TeamManifest } from '@main/services/teams-mvp/TeamWorkspaceService';
+import type { TeamManifest } from '@main/services/team-management/TeamWorkspaceService';
+import {
+  isExternalPlatformSessionKey as isParsedExternalPlatformSessionKey,
+  parseExternalPlatformSessionKey as parsePlatformSessionKey,
+} from '@main/utils/externalPlatformSessionKey';
 
-const EXTERNAL_PLATFORM_SESSION_RE = /^(feishu|lark|weixin|telegram|discord|slack):/;
 const FEISHU_LARK_KEYS = new Set(['feishu', 'lark']);
 
 export interface ExternalPlatformSessionKey {
@@ -10,18 +13,18 @@ export interface ExternalPlatformSessionKey {
 }
 
 export function isExternalPlatformSessionKey(sessionKey: string): boolean {
-  return EXTERNAL_PLATFORM_SESSION_RE.test(sessionKey);
+  return isParsedExternalPlatformSessionKey(sessionKey);
 }
 
 export function parseExternalPlatformSessionKey(
   sessionKey: string
 ): ExternalPlatformSessionKey | null {
-  if (!isExternalPlatformSessionKey(sessionKey)) return null;
-  const [platform, chatId, userId] = sessionKey.split(':');
+  const parsed = parsePlatformSessionKey(sessionKey);
+  if (parsed.kind !== 'external-platform' || !parsed.platform) return null;
   return {
-    platform,
-    chatId: chatId?.trim() || undefined,
-    userId: userId?.trim() || undefined,
+    platform: parsed.platform,
+    chatId: parsed.chatId,
+    userId: parsed.userId,
   };
 }
 
@@ -36,16 +39,25 @@ function getPlatformAllowValue(
   return record[platform] ?? '';
 }
 
-function matchesAllowList(allowList: string, value: string | undefined): boolean {
+function normalizeFeishuLarkChatId(value: string): string {
+  return value.replace(/^oc_/i, 'c_');
+}
+
+function normalizeAllowValue(platform: string, value: string): string {
+  return FEISHU_LARK_KEYS.has(platform) ? normalizeFeishuLarkChatId(value) : value;
+}
+
+function matchesAllowList(allowList: string, value: string | undefined, platform: string): boolean {
   const trimmed = allowList.trim();
   if (!trimmed) return false;
   if (trimmed === '*') return true;
   if (!value) return false;
+  const normalizedValue = normalizeAllowValue(platform, value);
   return trimmed
     .split(/[\s,]+/)
-    .map((entry) => entry.trim())
+    .map((entry) => normalizeAllowValue(platform, entry.trim()))
     .filter(Boolean)
-    .includes(value);
+    .includes(normalizedValue);
 }
 
 function scoreManifestForSession(
@@ -57,12 +69,12 @@ function scoreManifestForSession(
   let score = 0;
 
   if (allowChat) {
-    if (!matchesAllowList(allowChat, parsed.chatId)) return 0;
+    if (!matchesAllowList(allowChat, parsed.chatId, parsed.platform)) return 0;
     score += allowChat.trim() === '*' ? 1 : 4;
   }
 
   if (allowFrom) {
-    if (!matchesAllowList(allowFrom, parsed.userId)) return 0;
+    if (!matchesAllowList(allowFrom, parsed.userId, parsed.platform)) return 0;
     score += allowFrom.trim() === '*' ? 1 : 3;
   }
 

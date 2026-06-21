@@ -378,11 +378,20 @@ export function RuntimeConfigDialog({
     setSavePhase(options?.restartHandled ? 'saving' : 'restarting');
     setError(null);
     void (async () => {
+      // cc-connect 注册新渠道 + 重启有传播延迟，绑定后立即拉一次往往拿到绑定前的旧数据。
+      // 参考 TeamListView 的延迟二次刷新，确保运行时编辑框与团队列表及时反映新绑定。
+      const refreshAfterBinding = (delayMs: number): void => {
+        window.setTimeout(() => {
+          void Promise.all([fetchTeams(), selectTeam(teamName)]).catch(() => undefined);
+        }, delayMs);
+      };
       try {
         if (!options?.restartHandled && !isAdminTeam) {
           await api.ccSettings.restart();
         }
         await Promise.all([fetchTeams(), selectTeam(teamName)]);
+        refreshAfterBinding(1200);
+        refreshAfterBinding(3500);
         setBindingStep('runtime');
         setSavePhase('done');
       } catch (err) {
@@ -390,6 +399,8 @@ export function RuntimeConfigDialog({
         setBindingStep('runtime');
         setSavePhase('idle');
         void Promise.all([fetchTeams(), selectTeam(teamName)]).catch(() => undefined);
+        refreshAfterBinding(1200);
+        refreshAfterBinding(3500);
       }
     })();
   };

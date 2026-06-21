@@ -547,9 +547,13 @@ export class HttpAPIClient implements ElectronAPI {
       }
     ): Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }> => {
       const res = await this.postLong<{
-        ok: boolean;
-        data: { message: string; restart_required: boolean; restart_handled?: boolean };
+        ok?: boolean;
+        data?: { message: string; restart_required: boolean; restart_handled?: boolean };
+        error?: string;
       }>(`/api/projects/${encodeURIComponent(projectName)}/add-platform`, body, 120_000);
+      if (res.ok === false || !res.data) {
+        throw new Error(res.error ?? '绑定平台失败：服务未返回结果');
+      }
       return res.data;
     },
   };
@@ -1469,11 +1473,10 @@ export class HttpAPIClient implements ElectronAPI {
     setProjectBranchTracking: async (): Promise<void> => {
       // Not available in browser mode — no-op.
     },
-    getAttachments: async (
-      _teamName: string,
-      _messageId: string
-    ): Promise<AttachmentFileData[]> => {
-      return [];
+    getAttachments: async (teamName: string, messageId: string): Promise<AttachmentFileData[]> => {
+      return this.get<AttachmentFileData[]>(
+        `/api/teams/${encodeURIComponent(teamName)}/messages/${encodeURIComponent(messageId)}/attachments`
+      );
     },
     killProcess: async (teamName: string, pid: number): Promise<void> => {
       await this.post(`/api/teams/${encodeURIComponent(teamName)}/kill-process`, { pid });

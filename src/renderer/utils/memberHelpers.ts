@@ -51,6 +51,15 @@ export function agentAvatarUrl(name: string, size = 64): string {
   return `https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(normalized)}&backgroundColor=c0aede,d1d4f9,ffd5dc,ffdfbf,b6e3f4,c1f0c1`;
 }
 
+export function teamAvatarUrl(
+  teamName: string,
+  displayName: string | null | undefined,
+  size = 64
+): string {
+  const avatarSeed = displayName?.trim() || teamName;
+  return agentAvatarUrl(avatarSeed, size);
+}
+
 export const STATUS_DOT_COLORS: Record<MemberStatus, string> = {
   active: 'bg-emerald-400',
   idle: 'bg-zinc-400',

@@ -23,8 +23,16 @@ vi.mock('@renderer/components/team/dialogs/PlatformSetupQR', () => ({
 }));
 
 vi.mock('@renderer/components/team/dialogs/PlatformManualForm', () => ({
-  default: ({ onComplete, onCancel }: { onComplete: () => void; onCancel: () => void }) => (
-    <div data-testid="manual-form">
+  default: ({
+    platformType,
+    onComplete,
+    onCancel,
+  }: {
+    platformType: string;
+    onComplete: () => void;
+    onCancel: () => void;
+  }) => (
+    <div data-testid="manual-form" data-platform={platformType}>
       <button data-testid="form-complete" onClick={onComplete}>Form Done</button>
       <button data-testid="form-cancel" onClick={onCancel}>Form Back</button>
     </div>
@@ -53,7 +61,7 @@ describe('PlatformBindingContent', () => {
     vi.clearAllMocks();
   });
 
-  it('renders platform selection grid with all platform options', async () => {
+  it('renders platform selection grid with grouped WeCom IM card', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -67,6 +75,9 @@ describe('PlatformBindingContent', () => {
     expect(host.textContent).toContain('微信');
     expect(host.textContent).toContain('Telegram');
     expect(host.textContent).toContain('Discord');
+    expect(host.textContent).toContain('企业微信 / IM');
+    expect(host.textContent).not.toContain('企业微信智能机器人');
+    expect(host.textContent).not.toContain('企业微信自建应用（Callback）');
     expect(host.textContent).toContain('取消');
 
     await act(async () => {
@@ -130,6 +141,157 @@ describe('PlatformBindingContent', () => {
     });
 
     expect(host.querySelector('[data-testid="manual-form"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="manual-form"]')?.getAttribute('data-platform')).toBe(
+      'telegram',
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('opens WeCom mode selection from the grouped IM card', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<PlatformBindingContent {...defaultProps} />);
+      await Promise.resolve();
+    });
+
+    const wecomBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信 / IM'),
+    );
+
+    await act(async () => {
+      wecomBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('选择企业微信接入方式');
+    expect(host.textContent).toContain('企业微信智能机器人');
+    expect(host.textContent).toContain('企业微信自建应用（Callback）');
+    expect(host.querySelector('[data-testid="manual-form"]')).toBeFalsy();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('opens the WeCom websocket form after choosing intelligent robot mode', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<PlatformBindingContent {...defaultProps} />);
+      await Promise.resolve();
+    });
+
+    const wecomBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信 / IM'),
+    );
+    await act(async () => {
+      wecomBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const wsBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信智能机器人'),
+    );
+    await act(async () => {
+      wsBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="manual-form"]')?.getAttribute('data-platform')).toBe(
+      'wecom_ws',
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('opens the WeCom callback form after choosing self-built app mode', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<PlatformBindingContent {...defaultProps} />);
+      await Promise.resolve();
+    });
+
+    const wecomBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信 / IM'),
+    );
+    await act(async () => {
+      wecomBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const callbackBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信自建应用（Callback）'),
+    );
+    await act(async () => {
+      callbackBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="manual-form"]')?.getAttribute('data-platform')).toBe(
+      'wecom',
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('returns from a WeCom concrete form to mode selection', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<PlatformBindingContent {...defaultProps} />);
+      await Promise.resolve();
+    });
+
+    const wecomBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信 / IM'),
+    );
+    await act(async () => {
+      wecomBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const wsBtn = Array.from(host.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('企业微信智能机器人'),
+    );
+    await act(async () => {
+      wsBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const backBtn = host.querySelector('[data-testid="form-cancel"]');
+    await act(async () => {
+      backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="manual-form"]')).toBeFalsy();
+    expect(host.textContent).toContain('企业微信智能机器人');
+    expect(host.textContent).toContain('企业微信自建应用（Callback）');
 
     await act(async () => {
       root.unmount();
@@ -173,7 +335,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Click feishu to enter QR step
     const buttons = host.querySelectorAll('button');
     const feishuBtn = Array.from(buttons).find(
       (btn) => btn.textContent?.includes('飞书'),
@@ -185,7 +346,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Click back
     const backBtn = host.querySelector('[data-testid="qr-cancel"]');
     await act(async () => {
       backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -193,7 +353,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Should be back at platform selection
     expect(host.textContent).toContain('飞书');
     expect(host.querySelector('[data-testid="qr-setup"]')).toBeFalsy();
 
@@ -212,7 +371,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Click feishu to enter QR step
     const buttons = host.querySelectorAll('button');
     const feishuBtn = Array.from(buttons).find(
       (btn) => btn.textContent?.includes('飞书'),
@@ -224,7 +382,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Click complete
     const completeBtn = host.querySelector('[data-testid="qr-complete"]');
     await act(async () => {
       completeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -248,7 +405,6 @@ describe('PlatformBindingContent', () => {
       await Promise.resolve();
     });
 
-    // Click telegram to enter form step
     const buttons = host.querySelectorAll('button');
     const telegramBtn = Array.from(buttons).find(
       (btn) => btn.textContent?.includes('Telegram'),
@@ -261,14 +417,12 @@ describe('PlatformBindingContent', () => {
     });
     expect(host.querySelector('[data-testid="manual-form"]')).toBeTruthy();
 
-    // Change projectName to trigger reset
     await act(async () => {
       root.render(<PlatformBindingContent {...defaultProps} projectName="other-project" />);
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    // Should be back at platform selection
     expect(host.textContent).toContain('飞书');
 
     await act(async () => {

@@ -59,8 +59,6 @@ describe('idleNotificationSemantics', () => {
         })
       )
     ).toBe('[to bob] aligned on rollout order');
-    expect(getIdleGraphLabel('{"type":"idle_notification","idleReason":"available"}')).toBe(
-      'idle'
-    );
+    expect(getIdleGraphLabel('{"type":"idle_notification","idleReason":"available"}')).toBeNull();
   });
 });

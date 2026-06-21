@@ -267,6 +267,12 @@ export interface CcBridgeRegisterMessage {
   platform: string;
   capabilities: string[];
   metadata?: Record<string, string>;
+  /**
+   * Opt into per-turn token-usage broadcasts. ADDITIVE: a connection that also
+   * sets `platform` keeps full send/receive AND receives usage events. With an
+   * empty `platform` it is a pure monitoring-only observer (never a reply target).
+   */
+  observe_usage?: boolean;
 }
 
 /** User message from adapter to cc-connect. */
@@ -291,12 +297,27 @@ export interface CcBridgeUserMessage {
 }
 
 /** Complete reply from agent. */
+export interface CcBridgeTokenUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  total_tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  totalTokens?: number;
+}
+
 export interface CcBridgeReplyMessage {
   type: 'reply';
   session_key: string;
   reply_ctx?: string;
   content: string;
   format?: string;
+  usage?: CcBridgeTokenUsage;
+  token_usage?: CcBridgeTokenUsage;
 }
 
 /** Streaming delta from agent. */
@@ -308,6 +329,8 @@ export interface CcBridgeReplyStreamMessage {
   full_text: string;
   preview_handle?: string;
   done: boolean;
+  usage?: CcBridgeTokenUsage;
+  token_usage?: CcBridgeTokenUsage;
 }
 
 /** Card from agent. */
@@ -347,6 +370,24 @@ export interface CcBridgePongMessage {
   ts: number;
 }
 
+/**
+ * Per-turn token usage broadcast, fanned out to every connection that registered
+ * with `observe_usage: true`. Carries token counts ONLY — no message content —
+ * so it is safe to forward to external telemetry surfaces. Emitted by cc-connect
+ * at turn-complete (see the `UsageEmitter` optional interface on the bridge).
+ */
+export interface CcBridgeUsageMessage {
+  type: 'usage';
+  session_key: string;
+  platform: string;
+  agent_type?: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  ts: number;
+}
+
 /** Card action from adapter. */
 export interface CcBridgeCardActionMessage {
   type: 'card_action';
@@ -361,7 +402,8 @@ export type CcBridgeIncomingMessage =
   | CcBridgeCardMessage
   | CcBridgeButtonsMessage
   | CcBridgeTypingMessage
-  | CcBridgePongMessage;
+  | CcBridgePongMessage
+  | CcBridgeUsageMessage;
 
 export type CcBridgeOutgoingMessage =
   | CcBridgeRegisterMessage

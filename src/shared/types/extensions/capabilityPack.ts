@@ -40,6 +40,26 @@ export interface CapabilityWorkflow {
   path: string;
 }
 
+export interface CapabilityCronJob {
+  id: string;
+  name: string;
+  description?: string;
+  cronExpression: string;
+  prompt: string;
+  enabled: boolean;
+  teamName?: string;
+}
+
+export interface CapabilityMcpServer {
+  id: string;
+  name: string;
+  scope: 'local' | 'user' | 'project';
+  transport?: string;
+  config?: Record<string, unknown>;
+}
+
+export type CapabilityPackExportRuntime = 'claudecode' | 'codex' | 'cursor' | 'gemini' | 'opencode';
+
 export interface CapabilityPackManifest {
   schemaVersion: 1;
   id: string;
@@ -48,14 +68,18 @@ export interface CapabilityPackManifest {
   version: string;
   author?: string;
   description?: string;
+  tags?: string[];
+  teamName?: string;
   capabilities: {
     commands?: CapabilityCommand[];
     skills?: CapabilitySkill[];
     workflows?: CapabilityWorkflow[];
+    cron?: CapabilityCronJob[];
+    mcpServers?: CapabilityMcpServer[];
   };
 }
 
-export type CapabilityPackSource = 'builtin' | 'user' | 'project';
+export type CapabilityPackSource = 'builtin' | 'local' | 'user' | 'project';
 
 export interface LoadedCapabilityPack {
   manifest: CapabilityPackManifest;
@@ -78,8 +102,9 @@ export interface CapabilityPackImportRequest {
 
 export interface CapabilityPackExportRequest {
   packId: string;
-  destinationDir: string;
+  destinationDir?: string;
   overwrite?: boolean;
+  runtime?: CapabilityPackExportRuntime;
 }
 
 export interface CapabilityPackMutationResult {

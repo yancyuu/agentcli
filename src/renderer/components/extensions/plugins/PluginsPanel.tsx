@@ -286,7 +286,7 @@ export const PluginsPanel = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-sm font-semibold text-text">按适用场景浏览</h2>
                     <Badge variant="outline" className="text-[11px] text-text-muted">
-                      {activeFilterCount} 个已启用
+                      {activeFilterCount} 个筛选条件已启用
                     </Badge>
                   </div>
                   <p className="text-xs text-text-muted">按分类、能力或安装状态缩小目录范围。</p>

@@ -228,7 +228,7 @@ export function LoopCommandComposer({
           {intent.kind === 'runtime'
             ? '仅注入 runtime'
             : intent.kind === 'session'
-              ? 'Loop 会话'
+              ? '本地会话'
               : intent.kind === 'workers-list'
                 ? '查看数字员工'
                 : intent.kind === 'cross-team-task'
@@ -239,7 +239,7 @@ export function LoopCommandComposer({
 
       <MentionableTextarea
         id={`loop-console-${teamName}`}
-        placeholder='输入指令：/loop、/hermit:doctor、!runtime、!session --name "巡检"，或 @team 派单…'
+        placeholder='输入指令：/help、/model、!runtime、!session --name "巡检"，或 @team 派单…'
         value={text}
         onValueChange={setText}
         suggestions={mentionSuggestions}
@@ -249,7 +249,7 @@ export function LoopCommandComposer({
         chips={EMPTY_CHIPS}
         onModEnter={handleSubmit}
         extraTips={[
-          '输入 / 查看 Loop/ops workflow；输入 !runtime 表示只注入运行时；输入 !session 新建 Loop 会话。',
+          '输入 / 查看可用命令；输入 !runtime 表示只注入运行时；输入 !session 新建本地会话。',
         ]}
         surfaceClassName="bg-[var(--color-surface)]"
         surfaceFadeColor="var(--color-surface)"

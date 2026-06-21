@@ -16,6 +16,8 @@ export interface FieldDef {
 export interface PlatformMeta {
   label: string;
   fields: FieldDef[];
+  submitType?: string;
+  defaultOptions?: Record<string, unknown>;
 }
 
 export const platformMeta: Record<string, PlatformMeta> = {
@@ -143,8 +145,24 @@ export const platformMeta: Record<string, PlatformMeta> = {
       { key: 'share_session_in_channel', label: '共享群会话', type: 'boolean', group: 'advanced' },
     ],
   },
+  wecom_ws: {
+    label: '企业微信智能机器人',
+    submitType: 'wecom',
+    defaultOptions: { mode: 'websocket' },
+    fields: [
+      { key: 'bot_id', label: 'Bot ID', required: true, placeholder: '企业微信智能机器人 BotID' },
+      { key: 'bot_secret', label: 'Bot Secret', required: true, type: 'password' },
+      {
+        key: 'allow_from',
+        label: '私聊权限（允许的用户 ID）',
+        placeholder: '* 或 user_id',
+        group: 'advanced',
+        hint: '控制哪些用户可以私聊机器人，* 表示所有',
+      },
+    ],
+  },
   wecom: {
-    label: '企业微信',
+    label: '企业微信自建应用（Callback）',
     fields: [
       { key: 'corp_id', label: 'Corp ID', required: true },
       { key: 'corp_secret', label: 'Corp Secret', required: true, type: 'password' },

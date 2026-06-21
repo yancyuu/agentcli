@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useComposerDraft } from '@renderer/hooks/useComposerDraft';
+import { useProjectWorkflowCommands } from '@renderer/hooks/useProjectWorkflowCommands';
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { cn } from '@renderer/lib/utils';
@@ -25,7 +26,6 @@ import {
 } from '@renderer/utils/capabilityCommandExecution';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { getLoopShortcutSuggestions } from '@renderer/utils/loopShortcutSuggestions';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';
 import {
   RESERVED_SLASH_COMMANDS,
@@ -185,21 +185,32 @@ export const MessageComposer = ({
   const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
   const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
   const projectSkills = projectPath ? (skillsProjectCatalogByProjectPath[projectPath] ?? []) : [];
+  const projectWorkflowSuggestions = useProjectWorkflowCommands(projectPath);
   const slashCommandSuggestions = useMemo<MentionSuggestion[]>(() => {
+    const isBlockedCommand = (suggestion: MentionSuggestion) => {
+      const raw = (suggestion.command ?? suggestion.name).trim().toLowerCase().replace(/^\//, '');
+      return raw === 'loop' || raw === 'system' || raw.endsWith(':loop') || raw.endsWith(':system');
+    };
     const localSuggestions = [
-      ...getLoopShortcutSuggestions(),
+      ...projectWorkflowSuggestions,
       ...buildSlashCommandSuggestions(
         getSuggestedSlashCommandsForProvider(leadProviderId),
         projectSkills,
         skillsUserCatalog,
         leadProviderId
       ),
-    ];
+    ].filter((suggestion) => !isBlockedCommand(suggestion));
     const packSuggestions = buildCapabilityPackCommandSuggestions(capabilityPacks, 'team-loop', {
       forceNamespacedAliases: collectSlashSuggestionAliases(localSuggestions),
-    });
+    }).filter((suggestion) => !isBlockedCommand(suggestion));
     return [...localSuggestions, ...packSuggestions];
-  }, [capabilityPacks, leadProviderId, projectSkills, skillsUserCatalog]);
+  }, [
+    capabilityPacks,
+    leadProviderId,
+    projectSkills,
+    projectWorkflowSuggestions,
+    skillsUserCatalog,
+  ]);
   const capabilityRegistry = useMemo(
     () => buildSlashCommandRegistry({ packs: capabilityPacks, scope: 'team-loop' }),
     [capabilityPacks]
@@ -711,9 +722,7 @@ export const MessageComposer = ({
             )
               .slice(0, 6)
               .join('、');
-            return [
-              `Tips：你可以输入 "/" 来运行命令，如 ${commands} 等；输入 "/loop" 可选择常用模板。`,
-            ];
+            return [`Tips：你可以输入 "/" 来运行命令，如 ${commands} 等。`];
           }, [slashCommandSuggestions])}
           surfaceClassName="message-composer-shell message-composer-orbit-surface bg-[var(--color-surface-raised)]"
           surfaceDecoration="orbit-border"

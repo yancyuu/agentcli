@@ -103,6 +103,7 @@ export const MemberDetailHeader = ({
           launchVisualState === 'stale_runtime'
         ? (launchStatusLabel ?? presenceLabel)
         : presenceLabel;
+  const showBadgeLabel = badgeLabel !== 'idle';
 
   const canEditRole =
     !isLeadMember(member) && !member.removedAt && !isTeamProvisioning && !!onUpdateRole;
@@ -156,7 +157,7 @@ export const MemberDetailHeader = ({
                 )}
               </>
             )}
-            {!editing && (
+            {!editing && showBadgeLabel ? (
               <>
                 <Badge
                   variant="secondary"
@@ -171,7 +172,7 @@ export const MemberDetailHeader = ({
                 </Badge>
                 {/* NOTE: lead context token display disabled — usage formula is inaccurate */}
               </>
-            )}
+            ) : null}
             {!editing && runtimeSummary ? (
               <div className="mt-1 text-xs text-[var(--color-text-muted)]">{runtimeSummary}</div>
             ) : null}

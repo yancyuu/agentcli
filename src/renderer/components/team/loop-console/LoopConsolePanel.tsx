@@ -64,6 +64,36 @@ interface LoopConsolePanelProps {
   onReplyToMessage?: (message: InboxMessage) => void;
   onRestartTeam?: () => void;
   onTaskIdClick?: (taskId: string) => void;
+  statusLabel?: string;
+  sessionPendingRecipient?: string;
+}
+
+function reconcilePendingRepliesByMember(
+  pendingRepliesByMember: Record<string, number>,
+  messages: InboxMessage[]
+): Record<string, number> {
+  if (Object.keys(pendingRepliesByMember).length === 0) return pendingRepliesByMember;
+
+  const latestReplyToUserByMember = new Map<string, number>();
+  for (const message of messages) {
+    if (message.to !== 'user') continue;
+    const ts = Date.parse(message.timestamp);
+    if (!Number.isFinite(ts)) continue;
+    const previous = latestReplyToUserByMember.get(message.from);
+    if (previous == null || ts > previous) latestReplyToUserByMember.set(message.from, ts);
+  }
+
+  let changed = false;
+  const next: Record<string, number> = {};
+  for (const [memberName, sentAtMs] of Object.entries(pendingRepliesByMember)) {
+    const latestReplyAt = latestReplyToUserByMember.get(memberName);
+    if (latestReplyAt != null && latestReplyAt > sentAtMs) {
+      changed = true;
+      continue;
+    }
+    next[memberName] = sentAtMs;
+  }
+  return changed ? next : pendingRepliesByMember;
 }
 
 export function LoopConsolePanel({
@@ -86,6 +116,8 @@ export function LoopConsolePanel({
   onReplyToMessage,
   onRestartTeam,
   onTaskIdClick,
+  statusLabel,
+  sessionPendingRecipient,
 }: LoopConsolePanelProps): React.JSX.Element {
   const {
     teams,
@@ -174,8 +206,15 @@ export function LoopConsolePanel({
   const { sending, statusMessage, submitIntent } = useLoopConsoleController({
     teamName,
     sessionKey: selectedSessionKey,
+    sessionPendingRecipient,
     onPendingReplyChange,
   });
+
+  useEffect(() => {
+    if (Object.keys(pendingRepliesByMember).length === 0) return;
+    const next = reconcilePendingRepliesByMember(pendingRepliesByMember, activityMessages);
+    if (next !== pendingRepliesByMember) onPendingReplyChange(() => next);
+  }, [activityMessages, onPendingReplyChange, pendingRepliesByMember]);
 
   const handleMessageVisible = useCallback(
     (message: InboxMessage) => {
@@ -211,7 +250,7 @@ export function LoopConsolePanel({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-            {isTeamAlive ? '在线' : '离线'}
+            {statusLabel ?? (isTeamAlive ? '在线' : '离线')}
           </span>
           <button
             type="button"

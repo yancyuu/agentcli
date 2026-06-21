@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildFeishuLarkAllowUpdatePayload,
+  buildPlatformAllowUpdatePayload,
   getFeishuLarkAllowValue,
   getPlatformAllowValue,
+  hasFeishuLarkDeleteMarker,
   omitEmptyAllowMap,
   readStringRecord,
   withFeishuLarkAllowValue,
@@ -69,11 +71,73 @@ describe('platformAllowUtils', () => {
     expect(withPlatformAllowValue({ telegram: '123', wechat: 'old' }, 'weixin', '')).toEqual({
       telegram: '123',
     });
+    expect(withPlatformAllowValue({ wecom: 'old' }, 'wecom_ws', 'new')).toEqual({
+      wecom: 'new',
+    });
   });
 
   it('normalizes string records and drops empty values', () => {
     expect(readStringRecord({ feishu: '  ou_1  ', empty: ' ', bad: 1 })).toEqual({
       feishu: 'ou_1',
     });
+  });
+});
+
+describe('buildPlatformAllowUpdatePayload', () => {
+  it('returns undefined when nothing changed', () => {
+    expect(
+      buildPlatformAllowUpdatePayload({ feishu: 'ou_1', telegram: '123' }, {
+        feishu: 'ou_1',
+        telegram: '123',
+      })
+    ).toBeUndefined();
+  });
+
+  it('returns the normalized next map when a value changed', () => {
+    expect(
+      buildPlatformAllowUpdatePayload({ feishu: 'ou_1' }, { feishu: 'ou_2', telegram: '456' })
+    ).toEqual({ feishu: 'ou_2', telegram: '456' });
+  });
+
+  it('treats whitespace-only and empty entries as a change from a populated value', () => {
+    // readStringRecord drops empty entries, so the normalized next map loses
+    // the key while the source kept it — that counts as a change.
+    expect(buildPlatformAllowUpdatePayload({ feishu: 'ou_1' }, { feishu: '   ' })).toEqual({});
+  });
+
+  it('returns undefined when both base and values are empty', () => {
+    expect(buildPlatformAllowUpdatePayload({}, {})).toBeUndefined();
+  });
+});
+
+describe('hasFeishuLarkDeleteMarker', () => {
+  it('detects a blank feishu entry', () => {
+    expect(hasFeishuLarkDeleteMarker({ feishu: '' })).toBe(true);
+    expect(hasFeishuLarkDeleteMarker({ feishu: '   ' })).toBe(true);
+  });
+
+  it('detects a blank lark entry', () => {
+    expect(hasFeishuLarkDeleteMarker({ lark: '' })).toBe(true);
+  });
+
+  it('returns false when feishu/lark entries hold real values', () => {
+    expect(hasFeishuLarkDeleteMarker({ feishu: 'ou_1', lark: 'ou_2' })).toBe(false);
+  });
+
+  it('returns false for non-feishu/lark keys regardless of value', () => {
+    expect(hasFeishuLarkDeleteMarker({ telegram: '' })).toBe(false);
+    expect(hasFeishuLarkDeleteMarker({ weixin: '' })).toBe(false);
+  });
+
+  it('returns false for non-object or array inputs', () => {
+    expect(hasFeishuLarkDeleteMarker(null)).toBe(false);
+    expect(hasFeishuLarkDeleteMarker(undefined)).toBe(false);
+    expect(hasFeishuLarkDeleteMarker(['feishu'])).toBe(false);
+    expect(hasFeishuLarkDeleteMarker('feishu')).toBe(false);
+  });
+
+  it('ignores whitespace-padded feishu/lark keys', () => {
+    // Keys are trimmed before matching the feishu/lark set.
+    expect(hasFeishuLarkDeleteMarker({ '  feishu ': '' })).toBe(true);
   });
 });

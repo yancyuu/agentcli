@@ -1,150 +1,82 @@
 /**
- * UsageTelemetryService - scans Claude Code JSONL sessions and uploads
- * metadata-only usage metrics to Redis.
+ * UsageTelemetryService - scans Claude Code JSONL sessions to serve the
+ * local usage view. Local-only: it never uploads anything.
+ *
+ * Centralized reporting of IM "digital employee" usage is handled separately
+ * and per-turn by ExternalImUsageReporter, which pushes to the team-bus Redis
+ * when the team bus is on (this box is part of a distributed Hermit fleet) and
+ * usage reporting is opted in — see getImUplinkRedisConfig in server.ts. Local
+ * JSONL scans are never pushed off-box.
  */
 
-import type Redis from 'ioredis';
-import { scanSessions } from './SessionUsageParser';
+import type { ConversationTelemetryRow } from '@shared/types/api';
 import type { TaskBusConfig } from '@shared/types/team';
-import type { ParseResult } from './SessionUsageParser';
 
-const KEY_DAILY = (slug: string, date: string) => `hermit:usage:${slug}:daily:${date}`;
-const KEY_SUMMARY = (slug: string) => `hermit:usage:${slug}:summary`;
-const KEY_LAST_SCAN = (slug: string) => `hermit:usage:${slug}:lastScan`;
-const KEY_HOURLY = (slug: string) => `hermit:usage:${slug}:hourly`;
-const KEY_EVENTS7D = (slug: string) => `hermit:usage:${slug}:events7d`;
-const KEY_WORK_SECONDS = (slug: string) => `hermit:usage:${slug}:workSeconds`;
-const KEY_PROJECTS = (slug: string) => `hermit:usage:${slug}:projects`;
+import { SessionUsageCollector, type ConversationUsageRowsProvider } from './SessionUsageCollector';
+import type { UsageAggregate } from './SessionUsageParser';
+import { UsageAttributionService } from './UsageAttributionService';
+import type { UsageCollectionResult, UsageTelemetryStatus } from './usageTypes';
 
 let scanInterval: ReturnType<typeof setInterval> | null = null;
-let lastLocalScan: TelemetryStatusResult | null = null;
+let lastLocalScan: UsageTelemetryStatus | null = null;
+let collector = new SessionUsageCollector();
+const usageAttribution = new UsageAttributionService();
 
-function redisConfig(cfg: TaskBusConfig) {
+function emptyUnresolvedUsage() {
+  return { sessions: 0, messages: 0, tokensTotal: 0 };
+}
+
+function statusFromCollection(collection: UsageCollectionResult): UsageTelemetryStatus {
+  const aggregate: UsageAggregate = collection.legacyParseResult.aggregate;
+  const attributed = usageAttribution.attribute({
+    computedAt: collection.computedAt,
+    global: aggregate,
+    conversations: collection.conversations,
+  });
+
   return {
-    host: cfg.redis.host,
-    port: cfg.redis.port,
-    password: cfg.redis.password,
-    db: cfg.redis.db,
-    lazyConnect: true,
-    maxRetriesPerRequest: 0,
-    retryStrategy: () => null,
+    connected: false,
+    lastScan: collection.computedAt,
+    sessions: aggregate.sessions,
+    messages: aggregate.messages,
+    tokensIn: aggregate.tokens.input,
+    tokensOut: aggregate.tokens.output,
+    cacheRead: aggregate.tokens.cacheRead,
+    cacheCreation: aggregate.tokens.cacheCreation,
+    totalTokens: aggregate.tokens.total,
+    activeDays: aggregate.activeDays,
+    hourly: aggregate.hourly,
+    projects: aggregate.projects,
+    workSecondsByDay: aggregate.workSecondsByDay,
+    localUsers: attributed.localUsers,
+    externalUsers: attributed.externalUsers,
+    unresolvedUsage: attributed.unresolved ?? emptyUnresolvedUsage(),
   };
 }
 
-async function getRedis(cfg: TaskBusConfig): Promise<Redis | null> {
-  let Redis: typeof import('ioredis').default;
-  try {
-    const mod = await import('ioredis');
-    Redis = mod.default;
-  } catch {
-    return null;
-  }
-
-  const r = new Redis(redisConfig(cfg));
-  r.on('error', () => {
-    /* handled by connect/ping fallback */
-  });
-  try {
-    await r.connect();
-    await r.ping();
-    return r;
-  } catch {
-    try {
-      r.disconnect();
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
+async function doScan(): Promise<UsageTelemetryStatus | null> {
+  const collection = await collector.collect();
+  lastLocalScan = statusFromCollection(collection);
+  return lastLocalScan;
 }
 
-async function uploadMetrics(client: Redis, slug: string, result: ParseResult): Promise<void> {
-  const { aggregate } = result;
-  const pipe = client.pipeline();
-
-  // Per-day metrics (90 day TTL)
-  for (const [day, m] of Object.entries(aggregate.daily)) {
-    pipe.hset(KEY_DAILY(slug, day), {
-      sessions: m.sessions,
-      messages: m.messages,
-      tokens_in: m.tokensIn,
-      tokens_out: m.tokensOut,
-      cache_read: m.cacheRead,
-      cache_creation: m.cacheCreation,
-      tokens_total: m.tokensTotal,
-      work_seconds: m.workSeconds,
-    });
-    pipe.expire(KEY_DAILY(slug, day), 90 * 86400);
-  }
-
-  // Summary
-  pipe.hset(KEY_SUMMARY(slug), {
-    sessions: aggregate.sessions,
-    messages: aggregate.messages,
-    tokens_in: aggregate.tokens.input,
-    tokens_out: aggregate.tokens.output,
-    cache_read: aggregate.tokens.cacheRead,
-    cache_creation: aggregate.tokens.cacheCreation,
-    tokens_total: aggregate.tokens.total,
-    active_days: aggregate.activeDays,
-    last_scan: new Date().toISOString(),
-  });
-
-  // Hourly distribution
-  pipe.set(KEY_HOURLY(slug), JSON.stringify(aggregate.hourly));
-
-  // 7-day events for rolling window
-  pipe.set(KEY_EVENTS7D(slug), JSON.stringify(aggregate.events7d));
-
-  // Work seconds by day
-  pipe.set(KEY_WORK_SECONDS(slug), JSON.stringify(aggregate.workSecondsByDay));
-
-  // Projects ranking
-  pipe.set(KEY_PROJECTS(slug), JSON.stringify(aggregate.projects));
-
-  // Last scan time
-  pipe.set(KEY_LAST_SCAN(slug), new Date().toISOString());
-
-  await pipe.exec();
-}
-
-async function doScan(cfg: TaskBusConfig): Promise<ParseResult | null> {
-  if (!cfg.telemetry?.enabled) return null;
-
-  const result = await scanSessions();
-  lastLocalScan = statusFromParseResult(result, false);
-
-  if (!cfg.enabled || !cfg.telemetry.uploadEnabled) {
-    return result;
-  }
-
-  const client = await getRedis(cfg);
-  if (!client) return result;
-
-  try {
-    await uploadMetrics(client, 'global', result);
-    lastLocalScan = statusFromParseResult(result, true);
-    return result;
-  } finally {
-    try {
-      client.disconnect();
-    } catch {
-      /* ignore */
-    }
-  }
+export function configureUsageTelemetry(options: {
+  loadConversations?: ConversationUsageRowsProvider;
+}): void {
+  collector = new SessionUsageCollector(options.loadConversations);
 }
 
 export async function startTelemetry(cfg: TaskBusConfig): Promise<void> {
   await stopTelemetry();
   if (!cfg.telemetry?.enabled) return;
 
-  // Immediate first scan
-  await doScan(cfg);
-
-  // Periodic scan every 10 minutes
+  // Immediate first scan, then refresh every 10 minutes. Scans are local-only
+  // (no upload); the collector caches parsed results per file by size+mtime so
+  // unchanged files only cost a stat.
+  await doScan();
   scanInterval = setInterval(
     async () => {
-      await doScan(cfg);
+      await doScan();
     },
     10 * 60 * 1000
   );
@@ -157,120 +89,17 @@ export async function stopTelemetry(): Promise<void> {
   }
 }
 
-export async function triggerScan(cfg: TaskBusConfig): Promise<ParseResult | null> {
-  return doScan(cfg);
+export async function triggerScan(cfg: TaskBusConfig): Promise<UsageTelemetryStatus | null> {
+  if (!cfg.telemetry?.enabled) return null;
+  return doScan();
 }
 
 export function isTelemetryRunning(): boolean {
   return scanInterval !== null;
 }
 
-interface TelemetryStatusResult {
-  connected: boolean;
-  lastScan: string | null;
-  sessions: number;
-  messages: number;
-  tokensIn: number;
-  tokensOut: number;
-  cacheRead: number;
-  cacheCreation: number;
-  totalTokens: number;
-  activeDays: number;
-  hourly: number[];
-  projects: Array<{
-    cwd: string;
-    sessions: number;
-    messages: number;
-    tokensIn: number;
-    tokensOut: number;
-    tokensTotal: number;
-  }>;
-  workSecondsByDay: Record<string, number>;
+export async function getTelemetryStatus(): Promise<UsageTelemetryStatus | null> {
+  return lastLocalScan;
 }
 
-function statusFromParseResult(result: ParseResult, connected: boolean): TelemetryStatusResult {
-  const { aggregate } = result;
-  return {
-    connected,
-    lastScan: new Date().toISOString(),
-    sessions: aggregate.sessions,
-    messages: aggregate.messages,
-    tokensIn: aggregate.tokens.input,
-    tokensOut: aggregate.tokens.output,
-    cacheRead: aggregate.tokens.cacheRead,
-    cacheCreation: aggregate.tokens.cacheCreation,
-    totalTokens: aggregate.tokens.total,
-    activeDays: aggregate.activeDays,
-    hourly: aggregate.hourly,
-    projects: aggregate.projects,
-    workSecondsByDay: aggregate.workSecondsByDay,
-  };
-}
-
-export async function getTelemetryStatus(
-  redisCfg?: TaskBusConfig['redis']
-): Promise<TelemetryStatusResult | null> {
-  if (!redisCfg) return lastLocalScan;
-
-  let Redis: typeof import('ioredis').default;
-  try {
-    const mod = await import('ioredis');
-    Redis = mod.default;
-  } catch {
-    return lastLocalScan;
-  }
-
-  const cfg = { redis: redisCfg };
-  const client = new Redis(redisConfig(cfg as TaskBusConfig));
-  client.on('error', () => {
-    /* handled by connect/ping fallback */
-  });
-  try {
-    await client.connect();
-    await client.ping();
-  } catch {
-    try {
-      client.disconnect();
-    } catch {
-      /* ignore */
-    }
-    return lastLocalScan;
-  }
-
-  try {
-    const [lastScan, summary, hourlyRaw, projectsRaw, workSecondsRaw] = await Promise.all([
-      client.get(KEY_LAST_SCAN('global')),
-      client.hgetall(KEY_SUMMARY('global')),
-      client.get(KEY_HOURLY('global')),
-      client.get(KEY_PROJECTS('global')),
-      client.get(KEY_WORK_SECONDS('global')),
-    ]);
-
-    return {
-      connected: true,
-      lastScan: lastScan ?? null,
-      sessions: Number(summary.sessions ?? 0),
-      messages: Number(summary.messages ?? 0),
-      tokensIn: Number(summary.tokens_in ?? 0),
-      tokensOut: Number(summary.tokens_out ?? 0),
-      cacheRead: Number(summary.cache_read ?? 0),
-      cacheCreation: Number(summary.cache_creation ?? 0),
-      totalTokens:
-        Number(summary.tokens_total) ||
-        Number(summary.tokens_in ?? 0) +
-          Number(summary.tokens_out ?? 0) +
-          Number(summary.cache_read ?? 0) +
-          Number(summary.cache_creation ?? 0),
-      activeDays: Number(summary.active_days ?? 0),
-      hourly: hourlyRaw ? JSON.parse(hourlyRaw) : new Array(24).fill(0),
-      projects: projectsRaw ? JSON.parse(projectsRaw) : [],
-      workSecondsByDay: workSecondsRaw ? JSON.parse(workSecondsRaw) : {},
-    };
-  } finally {
-    try {
-      client.disconnect();
-    } catch {
-      /* ignore */
-    }
-  }
-}
+export type { ConversationTelemetryRow, UsageTelemetryStatus };

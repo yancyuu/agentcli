@@ -5,6 +5,7 @@ import {
   buildSlashCommandRegistry,
   collectSlashSuggestionAliases,
   resolveSlashCommand,
+  sourceLabel,
 } from '@renderer/utils/slashCommandRegistry';
 
 import type { LoadedCapabilityPack } from '@shared/types/extensions';
@@ -199,5 +200,104 @@ describe('slashCommandRegistry', () => {
     ]);
 
     expect([...aliases].sort()).toEqual(['doctor', 'summary']);
+  });
+
+  it('skips disabled packs and builtin packs', () => {
+    const disabled = makePack({ enabled: false });
+    const builtin = makePack({ source: 'builtin' });
+    expect(buildSlashCommandRegistry({ packs: [disabled, builtin], scope: 'team-loop' })).toEqual(
+      []
+    );
+  });
+
+  it('skips commands that do not expose the slash surface', () => {
+    const pack = makePack({
+      manifest: {
+        ...makePack().manifest,
+        capabilities: {
+          commands: [
+            {
+              id: 'no-slash',
+              alias: 'no-slash',
+              title: 'No Slash',
+              scope: ['team-loop'],
+              surfaces: ['quick-run'],
+              safety: 'read-only',
+              prompt: 'commands/no-slash.md',
+            },
+          ],
+        },
+      },
+    });
+    expect(buildSlashCommandRegistry({ packs: [pack], scope: 'team-loop' })).toEqual([]);
+  });
+
+  it('sorts registered commands by order then alias', () => {
+    const pack = makePack({
+      manifest: {
+        ...makePack().manifest,
+        capabilities: {
+          commands: [
+            {
+              id: 'zeta',
+              alias: 'zeta',
+              title: 'Zeta',
+              scope: ['team-loop'],
+              surfaces: ['slash'],
+              safety: 'read-only',
+              prompt: 'commands/zeta.md',
+              order: 1,
+            },
+            {
+              id: 'alpha',
+              alias: 'alpha',
+              title: 'Alpha',
+              scope: ['team-loop'],
+              surfaces: ['slash'],
+              safety: 'read-only',
+              prompt: 'commands/alpha.md',
+              order: 1,
+            },
+          ],
+        },
+      },
+    });
+    const registry = buildSlashCommandRegistry({ packs: [pack], scope: 'team-loop' });
+    expect(registry.map((entry) => entry.alias)).toEqual(['alpha', 'zeta']);
+  });
+});
+
+describe('resolveSlashCommand commandRef and empty inputs', () => {
+  const registry = buildSlashCommandRegistry({ packs: [makePack()], scope: 'team-loop' });
+
+  it('resolves by canonical commandRef directly, ignoring input text', () => {
+    expect(resolveSlashCommand(registry, '', 'yancy-loop-ops.doctor')).toMatchObject({
+      status: 'resolved',
+      command: { canonicalId: 'yancy-loop-ops.doctor' },
+    });
+  });
+
+  it('returns not-found for an unknown commandRef', () => {
+    expect(resolveSlashCommand(registry, '/anything', 'missing.id').status).toBe('not-found');
+  });
+
+  it('returns not-found for empty input without a commandRef', () => {
+    expect(resolveSlashCommand(registry, '').status).toBe('not-found');
+    expect(resolveSlashCommand(registry, '   ').status).toBe('not-found');
+  });
+
+  it('rejects malformed namespaced inputs', () => {
+    expect(resolveSlashCommand(registry, '/a:b:c').status).toBe('not-found');
+    expect(resolveSlashCommand(registry, '/:doctor').status).toBe('not-found');
+    expect(resolveSlashCommand(registry, '/yancy:').status).toBe('not-found');
+  });
+});
+
+describe('sourceLabel', () => {
+  it('labels each source', () => {
+    expect(sourceLabel('builtin')).toBe('Built-in');
+    expect(sourceLabel('official')).toBe('Official');
+    expect(sourceLabel('project')).toBe('Project');
+    expect(sourceLabel('pack')).toBe('Capability pack');
   });
 });

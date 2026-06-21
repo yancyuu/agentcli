@@ -286,7 +286,7 @@ function getStringField(obj: StructuredMessage, key: string): string | null {
 /** Check if a message renders as a compact noise row (idle, shutdown, etc.). */
 export function isNoiseMessage(text: string): boolean {
   return (
-    getIdleNoiseLabel(text) !== null ||
+    classifyIdleNotification(text)?.uiPresentation === 'heartbeat' ||
     ((): boolean => {
       const parsed = parseStructuredAgentMessage(text);
       return parsed !== null && getNoiseLabel(parsed) !== null;
@@ -952,6 +952,10 @@ export const ActivityItem = memo(
           onMemberNameClick={onMemberNameClick}
         />
       );
+    }
+
+    if (idleSemantic?.uiPresentation === 'heartbeat') {
+      return <></>;
     }
 
     if (bootstrapDisplay) {

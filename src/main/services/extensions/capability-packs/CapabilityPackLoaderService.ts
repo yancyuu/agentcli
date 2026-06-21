@@ -3,19 +3,23 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
-  getGlobalHermitWorkflowDir,
-  listBuiltinWorkflowMetadata,
+  getHermitWorkflowScanDir,
+  listHermitWorkflows,
 } from '@main/services/system-manager/BuiltinWorkflowSeeder';
 import { validateOpenPathUserSelected } from '@main/utils/pathValidation';
 import { createLogger } from '@shared/utils/logger';
 import { KNOWN_SLASH_COMMANDS, isSupportedSlashCommandName } from '@shared/utils/slashCommands';
 
+import type { CcCronJob } from '@shared/types/ccConnect';
 import type {
   CapabilityCommand,
   CapabilityCommandPromptRequest,
   CapabilityCommandPromptResult,
   CapabilityCommandSurface,
+  CapabilityCronJob,
+  CapabilityMcpServer,
   CapabilityPackExportRequest,
+  CapabilityPackExportRuntime,
   CapabilityPackImportRequest,
   CapabilityPackListResult,
   CapabilityPackManifest,
@@ -26,7 +30,11 @@ import type {
   CapabilityWorkflow,
   LoadedCapabilityPack,
   RegisteredSlashCommand,
+  SkillCatalogItem,
 } from '@shared/types/extensions';
+
+import { McpConfigStateReader } from '../runtime/McpConfigStateReader';
+import { SkillsCatalogService } from '../skills/SkillsCatalogService';
 
 const logger = createLogger('Extensions:CapabilityPacks');
 const MANIFEST_FILENAME = 'pack.json';
@@ -62,6 +70,35 @@ const RESERVED_SLASH_COMMANDS = new Set([
 
 const BUILTIN_HERMIT_OPS_PACK_ID = 'hermit-team-ops';
 const BUILTIN_HERMIT_OPS_PACK_NAMESPACE = 'hermit';
+const LOCAL_CAPABILITY_PACK_ID = 'local-capabilities';
+const LOCAL_CAPABILITY_PACK_NAMESPACE = 'local';
+const LOCAL_CAPABILITY_FALLBACK_TEAM = 'personal';
+const SUPPORTED_EXPORT_RUNTIMES = new Set<CapabilityPackExportRuntime>([
+  'claudecode',
+  'codex',
+  'cursor',
+  'gemini',
+  'opencode',
+]);
+
+export interface LocalTeamEntry {
+  slug: string;
+  displayName: string;
+  workDir?: string;
+  bindProject?: string;
+  /**
+   * 当前工作目录对应的团队（personal/cwd）。它承载 user 级 + 项目级 skills/MCP
+   * 与内置 workflows，并使用遗留的裸 `local-capabilities` id，方便按运行时导出。
+   */
+  isPersonal?: boolean;
+}
+
+export interface LocalCapabilityPackSource {
+  projectPath?: string;
+  listCronJobs?: () => Promise<CcCronJob[]>;
+  /** 枚举所有团队，按团队工作空间分组生成本地能力包。 */
+  listTeams?: () => Promise<LocalTeamEntry[]>;
+}
 
 function getHermitHome(): string {
   return process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit');
@@ -72,8 +109,8 @@ function toCapabilitySafety(safety: string): CapabilitySafety {
   return 'audit';
 }
 
-function createBuiltinHermitOpsPack(): LoadedCapabilityPack {
-  const workflows = listBuiltinWorkflowMetadata();
+async function createBuiltinHermitOpsPack(): Promise<LoadedCapabilityPack> {
+  const workflows = await listHermitWorkflows();
   return {
     manifest: {
       schemaVersion: 1,
@@ -83,7 +120,7 @@ function createBuiltinHermitOpsPack(): LoadedCapabilityPack {
       version: '1.0.0',
       author: 'Hermit',
       description:
-        'Hermit 官方预装的团队运维检测包，安装到 ~/.claude/commands/hermit 后可被所有团队复用。',
+        'Hermit 官方预装的团队运维检测包，workflow 随包分发到 ~/.hermit/.claude/workflow，通过能力包暴露给所有团队。',
       capabilities: {
         commands: workflows.map((workflow) => ({
           id: workflow.id,
@@ -107,7 +144,7 @@ function createBuiltinHermitOpsPack(): LoadedCapabilityPack {
         skills: [],
       },
     },
-    packDir: getGlobalHermitWorkflowDir(),
+    packDir: getHermitWorkflowScanDir(),
     source: 'builtin',
     enabled: true,
     warnings: [],
@@ -161,9 +198,20 @@ function filterStringUnion<T extends string>(
 
 export class CapabilityPackLoaderService {
   private readonly rootDir: string;
+  private localSource: LocalCapabilityPackSource;
 
-  constructor(rootDir = path.join(getHermitHome(), 'capability-packs')) {
+  constructor(
+    rootDir = path.join(getHermitHome(), 'capability-packs'),
+    private readonly skillsCatalog = new SkillsCatalogService(),
+    private readonly mcpReader = new McpConfigStateReader(),
+    localSource: LocalCapabilityPackSource = {}
+  ) {
     this.rootDir = rootDir;
+    this.localSource = localSource;
+  }
+
+  setLocalSource(source: LocalCapabilityPackSource): void {
+    this.localSource = { ...this.localSource, ...source };
   }
 
   async list(): Promise<CapabilityPackListResult> {
@@ -198,7 +246,8 @@ export class CapabilityPackLoaderService {
         })
     );
 
-    const packs: LoadedCapabilityPack[] = [createBuiltinHermitOpsPack()];
+    const packs: LoadedCapabilityPack[] = [await createBuiltinHermitOpsPack()];
+    packs.push(...(await this.createLocalCapabilityPacks()));
     const packIds = new Set<string>(packs.map((pack) => pack.manifest.id));
     for (const pack of loadedPacks) {
       if (!pack) continue;
@@ -244,17 +293,8 @@ export class CapabilityPackLoaderService {
 
   async exportPack(request: CapabilityPackExportRequest): Promise<CapabilityPackMutationResult> {
     const packId = sanitizePackId(request.packId);
-    const sourceDir = path.join(this.rootDir, packId);
-    if (!(await this.pathExists(sourceDir))) {
-      throw new Error(`Capability pack ${packId} is not installed`);
-    }
-
-    const validatedDestination = validateOpenPathUserSelected(request.destinationDir);
-    if (!validatedDestination.valid || !validatedDestination.normalizedPath) {
-      throw new Error(validatedDestination.error ?? 'Invalid export destination');
-    }
-
-    const destinationRoot = validatedDestination.normalizedPath;
+    const runtime = this.normalizeExportRuntime(request.runtime);
+    const destinationRoot = this.resolveExportDestinationRoot(request.destinationDir, runtime);
     const destination = path.join(destinationRoot, packId);
     if (!request.overwrite && (await this.pathExists(destination))) {
       throw new Error(`Export destination already contains ${packId}`);
@@ -263,9 +303,33 @@ export class CapabilityPackLoaderService {
     if (request.overwrite) {
       await fs.rm(destination, { recursive: true, force: true });
     }
+
+    if (this.isLocalCapabilityPackId(packId)) {
+      const pack = await this.exportLocalPack(packId, destination, runtime);
+      return {
+        pack,
+        warnings: [`Exported ${runtime} config package to ${destination}`, ...pack.warnings],
+      };
+    }
+
+    if (packId === BUILTIN_HERMIT_OPS_PACK_ID) {
+      const pack = await this.exportBuiltinPack(destination, runtime);
+      return { pack, warnings: [`Exported ${runtime} config package to ${destination}`] };
+    }
+
+    const sourceDir = path.join(this.rootDir, packId);
+    if (!(await this.pathExists(sourceDir))) {
+      throw new Error(`Capability pack ${packId} is not installed`);
+    }
+
     await this.copyDirectory(sourceDir, destination);
+    await this.writeRuntimeExportDescriptor(
+      destination,
+      runtime,
+      await this.readManifest(path.join(sourceDir, MANIFEST_FILENAME))
+    );
     const pack = await this.loadPackDir(sourceDir);
-    return { pack, warnings: [`Exported to ${destination}`] };
+    return { pack, warnings: [`Exported ${runtime} config package to ${destination}`] };
   }
 
   async getCommandPrompt(
@@ -371,10 +435,14 @@ export class CapabilityPackLoaderService {
       version,
       author: normalizeName(record.author) ?? undefined,
       description: normalizeName(record.description) ?? undefined,
+      tags: asStringArray(record.tags),
+      teamName: normalizeName(record.teamName) ?? undefined,
       capabilities: {
         commands: this.normalizeCommands(capabilities.commands),
         skills: this.normalizeSkills(capabilities.skills),
         workflows: this.normalizeWorkflows(capabilities.workflows),
+        cron: this.normalizeCronJobs(capabilities.cron),
+        mcpServers: this.normalizeMcpServers(capabilities.mcpServers),
       },
     };
   }
@@ -531,6 +599,63 @@ export class CapabilityPackLoaderService {
     });
   }
 
+  private normalizeCronJobs(value: unknown): CapabilityCronJob[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new Error(`Cron job at index ${index} must be an object`);
+      }
+      const record = entry as Record<string, unknown>;
+      const id = normalizeName(record.id);
+      const name = normalizeName(record.name);
+      const cronExpression = normalizeName(record.cronExpression);
+      const prompt = normalizeName(record.prompt);
+      if (!id || !name || !cronExpression || !prompt) {
+        throw new Error(`Cron job at index ${index} requires id, name, cronExpression, and prompt`);
+      }
+      return {
+        id,
+        name,
+        description: normalizeName(record.description) ?? undefined,
+        cronExpression,
+        prompt,
+        enabled: record.enabled !== false,
+        teamName: normalizeName(record.teamName) ?? undefined,
+      };
+    });
+  }
+
+  private normalizeMcpServers(value: unknown): CapabilityMcpServer[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new Error(`MCP server at index ${index} must be an object`);
+      }
+      const record = entry as Record<string, unknown>;
+      const id = normalizeName(record.id);
+      const name = normalizeName(record.name);
+      const scope = normalizeName(record.scope);
+      if (!id || !name || !this.isMcpScope(scope)) {
+        throw new Error(`MCP server at index ${index} requires id, name, and supported scope`);
+      }
+      const config =
+        record.config && typeof record.config === 'object' && !Array.isArray(record.config)
+          ? { ...(record.config as Record<string, unknown>) }
+          : undefined;
+      return {
+        id,
+        name,
+        scope,
+        transport: normalizeName(record.transport) ?? undefined,
+        config,
+      };
+    });
+  }
+
+  private isMcpScope(value: string | null): value is CapabilityMcpServer['scope'] {
+    return value === 'local' || value === 'user' || value === 'project';
+  }
+
   private async readPromptFile(packDir: string, relativePath: string): Promise<string> {
     if (path.isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes('..')) {
       throw new Error(`Unsafe capability command prompt path: ${relativePath}`);
@@ -545,6 +670,451 @@ export class CapabilityPackLoaderService {
       throw new Error('Capability command prompt is too large');
     }
     return fs.readFile(absolutePath, 'utf8');
+  }
+
+  private async createLocalCapabilityPacks(): Promise<LoadedCapabilityPack[]> {
+    const warnings: string[] = [];
+    const cronJobs = await this.readLocalCronJobs(warnings);
+    const teams = await this.readLocalTeams(warnings, cronJobs);
+
+    const cronByKey = new Map<string, CapabilityCronJob[]>();
+    for (const job of cronJobs) {
+      const key = (job.teamName ?? '').trim();
+      if (!key) continue;
+      cronByKey.set(key, [...(cronByKey.get(key) ?? []), job]);
+    }
+
+    // The personal (cwd) team carries the operator's user-level + project-level
+    // capabilities; real workspace teams carry only their own project caps, and
+    // cron-only teams (no workspace) carry their schedules. Skills/MCP for the
+    // personal pack are scanned once and reused.
+    const personalWorkDir = teams.find((team) => team.isPersonal)?.workDir;
+    const [personalSkills, personalMcpServers] = personalWorkDir
+      ? await Promise.all([
+          this.readLocalSkills(warnings, personalWorkDir),
+          this.readLocalMcpServers(warnings, personalWorkDir),
+        ])
+      : ([[], []] as [CapabilitySkill[], CapabilityMcpServer[]]);
+    const workflows = await this.toCapabilityWorkflows();
+
+    const packs: LoadedCapabilityPack[] = [];
+    for (const team of teams) {
+      const cron = this.matchTeamCronJobs(team, cronByKey);
+      let skills: CapabilitySkill[] = [];
+      let mcpServers: CapabilityMcpServer[] = [];
+      let packWorkflows: CapabilityWorkflow[] = [];
+      if (team.isPersonal) {
+        skills = personalSkills;
+        mcpServers = personalMcpServers;
+        packWorkflows = workflows;
+      } else if (team.workDir) {
+        [skills, mcpServers] = await Promise.all([
+          this.readProjectSkills(warnings, team.workDir),
+          this.readProjectMcpServers(warnings, team.workDir),
+        ]);
+      }
+      const pack = this.buildLocalCapabilityPack({
+        team,
+        skills,
+        mcpServers,
+        workflows: packWorkflows,
+        cron,
+      });
+      if (this.hasCapabilities(pack.manifest)) {
+        packs.push({ ...pack, warnings: [...warnings] });
+      }
+    }
+    return packs;
+  }
+
+  private async toCapabilityWorkflows(): Promise<CapabilityWorkflow[]> {
+    const workflows = await listHermitWorkflows();
+    return workflows.map((workflow) => ({
+      id: workflow.id,
+      name: workflow.label,
+      description: workflow.description,
+      path: `workflows/${workflow.filename}`,
+    }));
+  }
+
+  private async readLocalTeams(
+    warnings: string[],
+    cronJobs: CapabilityCronJob[]
+  ): Promise<LocalTeamEntry[]> {
+    if (this.localSource.listTeams) {
+      try {
+        const teams = await this.localSource.listTeams();
+        const cwd = this.localSource.projectPath;
+        const cwdName = cwd ? path.basename(cwd) : '';
+        return teams.map((team) => ({
+          ...team,
+          isPersonal:
+            Boolean(cwd) &&
+            (team.workDir === cwd || (Boolean(cwdName) && team.displayName === cwdName)),
+        }));
+      } catch (error) {
+        warnings.push('Unable to enumerate teams for local capability packs.');
+        logger.warn('Failed to enumerate teams for capability packs', error);
+        return [];
+      }
+    }
+    // 无团队枚举器时回退：当前项目作为 personal 团队，并按 cron 的 project 字段
+    // 派生出额外团队（每个 project 一个本地能力包）。
+    const projectPath = this.localSource.projectPath;
+    if (!projectPath) return [];
+    const personalName = path.basename(projectPath) || LOCAL_CAPABILITY_FALLBACK_TEAM;
+    const seen = new Set([personalName.toLowerCase()]);
+    const teams: LocalTeamEntry[] = [
+      {
+        slug: this.slugify(personalName),
+        displayName: personalName,
+        workDir: projectPath,
+        isPersonal: true,
+      },
+    ];
+    for (const job of cronJobs) {
+      const project = (job.teamName ?? '').trim();
+      if (!project || seen.has(project.toLowerCase())) continue;
+      seen.add(project.toLowerCase());
+      teams.push({ slug: this.slugify(project), displayName: project, bindProject: project });
+    }
+    return teams;
+  }
+
+  private matchTeamCronJobs(
+    team: LocalTeamEntry,
+    cronByKey: Map<string, CapabilityCronJob[]>
+  ): CapabilityCronJob[] {
+    const keys = [team.bindProject, team.slug, team.displayName]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value));
+    const matched = new Map<string, CapabilityCronJob>();
+    for (const key of keys) {
+      for (const job of cronByKey.get(key) ?? []) {
+        matched.set(job.id, job);
+      }
+    }
+    return [...matched.values()];
+  }
+
+  private buildLocalCapabilityPack(input: {
+    team: LocalTeamEntry;
+    skills: CapabilitySkill[];
+    mcpServers: CapabilityMcpServer[];
+    workflows: CapabilityWorkflow[];
+    cron: CapabilityCronJob[];
+  }): LoadedCapabilityPack {
+    const { team, skills, mcpServers, workflows, cron } = input;
+    const slug = this.slugify(team.slug || team.displayName);
+    // The personal (cwd) team keeps the legacy bare id so existing exports that
+    // reference `local-capabilities` keep resolving to it.
+    const id = team.isPersonal ? LOCAL_CAPABILITY_PACK_ID : `${LOCAL_CAPABILITY_PACK_ID}-${slug}`;
+    return {
+      manifest: {
+        schemaVersion: 1,
+        id,
+        name: `${team.displayName} 能力`,
+        namespace: LOCAL_CAPABILITY_PACK_NAMESPACE,
+        version: '1.0.0',
+        author: 'Hermit',
+        description: `${team.displayName} 工作空间的本地能力（skills、MCP、定时任务），可按运行时导出。`,
+        tags: ['local'],
+        teamName: team.displayName,
+        capabilities: {
+          commands: [],
+          skills,
+          workflows,
+          cron,
+          mcpServers,
+        },
+      },
+      packDir: team.workDir ?? this.localSource.projectPath ?? getHermitHome(),
+      source: 'local' as const,
+      enabled: true,
+      warnings: [],
+    };
+  }
+
+  private hasCapabilities(manifest: CapabilityPackManifest): boolean {
+    return Boolean(
+      manifest.capabilities.commands?.length ||
+      manifest.capabilities.skills?.length ||
+      manifest.capabilities.workflows?.length ||
+      manifest.capabilities.cron?.length ||
+      manifest.capabilities.mcpServers?.length
+    );
+  }
+
+  private isLocalCapabilityPackId(packId: string): boolean {
+    return packId === LOCAL_CAPABILITY_PACK_ID || packId.startsWith(`${LOCAL_CAPABILITY_PACK_ID}-`);
+  }
+
+  private async readLocalSkills(warnings: string[], workDir?: string): Promise<CapabilitySkill[]> {
+    try {
+      const skills = await this.skillsCatalog.list(workDir ?? this.localSource.projectPath);
+      return skills.map((skill) => this.toCapabilitySkill(skill));
+    } catch (error) {
+      warnings.push('Unable to scan local skills.');
+      logger.warn('Failed to scan local skills for capability pack', error);
+      return [];
+    }
+  }
+
+  private async readProjectSkills(
+    warnings: string[],
+    projectPath?: string
+  ): Promise<CapabilitySkill[]> {
+    try {
+      const skills = await this.skillsCatalog.list(projectPath ?? this.localSource.projectPath);
+      return skills
+        .filter((skill) => skill.scope !== 'user')
+        .map((skill) => this.toCapabilitySkill(skill));
+    } catch (error) {
+      warnings.push('Unable to scan project skills.');
+      logger.warn('Failed to scan project skills for capability pack', error);
+      return [];
+    }
+  }
+
+  private toCapabilitySkill(skill: SkillCatalogItem): CapabilitySkill {
+    return {
+      id: this.slugify(skill.folderName || skill.name),
+      name: skill.name,
+      description: skill.description,
+      path: skill.skillDir,
+    };
+  }
+
+  private async readLocalMcpServers(
+    warnings: string[],
+    workDir?: string
+  ): Promise<CapabilityMcpServer[]> {
+    try {
+      const servers = await this.mcpReader.readConfigured(workDir ?? this.localSource.projectPath);
+      return servers.map((server) => this.toCapabilityMcpServer(server));
+    } catch (error) {
+      warnings.push('Unable to scan local MCP servers.');
+      logger.warn('Failed to scan local MCP servers for capability pack', error);
+      return [];
+    }
+  }
+
+  private async readProjectMcpServers(
+    warnings: string[],
+    projectPath?: string
+  ): Promise<CapabilityMcpServer[]> {
+    try {
+      const servers = await this.mcpReader.readConfigured(
+        projectPath ?? this.localSource.projectPath
+      );
+      return servers
+        .filter((server) => server.scope !== 'user')
+        .map((server) => this.toCapabilityMcpServer(server));
+    } catch (error) {
+      warnings.push('Unable to scan project MCP servers.');
+      logger.warn('Failed to scan project MCP servers for capability pack', error);
+      return [];
+    }
+  }
+
+  private toCapabilityMcpServer(server: {
+    name: string;
+    scope: 'local' | 'user' | 'project';
+    transport?: string;
+    config?: Record<string, unknown>;
+  }): CapabilityMcpServer {
+    return {
+      id: this.slugify(server.name),
+      name: server.name,
+      scope: server.scope,
+      transport: server.transport,
+      config: server.config,
+    };
+  }
+
+  private async readLocalCronJobs(warnings: string[]): Promise<CapabilityCronJob[]> {
+    if (!this.localSource.listCronJobs) return [];
+    try {
+      const jobs = await this.localSource.listCronJobs();
+      return jobs.map((job) => ({
+        id: this.slugify(job.id),
+        name: job.description?.trim() || job.id,
+        description: job.description,
+        cronExpression: job.cron_expr,
+        prompt: job.prompt,
+        enabled: job.enabled,
+        teamName: job.project,
+      }));
+    } catch (error) {
+      warnings.push('Unable to scan local cron schedules.');
+      logger.warn('Failed to scan local cron jobs for capability pack', error);
+      return [];
+    }
+  }
+
+  private async exportBuiltinPack(
+    destination: string,
+    runtime: CapabilityPackExportRuntime
+  ): Promise<LoadedCapabilityPack> {
+    const pack = await createBuiltinHermitOpsPack();
+    await fs.mkdir(path.join(destination, 'workflows'), { recursive: true });
+    for (const workflow of await listHermitWorkflows()) {
+      await fs.writeFile(
+        path.join(destination, 'workflows', workflow.filename),
+        workflow.content,
+        'utf8'
+      );
+    }
+    await fs.writeFile(
+      path.join(destination, MANIFEST_FILENAME),
+      `${JSON.stringify(pack.manifest, null, 2)}\n`,
+      'utf8'
+    );
+    await this.writeRuntimeExportDescriptor(destination, runtime, pack.manifest);
+    return { ...pack, packDir: destination };
+  }
+
+  private async exportLocalPack(
+    packId: string,
+    destination: string,
+    runtime: CapabilityPackExportRuntime
+  ): Promise<LoadedCapabilityPack> {
+    const localPacks = await this.createLocalCapabilityPacks();
+    const pack = localPacks.find((entry) => entry.manifest.id === packId);
+    if (!pack) {
+      throw new Error(`Local capability pack ${packId} is not available`);
+    }
+    await fs.mkdir(destination, { recursive: true });
+    await fs.mkdir(path.join(destination, 'skills'), { recursive: true });
+    await fs.mkdir(path.join(destination, 'workflows'), { recursive: true });
+    await fs.mkdir(path.join(destination, 'cron'), { recursive: true });
+    await fs.mkdir(path.join(destination, 'mcp'), { recursive: true });
+
+    const exportWarnings: string[] = [];
+    for (const skill of pack.manifest.capabilities.skills ?? []) {
+      if (!path.isAbsolute(skill.path) || !(await this.pathExists(skill.path))) continue;
+      try {
+        exportWarnings.push(
+          ...(await this.copyDirectory(skill.path, path.join(destination, 'skills', skill.id)))
+        );
+      } catch (error) {
+        exportWarnings.push(
+          `Skipped skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    for (const workflow of await listHermitWorkflows()) {
+      await fs.writeFile(
+        path.join(destination, 'workflows', workflow.filename),
+        workflow.content,
+        'utf8'
+      );
+    }
+
+    const exportManifest = this.toPortableExportManifest(pack.manifest);
+
+    await Promise.all([
+      fs.writeFile(
+        path.join(destination, MANIFEST_FILENAME),
+        `${JSON.stringify(exportManifest, null, 2)}\n`,
+        'utf8'
+      ),
+      fs.writeFile(
+        path.join(destination, 'cron', 'schedules.json'),
+        `${JSON.stringify(exportManifest.capabilities.cron ?? [], null, 2)}\n`,
+        'utf8'
+      ),
+      fs.writeFile(
+        path.join(destination, 'mcp', 'servers.json'),
+        `${JSON.stringify(exportManifest.capabilities.mcpServers ?? [], null, 2)}\n`,
+        'utf8'
+      ),
+      this.writeRuntimeExportDescriptor(destination, runtime, exportManifest),
+    ]);
+
+    return { ...pack, manifest: exportManifest, packDir: destination, warnings: exportWarnings };
+  }
+
+  private toPortableExportManifest(manifest: CapabilityPackManifest): CapabilityPackManifest {
+    return {
+      ...manifest,
+      capabilities: {
+        ...manifest.capabilities,
+        skills: (manifest.capabilities.skills ?? []).map((skill) => ({
+          ...skill,
+          path: `skills/${skill.id}`,
+        })),
+        mcpServers: (manifest.capabilities.mcpServers ?? []).map(
+          ({ config: _config, ...server }) => server
+        ),
+      },
+    };
+  }
+
+  private async writeRuntimeExportDescriptor(
+    destination: string,
+    runtime: CapabilityPackExportRuntime,
+    manifest: CapabilityPackManifest
+  ): Promise<void> {
+    await fs.mkdir(path.join(destination, 'runtime'), { recursive: true });
+    const payload = {
+      runtime,
+      schemaVersion: 1,
+      packId: manifest.id,
+      exportedAt: new Date().toISOString(),
+      layout: {
+        skills: 'skills/',
+        cron: 'cron/schedules.json',
+        workflows: 'workflows/',
+        mcp: 'mcp/servers.json',
+      },
+      counts: {
+        skills: manifest.capabilities.skills?.length ?? 0,
+        cron: manifest.capabilities.cron?.length ?? 0,
+        workflows: manifest.capabilities.workflows?.length ?? 0,
+        mcpServers: manifest.capabilities.mcpServers?.length ?? 0,
+      },
+    };
+    await fs.writeFile(
+      path.join(destination, 'runtime', `${runtime}.json`),
+      `${JSON.stringify(payload, null, 2)}\n`,
+      'utf8'
+    );
+  }
+
+  private resolveExportDestinationRoot(
+    destinationDir: string | undefined,
+    runtime: CapabilityPackExportRuntime
+  ): string {
+    if (!destinationDir) {
+      return path.join(getHermitHome(), 'exports', 'capability-packs', runtime);
+    }
+
+    const validatedDestination = validateOpenPathUserSelected(destinationDir);
+    if (!validatedDestination.valid || !validatedDestination.normalizedPath) {
+      throw new Error(validatedDestination.error ?? 'Invalid export destination');
+    }
+    return validatedDestination.normalizedPath;
+  }
+
+  private normalizeExportRuntime(
+    runtime: CapabilityPackExportRequest['runtime']
+  ): CapabilityPackExportRuntime {
+    if (!runtime) return 'claudecode';
+    if (!SUPPORTED_EXPORT_RUNTIMES.has(runtime)) {
+      throw new Error(`Unsupported export runtime: ${runtime}`);
+    }
+    return runtime;
+  }
+
+  private slugify(value: string): string {
+    const slug = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return slug || 'capability';
   }
 
   private async validateReferencedFiles(
@@ -571,34 +1141,40 @@ export class CapabilityPackLoaderService {
     return warnings;
   }
 
-  private async copyDirectory(sourceDir: string, targetDir: string): Promise<void> {
-    const files = await this.walkDirectory(sourceDir);
+  private async copyDirectory(sourceDir: string, targetDir: string): Promise<string[]> {
+    const { files, warnings } = await this.walkDirectory(sourceDir);
     await fs.mkdir(targetDir, { recursive: true });
     for (const file of files) {
       const targetPath = path.join(targetDir, file.relativePath);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.copyFile(file.absolutePath, targetPath);
     }
+    return warnings;
   }
 
-  private async walkDirectory(rootDir: string): Promise<
-    Array<{
+  private async walkDirectory(rootDir: string): Promise<{
+    files: Array<{
       absolutePath: string;
       relativePath: string;
-    }>
-  > {
+    }>;
+    warnings: string[];
+  }> {
     const allFiles: Array<{ absolutePath: string; relativePath: string }> = [];
+    const warnings: string[] = [];
     let totalBytes = 0;
 
     const visit = async (currentDir: string): Promise<void> => {
       const entries = await fs.readdir(currentDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.name.startsWith('.')) continue;
+        const fullPath = path.join(currentDir, entry.name);
         if (entry.isSymbolicLink()) {
-          throw new Error('Capability pack cannot contain symbolic links');
+          warnings.push(
+            `Skipped symbolic link: ${path.relative(rootDir, fullPath).replace(/\\/g, '/')}`
+          );
+          continue;
         }
 
-        const fullPath = path.join(currentDir, entry.name);
         if (entry.isDirectory()) {
           await visit(fullPath);
           continue;
@@ -623,7 +1199,10 @@ export class CapabilityPackLoaderService {
     };
 
     await visit(rootDir);
-    return allFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+    return {
+      files: allFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+      warnings,
+    };
   }
 
   private async pathExists(targetPath: string): Promise<boolean> {

@@ -50,7 +50,7 @@ export default function PlatformManualForm({
     setSaving(true);
     setError('');
     try {
-      const opts: Record<string, unknown> = {};
+      const opts: Record<string, unknown> = { ...(meta.defaultOptions ?? {}) };
       for (const f of meta.fields) {
         const v = values[f.key];
         if (v !== undefined && v !== '' && v !== false) {
@@ -58,12 +58,12 @@ export default function PlatformManualForm({
         }
       }
       const result = await api.ccSetup.addPlatform(projectName, {
-        type: platformType,
+        type: meta.submitType ?? platformType,
         options: opts,
         work_dir: workDir,
         agent_type: agentType,
       });
-      onComplete({ restartHandled: result.restart_handled === true });
+      onComplete({ restartHandled: result?.restart_handled === true });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -165,7 +165,7 @@ function FieldInput({
       <div className="relative mt-1">
         <Input
           type={isPassword && !showPwd ? 'password' : field.type === 'number' ? 'number' : 'text'}
-          value={typeof value === 'string' ? value : ''}
+          value={typeof value === 'string' || typeof value === 'number' ? value : ''}
           onChange={(e) =>
             onChange(
               field.type === 'number'

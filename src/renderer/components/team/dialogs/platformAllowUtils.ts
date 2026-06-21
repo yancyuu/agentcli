@@ -4,6 +4,8 @@ const PLATFORM_ALLOW_ALIASES: Record<string, readonly string[]> = {
   lark: ['feishu'],
   weixin: ['wechat'],
   wechat: ['weixin'],
+  wecom_ws: ['wecom'],
+  wecom: ['wecom_ws'],
 };
 
 export function readStringRecord(value: unknown): Record<string, string> {

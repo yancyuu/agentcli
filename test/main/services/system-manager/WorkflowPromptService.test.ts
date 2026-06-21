@@ -29,24 +29,38 @@ describe('WorkflowPromptService', () => {
       filename: 'daily-workflow-extraction.md',
       source: 'claude-command',
       commandName: '/hermit:daily-workflow-extraction',
-      builtin: true,
-      label: 'Daily Workflow Extraction',
-      safety: 'read-only',
     });
   });
 
-  it('keeps plain workflow folders as non-command prompt folders', async () => {
+  it('lists workspace root Claude command folders using native slash command names', async () => {
+    const commandsDir = path.join(tmpDir, '.claude', 'commands');
+    fs.mkdirSync(path.join(commandsDir, 'ops'), { recursive: true });
+    fs.writeFileSync(path.join(commandsDir, 'nightly-triage.md'), '# Triage\n', 'utf8');
+    fs.writeFileSync(path.join(commandsDir, 'ops', 'summary.md'), '# Summary\n', 'utf8');
+
+    const result = await new WorkflowPromptService().list(commandsDir);
+
+    expect(result.prompts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filename: 'nightly-triage.md',
+          source: 'claude-command',
+          commandName: '/nightly-triage',
+        }),
+        expect.objectContaining({
+          filename: path.join('ops', 'summary.md'),
+          source: 'claude-command',
+          commandName: '/ops:summary',
+        }),
+      ])
+    );
+  });
+
+  it('rejects legacy workflow folders so command boards only use native Claude commands', async () => {
     const workflowsDir = path.join(tmpDir, 'workflows');
     fs.mkdirSync(workflowsDir, { recursive: true });
     fs.writeFileSync(path.join(workflowsDir, 'nightly-triage.md'), '# Triage\n', 'utf8');
 
-    const result = await new WorkflowPromptService().list(workflowsDir);
-
-    expect(result.prompts[0]).toMatchObject({
-      filename: 'nightly-triage.md',
-      source: 'workflow-folder',
-      commandName: undefined,
-    });
-    expect(result.prompts[0]).not.toHaveProperty('builtin');
+    await expect(new WorkflowPromptService().list(workflowsDir)).rejects.toThrow(/\.claude\/commands/);
   });
 });
