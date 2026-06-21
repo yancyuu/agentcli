@@ -5,7 +5,12 @@ export interface ExternalPlatformSessionKeyParts {
   kind: 'external-platform' | 'hermit-local' | 'unknown';
 }
 
-const EXTERNAL_PLATFORM_RE = /^(feishu|lark|weixin|wechat|telegram|discord|slack)$/i;
+// Mirrors cc-connect's built-in IM platform set. When cc-connect gains a new
+// platform, add it here so its turns are tracked (producer emits for every
+// turn already; this is the consumer-side allowlist). Long-term this list
+// should be sourced from cc-connect at startup rather than hardcoded.
+const EXTERNAL_PLATFORM_RE =
+  /^(feishu|lark|weixin|wechat|dingtalk|qq|telegram|discord|slack|line)$/i;
 
 export function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;

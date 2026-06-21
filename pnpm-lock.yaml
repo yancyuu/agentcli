@@ -382,6 +382,9 @@ importers:
         specifier: ^3.1.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.0.7)(happy-dom@20.0.2)(sass@1.98.0)(terser@5.46.0)
     optionalDependencies:
+      hermit-bridge:
+        specifier: 0.1.0
+        version: 0.1.0
       ioredis:
         specifier: ^5.6.1
         version: 5.10.1
@@ -3654,6 +3657,12 @@ packages:
 
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
+
+  hermit-bridge@0.1.0:
+    resolution: {integrity: sha512-48lDjxna5hJ6sdHQj7q15joS62wZSS3BrH8SKLTMcHiKhpq7IN+ktVxGx8xLWDUvzvEJk3x7oCmdSZrvjvquqg==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
 
   highlight.js@11.11.1:
     resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
@@ -9236,6 +9245,9 @@ snapshots:
   hermes-parser@0.25.1:
     dependencies:
       hermes-estree: 0.25.1
+
+  hermit-bridge@0.1.0:
+    optional: true
 
   highlight.js@11.11.1: {}
 

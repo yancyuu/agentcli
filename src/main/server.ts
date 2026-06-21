@@ -55,6 +55,7 @@ import type {
 import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
 import { mapUsageEventToReportInput } from './services/ccConnect/usageEventMapper';
 import { CcConnectClient } from './services/ccConnect/CcConnectClient';
+import { CcConnectLauncher } from './services/ccConnect/CcConnectLauncher';
 import { isPlaceholderWorkDir, needsWorkDirReconcile } from './services/ccConnect/workDirReconcile';
 import {
   DirectCliSessionManager,
@@ -350,6 +351,9 @@ const bridge = new CcConnectBridge({
   bridgeUrl: runtimeConfig.ccBridgeUrl,
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
+// Auto-launches the cc-connect bridge (via the bundled `hermit-bridge` binary)
+// when no management API is reachable; a no-op when cc-connect already runs.
+const bridgeLauncher = new CcConnectLauncher();
 const svc = new TeamProvisioningService(cc, bridge, undefined, {
   restartCcConnect: restartCcConnectAndReconnectBridge,
 });
@@ -7313,6 +7317,22 @@ function reply500(err: unknown) {
 // Start
 // ===========================================================================
 
+// Ensure the cc-connect bridge is running before Hermit connects to it. A no-op
+// when the management API already responds (an externally-managed cc-connect is
+// left untouched); otherwise launches the bundled hermit-bridge sidecar. Best-effort:
+// a launch failure never blocks Hermit boot — the bridge just won't auto-start.
+await bridgeLauncher
+  .ensureRunning({
+    client: cc,
+    configPath: HERMIT_CC_CONNECT_CONFIG_FILE,
+    extraArgs: ['--force'],
+    logFile: path.join(HERMIT_HOME, 'cc-connect', 'hermit-bridge.log'),
+  })
+  .then((r) => {
+    if (r.launched) app.log.info({ pid: r.pid }, 'launched hermit-bridge sidecar');
+    else app.log.info('hermit-bridge already running — skipping auto-launch');
+  })
+  .catch((err) => app.log.warn({ err }, 'hermit-bridge auto-launch skipped'));
 // 启动 cc-connect Bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
 await initializeTaskBusFromSettings();
@@ -7336,6 +7356,7 @@ try {
 const shutdown = async () => {
   try {
     directCliManager.shutdown();
+    bridgeLauncher.stop();
     bridge.dispose?.();
     await app.close();
     process.exit(0);

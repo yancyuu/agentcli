@@ -53,6 +53,18 @@ describe('mapUsageEventToReportInput', () => {
     expect(input!.occurredAt).toBeUndefined();
   });
 
+  it('maps turn_id to turnId so reportTurn dedups by a stable per-turn key', () => {
+    const input = mapUsageEventToReportInput(feishuUsage({ turn_id: 'om_msg_123' }));
+    expect(input).not.toBeNull();
+    expect(input!.turnId).toBe('om_msg_123');
+  });
+
+  it('omits turnId when the event carries no turn_id', () => {
+    const input = mapUsageEventToReportInput(feishuUsage());
+    expect(input).not.toBeNull();
+    expect(input!.turnId).toBeUndefined();
+  });
+
   it('leaves identity resolution to reportTurn (only sessionKey is required)', () => {
     const input = mapUsageEventToReportInput(feishuUsage());
     expect(input).not.toBeNull();

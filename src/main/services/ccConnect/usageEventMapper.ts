@@ -23,6 +23,7 @@ export function mapUsageEventToReportInput(
     sessionKey: msg.session_key,
     teamName: '',
     runtime: msg.agent_type,
+    turnId: msg.turn_id,
     occurredAt: typeof msg.ts === 'number' ? new Date(msg.ts * 1000).toISOString() : undefined,
     metrics,
   };
