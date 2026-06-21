@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.6.44",
+  "version": "1.6.45",
   "description": "openHermit: Loop Engineering workbench for local AI agent runtimes.",
   "license": "AGPL-3.0",
   "author": {
@@ -27,7 +27,8 @@
     "dist-renderer/",
     "tsconfig.json",
     "package.json",
-    "README.md"
+    "README.md",
+    "README-CN.md"
   ],
   "scripts": {
     "dev": "node ./scripts/dev-mvp.mjs",
