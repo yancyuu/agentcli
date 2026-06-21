@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { CcSessionListItem } from '@shared/types/ccConnect';
+import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 
 import type { LocalSessionSummary } from '../LocalSessionScanner';
 import { mergeLocalAndCcSessions } from '../teamSessionListMapper';
@@ -40,13 +40,13 @@ function localSummary(id: string): LocalSessionSummary {
   };
 }
 
-function ccItem(id: string, platform = 'feishu'): CcSessionListItem {
+function ccItem(id: string, platform = 'feishu'): HermitBridgeSessionListItem {
   return {
     id,
     name: id,
     session_key: id,
     agent_session_id: id,
-    agent_type: 'claude-code' as CcSessionListItem['agent_type'],
+    agent_type: 'claude-code' as HermitBridgeSessionListItem['agent_type'],
     active: true,
     live: true,
     history_count: 0,

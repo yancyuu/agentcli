@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
-import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import { useShallow } from 'zustand/react/shallow';
 
 import type { LoopSendIntent } from './loopSendIntent';
@@ -134,82 +133,6 @@ export function useLoopConsoleController({
           return false;
         } finally {
           setLocalSending(false);
-        }
-      }
-
-      if (intent.kind === 'cross-team-task') {
-        const now = Date.now();
-        const optimisticMessageId = `loop-cross-team-${now}`;
-        addOptimisticTeamMessage(teamName, {
-          from: 'user',
-          to: intent.toTeam,
-          text: `@${intent.toTeam} ${intent.subject}`,
-          timestamp: new Date(now).toISOString(),
-          read: true,
-          messageId: optimisticMessageId,
-          source: 'cross_team_sent',
-          session: routedSessionKey ? { key: routedSessionKey } : undefined,
-        });
-        if (teamName === SYSTEM_MANAGER_TEAM_NAME) {
-          try {
-            const result = await api.workers.invoke(intent.toTeam, {
-              fromTeam: teamName,
-              text: intent.subject,
-              summary: intent.summary,
-              sessionName: intent.toTeam,
-              reuse: true,
-              sessionKey: routedSessionKey,
-            });
-            const verb = result.reused ? '已复用' : '已创建';
-            addOptimisticTeamMessage(
-              teamName,
-              buildOptimisticSystemMessage(
-                `${verb} ${result.worker.name} 的本地会话并直接下发指令，无需审批。`
-              )
-            );
-            await refreshTeamMessagesHead(teamName).catch(() => undefined);
-            return true;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : '调用数字员工失败';
-            addOptimisticTeamMessage(
-              teamName,
-              buildOptimisticSystemMessage(`无法调用 ${intent.toTeam}：${message}`)
-            );
-            await refreshTeamMessagesHead(teamName).catch(() => undefined);
-            setStatusMessage(message);
-            return false;
-          }
-        }
-        try {
-          const result = await api.crossTeam.send({
-            fromTeam: teamName,
-            fromMember: 'user',
-            toTeam: intent.toTeam,
-            text: intent.text,
-            summary: intent.summary,
-            taskRefs: intent.taskRefs,
-            messageId: optimisticMessageId,
-            sessionKey: routedSessionKey,
-          });
-          if ('ok' in result && result.ok === false) {
-            const errorMessage =
-              'error' in result && typeof result.error === 'string'
-                ? result.error
-                : '跨团队任务派发失败';
-            throw new Error(errorMessage);
-          }
-          window.dispatchEvent(new CustomEvent('collab:refresh'));
-          await refreshTeamMessagesHead(teamName);
-          return true;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '跨团队任务派发失败';
-          addOptimisticTeamMessage(
-            teamName,
-            buildOptimisticSystemMessage(`无法派发给 ${intent.toTeam}：${message}`)
-          );
-          await refreshTeamMessagesHead(teamName).catch(() => undefined);
-          setStatusMessage(message);
-          return false;
         }
       }
 

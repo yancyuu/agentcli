@@ -1,13 +1,13 @@
 /**
  * Shared harness type definitions used across the app.
- * Mirrors cc-connect's CcAgentType.
+ * Mirrors cc-connect's HermitBridgeAgentType.
  */
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
-export type { CcAgentType } from '@shared/types/ccConnect';
+export type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
-export const ALL_AGENT_TYPES: CcAgentType[] = [
+export const ALL_AGENT_TYPES: HermitBridgeAgentType[] = [
   'claudecode',
   'codex',
   'cursor',
@@ -22,7 +22,7 @@ export const ALL_AGENT_TYPES: CcAgentType[] = [
   'tmux',
 ];
 
-export const AGENT_TYPE_LABELS: Record<CcAgentType, string> = {
+export const AGENT_TYPE_LABELS: Record<HermitBridgeAgentType, string> = {
   claudecode: 'Claude Code',
   codex: 'Codex',
   cursor: 'Cursor',

@@ -12,8 +12,8 @@ import * as path from 'path';
 
 import { createLogger } from '@shared/utils/logger';
 
-import type { CcConnectBridge } from '../ccConnect/CcConnectBridge';
-import type { CcConnectClient } from '../ccConnect/CcConnectClient';
+import type { HermitBridgeConnection } from '../hermitBridge/HermitBridgeConnection';
+import type { HermitBridgeClient } from '../hermitBridge/HermitBridgeClient';
 
 import { buildHermitOpsRunbookContext } from './OpsRunbookContext';
 import {
@@ -79,8 +79,8 @@ export class TeamProvisioningService {
   private readonly workspace: TeamWorkspaceService;
 
   constructor(
-    private readonly cc: CcConnectClient,
-    private readonly bridge: CcConnectBridge,
+    private readonly cc: HermitBridgeClient,
+    private readonly bridge: HermitBridgeConnection,
     workspace?: TeamWorkspaceService,
     private readonly hooks: { restartCcConnect?: () => Promise<void> } = {}
   ) {
@@ -95,7 +95,7 @@ export class TeamProvisioningService {
    * 创建团队：
    * 1. 本地建目录 + team.json
    * 2. 在 cc-connect 创建 project（bridge platform）
-   * 3. 注入 CLAUDE.md 跨团队派发指令
+   * 3. 注入 CLAUDE.md 团队上下文指令
    * 4. 触发 cc-connect restart 激活 project
    */
   async createTeam(
@@ -347,8 +347,7 @@ Current team slug: \`${teamSlug}\`
 Available teams:
 ${availableTeams.length > 0 ? availableTeams.join('\n') : '- No other teams currently registered.'}
 
-Cross-team work is routed by Hermit itself. If the user mentions another team with \`@team\`,
-Hermit will create and track the cross-team collaboration task automatically.
+Cross-team collaboration is handled through Hermit's team bus and task-pool surfaces.
 
 Do not call cross-team dispatch APIs yourself and do not invent dispatch IDs.
 You may use the team list only to understand which teams exist and when a user is referring to one.

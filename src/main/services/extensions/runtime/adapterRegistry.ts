@@ -2,7 +2,7 @@
  * Adapter registry — maps harness types to their install adapters.
  */
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 import type { HarnessInstallAdapter } from './HarnessInstallAdapter';
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter';
@@ -11,7 +11,7 @@ import { CursorAdapter } from './CursorAdapter';
 import { GeminiAdapter } from './GeminiAdapter';
 import { OpenCodeAdapter } from './OpenCodeAdapter';
 
-const adapters = new Map<CcAgentType, HarnessInstallAdapter>();
+const adapters = new Map<HermitBridgeAgentType, HarnessInstallAdapter>();
 
 function registerDefaults(): void {
   if (adapters.size > 0) return;
@@ -27,7 +27,7 @@ function registerDefaults(): void {
   }
 }
 
-export function getAdapter(harnessType: CcAgentType): HarnessInstallAdapter | null {
+export function getAdapter(harnessType: HermitBridgeAgentType): HarnessInstallAdapter | null {
   registerDefaults();
   return adapters.get(harnessType) ?? null;
 }

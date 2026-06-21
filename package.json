@@ -1,9 +1,12 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.6.45",
+  "version": "1.6.50",
   "description": "openHermit: Loop Engineering workbench for local AI agent runtimes.",
   "license": "AGPL-3.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": {
     "name": "yancyyu",
     "email": "yancyyu.ok@gmail.com"
@@ -147,7 +150,7 @@
   },
   "optionalDependencies": {
     "ioredis": "^5.6.1",
-    "hermit-bridge": "0.1.0"
+    "hermit-bridge": "0.1.1"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.6.0",

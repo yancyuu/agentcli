@@ -778,8 +778,13 @@ async function waitForRuntimeReady(baseUrl, token, child, timeoutMs = 30_000) {
 }
 
 function resolveHermitBridgeRunner() {
-  const pkgPath = require.resolve('hermit-bridge/package.json');
-  return path.join(path.dirname(pkgPath), 'run.js');
+  try {
+    const pkgPath = require.resolve('hermit-bridge/package.json');
+    const runner = path.join(path.dirname(pkgPath), 'run.js');
+    return existsSync(runner) ? runner : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveTsxLoader() {
@@ -873,39 +878,47 @@ if (!skipHermitBridge) {
   }
 
   if (shouldStartRuntime) {
-    console.log('[openHermit] Starting bundled runtime service...');
-    console.log(`[openHermit] Runtime config: ${hermitBridgeConfigPath}`);
-    hermitBridgeProcess = spawn(process.execPath, [resolveHermitBridgeRunner(), '-config', hermitBridgeConfigPath], {
-      cwd: repoRoot,
-      detached: true,
-      env: {
-        ...process.env,
-        HERMIT_BRIDGE_TOKEN: bridgeTokens.managementToken,
-        HERMIT_BRIDGE_MANAGEMENT_TOKEN: bridgeTokens.managementToken,
-        HERMIT_BRIDGE_WS_TOKEN: bridgeTokens.bridgeToken,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const hermitBridgeRunner = resolveHermitBridgeRunner();
+    if (!hermitBridgeRunner) {
+      runtimeSetupMode = true;
+      console.warn('[openHermit] Bundled hermit-bridge runtime is not installed for this platform.');
+      console.warn('[openHermit] Starting openHermit without auto-starting the runtime service.');
+      console.warn('[openHermit] Configure an external hermit-bridge service or use --no-hermit-bridge to skip this check.');
+    } else {
+      console.log('[openHermit] Starting bundled runtime service...');
+      console.log(`[openHermit] Runtime config: ${hermitBridgeConfigPath}`);
+      hermitBridgeProcess = spawn(process.execPath, [hermitBridgeRunner, '-config', hermitBridgeConfigPath], {
+        cwd: repoRoot,
+        detached: true,
+        env: {
+          ...process.env,
+          HERMIT_BRIDGE_TOKEN: bridgeTokens.managementToken,
+          HERMIT_BRIDGE_MANAGEMENT_TOKEN: bridgeTokens.managementToken,
+          HERMIT_BRIDGE_WS_TOKEN: bridgeTokens.bridgeToken,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
-    hermitBridgeProcess.stdout?.on('data', (chunk) => {
-      process.stdout.write(chunk);
-      appendLog(runtimeLogPath, chunk);
-    });
-    hermitBridgeProcess.stderr?.on('data', (chunk) => {
-      process.stderr.write(chunk);
-      appendLog(runtimeLogPath, chunk);
-    });
+      hermitBridgeProcess.stdout?.on('data', (chunk) => {
+        process.stdout.write(chunk);
+        appendLog(runtimeLogPath, chunk);
+      });
+      hermitBridgeProcess.stderr?.on('data', (chunk) => {
+        process.stderr.write(chunk);
+        appendLog(runtimeLogPath, chunk);
+      });
 
-    try {
-      await waitForRuntimeReady(bridgeBaseUrl, bridgeTokens.managementToken, hermitBridgeProcess, 30_000);
-    } catch (err) {
-      console.error(
-        `[openHermit] Runtime service failed to start: ${err instanceof Error ? err.message : String(err)}`
-      );
-      printLogTail('Runtime', runtimeLogPath);
-      signalDaemon(hermitBridgeProcess.pid, 'SIGTERM');
-      setTimeout(() => signalDaemon(hermitBridgeProcess?.pid, 'SIGKILL'), 2_000).unref();
-      process.exit(1);
+      try {
+        await waitForRuntimeReady(bridgeBaseUrl, bridgeTokens.managementToken, hermitBridgeProcess, 180_000);
+      } catch (err) {
+        console.error(
+          `[openHermit] Runtime service failed to start: ${err instanceof Error ? err.message : String(err)}`
+        );
+        printLogTail('Runtime', runtimeLogPath);
+        signalDaemon(hermitBridgeProcess.pid, 'SIGTERM');
+        setTimeout(() => signalDaemon(hermitBridgeProcess?.pid, 'SIGKILL'), 2_000).unref();
+        process.exit(1);
+      }
     }
   }
 }

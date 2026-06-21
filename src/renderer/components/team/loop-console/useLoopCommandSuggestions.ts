@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useProjectWorkflowCommands } from '@renderer/hooks/useProjectWorkflowCommands';
+import { useStore } from '@renderer/store';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';
 import { buildSlashCommandSuggestions } from '@renderer/utils/skillCommandSuggestions';
@@ -19,7 +20,7 @@ interface UseLoopCommandSuggestionsOptions {
   teamName: string;
   members: ResolvedTeamMember[];
   commandSuggestions?: MentionSuggestion[];
-  /** Team project path — used to load that project's .claude/commands workflow commands. */
+  /** Team project path — used to load that project's commands/workflows and skills. */
   projectPath?: string | null;
 }
 
@@ -28,7 +29,6 @@ interface UseLoopCommandSuggestionsResult {
   teamSuggestions: MentionSuggestion[];
   taskSuggestions: MentionSuggestion[];
   commandSuggestions: MentionSuggestion[];
-  teamSlugs: string[];
   leadRecipient: string;
 }
 
@@ -73,15 +73,30 @@ export function useLoopCommandSuggestions({
     [leadMember?.model, leadMember?.providerId]
   );
 
+  const skillsProjectCatalogByProjectPath = useStore(
+    (state) => state.skillsProjectCatalogByProjectPath
+  );
+  const fetchSkillsCatalog = useStore((state) => state.fetchSkillsCatalog);
+
+  useEffect(() => {
+    void fetchSkillsCatalog(projectPath ?? undefined);
+  }, [fetchSkillsCatalog, projectPath]);
+
   const { suggestions: teamSuggestions } = useTeamSuggestions(teamName);
   const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
-  // Load the team project's own .claude/commands so project-specific commands
-  // appear in the team console. Skipped when the caller supplies its own full
-  // suggestion set (e.g. the admin console builds its own).
-  const projectWorkflowSuggestions = useProjectWorkflowCommands(
-    scopedCommandSuggestions ? null : projectPath
-  );
+  // Load the team project's own executable assets so project-specific commands,
+  // workflows and skills appear in every team console. Caller-supplied scoped
+  // commands are additive (e.g. Helm Loop capability-pack commands), not a
+  // replacement for the current team's project/workspace assets.
+  const projectWorkflowSuggestions = useProjectWorkflowCommands(projectPath);
+  const projectSkills = projectPath ? (skillsProjectCatalogByProjectPath[projectPath] ?? []) : [];
   const commandSuggestions = useMemo<MentionSuggestion[]>(() => {
+    const projectSkillSuggestions = buildSlashCommandSuggestions(
+      [],
+      projectSkills,
+      [],
+      leadProviderId
+    );
     const baseSuggestions = buildSlashCommandSuggestions(
       getSuggestedSlashCommandsForProvider(leadProviderId),
       [],
@@ -89,11 +104,14 @@ export function useLoopCommandSuggestions({
       leadProviderId
     );
 
-    // 团队指令台只显示本地项目命令 + Claude/Codex 常用命令。
-    // Hermit 运维 workflow 由 SystemManagerView 显式传入，只属于 Helm Loop。
-    const localSuggestions = scopedCommandSuggestions
-      ? [...scopedCommandSuggestions, ...baseSuggestions]
-      : [...projectWorkflowSuggestions, ...baseSuggestions];
+    // 团队指令台优先显示当前项目资产：commands/workflows > project skills > 调用方注入命令 > 基础命令。
+    // Helm Loop 的运维 workflow 由 SystemManagerView 注入，但不能替代当前团队项目资产。
+    const localSuggestions = [
+      ...projectWorkflowSuggestions,
+      ...projectSkillSuggestions,
+      ...(scopedCommandSuggestions ?? []),
+      ...baseSuggestions,
+    ];
     const seen = new Set<string>();
     return localSuggestions.filter((suggestion) => {
       if (isBlockedCommandSuggestion(suggestion)) return false;
@@ -102,22 +120,13 @@ export function useLoopCommandSuggestions({
       seen.add(key);
       return true;
     });
-  }, [leadProviderId, projectWorkflowSuggestions, scopedCommandSuggestions]);
-
-  const teamSlugs = useMemo(
-    () =>
-      teamSuggestions.map((suggestion) =>
-        suggestion.id.startsWith('team:') ? suggestion.id.slice('team:'.length) : suggestion.name
-      ),
-    [teamSuggestions]
-  );
+  }, [leadProviderId, projectSkills, projectWorkflowSuggestions, scopedCommandSuggestions]);
 
   return {
     mentionSuggestions,
     teamSuggestions,
     taskSuggestions,
     commandSuggestions,
-    teamSlugs,
     leadRecipient,
   };
 }

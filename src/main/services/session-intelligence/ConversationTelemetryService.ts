@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import * as path from 'node:path';
 
-import type { CcConnectClient } from '@main/services/ccConnect/CcConnectClient';
+import type { HermitBridgeClient } from '@main/services/hermitBridge/HermitBridgeClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
 import type {
   ConversationTelemetryExportFormat,
@@ -49,7 +49,7 @@ interface CachedClaudeSession {
 }
 
 interface ConversationTelemetryServiceOptions {
-  cc: CcConnectClient;
+  cc: HermitBridgeClient;
   listTeams: () => Promise<TeamManifest[]>;
   readTeamManifest: (teamName: string) => Promise<TeamManifest>;
   identityResolver?: ConversationIdentityResolver;
@@ -146,7 +146,7 @@ async function* walkJsonl(dir: string): AsyncGenerator<string> {
 }
 
 export class ConversationTelemetryService {
-  private readonly cc: CcConnectClient;
+  private readonly cc: HermitBridgeClient;
   private readonly listTeams: () => Promise<TeamManifest[]>;
   private readonly readTeamManifest: (teamName: string) => Promise<TeamManifest>;
   private readonly identityResolver: ConversationIdentityResolver;

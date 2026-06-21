@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yancyuu/Hermit/stargazers"><img src="https://img.shields.io/github/stars/yancyuu/Hermit?style=flat-square&color=black" alt="GitHub stars" /></a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=release&color=black" alt="Latest release" /></a>
-  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/v/@yancyyu/openhermit?style=flat-square&color=black" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/dm/@yancyyu/openhermit?style=flat-square&color=black" alt="npm downloads" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-black?style=flat-square" alt="AGPL-3.0 license" /></a>
-  <a href="https://yancyuu.github.io/Hermit/"><img src="https://img.shields.io/badge/docs-public_guide-black?style=flat-square" alt="Public guide" /></a>
-  <img src="https://img.shields.io/badge/local--first-~%2F.hermit-black?style=flat-square" alt="Local first" />
+  <a href="https://github.com/yancyuu/Hermit/stargazers"><img src="https://img.shields.io/github/stars/yancyuu/Hermit?style=flat-square&color=brightgreen" alt="GitHub stars" /></a>
+  <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=release&color=brightgreen" alt="Latest release" /></a>
+  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/v/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/dm/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-brightgreen?style=flat-square" alt="AGPL-3.0 license" /></a>
+  <a href="https://yancyuu.github.io/Hermit/"><img src="https://img.shields.io/badge/docs-public_guide-brightgreen?style=flat-square" alt="Public guide" /></a>
+  <img src="https://img.shields.io/badge/local--first-~%2F.hermit-brightgreen?style=flat-square" alt="Local first" />
 </p>
 
 <p align="center">

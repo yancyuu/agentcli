@@ -701,7 +701,7 @@ export function TaskBusSection(): React.JSX.Element {
           <div>
             <SettingRow
               label="分布式团队协作"
-              description="开启后 Hermit 平台识别 @团队 并创建跨团队协作任务；Agent 只读取团队列表，不直接派发"
+              description="开启团队总线基础能力，供后续任务池和协作视图使用；不再提供手动派单入口"
             >
               <SettingsToggle
                 enabled={collaborationEnabled}

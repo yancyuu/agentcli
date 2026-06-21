@@ -12,7 +12,6 @@ describe('loopSendIntent', () => {
       text: '/loop 1d 总结状态',
       recipient: 'Lead',
       leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
     });
 
     expect(intent).toMatchObject({ kind: 'message', recipient: 'Lead', text: '/loop 1d 总结状态' });
@@ -77,93 +76,47 @@ describe('loopSendIntent', () => {
     });
   });
 
-  it('parses known @team prefix as cross-team task', () => {
+  it('keeps known @team prefixes as plain lead messages', () => {
     const intent = parseLoopSendIntent({
       text: '@ops 检查 Redis task bus',
       recipient: 'Lead',
       leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
     });
 
     expect(intent).toMatchObject({
-      kind: 'cross-team-task',
-      toTeam: 'ops',
-      subject: '检查 Redis task bus',
+      kind: 'message',
+      recipient: 'Lead',
+      text: '@ops 检查 Redis task bus',
     });
   });
 
-  it('parses full-width ＠ team mentions through the loop console path', () => {
+  it('preserves full-width ＠ team mention text as a plain message', () => {
     const intent = parseLoopSendIntent({
-      text: '＠ops　检查中文输入法团队派单',
+      text: '＠ops　检查中文输入法团队消息',
       recipient: 'Lead',
       leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
     });
 
     expect(intent).toMatchObject({
-      kind: 'cross-team-task',
-      toTeam: 'ops',
-      subject: '检查中文输入法团队派单',
+      kind: 'message',
+      recipient: 'Lead',
+      text: '＠ops　检查中文输入法团队消息',
     });
   });
 
-  it('preserves structured task refs on cross-team task intents', () => {
+  it('preserves structured task refs on @team-looking messages', () => {
     const taskRefs = [{ taskId: 'task-123', displayId: 'ABC123', teamName: 'source' }];
     const intent = parseLoopSendIntent({
       text: '@ops 继续处理 #ABC123',
       recipient: 'Lead',
       leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
       taskRefs,
     });
 
     expect(intent).toMatchObject({
-      kind: 'cross-team-task',
-      toTeam: 'ops',
+      kind: 'message',
+      recipient: 'Lead',
       taskRefs,
     });
-  });
-
-  it('falls back to a plain message when @team is not a known team slug (TEAM-010-003)', () => {
-    // An unknown team slug must NOT silently become a cross-team dispatch —
-    // it would create a task for a non-existent team. It falls through to a
-    // normal lead message so the literal text stays visible.
-    const intent = parseLoopSendIntent({
-      text: '@ghost-team 这个团队不在列表里',
-      recipient: 'Lead',
-      leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
-    });
-
-    expect(intent.kind).toBe('message');
-    expect(intent).not.toMatchObject({ kind: 'cross-team-task' });
-  });
-
-  it('validates a cross-team task even when the source team is offline (TEAM-010-004)', () => {
-    // Cross-team dispatch hands an async task to the TARGET team; it must NOT
-    // be blocked by the SOURCE team's runtime being offline (unlike
-    // runtime/session/attachment intents, which are gated on isTeamAlive).
-    const intent = parseLoopSendIntent({
-      text: '@ops 检查 Redis task bus',
-      recipient: 'Lead',
-      leadRecipient: 'Lead',
-      teamSlugs: ['ops'],
-    });
-    expect(intent.kind).toBe('cross-team-task');
-
-    expect(validateLoopSendIntent(intent, { isTeamAlive: false }).ok).toBe(true);
-    expect(validateLoopSendIntent(intent, { isTeamAlive: true }).ok).toBe(true);
-  });
-
-  it('rejects a cross-team task intent missing its target team (defensive guard)', () => {
-    // parseLoopSendIntent never emits this in practice (toTeam comes from a
-    // non-empty regex capture), but the validator must still defend the shape.
-    const intent = {
-      kind: 'cross-team-task' as const,
-      toTeam: '',
-      subject: '检查 Redis task bus',
-      text: '@ 检查 Redis task bus',
-    };
-    expect(validateLoopSendIntent(intent).ok).toBe(false);
   });
 });

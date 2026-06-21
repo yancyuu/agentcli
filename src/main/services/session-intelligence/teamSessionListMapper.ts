@@ -1,8 +1,8 @@
 import type { LocalSessionSummary } from './LocalSessionScanner';
-import type { CcSessionListItem } from '@shared/types/ccConnect';
+import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 import type { CcSession } from '@shared/types/api';
 
-function toLastMessage(session: CcSessionListItem): CcSession['lastMessage'] {
+function toLastMessage(session: HermitBridgeSessionListItem): CcSession['lastMessage'] {
   return session.last_message
     ? {
         role: session.last_message.role,
@@ -21,7 +21,7 @@ function normalizeFeishuLarkChatId(value: string): string {
   return value.replace(/^oc_/i, 'c_');
 }
 
-function externalSessionIdentity(session: CcSessionListItem): string | null {
+function externalSessionIdentity(session: HermitBridgeSessionListItem): string | null {
   const [platform, chatId, userId] = session.session_key.split(':');
   if (!platform || !chatId || !userId) return null;
   if (platform !== 'feishu' && platform !== 'lark') return null;
@@ -29,9 +29,9 @@ function externalSessionIdentity(session: CcSessionListItem): string | null {
 }
 
 function pickPreferredCcSession(
-  current: CcSessionListItem,
-  candidate: CcSessionListItem
-): CcSessionListItem {
+  current: HermitBridgeSessionListItem,
+  candidate: HermitBridgeSessionListItem
+): HermitBridgeSessionListItem {
   const currentHasLocal = Boolean(current.agent_session_id);
   const candidateHasLocal = Boolean(candidate.agent_session_id);
   if (currentHasLocal !== candidateHasLocal) return candidateHasLocal ? candidate : current;
@@ -43,9 +43,11 @@ function pickPreferredCcSession(
   return timestampMs(candidate.updated_at) > timestampMs(current.updated_at) ? candidate : current;
 }
 
-function dedupeCcSessionsByExternalIdentity(ccSessions: CcSessionListItem[]): CcSessionListItem[] {
-  const byIdentity = new Map<string, CcSessionListItem>();
-  const result: CcSessionListItem[] = [];
+function dedupeCcSessionsByExternalIdentity(
+  ccSessions: HermitBridgeSessionListItem[]
+): HermitBridgeSessionListItem[] {
+  const byIdentity = new Map<string, HermitBridgeSessionListItem>();
+  const result: HermitBridgeSessionListItem[] = [];
 
   for (const session of ccSessions) {
     const identity = externalSessionIdentity(session);
@@ -66,7 +68,7 @@ function dedupeCcSessionsByExternalIdentity(ccSessions: CcSessionListItem[]): Cc
   return [...result, ...byIdentity.values()];
 }
 
-function mapCcOnlySession(session: CcSessionListItem, projectId: string): CcSession {
+function mapCcOnlySession(session: HermitBridgeSessionListItem, projectId: string): CcSession {
   return {
     id: session.agent_session_id || session.id,
     title: session.name || session.session_key,
@@ -87,9 +89,9 @@ function mapCcOnlySession(session: CcSessionListItem, projectId: string): CcSess
 
 export function filterHiddenTeamSessions(
   localSessions: LocalSessionSummary[],
-  ccSessions: CcSessionListItem[],
+  ccSessions: HermitBridgeSessionListItem[],
   hiddenIds: ReadonlySet<string>
-): { localSessions: LocalSessionSummary[]; ccSessions: CcSessionListItem[] } {
+): { localSessions: LocalSessionSummary[]; ccSessions: HermitBridgeSessionListItem[] } {
   if (hiddenIds.size === 0) {
     return { localSessions, ccSessions };
   }
@@ -107,7 +109,7 @@ export function filterHiddenTeamSessions(
 
 export function mergeLocalAndCcSessions(
   localSessions: LocalSessionSummary[],
-  ccSessions: CcSessionListItem[],
+  ccSessions: HermitBridgeSessionListItem[],
   projectId: string
 ): CcSession[] {
   const dedupedCcSessions = dedupeCcSessionsByExternalIdentity(ccSessions);

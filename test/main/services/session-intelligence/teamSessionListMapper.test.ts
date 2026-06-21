@@ -6,7 +6,7 @@ import {
 } from '@main/services/session-intelligence/teamSessionListMapper';
 
 import type { LocalSessionSummary } from '@main/services/session-intelligence/LocalSessionScanner';
-import type { CcSessionListItem } from '@shared/types/ccConnect';
+import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 
 function localSession(id: string): LocalSessionSummary {
   return {
@@ -31,7 +31,7 @@ function localSession(id: string): LocalSessionSummary {
   };
 }
 
-function ccSession(overrides: Partial<CcSessionListItem>): CcSessionListItem {
+function ccSession(overrides: Partial<HermitBridgeSessionListItem>): HermitBridgeSessionListItem {
   return {
     id: 'oc_09d7d178a38cf860ed1967b83d6fc37d',
     name: '',

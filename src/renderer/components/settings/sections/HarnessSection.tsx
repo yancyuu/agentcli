@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { providersApi } from '@renderer/api/providers';
 import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
-import type { CcAgentType } from '@renderer/components/team/HarnessCards';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import { HarnessIcon } from '@renderer/components/team/HarnessSelect';
 import { cn } from '@renderer/lib/utils';
 import { OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
@@ -19,9 +19,9 @@ import { CliStatusSection } from './CliStatusSection';
 
 export const HarnessSection = (): React.JSX.Element => {
   const [providerNamesByAgentType, setProviderNamesByAgentType] = useState<
-    Map<CcAgentType, string[]>
+    Map<HermitBridgeAgentType, string[]>
   >(() => new Map(ALL_AGENT_TYPES.map((type) => [type, []])));
-  const [usedAgentTypes, setUsedAgentTypes] = useState<Set<CcAgentType>>(new Set());
+  const [usedAgentTypes, setUsedAgentTypes] = useState<Set<HermitBridgeAgentType>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
@@ -33,12 +33,12 @@ export const HarnessSection = (): React.JSX.Element => {
 
       const providerData =
         providerRes.status === 'fulfilled' ? providerRes.value : { providers: [] };
-      const providerCoverage = new Map<CcAgentType, string[]>(
+      const providerCoverage = new Map<HermitBridgeAgentType, string[]>(
         ALL_AGENT_TYPES.map((type) => [type, []])
       );
       for (const provider of providerData.providers ?? []) {
         for (const agentType of provider.agent_types ?? []) {
-          const type = agentType as CcAgentType;
+          const type = agentType as HermitBridgeAgentType;
           const list = providerCoverage.get(type);
           if (list && !list.includes(provider.name)) {
             list.push(provider.name);
@@ -48,7 +48,7 @@ export const HarnessSection = (): React.JSX.Element => {
       setProviderNamesByAgentType(providerCoverage);
 
       // Extract agent types from projects to mark which types are in use
-      const projectAgentTypes = new Set<CcAgentType>();
+      const projectAgentTypes = new Set<HermitBridgeAgentType>();
       if (projectsRes.status === 'fulfilled' && projectsRes.value.ok) {
         try {
           const json = await projectsRes.value.json();
@@ -82,7 +82,7 @@ export const HarnessSection = (): React.JSX.Element => {
   }, [refresh]);
 
   // Build coverage map: agent type -> list of sources (providers + projects)
-  const coveredTypes = new Map<CcAgentType, string[]>();
+  const coveredTypes = new Map<HermitBridgeAgentType, string[]>();
   for (const type of ALL_AGENT_TYPES) {
     coveredTypes.set(type, [...(providerNamesByAgentType.get(type) ?? [])]);
   }

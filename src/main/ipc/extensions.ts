@@ -5,7 +5,7 @@
  * state, skills, credentials) and returns results via IPC.
  */
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import type {
   CapabilityCommandPromptRequest,
   CapabilityPackExportRequest,
@@ -165,7 +165,7 @@ export const extensionHandlers = {
   pluginInstall: (request: PluginInstallRequest) =>
     wrapHandler(async () => {
       // Plugins are claudecode-only — no other harness supports them
-      const harnessType = 'claudecode' as CcAgentType;
+      const harnessType = 'claudecode' as HermitBridgeAgentType;
       const adapter = getAdapter(harnessType);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${harnessType}` };
 
@@ -187,10 +187,10 @@ export const extensionHandlers = {
     pluginId: string,
     scope?: string,
     projectPath?: string,
-    harnessType?: CcAgentType
+    harnessType?: HermitBridgeAgentType
   ) =>
     wrapHandler(async () => {
-      const ht = (harnessType ?? 'claudecode') as CcAgentType;
+      const ht = (harnessType ?? 'claudecode') as HermitBridgeAgentType;
       const adapter = getAdapter(ht);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${ht}` };
 
@@ -217,7 +217,7 @@ export const extensionHandlers = {
 
   mcpInstallCustom: (request: McpCustomInstallRequest) =>
     wrapHandler(async () => {
-      const harnessType = (request.harnessType ?? 'claudecode') as CcAgentType;
+      const harnessType = (request.harnessType ?? 'claudecode') as HermitBridgeAgentType;
       const adapter = getAdapter(harnessType);
       if (!adapter || !adapter.supportsMcp) {
         return { state: 'error' as const, error: `MCP not supported by ${harnessType}` };
@@ -237,9 +237,14 @@ export const extensionHandlers = {
       return result;
     }),
 
-  mcpUninstall: (name: string, scope?: string, projectPath?: string, harnessType?: CcAgentType) =>
+  mcpUninstall: (
+    name: string,
+    scope?: string,
+    projectPath?: string,
+    harnessType?: HermitBridgeAgentType
+  ) =>
     wrapHandler(async () => {
-      const ht = (harnessType ?? 'claudecode') as CcAgentType;
+      const ht = (harnessType ?? 'claudecode') as HermitBridgeAgentType;
       const adapter = getAdapter(ht);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${ht}` };
 

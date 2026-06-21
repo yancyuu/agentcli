@@ -5,7 +5,7 @@
  * harness-specific installation commands and configuration paths.
  */
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import type { McpHeaderDef, McpInstallSpec, OperationResult } from '@shared/types/extensions';
 
 import type { InstalledMcpEntry } from '@shared/types/extensions';
@@ -23,7 +23,7 @@ export interface ResolvedSkillRoot {
 }
 
 export interface HarnessInstallAdapter {
-  readonly harnessType: CcAgentType;
+  readonly harnessType: HermitBridgeAgentType;
   readonly supportsPlugins: boolean;
   readonly supportsMcp: boolean;
   readonly supportsSkills: boolean;

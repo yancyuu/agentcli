@@ -20,7 +20,7 @@ const DASHBOARD_BOUNDARIES = [
   {
     title: 'Team Loop',
     description:
-      '只负责当前团队消息、runtime 注入、Loop session 和跨团队派单，避免把 Admin workflow 混进普通团队。',
+      '只负责当前团队消息、runtime 注入和 Loop session，避免把 Admin workflow 混进普通团队。',
     badge: '团队作用域',
   },
   {

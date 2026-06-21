@@ -4,7 +4,7 @@
  */
 
 import { getHomeDir } from '@main/utils/pathDecoder';
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import path from 'node:path';
 
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter';
@@ -39,7 +39,7 @@ function resolveBinaryFromPath(binaryName: string): Promise<string | null> {
  * binary resolution and skill roots. CLI args pattern is the same.
  */
 export class CodexAdapter implements HarnessInstallAdapter {
-  readonly harnessType: CcAgentType = 'codex';
+  readonly harnessType: HermitBridgeAgentType = 'codex';
   readonly supportsPlugins = false;
   readonly supportsMcp = true;
   readonly supportsSkills = true;

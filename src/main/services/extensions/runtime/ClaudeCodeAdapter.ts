@@ -6,7 +6,7 @@ import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { getHomeDir } from '@main/utils/pathDecoder';
 import { execCli } from '@main/utils/childProcess';
 import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import { createLogger } from '@shared/utils/logger';
 import path from 'node:path';
 
@@ -56,7 +56,7 @@ function maskSecrets(
 }
 
 export class ClaudeCodeAdapter implements HarnessInstallAdapter {
-  readonly harnessType: CcAgentType = 'claudecode';
+  readonly harnessType: HermitBridgeAgentType = 'claudecode';
   readonly supportsPlugins = true;
   readonly supportsMcp = true;
   readonly supportsSkills = true;

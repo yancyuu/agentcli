@@ -232,6 +232,41 @@ describe('slashCommandRegistry', () => {
     expect(buildSlashCommandRegistry({ packs: [pack], scope: 'team-loop' })).toEqual([]);
   });
 
+  it('uses workflow metadata as the admin command description when command description is missing', () => {
+    const pack = makePack({
+      manifest: {
+        ...makePack().manifest,
+        capabilities: {
+          commands: [
+            {
+              id: 'doctor',
+              alias: 'doctor',
+              title: 'Loop Doctor',
+              scope: ['admin-loop'],
+              surfaces: ['slash'],
+              safety: 'read-only',
+              prompt: 'commands/doctor.md',
+              workflow: 'doctor.md',
+            },
+          ],
+          workflows: [
+            {
+              id: 'doctor',
+              name: 'Loop Doctor',
+              description: 'Diagnose runtime, config, MCP, cron, and project assets.',
+              path: 'workflows/doctor.md',
+            },
+          ],
+        },
+      },
+    });
+
+    const [suggestion] = buildCapabilityPackCommandSuggestions([pack], 'admin-loop');
+
+    expect(suggestion?.description).toBe('Diagnose runtime, config, MCP, cron, and project assets.');
+    expect(suggestion?.searchText).toContain('Diagnose runtime');
+  });
+
   it('sorts registered commands by order then alias', () => {
     const pack = makePack({
       manifest: {

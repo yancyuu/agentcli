@@ -4,6 +4,7 @@ import type { MentionSuggestion } from '@renderer/types/mention';
 import type {
   CapabilityCommand,
   CapabilityScope,
+  CapabilityWorkflow,
   LoadedCapabilityPack,
   RegisteredSlashCommand,
   SlashCommandResolveResult,
@@ -54,6 +55,29 @@ function commandSupportsSlash(command: CapabilityCommand): boolean {
   return command.surfaces.includes('slash');
 }
 
+function workflowMatchesCommand(workflow: CapabilityWorkflow, command: CapabilityCommand): boolean {
+  const commandWorkflow = command.workflow?.trim();
+  if (!commandWorkflow) return false;
+  const workflowPath = workflow.path.trim();
+  const workflowFile = workflowPath.split(/[\\/]/u).pop();
+  return (
+    workflow.id === commandWorkflow ||
+    workflowPath === commandWorkflow ||
+    workflowFile === commandWorkflow ||
+    workflowPath.endsWith(`/${commandWorkflow}`)
+  );
+}
+
+function resolveCommandDescription(
+  command: CapabilityCommand,
+  workflows: readonly CapabilityWorkflow[]
+): string | undefined {
+  const ownDescription = command.description?.trim();
+  if (ownDescription) return ownDescription;
+  const workflow = workflows.find((candidate) => workflowMatchesCommand(candidate, command));
+  return workflow?.description?.trim() || undefined;
+}
+
 interface SlashCommandSuggestionOptions {
   forceNamespacedAliases?: ReadonlySet<string>;
 }
@@ -92,6 +116,7 @@ export function buildSlashCommandRegistry({
 
     const packId = pack.manifest.id;
     const namespace = normalizeNamespace(pack.manifest.namespace);
+    const workflows = pack.manifest.capabilities.workflows ?? [];
     for (const command of pack.manifest.capabilities.commands ?? []) {
       const alias = normalizeAlias(command.alias);
       if (
@@ -116,6 +141,7 @@ export function buildSlashCommandRegistry({
         command: {
           ...command,
           alias,
+          description: resolveCommandDescription(command, workflows),
           execution: command.execution ?? {
             type: scope === 'admin-loop' ? 'loop-session' : 'send-message',
             reuse: true,

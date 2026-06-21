@@ -10,17 +10,17 @@ import {
 import { HarnessBrandLogo } from './HarnessBrandLogos';
 import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from './HarnessCards';
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 interface HarnessSelectProps {
-  readonly value: CcAgentType;
-  readonly onChange: (value: CcAgentType) => void;
+  readonly value: HermitBridgeAgentType;
+  readonly onChange: (value: HermitBridgeAgentType) => void;
   readonly className?: string;
   readonly id?: string;
 }
 
 const HARNESS_PROVIDER_MAP: Partial<
-  Record<CcAgentType, 'anthropic' | 'codex' | 'gemini' | 'opencode'>
+  Record<HermitBridgeAgentType, 'anthropic' | 'codex' | 'gemini' | 'opencode'>
 > = {
   claudecode: 'anthropic',
   codex: 'codex',
@@ -29,7 +29,7 @@ const HARNESS_PROVIDER_MAP: Partial<
 };
 
 interface HarnessIconProps {
-  readonly type: CcAgentType;
+  readonly type: HermitBridgeAgentType;
   readonly className?: string;
 }
 
@@ -49,7 +49,7 @@ const HarnessSelect = ({
   id,
 }: HarnessSelectProps): React.JSX.Element => {
   return (
-    <Select value={value} onValueChange={(v) => onChange(v as CcAgentType)}>
+    <Select value={value} onValueChange={(v) => onChange(v as HermitBridgeAgentType)}>
       <SelectTrigger id={id} className={className}>
         <SelectValue />
       </SelectTrigger>

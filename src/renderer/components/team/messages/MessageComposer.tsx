@@ -18,7 +18,6 @@ import { useStore } from '@renderer/store';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { parseTeamMentionDirective } from '@renderer/utils/teamMentionDirective';
 import {
   expandCapabilityCommand,
   resolveCapabilityCommandInput,
@@ -79,11 +78,6 @@ interface MessageComposerProps {
     taskRefs?: TaskRef[],
     slashCommand?: SlashCommandMeta
   ) => void;
-  onDispatchTask?: (
-    toTeam: string,
-    subject: string,
-    description: string
-  ) => Promise<boolean | void> | boolean | void;
 }
 
 export const MessageComposer = ({
@@ -98,7 +92,6 @@ export const MessageComposer = ({
   lastResult,
   textareaRef: externalTextareaRef,
   onSend,
-  onDispatchTask,
 }: MessageComposerProps): React.JSX.Element => {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useMemo(() => {
@@ -263,24 +256,6 @@ export const MessageComposer = ({
             ? '斜杠命令需要 Lead 在线'
             : null
     : null;
-  const teamDispatch = useMemo(() => {
-    if (!onDispatchTask) return null;
-    const parsed = parseTeamMentionDirective(trimmed);
-    if (!parsed) return null;
-    const { mentioned, subject } = parsed;
-    const targetTeam = teamMentionSuggestions.find((team) => {
-      const slug = team.id.startsWith('team:') ? team.id.slice('team:'.length) : team.id;
-      return slug === mentioned || team.name === mentioned;
-    });
-    const slug = targetTeam
-      ? targetTeam.id.startsWith('team:')
-        ? targetTeam.id.slice('team:'.length)
-        : targetTeam.id
-      : mentioned;
-    return { slug, subject };
-  }, [onDispatchTask, teamMentionSuggestions, trimmed]);
-  const canDispatchToTeam =
-    teamDispatch !== null && trimmed.length > 0 && trimmed.length <= MAX_TEXT_LENGTH && !sending;
   const canSendRegularMessage =
     recipient.length > 0 &&
     trimmed.length > 0 &&
@@ -289,7 +264,7 @@ export const MessageComposer = ({
     !isProvisioning &&
     !attachmentsBlocked &&
     !slashCommandRestrictionReason;
-  const canSend = canDispatchToTeam || canSendRegularMessage;
+  const canSend = canSendRegularMessage;
 
   // Track whether we initiated a send — clear draft only on confirmed success
   const pendingSendRef = useRef(false);
@@ -299,15 +274,6 @@ export const MessageComposer = ({
     dismissMentionsRef.current?.();
     const taskRefs = extractTaskRefsFromText(draft.text, taskSuggestions);
     const serialized = serializeChipsWithText(trimmed, draft.chips);
-
-    if (teamDispatch && onDispatchTask) {
-      void Promise.resolve(
-        onDispatchTask(teamDispatch.slug, teamDispatch.subject, serialized)
-      ).then((dispatched) => {
-        if (dispatched !== false) draft.clearDraft();
-      });
-      return;
-    }
 
     const send = async () => {
       if (capabilityCommandResult.status === 'resolved' && capabilityCommandResult.resolved) {
@@ -345,17 +311,7 @@ export const MessageComposer = ({
       // before the normal send error store is involved.
       console.error(error);
     });
-  }, [
-    canSend,
-    capabilityCommandResult,
-    recipient,
-    trimmed,
-    onSend,
-    draft,
-    taskSuggestions,
-    teamDispatch,
-    onDispatchTask,
-  ]);
+  }, [canSend, capabilityCommandResult, recipient, trimmed, onSend, draft, taskSuggestions]);
 
   // Clear draft only after send completes successfully (sending: true → false, no error)
   useEffect(() => {
@@ -463,11 +419,6 @@ export const MessageComposer = ({
     </span>
   ) : sendWarning ? (
     <OpenCodeDeliveryWarning warning={sendWarning} debugDetails={sendDebugDetails} />
-  ) : teamDispatch ? (
-    <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300">
-      <Send size={10} className="shrink-0" />
-      将创建跨团队任务：{teamDispatch.slug}
-    </span>
   ) : lastResult?.deduplicated ? (
     <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
       <Check size={10} className="shrink-0" />

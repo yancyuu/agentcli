@@ -48,17 +48,20 @@ import Fastify from 'fastify';
 
 import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
 import type {
-  CcAgentType,
-  CcBridgeUsageMessage,
-  CcProjectPlatform,
-  CcSessionDetail as CcConnectSessionDetail,
-  CcSessionListItem,
-} from '../shared/types/ccConnect';
-import { CcConnectBridge } from './services/ccConnect/CcConnectBridge';
-import { mapUsageEventToReportInput } from './services/ccConnect/usageEventMapper';
-import { CcConnectClient } from './services/ccConnect/CcConnectClient';
-import { CcConnectLauncher } from './services/ccConnect/CcConnectLauncher';
-import { isPlaceholderWorkDir, needsWorkDirReconcile } from './services/ccConnect/workDirReconcile';
+  HermitBridgeAgentType,
+  HermitBridgeProjectPlatform,
+  HermitBridgeSessionDetail,
+  HermitBridgeSessionListItem,
+  HermitBridgeUsageMessage,
+} from '../shared/types/hermitBridge';
+import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
+import { mapUsageEventToReportInput } from './services/hermitBridge/usageEventMapper';
+import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
+import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
+import {
+  isPlaceholderWorkDir,
+  needsWorkDirReconcile,
+} from './services/hermitBridge/workDirReconcile';
 import {
   DirectCliSessionManager,
   buildDirectReplyMessageId,
@@ -149,7 +152,15 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number.parseInt(process.env.PORT ?? '5680', 10);
 const STATIC_DIR = process.env.STATIC_DIR ?? path.resolve(REPO_ROOT, 'dist-renderer');
 const HARNESS_BRIDGE_CONNECT_TIMEOUT_MS = 10_000;
-const CC_AGENT_TYPES: readonly CcAgentType[] = [
+const DEFAULT_HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS = 180_000;
+const hermitBridgeAutoLaunchTimeoutMs = Number.parseInt(
+  process.env.HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS ?? '',
+  10
+);
+const HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS = Number.isFinite(hermitBridgeAutoLaunchTimeoutMs)
+  ? Math.max(30_000, hermitBridgeAutoLaunchTimeoutMs)
+  : DEFAULT_HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS;
+const CC_AGENT_TYPES: readonly HermitBridgeAgentType[] = [
   'claudecode',
   'codex',
   'cursor',
@@ -166,8 +177,10 @@ const CC_AGENT_TYPES: readonly CcAgentType[] = [
 const SYSTEM_MANAGER_DESCRIPTION =
   '项目级 Claude Code Helm Loop，负责插件、MCP、Env、数字员工和统计数据的托管管理。';
 
-function toCcAgentType(value: string | undefined): CcAgentType {
-  return CC_AGENT_TYPES.includes(value as CcAgentType) ? (value as CcAgentType) : 'claudecode';
+function toHermitBridgeAgentType(value: string | undefined): HermitBridgeAgentType {
+  return CC_AGENT_TYPES.includes(value as HermitBridgeAgentType)
+    ? (value as HermitBridgeAgentType)
+    : 'claudecode';
 }
 
 function isReservedSystemTeamName(teamName: string): boolean {
@@ -406,20 +419,20 @@ function writeHermitConfigRaw(content: string): HermitConfig {
 // Mutable runtime config — updated via /api/hermit-config POST
 let runtimeConfig = loadConfig();
 
-const cc = new CcConnectClient({
+const cc = new HermitBridgeClient({
   baseUrl: runtimeConfig.ccBaseUrl,
   token: runtimeConfig.ccToken,
   bridgeUrl: runtimeConfig.ccBridgeUrl,
 });
-const bridge = new CcConnectBridge({
+const bridge = new HermitBridgeConnection({
   bridgeUrl: runtimeConfig.ccBridgeUrl,
   bridgeToken: runtimeConfig.ccBridgeToken || runtimeConfig.ccToken,
 });
 // Auto-launches the cc-connect bridge (via the bundled `hermit-bridge` binary)
 // when no management API is reachable; a no-op when cc-connect already runs.
-const bridgeLauncher = new CcConnectLauncher();
+const bridgeLauncher = new HermitBridgeLauncher();
 const svc = new TeamProvisioningService(cc, bridge, undefined, {
-  restartCcConnect: restartCcConnectAndReconnectBridge,
+  restartCcConnect: restartHermitBridgeAndReconnect,
 });
 const systemManagerConfig = new SystemManagerConfigService();
 const workflowPromptService = new WorkflowPromptService();
@@ -612,10 +625,10 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
   return resolveCcProjectName(teamName, (name) => svc.readTeamManifestByProject(name));
 }
 
-async function restartCcConnectAndReconnectBridge(): Promise<void> {
+async function restartHermitBridgeAndReconnect(): Promise<void> {
   await cc.restart();
 
-  // Wait for cc-connect management API to come back (restart only signals, process respawns async).
+  // Wait for hermit-bridge management API to come back (restart only signals, process respawns async).
   let managementReady = false;
   for (let i = 0; i < 30; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -628,11 +641,11 @@ async function restartCcConnectAndReconnectBridge(): Promise<void> {
     }
   }
   if (!managementReady) {
-    throw new Error('cc-connect did not come back within 30s');
+    throw new Error('hermit-bridge did not come back within 30s');
   }
 
-  // After cc-connect restarts, force Hermit's Bridge adapter to reconnect and re-register.
-  // Otherwise Feishu/Lark may show connected in cc-connect but Hermit is not listening yet.
+  // After hermit-bridge restarts, force Hermit's Bridge adapter to reconnect and re-register.
+  // Otherwise Feishu/Lark may show connected in hermit-bridge but Hermit is not listening yet.
   bridge.reconnect();
   await waitForHarnessBridgeConnected(15_000);
 }
@@ -717,7 +730,7 @@ async function resolveTeamSlugForMention(rawName: string): Promise<string | null
   return matched?.slug ?? null;
 }
 
-function mapCcSessionDetail(detail: CcConnectSessionDetail): CcSessionDetail {
+function mapCcSessionDetail(detail: HermitBridgeSessionDetail): CcSessionDetail {
   return {
     id: detail.agent_session_id || detail.id,
     name: detail.name || detail.session_key,
@@ -1010,7 +1023,7 @@ directCliManager.on('event', (event: DirectCliEvent) => {
  * session_key inside reportTurn, so no project/session lookup is needed here.
  * reportTurn applies the team-bus + telemetry gate itself.
  */
-function reportBridgeUsageEvent(msg: CcBridgeUsageMessage): void {
+function reportBridgeUsageEvent(msg: HermitBridgeUsageMessage): void {
   const input = mapUsageEventToReportInput(msg);
   if (!input) return;
   void externalImUsageReporter
@@ -1289,11 +1302,12 @@ await app.register(cors, {
 });
 
 // ===========================================================================
-// /api/cc/*  →  cc-connect /api/v1/*  (proxy with token)
-// /api/v1/*  →  cc-connect /api/v1/*  (兼容旧 renderer 直接打 /api/v1 的代码)
+// /api/bridge/* → hermit-bridge /api/v1/* (canonical proxy with token)
+// /api/cc/*     → hermit-bridge /api/v1/* (legacy alias)
+// /api/v1/*     → hermit-bridge /api/v1/* (兼容旧 renderer 直接打 /api/v1 的代码)
 // ===========================================================================
 
-async function proxyToCcConnect(
+async function proxyToHermitBridge(
   request: import('fastify').FastifyRequest,
   reply: import('fastify').FastifyReply,
   stripPrefix: string
@@ -1319,10 +1333,10 @@ async function proxyToCcConnect(
   try {
     upstream = await fetch(target, init);
   } catch (err) {
-    request.log.warn({ target, err }, 'cc-connect proxy network error');
+    request.log.warn({ target, err }, 'hermit-bridge proxy network error');
     return reply.code(502).send({
       ok: false,
-      error: `cc-connect 不可达: ${err instanceof Error ? err.message : String(err)}`,
+      error: `hermit-bridge 不可达: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 
@@ -1335,13 +1349,13 @@ async function proxyToCcConnect(
     const snippet = body.toString('utf-8').slice(0, 100).trim();
     request.log.warn(
       { target, status: upstream.status, contentType, snippet },
-      'cc-connect returned non-JSON error response'
+      'hermit-bridge returned non-JSON error response'
     );
     return reply.code(upstream.status).send({
       ok: false,
       error:
-        `cc-connect 端点 ${subPath} 返回了非 JSON 响应 (HTTP ${upstream.status})。` +
-        '请检查 cc-connect 是否正在运行且支持该端点。',
+        `hermit-bridge 端点 ${subPath} 返回了非 JSON 响应 (HTTP ${upstream.status})。` +
+        '请检查 hermit-bridge 是否正在运行且支持该端点。',
     });
   }
 
@@ -1351,8 +1365,11 @@ async function proxyToCcConnect(
     .send(body);
 }
 
-app.all('/api/cc/*', async (request, reply) => proxyToCcConnect(request, reply, '/api/cc'));
-app.all('/api/v1/*', async (request, reply) => proxyToCcConnect(request, reply, '/api/v1'));
+app.all('/api/bridge/*', async (request, reply) =>
+  proxyToHermitBridge(request, reply, '/api/bridge')
+);
+app.all('/api/cc/*', async (request, reply) => proxyToHermitBridge(request, reply, '/api/cc'));
+app.all('/api/v1/*', async (request, reply) => proxyToHermitBridge(request, reply, '/api/v1'));
 
 // ===========================================================================
 // Hermit config (read/write ~/.hermit/config.json)
@@ -1430,12 +1447,12 @@ app.post<{ Body: { content?: unknown } }>('/api/hermit-config/raw', async (reque
 // hermit-bridge config (Hermit-managed: ~/.hermit/hermit-bridge/config.toml)
 // ===========================================================================
 
-function readCcConnectConfigRaw(): { path: string; content: string } {
+function readHermitBridgeConfigRaw(): { path: string; content: string } {
   return readHermitBridgeConfigTomlRaw();
 }
 
 /** Simple TOML parser for hermit-bridge config (handles only the fields we need). */
-function readCcConnectConfig(): Record<string, unknown> {
+function readHermitBridgeConfig(): Record<string, unknown> {
   const { content: raw } = readHermitBridgeConfigTomlRaw();
 
   const result: Record<string, unknown> = {};
@@ -1494,7 +1511,7 @@ function readCcConnectConfig(): Record<string, unknown> {
   return result;
 }
 
-function writeCcConnectConfig(updates: Record<string, unknown>): void {
+function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   const configFile = ensureWritableHermitBridgeConfigFile();
   let raw = readFileSync(configFile, 'utf-8');
 
@@ -1572,26 +1589,28 @@ function writeCcConnectConfig(updates: Record<string, unknown>): void {
   writeFileSync(configFile, raw, 'utf-8');
 }
 
-function writeCcConnectConfigRaw(content: string): void {
+function writeHermitBridgeConfigRaw(content: string): void {
   const configFile = ensureWritableHermitBridgeConfigFile();
   writeFileSync(configFile, content, 'utf-8');
 }
 
-app.get('/api/cc-config', async () => {
+async function handleReadHermitBridgeConfig() {
   try {
-    const config = readCcConnectConfig();
+    const config = readHermitBridgeConfig();
     return { ok: true, data: config };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-});
+}
 
-app.post<{ Body: Record<string, unknown> }>('/api/cc-config', async (request, reply) => {
+async function handleWriteHermitBridgeConfig(
+  request: import('fastify').FastifyRequest<{ Body: Record<string, unknown> }>
+) {
   try {
     const updates = request.body ?? {};
-    writeCcConnectConfig(updates);
+    writeHermitBridgeConfig(updates);
 
-    // If management port/token changed, notify user to restart cc-connect
+    // If management port/token changed, notify user to restart hermit-bridge.
     const needsRestart =
       'management_port' in updates ||
       'management_token' in updates ||
@@ -1605,29 +1624,47 @@ app.post<{ Body: Record<string, unknown> }>('/api/cc-config', async (request, re
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-});
+}
 
-app.get('/api/cc-config/raw', async () => {
+async function handleReadHermitBridgeConfigRaw() {
   try {
-    const data = readCcConnectConfigRaw();
+    const data = readHermitBridgeConfigRaw();
     return { ok: true, data };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-});
+}
 
-app.post<{ Body: { content?: unknown } }>('/api/cc-config/raw', async (request) => {
+async function handleWriteHermitBridgeConfigRaw(
+  request: import('fastify').FastifyRequest<{ Body: { content?: unknown } }>
+) {
   try {
     const content = request.body?.content;
     if (typeof content !== 'string') {
       return { ok: false, error: 'content 必须是字符串' };
     }
-    writeCcConnectConfigRaw(content);
+    writeHermitBridgeConfigRaw(content);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-});
+}
+
+app.get('/api/hermit-bridge-config', handleReadHermitBridgeConfig);
+app.post<{ Body: Record<string, unknown> }>(
+  '/api/hermit-bridge-config',
+  handleWriteHermitBridgeConfig
+);
+app.get('/api/hermit-bridge-config/raw', handleReadHermitBridgeConfigRaw);
+app.post<{ Body: { content?: unknown } }>(
+  '/api/hermit-bridge-config/raw',
+  handleWriteHermitBridgeConfigRaw
+);
+
+app.get('/api/cc-config', handleReadHermitBridgeConfig);
+app.post<{ Body: Record<string, unknown> }>('/api/cc-config', handleWriteHermitBridgeConfig);
+app.get('/api/cc-config/raw', handleReadHermitBridgeConfigRaw);
+app.post<{ Body: { content?: unknown } }>('/api/cc-config/raw', handleWriteHermitBridgeConfigRaw);
 
 // ===========================================================================
 // Health / cc-connect status (alias)
@@ -1673,7 +1710,7 @@ app.patch<{ Body: Record<string, unknown> }>('/api/cc-settings', async (request,
 // restart / reload cc-connect
 app.post('/api/cc-restart', async () => {
   try {
-    await restartCcConnectAndReconnectBridge();
+    await restartHermitBridgeAndReconnect();
     return { ok: true };
   } catch (err) {
     return reply500(err);
@@ -1928,7 +1965,7 @@ app.get('/api/teams', async () => {
           // block first paint. Runtime liveness is loaded separately via aliveList.
           const workDir = (meta.workDir || '').trim();
           const projectPath = (meta.workDir || '').trim();
-          const harness = toCcAgentType(project?.agent_type || meta.harness);
+          const harness = toHermitBridgeAgentType(project?.agent_type || meta.harness);
           const color = meta.color || 'blue';
           const displayName = meta.displayName || meta.slug;
           const usageStats = workDir ? getProjectStatsSnapshot(workDir) : null;
@@ -2178,7 +2215,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       kanbanState: { teamName: name, reviewers: [], tasks: {} },
       processes: [],
       isAlive: isOnline,
-      platforms: (p.platforms ?? []) as CcProjectPlatform[],
+      platforms: (p.platforms ?? []) as HermitBridgeProjectPlatform[],
       harness: p.agent_type,
       bindProject,
       collaboration,
@@ -2237,7 +2274,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       kanbanState: { teamName: name, reviewers: [], tasks: {} },
       processes: [],
       isAlive: false,
-      platforms: [] as CcProjectPlatform[],
+      platforms: [] as HermitBridgeProjectPlatform[],
       harness,
       bindProject,
       collaboration,
@@ -2580,7 +2617,10 @@ app.get('/api/harnesses', async () => {
   }
 });
 
-function mapCcSessionListItem(session: CcSessionListItem, projectId: string): CcSession {
+function mapHermitBridgeSessionListItem(
+  session: HermitBridgeSessionListItem,
+  projectId: string
+): CcSession {
   return {
     id: session.agent_session_id || session.id,
     title: session.name || session.session_key,
@@ -2719,7 +2759,7 @@ async function ensureLoopSessionProjectReady(teamName: string): Promise<{
       projectExists = true;
     }
 
-    await restartCcConnectAndReconnectBridge();
+    await restartHermitBridgeAndReconnect();
     try {
       const project = await cc.getProject(bindProject);
       isOnline =
@@ -2906,7 +2946,7 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
         // Covers: newly created project, existing project with disconnected platform,
         // Feishu/Lark IM that lost connection after cc-connect restart, etc.
         try {
-          await restartCcConnectAndReconnectBridge();
+          await restartHermitBridgeAndReconnect();
         } catch (err) {
           request.log.warn(
             { err, bindProject },
@@ -3103,7 +3143,7 @@ app.post<{
       // required before cc-connect listens to the new long-connection and Hermit must reconnect
       // its Bridge adapter after that restart. Do it here so callers cannot accidentally leave
       // cc-connect showing “connected” while Hermit is not listening.
-      await restartCcConnectAndReconnectBridge();
+      await restartHermitBridgeAndReconnect();
       return { ok: true, data: { ...result, restart_required: false, restart_handled: true } };
     }
 
@@ -3208,7 +3248,7 @@ const MCP_TOOLS = [
   {
     name: 'list_teams',
     description:
-      '只读：列出所有可用团队（本地和远程）及能力信息。跨团队派发由 Hermit 平台根据用户 @团队 自动处理，agent 不应自行派发。',
+      '只读：列出所有可用团队（本地和远程）及能力信息。团队协作后续由总线和任务池承载，agent 不应自行派发。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -4791,7 +4831,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/sessions', async (reques
 
     // Merge cc-connect sessions into the response. External platform sessions (Feishu/Lark/etc.)
     // may not have a local Claude JSONL yet, but users still expect to see them as listening sessions.
-    let ccSessions: CcSessionListItem[] = [];
+    let ccSessions: HermitBridgeSessionListItem[] = [];
     try {
       const bindProject = await resolveRouteCcProjectName(request.params.name);
       ccSessions = await cc.listSessions(bindProject);
@@ -5229,7 +5269,7 @@ async function applyTeamConfigUpdate(
   const platformAllowChat = normalizePlatformAllowUpdate(body.platformAllowChat);
 
   // Validate agent type before checking CLI availability.
-  if (agentType && !CC_AGENT_TYPES.includes(agentType as CcAgentType)) {
+  if (agentType && !CC_AGENT_TYPES.includes(agentType as HermitBridgeAgentType)) {
     throw new Error(`${agentType} 不是支持的运行时类型。`);
   }
   if (agentType && agentType !== 'claudecode') {
@@ -5305,7 +5345,7 @@ async function applyTeamConfigUpdate(
     try {
       const updateResult = await cc.updateProject(
         bindProject,
-        ccPatch as Parameters<CcConnectClient['updateProject']>[1]
+        ccPatch as Parameters<HermitBridgeClient['updateProject']>[1]
       );
       if (updateResult.restart_required) {
         try {
@@ -5531,56 +5571,6 @@ app.post<{
     typeof request.body?.messageId === 'string' ? request.body.messageId.trim() : '';
   const msgId =
     requestedMessageId || `hermit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  const crossTeamDirective = text.trim().match(/^@([^\s]+)\s+([\s\S]+)$/);
-  if (crossTeamDirective) {
-    const targetTeam = await resolveTeamSlugForMention(crossTeamDirective[1] ?? '');
-    const subject = crossTeamDirective[2]?.trim();
-    if (targetTeam && subject && targetTeam !== teamName) {
-      try {
-        const sourceMsg = await svc.appendMessage(teamName, {
-          from: 'user',
-          to: targetTeam,
-          role: 'user',
-          content: text,
-          meta: { source: CROSS_TEAM_SENT_SOURCE },
-        });
-        const result = await taskDispatch.dispatchTask(
-          teamName,
-          {
-            subject,
-            description: text,
-            prompt: subject,
-          },
-          targetTeam,
-          { deadlineMinutes: 10, needsHumanReview: true }
-        );
-        broadcastSse('team-change', { type: 'inbox', teamName });
-        broadcastSse('team-change', { type: 'task', teamName: targetTeam });
-        broadcastSse('collab-change', {
-          dispatchId: result.dispatchId,
-          status: result.status,
-          fromTeam: teamName,
-          toTeam: targetTeam,
-        });
-        return {
-          ok: result.status !== 'failed',
-          deliveredToInbox: false,
-          messageId: sourceMsg.id,
-          dispatchId: result.dispatchId,
-          status: result.status,
-          message: result.message,
-          runtimeDelivery: {
-            attempted: false,
-            delivered: false,
-            reason: 'waiting_for_target_start',
-          },
-        };
-      } catch (err) {
-        request.log.warn({ err, teamName, targetTeam }, 'cross-team directive dispatch failed');
-      }
-    }
-  }
 
   // 使用固定格式 session key，保证 reply 事件能正确映射回 teamName。
   // UI 消息先落盘并广播，bridge 投递放后台执行，避免 bridge 重连窗口卡住发送按钮。
@@ -6099,7 +6089,7 @@ app.post<{
     return {
       ok: true,
       worker,
-      session: mapCcSessionListItem(session, resolvedWorkerId),
+      session: mapHermitBridgeSessionListItem(session, resolvedWorkerId),
       reused,
       messageSent: true,
     };
@@ -6206,7 +6196,8 @@ app.get<{ Params: { dispatchId: string } }>(
   }
 );
 
-// Update /api/cross-team/send to support needsHumanReview
+// Deprecated manual cross-team dispatch endpoint. Kept as a guarded compatibility
+// route until the bus/task-pool replacement owns collaboration entry points.
 app.post<{
   Body: {
     fromTeam: string;
@@ -6227,126 +6218,11 @@ app.post<{
     deadlineMinutes?: number;
     needsHumanReview?: boolean;
   };
-}>('/api/cross-team/send', async (request) => {
-  const {
-    fromTeam,
-    fromMember,
-    toTeam,
-    text,
-    subject,
-    description,
-    prompt,
-    messageId,
-    sessionKey,
-    conversationId,
-    replyToConversationId,
-    taskRefs,
-    actionMode,
-    summary,
-    chainDepth,
-    deadlineMinutes,
-    needsHumanReview,
-  } = request.body ?? {};
-  if (!fromTeam || !toTeam) return { ok: false, error: 'fromTeam and toTeam are required' };
-  const resolvedToTeam = await resolveTeamSlugForMention(toTeam);
-  if (!resolvedToTeam) return { ok: false, error: `Unknown target team: ${toTeam}` };
-
-  if (typeof text === 'string') {
-    const trimmedText = text.trim();
-    if (!trimmedText) return { ok: false, error: 'text is required' };
-
-    const depth = Number.isFinite(Number(chainDepth)) ? Number(chainDepth) : 0;
-    const threadId = conversationId || messageId || `cross-team-${Date.now()}`;
-    const sender = fromMember || 'user';
-    const fromSessionKey =
-      typeof sessionKey === 'string' && sessionKey.trim().length > 0
-        ? sessionKey.trim()
-        : buildFallbackSessionKey(fromTeam);
-    const meta = {
-      taskRefs,
-      actionMode,
-      summary,
-      conversationId: threadId,
-      replyToConversationId,
-      chainDepth: depth,
-    };
-
-    const outgoing = await svc.appendMessage(fromTeam, {
-      from: `${fromTeam}.${sender}`,
-      to: resolvedToTeam,
-      role: 'user',
-      content: trimmedText,
-      meta: { ...meta, source: CROSS_TEAM_SENT_SOURCE, sessionKey: fromSessionKey },
-    });
-
-    // Do not write the relayed message into the target inbox here. Cross-team
-    // transfer must first create a target TODO/review surface; the target inbox or
-    // runtime should only receive content after the user explicitly starts it.
-    const dispatchResult = await taskDispatch.dispatchTask(
-      fromTeam,
-      {
-        subject: summary || trimmedText.split(/\r?\n/, 1)[0]?.slice(0, 120) || '跨团队 @ 消息',
-        description: trimmedText,
-        prompt: trimmedText,
-      },
-      resolvedToTeam,
-      { dispatchId: threadId, needsHumanReview: needsHumanReview ?? true }
-    );
-    if (dispatchResult.status === 'failed') {
-      return { ok: false, error: dispatchResult.message };
-    }
-
-    broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
-    broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
-
-    return {
-      messageId: outgoing.id,
-      deliveredToInbox: false,
-      deduplicated: false,
-      runtimeDelivery: {
-        attempted: false,
-        delivered: false,
-        reason: 'waiting_for_target_start',
-      },
-    };
-  }
-
-  if (!subject) return { ok: false, error: 'subject is required' };
-
-  const sentMessage = await svc.appendMessage(fromTeam, {
-    from: fromMember ? `${fromTeam}.${fromMember}` : 'user',
-    to: resolvedToTeam,
-    role: 'user',
-    content: `@${resolvedToTeam} ${subject}`,
-    meta: {
-      source: CROSS_TEAM_SENT_SOURCE,
-      sessionKey,
-      clientMessageId: messageId,
-    },
+}>('/api/cross-team/send', async (_request, reply) => {
+  return reply.code(410).send({
+    ok: false,
+    error: 'Manual cross-team dispatch has been removed. Use the team bus/task pool instead.',
   });
-  broadcastSse('team-change', { type: 'inbox', teamName: fromTeam });
-
-  const result = await taskDispatch.dispatchTask(
-    fromTeam ?? 'unknown',
-    { subject, description, prompt },
-    resolvedToTeam,
-    {
-      deadlineMinutes: deadlineMinutes ? Number(deadlineMinutes) : undefined,
-      needsHumanReview,
-    }
-  );
-  const ok = result.status !== 'failed';
-  if (ok) {
-    broadcastSse('team-change', { type: 'inbox', teamName: resolvedToTeam });
-    broadcastSse('team-change', { type: 'task', teamName: resolvedToTeam });
-  }
-  return {
-    ok,
-    messageId: sentMessage.id,
-    dispatchId: result.dispatchId,
-    status: result.status,
-    message: result.message,
-  };
 });
 
 // GET /api/settings/task-bus → full config including telemetry
@@ -7100,7 +6976,7 @@ app.post('/api/extensions/plugins/uninstall', async (request) => {
     body.pluginId as string,
     body.scope as string,
     body.projectPath as string,
-    body.harnessType as CcAgentType | undefined
+    body.harnessType as HermitBridgeAgentType | undefined
   );
   return result;
 });
@@ -7123,7 +6999,7 @@ app.post('/api/extensions/mcp/uninstall', async (request) => {
     body.name as string,
     body.scope as string,
     body.projectPath as string,
-    body.harnessType as CcAgentType | undefined
+    body.harnessType as HermitBridgeAgentType | undefined
   );
   return result;
 });
@@ -7391,6 +7267,7 @@ await bridgeLauncher
     configPath: HERMIT_BRIDGE_CONFIG_FILE,
     extraArgs: ['--force'],
     logFile: path.join(HERMIT_HOME, 'hermit-bridge', 'hermit-bridge.log'),
+    timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
   })
   .then((r) => {
     if (r.launched) app.log.info({ pid: r.pid }, 'launched hermit-bridge sidecar');
@@ -7408,7 +7285,7 @@ try {
     `hermit-bridge:        ${process.env.HERMIT_BRIDGE_BASE_URL ?? process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820'}`
   );
   app.log.info(
-    `bridge:               ${process.env.CC_CONNECT_BRIDGE_URL ?? 'ws://127.0.0.1:9810/bridge/ws'}`
+    `bridge:               ${process.env.HERMIT_BRIDGE_WS_URL ?? process.env.CC_CONNECT_BRIDGE_URL ?? 'ws://127.0.0.1:9810/bridge/ws'}`
   );
   app.log.info(`static:               ${STATIC_DIR}`);
 } catch (err) {

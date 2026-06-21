@@ -17,8 +17,8 @@ describe('validateLoopSendIntent', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBeTruthy();
     // The console accepts more than just loop commands — !runtime, !session,
-    // /workflows, @team dispatch — so the empty-state prompt must be generic
-    // command wording, never branded "Loop 指令".
+    // and /workflows — so the empty-state prompt must be generic command wording,
+    // never branded "Loop 指令".
     expect(result.reason).toMatch(/指令/);
     expect(result.reason).not.toMatch(/Loop/i);
   });
@@ -140,27 +140,16 @@ describe('parseLoopSendIntent directives', () => {
     expect(intent.reuse).toBe(true);
   });
 
-  it('dispatches a known @team mention as a cross-team task', () => {
+  it('keeps @team-looking input as a plain lead message', () => {
     const intent = parseLoopSendIntent({
       text: '@hermit please fix the kanban',
       recipient: 'lead',
       leadRecipient: 'lead',
-      teamSlugs: ['hermit', 'other'],
     });
-    expect(intent.kind).toBe('cross-team-task');
-    if (intent.kind !== 'cross-team-task') return;
-    expect(intent.toTeam).toBe('hermit');
-    expect(intent.subject).toContain('fix the kanban');
-  });
-
-  it('falls back to a plain message when the mentioned team is unknown', () => {
-    const intent = parseLoopSendIntent({
-      text: '@ghost-team do something',
-      recipient: 'lead',
-      leadRecipient: 'lead',
-      teamSlugs: ['hermit'],
-    });
-    expect(intent.kind).not.toBe('cross-team-task');
+    expect(intent.kind).toBe('message');
+    if (intent.kind !== 'message') return;
+    expect(intent.recipient).toBe('lead');
+    expect(intent.text).toBe('@hermit please fix the kanban');
   });
 });
 
@@ -177,15 +166,6 @@ describe('validateLoopSendIntent edge cases', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/附件|离线/);
   });
-
-  it('requires a target team for a cross-team task', () => {
-    const result = validateLoopSendIntent(
-      { kind: 'cross-team-task', toTeam: '', subject: 'x', text: 'x' },
-      { isTeamAlive: true }
-    );
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/团队/);
-  });
 });
 
 describe('getLoopSendIntentLabel', () => {
@@ -200,12 +180,6 @@ describe('getLoopSendIntentLabel', () => {
     expect(getLoopSendIntentLabel({ kind: 'session', text: 'x', reuse: false })).toBe(
       '新建本地会话'
     );
-  });
-
-  it('labels a cross-team task with the target team', () => {
-    expect(
-      getLoopSendIntentLabel({ kind: 'cross-team-task', toTeam: 'hermit', subject: 'x', text: 'x' })
-    ).toBe('跨团队派单：hermit');
   });
 
   it('labels a workers-list intent', () => {

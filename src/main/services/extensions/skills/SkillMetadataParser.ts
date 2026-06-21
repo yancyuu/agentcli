@@ -252,6 +252,23 @@ export class SkillMetadataParser {
         issues: [],
       };
     } catch (error) {
+      const recovered = this.parseFlatFrontmatter(rawFrontmatter);
+      if (recovered) {
+        return {
+          rawFrontmatter,
+          body,
+          data: recovered,
+          issues: [
+            {
+              code: 'frontmatter-yaml-recovered',
+              message:
+                'YAML frontmatter contains non-standard flat values; recovered simple fields for command discovery.',
+              severity: 'warning',
+            },
+          ],
+        };
+      }
+
       logger.warn('Failed to parse skill frontmatter', error);
       return {
         rawFrontmatter,
@@ -266,6 +283,34 @@ export class SkillMetadataParser {
         ],
       };
     }
+  }
+
+  private parseFlatFrontmatter(rawFrontmatter: string): Record<string, unknown> | null {
+    const data: Record<string, unknown> = {};
+    for (const line of rawFrontmatter.split(/\r?\n/u)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      if (/^[-{}[\]]/u.test(trimmed) || /^\s/u.test(line)) return null;
+
+      const match = /^([A-Za-z0-9_-]+):\s*(.*)$/u.exec(line);
+      if (!match) return null;
+      data[match[1]] = this.parseFlatScalar(match[2]);
+    }
+
+    return typeof data.name === 'string' || typeof data.description === 'string' ? data : null;
+  }
+
+  private parseFlatScalar(value: string): string | boolean {
+    const trimmed = value.trim();
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+
+    const quote = trimmed[0];
+    if ((quote === '"' || quote === "'") && trimmed.endsWith(quote)) {
+      return trimmed.slice(1, -1);
+    }
+
+    return trimmed;
   }
 
   private normalizeMetadata(value: unknown): Record<string, string> {

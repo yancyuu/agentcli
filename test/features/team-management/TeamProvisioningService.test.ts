@@ -11,7 +11,7 @@ import { TeamProvisioningService } from '@main/services/team-management/TeamProv
 import { TeamWorkspaceService } from '@main/services/team-management/TeamWorkspaceService';
 
 // ---------------------------------------------------------------------------
-// Minimal mocks for CcConnectClient and CcConnectBridge
+// Minimal mocks for HermitBridgeClient and HermitBridgeConnection
 // ---------------------------------------------------------------------------
 
 function makeCcClient() {

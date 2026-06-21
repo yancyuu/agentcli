@@ -194,7 +194,8 @@ function CapabilityPackCard({
       </div>
 
       <p className="line-clamp-2 min-h-10 text-xs leading-5 text-text-secondary">
-        {pack.manifest.description || '团队能力包：commands、skills metadata、workflows metadata。'}
+        {pack.manifest.description ||
+          '项目能力包：commands、skills、workflows、cron 与 MCP 配置集合。'}
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
@@ -327,10 +328,10 @@ export function CapabilityPacksPanel(): React.JSX.Element {
       // Exactly two groups: all local teams merged together, everything else
       // (official / global / imported) in the other. No per-team splitting.
       const isLocalTeam = pack.source === 'local' && !isGlobalCapabilityPack(pack);
-      const groupName = isLocalTeam ? '本地团队' : '官方 / 全局';
+      const groupName = isLocalTeam ? '项目资产' : '运行时 / 全局';
       groups.set(groupName, [...(groups.get(groupName) ?? []), pack]);
     }
-    const order = ['官方 / 全局', '本地团队'];
+    const order = ['运行时 / 全局', '项目资产'];
     return [...groups.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   }, [filteredPacks]);
 
@@ -443,11 +444,11 @@ export function CapabilityPacksPanel(): React.JSX.Element {
           <div className="flex items-start gap-3">
             <Package className="mt-0.5 size-5 text-indigo-300" />
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-text">团队能力包</h2>
+              <h2 className="text-sm font-semibold text-text">项目能力包</h2>
               <p className="mt-1 text-xs leading-5 text-text-secondary">
-                官方测试过的 Hermit 运维检测包会默认安装到{' '}
-                <span className="font-mono">~/.claude/commands/hermit</span>，所有团队可直接运行{' '}
-                <span className="font-mono">/hermit:*</span>。 后续插件包按团队启用。
+                能力包是项目级资产集合，汇总当前项目的{' '}
+                <span className="font-mono">.claude/skills</span>、workflows/commands、cron 和 MCP
+                配置；Hermit 运行时与全局资产单独归类展示，不再按团队启用。
               </p>
             </div>
           </div>

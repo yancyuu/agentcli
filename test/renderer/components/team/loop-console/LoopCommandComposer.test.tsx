@@ -20,7 +20,6 @@ vi.mock('@renderer/components/team/loop-console/useLoopCommandSuggestions', () =
     teamSuggestions: [],
     taskSuggestions: [],
     commandSuggestions: [],
-    teamSlugs: [],
     leadRecipient: 'hermit开发',
   }),
 }));

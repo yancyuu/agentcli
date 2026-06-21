@@ -147,8 +147,8 @@ export const SystemManagerView = ({
                 <div className="min-w-0">
                   <div className="font-mono text-sm text-[var(--color-text)]">helm 指令台</div>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
-                    全局巡检、诊断、复盘、治理和改进提案。团队消息、runtime 注入和派单在 Team Loop
-                    指令台。
+                    全局巡检、诊断、复盘、治理和改进提案。团队消息、runtime 注入和本地会话在 Team
+                    Loop 指令台。
                   </p>
                 </div>
               </div>

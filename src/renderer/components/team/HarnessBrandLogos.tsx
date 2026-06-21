@@ -10,7 +10,7 @@
 
 import { useId } from 'react';
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 type BrandLogoProps = Readonly<{
   className?: string;
@@ -282,7 +282,7 @@ const TmuxBrandLogo = ({ className }: BrandLogoProps): React.JSX.Element => {
 };
 
 interface HarnessBrandLogoProps {
-  readonly type: CcAgentType;
+  readonly type: HermitBridgeAgentType;
   readonly className?: string;
 }
 

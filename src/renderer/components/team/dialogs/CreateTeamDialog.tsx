@@ -43,7 +43,7 @@ import type {
   TeamFastMode,
   TeamProviderId,
 } from '@shared/types';
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import type { GlobalProvider } from '@shared/types/providers';
 
 export interface ActiveTeamRef {
@@ -131,7 +131,7 @@ export const CreateTeamDialog = ({
 
   // ── Wizard state ─────────────────────────────────────────────────────
   const [step, setStep] = useState<WizardStep>('name');
-  const [selectedHarness, setSelectedHarness] = useState<CcAgentType>('claudecode');
+  const [selectedHarness, setSelectedHarness] = useState<HermitBridgeAgentType>('claudecode');
   const [description, setDescription] = useState('');
 
   // ── bindProject (ASCII unique identifier) ────────────────────────────

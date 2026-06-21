@@ -28,6 +28,7 @@ export interface SkillValidationIssue {
   code:
     | 'missing-frontmatter'
     | 'invalid-frontmatter'
+    | 'frontmatter-yaml-recovered'
     | 'missing-name'
     | 'missing-description'
     | 'folder-name-mismatch'

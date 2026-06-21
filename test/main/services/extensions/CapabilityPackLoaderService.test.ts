@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CapabilityPackLoaderService } from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
 import { ensureGlobalWorkflows } from '@main/services/system-manager/BuiltinWorkflowSeeder';
 
-import type { CcCronJob } from '@shared/types/ccConnect';
+import type { HermitBridgeCronJob } from '@shared/types/hermitBridge';
 import type { SkillCatalogItem } from '@shared/types/extensions';
 
 let tmpDir: string;
@@ -38,7 +38,7 @@ function buildSkill(overrides: Partial<SkillCatalogItem> = {}): SkillCatalogItem
   };
 }
 
-function buildCron(overrides: Partial<CcCronJob> = {}): CcCronJob {
+function buildCron(overrides: Partial<HermitBridgeCronJob> = {}): HermitBridgeCronJob {
   return {
     id: 'cron-local-review',
     project: 'hermit',
@@ -53,7 +53,7 @@ function buildCron(overrides: Partial<CcCronJob> = {}): CcCronJob {
 }
 
 function createService(
-  options: { skills?: SkillCatalogItem[]; cron?: CcCronJob[]; skillsError?: boolean } = {}
+  options: { skills?: SkillCatalogItem[]; cron?: HermitBridgeCronJob[]; skillsError?: boolean } = {}
 ) {
   const skillsCatalog = {
     list: async () => {

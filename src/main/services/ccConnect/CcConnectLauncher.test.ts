@@ -4,6 +4,7 @@ import {
   buildBridgeArgs,
   CcConnectLauncher,
   resolveBridgeCommand,
+  resolveHermitBridgeBinaryName,
   type SpawnedBridge,
   type SpawnFn,
 } from './CcConnectLauncher';
@@ -36,6 +37,15 @@ describe('CcConnectLauncher', () => {
       );
       expect(cmd).toBe('/node_modules/hermit-bridge/bin/hermit-bridge');
       expect(args).toEqual(['-config', '/c.toml']);
+    });
+
+    it('maps host platforms to packaged hermit-bridge binary names', () => {
+      expect(resolveHermitBridgeBinaryName('darwin', 'arm64')).toBe('hermit-bridge-darwin-arm64');
+      expect(resolveHermitBridgeBinaryName('linux', 'x64')).toBe('hermit-bridge-linux-amd64');
+      expect(resolveHermitBridgeBinaryName('win32', 'x64')).toBe('hermit-bridge-windows-amd64.exe');
+      expect(resolveHermitBridgeBinaryName('win32', 'arm64')).toBe(
+        'hermit-bridge-windows-arm64.exe'
+      );
     });
 
     it('throws when the hermit-bridge binary is absent (no silent fallback)', () => {

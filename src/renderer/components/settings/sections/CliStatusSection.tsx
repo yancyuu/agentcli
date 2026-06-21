@@ -49,10 +49,10 @@ import {
 import { SettingsSectionHeader } from '../components';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import type { GlobalProvider } from '@shared/types/providers';
 
-const CLI_PROVIDER_BY_AGENT_TYPE: Partial<Record<CcAgentType, CliProviderId>> = {
+const CLI_PROVIDER_BY_AGENT_TYPE: Partial<Record<HermitBridgeAgentType, CliProviderId>> = {
   claudecode: 'anthropic',
   codex: 'codex',
   gemini: 'gemini',
@@ -176,7 +176,8 @@ export const CliStatusSection = ({
   } | null>(null);
   const [manageProviderId, setManageProviderId] = useState<CliProviderId>('gemini');
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
-  const [genericHarnessAgentType, setGenericHarnessAgentType] = useState<CcAgentType | null>(null);
+  const [genericHarnessAgentType, setGenericHarnessAgentType] =
+    useState<HermitBridgeAgentType | null>(null);
   const [globalProviders, setGlobalProviders] = useState<GlobalProvider[]>([]);
   const [globalProvidersLoading, setGlobalProvidersLoading] = useState(false);
   const [globalProvidersError, setGlobalProvidersError] = useState<string | null>(null);
@@ -277,7 +278,7 @@ export const CliStatusSection = ({
   );
 
   const handleHarnessManage = useCallback(
-    (agentType: CcAgentType) => {
+    (agentType: HermitBridgeAgentType) => {
       const providerId = CLI_PROVIDER_BY_AGENT_TYPE[agentType];
       if (providerId && visibleProviders.some((provider) => provider.providerId === providerId)) {
         setManageProviderId(providerId);
@@ -342,7 +343,7 @@ export const CliStatusSection = ({
         : getProviderTerminalLogoutCommand(activeTerminalProvider)
       : null;
   const cliProviderStatusByAgentType = useMemo(() => {
-    const map = new Map<CcAgentType, CliProviderStatus>();
+    const map = new Map<HermitBridgeAgentType, CliProviderStatus>();
     for (const agentType of ALL_AGENT_TYPES) {
       const providerId = CLI_PROVIDER_BY_AGENT_TYPE[agentType];
       const provider = providerId
@@ -355,7 +356,7 @@ export const CliStatusSection = ({
     return map;
   }, [visibleProviders]);
   const globalProvidersByAgentType = useMemo(() => {
-    const map = new Map<CcAgentType, GlobalProvider[]>();
+    const map = new Map<HermitBridgeAgentType, GlobalProvider[]>();
     for (const agentType of ALL_AGENT_TYPES) {
       map.set(
         agentType,
@@ -636,7 +637,7 @@ export const CliStatusSection = ({
 };
 
 interface GenericHarnessProviderDialogProps {
-  agentType: CcAgentType | null;
+  agentType: HermitBridgeAgentType | null;
   providers: GlobalProvider[];
   loading: boolean;
   error: string | null;

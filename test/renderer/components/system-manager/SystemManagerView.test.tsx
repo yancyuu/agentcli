@@ -33,6 +33,44 @@ const {
 const storeState = {
   fetchTeams: fetchTeamsMock,
   refreshTeamMessagesHead: refreshTeamMessagesHeadMock,
+  capabilityPacks: [
+    {
+      packDir: '/repo/.claude/capabilities',
+      source: 'project' as const,
+      enabled: true,
+      warnings: [],
+      manifest: {
+        schemaVersion: 1 as const,
+        id: 'repo-admin-pack',
+        name: 'Repo Admin Pack',
+        namespace: 'repo',
+        version: '1.0.0',
+        capabilities: {
+          commands: [
+            {
+              id: 'repo-doctor',
+              alias: 'repo-doctor',
+              title: 'Repo Doctor',
+              scope: ['admin-loop' as const],
+              surfaces: ['slash' as const],
+              safety: 'read-only' as const,
+              prompt: 'commands/repo-doctor.md',
+              workflow: 'repo-doctor.md',
+            },
+          ],
+          workflows: [
+            {
+              id: 'repo-doctor',
+              name: 'Repo Doctor',
+              description: 'Explain what the repo doctor command checks before it runs.',
+              path: 'workflows/repo-doctor.md',
+            },
+          ],
+        },
+      },
+    },
+  ],
+  fetchCapabilityPacks: vi.fn(async () => undefined),
 };
 
 vi.mock('@renderer/store', () => {
@@ -42,7 +80,7 @@ vi.mock('@renderer/store', () => {
 });
 
 vi.mock('@renderer/components/team/loop-console/LoopConsolePanel', () => ({
-  LoopConsolePanel: (props: { commandSuggestions?: Array<{ command?: string; name?: string }> }) => {
+  LoopConsolePanel: (props: { commandSuggestions?: Array<{ command?: string; name?: string; description?: string }> }) => {
     loopConsolePanelPropsMock(props);
     return <div data-testid="admin-loop-panel">Embedded Helm Loop Panel</div>;
   },
@@ -164,7 +202,7 @@ describe('SystemManagerView', () => {
     vi.clearAllMocks();
   });
 
-  it('renders embedded Helm Loop panel and exposes only capability-pack commands', async () => {
+  it('renders embedded Helm Loop panel with project and scoped command support', async () => {
     getStatusMock.mockResolvedValue(baseStatus());
     getConfigMock.mockResolvedValue(baseConfig());
     updateConfigMock.mockImplementation(async (patch: { selectedWorkDir?: string }) =>
@@ -185,12 +223,15 @@ describe('SystemManagerView', () => {
     expect(host.textContent).toContain('Embedded Helm Loop Panel');
     expect(host.textContent).toContain('运行时');
     expect(host.textContent).not.toContain('打开终端');
-    expect(host.textContent).not.toContain('Loop Scan');
-    // workflow 列表已移除：不再展示按 .claude/commands 扫描的 workflow 命令。
-    expect(host.textContent).not.toContain('read-only');
     expect(loopConsolePanelPropsMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         slashCommandMode: 'session',
+        commandSuggestions: expect.arrayContaining([
+          expect.objectContaining({
+            command: '/repo-doctor',
+            description: 'Explain what the repo doctor command checks before it runs.',
+          }),
+        ]),
       })
     );
     expect(ensureSystemManagerMock).toHaveBeenCalled();

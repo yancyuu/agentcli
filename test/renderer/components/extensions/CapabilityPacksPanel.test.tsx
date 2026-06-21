@@ -172,6 +172,10 @@ describe('CapabilityPacksPanel', () => {
   it('renders plugin-style filters and local shows every team local pack', () => {
     const { host, root } = renderPanel();
 
+    expect(host.textContent).toContain('项目能力包');
+    expect(host.textContent).toContain('.claude/skills');
+    expect(host.textContent).not.toContain('团队能力包');
+    expect(host.textContent).not.toContain('后续插件包按团队启用');
     expect(host.textContent).toContain('按适用场景浏览');
     expect(host.textContent).toContain('0 个筛选条件已启用');
     expect(host.textContent).toContain('按分类、能力或安装状态缩小目录范围。');

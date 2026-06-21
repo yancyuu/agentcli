@@ -3,15 +3,15 @@ import { Button } from '@renderer/components/ui/button';
 import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from './HarnessCards';
 import { HarnessIcon } from './HarnessSelect';
 
-import type { CcAgentType } from '@shared/types/ccConnect';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 interface TeamEmptyStateProps {
   canCreate: boolean;
   onCreateTeam: () => void;
-  onSelectHarness?: (harness: CcAgentType) => void;
+  onSelectHarness?: (harness: HermitBridgeAgentType) => void;
 }
 
-const HARNESS_DESCRIPTIONS: Record<CcAgentType, string> = {
+const HARNESS_DESCRIPTIONS: Record<HermitBridgeAgentType, string> = {
   claudecode: 'Anthropic 官方 CLI',
   codex: 'OpenAI Codex CLI',
   cursor: 'Cursor IDE Agent',

@@ -65,12 +65,15 @@ describe('mapUsageEventToReportInput', () => {
     expect(input!.turnId).toBeUndefined();
   });
 
-  it('leaves identity resolution to reportTurn (only sessionKey is required)', () => {
-    const input = mapUsageEventToReportInput(feishuUsage());
+  it('maps usage event sender identity when the bridge provides it', () => {
+    const input = mapUsageEventToReportInput(
+      feishuUsage({ user_id: 'ou_sender', user_name: '张三', chat_name: '产品群' })
+    );
     expect(input).not.toBeNull();
     expect(input!.teamName).toBe('');
-    expect(input!.userId).toBeUndefined();
+    expect(input!.userId).toBe('ou_sender');
+    expect(input!.userName).toBe('张三');
+    expect(input!.chatName).toBe('产品群');
     expect(input!.chatId).toBeUndefined();
-    // reportTurn parses platform/userId/chatId from session_key itself.
   });
 });

@@ -10,7 +10,7 @@ import { validateOpenPathUserSelected } from '@main/utils/pathValidation';
 import { createLogger } from '@shared/utils/logger';
 import { KNOWN_SLASH_COMMANDS, isSupportedSlashCommandName } from '@shared/utils/slashCommands';
 
-import type { CcCronJob } from '@shared/types/ccConnect';
+import type { HermitBridgeCronJob } from '@shared/types/hermitBridge';
 import type {
   CapabilityCommand,
   CapabilityCommandPromptRequest,
@@ -95,7 +95,7 @@ export interface LocalTeamEntry {
 
 export interface LocalCapabilityPackSource {
   projectPath?: string;
-  listCronJobs?: () => Promise<CcCronJob[]>;
+  listCronJobs?: () => Promise<HermitBridgeCronJob[]>;
   /** 枚举所有团队，按团队工作空间分组生成本地能力包。 */
   listTeams?: () => Promise<LocalTeamEntry[]>;
 }

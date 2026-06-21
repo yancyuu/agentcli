@@ -168,6 +168,48 @@ describe('ExternalImUsageReporter', () => {
     expect(event).not.toContain('SECRET MSG CONTENT');
   });
 
+  it('uses explicit usage-event userId for aggregation instead of the session-key fallback id', async () => {
+    const redis = new FakeRedis();
+    const reporter = new ExternalImUsageReporter({
+      getRedisConfig: async () => redisConfig,
+      redisFactory: async () => redis as never,
+      now: () => '2026-06-21T00:00:00.000Z',
+    });
+
+    const result = await reporter.reportTurn({
+      sessionKey: 'feishu:oc_group_context:ou_context_sender',
+      teamName: 'feishu-team',
+      runtime: 'claudecode',
+      turnId: 'om_turn_1',
+      userId: 'ou_sender_from_event',
+      userName: '张三',
+      chatName: '产品群',
+      metrics: {
+        inputTokens: 10,
+        outputTokens: 20,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 30,
+      },
+    });
+
+    expect(result).toEqual({ reported: true });
+    expect(redis.sets.get(externalImUsageRedisKeys.users)?.has('feishu:user:ou_sender_from_event')).toBe(
+      true
+    );
+    expect(redis.sets.get(externalImUsageRedisKeys.users)?.has('feishu:user:ou_context_sender')).toBe(
+      false
+    );
+    expect(redis.hashes.get(externalImUsageRedisKeys.userSummary('feishu', 'ou_sender_from_event'))).toMatchObject({
+      user_id: 'ou_sender_from_event',
+      user_name: '张三',
+      chat_id: 'oc_group_context',
+      chat_name: '产品群',
+      turns: '1',
+      total_tokens: '30',
+    });
+  });
+
   it('deduplicates the same external IM turn', async () => {
     const redis = new FakeRedis();
     const reporter = new ExternalImUsageReporter({

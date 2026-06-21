@@ -1134,9 +1134,9 @@ export interface TeamViewSnapshot {
   processes: TeamProcess[];
   warnings?: string[];
   isAlive?: boolean;
-  /** Bound external platforms (feishu, telegram, etc.) from cc-connect */
-  platforms?: import('./ccConnect').CcProjectPlatform[];
-  /** cc-connect project name this team is bound to */
+  /** Bound external platforms (feishu, telegram, etc.) from hermit-bridge */
+  platforms?: import('./hermitBridge').HermitBridgeProjectPlatform[];
+  /** hermit-bridge project name this team is bound to */
   bindProject?: string;
   /** 团队协作开关：false = 独立作战，true = 可跨团队调度 */
   collaboration?: boolean;

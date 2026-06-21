@@ -1,14 +1,7 @@
 import type { AttachmentPayload, SlashCommandMeta, TaskRef } from '@shared/types';
 import type { WorkflowPromptSummary } from '@shared/types/systemManager';
 
-import { parseTeamMentionDirective } from '@renderer/utils/teamMentionDirective';
-
-export type LoopSendIntentKind =
-  | 'message'
-  | 'runtime'
-  | 'session'
-  | 'cross-team-task'
-  | 'workers-list';
+export type LoopSendIntentKind = 'message' | 'runtime' | 'session' | 'workers-list';
 
 export interface LoopSendIntentBase {
   kind: LoopSendIntentKind;
@@ -35,13 +28,6 @@ export interface LoopSessionIntent extends LoopSendIntentBase {
   workflowPrompt?: WorkflowPromptSummary;
 }
 
-export interface LoopCrossTeamTaskIntent extends LoopSendIntentBase {
-  kind: 'cross-team-task';
-  toTeam: string;
-  subject: string;
-  taskRefs?: TaskRef[];
-}
-
 export interface LoopWorkersListIntent extends LoopSendIntentBase {
   kind: 'workers-list';
 }
@@ -50,14 +36,12 @@ export type LoopSendIntent =
   | LoopMessageIntent
   | LoopRuntimeIntent
   | LoopSessionIntent
-  | LoopCrossTeamTaskIntent
   | LoopWorkersListIntent;
 
 export interface LoopSendIntentParseOptions {
   text: string;
   recipient: string;
   leadRecipient: string;
-  teamSlugs?: readonly string[];
   attachments?: AttachmentPayload[];
   taskRefs?: TaskRef[];
   slashCommandMode?: 'message' | 'session';
@@ -72,10 +56,6 @@ export interface LoopSendIntentValidationContext {
 export interface LoopSendIntentValidationResult {
   ok: boolean;
   reason?: string;
-}
-
-function normalizeTeamSlug(value: string): string {
-  return value.trim().replace(/^@/, '');
 }
 
 function parseDirective(text: string): { directive: string; rest: string } | null {
@@ -122,22 +102,6 @@ export function parseLoopSendIntent(options: LoopSendIntentParseOptions): LoopSe
       sessionName: session.sessionName,
       reuse: session.reuse,
     };
-  }
-
-  const crossTeamDirective = parseTeamMentionDirective(text);
-  if (crossTeamDirective) {
-    const toTeam = normalizeTeamSlug(crossTeamDirective.mentioned);
-    const knownTeam = options.teamSlugs?.some((team) => normalizeTeamSlug(team) === toTeam);
-    if (knownTeam) {
-      return {
-        kind: 'cross-team-task',
-        toTeam,
-        subject: crossTeamDirective.subject,
-        text,
-        summary: crossTeamDirective.subject,
-        taskRefs,
-      };
-    }
   }
 
   const messageText = directive?.directive === 'message' ? directive.rest : text;
@@ -197,10 +161,6 @@ export function validateLoopSendIntent(
     return { ok: false, reason: 'Loop runtime 离线时不能发送附件。' };
   }
 
-  if (intent.kind === 'cross-team-task' && !intent.toTeam) {
-    return { ok: false, reason: '请选择目标团队。' };
-  }
-
   return { ok: true };
 }
 
@@ -210,8 +170,6 @@ export function getLoopSendIntentLabel(intent: LoopSendIntent): string {
       return '注入运行时';
     case 'session':
       return intent.reuse ? '复用本地会话' : '新建本地会话';
-    case 'cross-team-task':
-      return `跨团队派单：${intent.toTeam}`;
     case 'workers-list':
       return '查看数字员工';
     case 'message':

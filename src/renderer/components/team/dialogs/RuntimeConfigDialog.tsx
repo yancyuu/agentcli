@@ -27,7 +27,10 @@ import {
 } from './platformAllowUtils';
 import { platformMeta } from './platformMeta';
 
-import type { CcAgentType, CcProjectPlatform } from '@shared/types/ccConnect';
+import type {
+  HermitBridgeAgentType,
+  HermitBridgeProjectPlatform,
+} from '@shared/types/hermitBridge';
 import type { TeamUpdateConfigRequest } from '@shared/types/team';
 import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
@@ -88,7 +91,7 @@ function getPlatformAllowPlaceholder(platformType: string, kind: 'from' | 'chat'
     : '留空表示未单独配置；输入 * 表示允许所有群聊/频道';
 }
 
-function uniquePlatformTypes(platforms: CcProjectPlatform[]): string[] {
+function uniquePlatformTypes(platforms: HermitBridgeProjectPlatform[]): string[] {
   return [
     ...new Set(
       platforms
@@ -98,7 +101,11 @@ function uniquePlatformTypes(platforms: CcProjectPlatform[]): string[] {
   ];
 }
 
-function BoundPlatformList({ platforms }: { platforms: CcProjectPlatform[] }): React.JSX.Element {
+function BoundPlatformList({
+  platforms,
+}: {
+  platforms: HermitBridgeProjectPlatform[];
+}): React.JSX.Element {
   if (platforms.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
@@ -260,7 +267,7 @@ export function RuntimeConfigDialog({
     [defaults.globalProviders, agentType]
   );
 
-  const boundPlatforms = useMemo<CcProjectPlatform[]>(
+  const boundPlatforms = useMemo<HermitBridgeProjectPlatform[]>(
     () => data?.platforms ?? [],
     [data?.platforms]
   );
@@ -453,7 +460,7 @@ export function RuntimeConfigDialog({
                 <div>
                   <label className={labelCls}>Agent 类型</label>
                   <HarnessSelect
-                    value={agentType as CcAgentType}
+                    value={agentType as HermitBridgeAgentType}
                     onChange={(v) => {
                       markRuntimeEdited();
                       setAgentType(v);
@@ -637,8 +644,8 @@ export function RuntimeConfigDialog({
                 <div>
                   <p className="text-xs font-medium text-[var(--color-text)]">Provider（可选）</p>
                   <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                    留空时使用本机 {AGENT_TYPE_LABELS[agentType as CcAgentType] ?? agentType}{' '}
-                    默认配置。
+                    留空时使用本机{' '}
+                    {AGENT_TYPE_LABELS[agentType as HermitBridgeAgentType] ?? agentType} 默认配置。
                   </p>
                 </div>
                 {providerRef ? (
@@ -658,7 +665,7 @@ export function RuntimeConfigDialog({
                 {compatibleProviders.length > 0 ? (
                   compatibleProviders.map((provider) => {
                     const checked = providerRef === provider.name;
-                    const at = agentType as CcAgentType;
+                    const at = agentType as HermitBridgeAgentType;
                     const endpoint = provider.endpoints?.[at] ?? provider.base_url ?? '默认端点';
                     const model =
                       provider.agent_models?.[at] ??
@@ -700,8 +707,8 @@ export function RuntimeConfigDialog({
                   })
                 ) : (
                   <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
-                    暂无适用于 {AGENT_TYPE_LABELS[agentType as CcAgentType] ?? agentType} 的全局
-                    Provider。
+                    暂无适用于 {AGENT_TYPE_LABELS[agentType as HermitBridgeAgentType] ?? agentType}{' '}
+                    的全局 Provider。
                   </div>
                 )}
               </div>

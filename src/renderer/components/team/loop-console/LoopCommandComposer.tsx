@@ -67,7 +67,6 @@ export function LoopCommandComposer({
     teamSuggestions,
     taskSuggestions,
     commandSuggestions,
-    teamSlugs,
     leadRecipient,
   } = useLoopCommandSuggestions({
     teamName,
@@ -118,11 +117,10 @@ export function LoopCommandComposer({
         text: serializeChipsWithText(trimmed, EMPTY_CHIPS),
         recipient: leadRecipient,
         leadRecipient,
-        teamSlugs,
         taskRefs,
         slashCommandMode,
       }),
-    [leadRecipient, slashCommandMode, taskRefs, teamSlugs, trimmed]
+    [leadRecipient, slashCommandMode, taskRefs, trimmed]
   );
   const validation = validateLoopSendIntent(intent, { isTeamAlive, isProvisioning });
   const conflictReason =
@@ -210,7 +208,6 @@ export function LoopCommandComposer({
     onSubmit,
     slashCommandMode,
     taskRefs,
-    teamSlugs,
     validation.ok,
     validation.reason,
     workflowCommandResult,
@@ -231,15 +228,13 @@ export function LoopCommandComposer({
               ? '本地会话'
               : intent.kind === 'workers-list'
                 ? '查看数字员工'
-                : intent.kind === 'cross-team-task'
-                  ? `派单到 ${intent.toTeam}`
-                  : '发送给 Lead'}
+                : '发送给 Lead'}
         </span>
       </div>
 
       <MentionableTextarea
         id={`loop-console-${teamName}`}
-        placeholder='输入指令：/help、/model、!runtime、!session --name "巡检"，或 @team 派单…'
+        placeholder='输入指令：/help、/model、!runtime、!session --name "巡检"…'
         value={text}
         onValueChange={setText}
         suggestions={mentionSuggestions}
