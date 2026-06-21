@@ -25,6 +25,8 @@
  */
 
 import {
+  copyFileSync,
+  cpSync,
   existsSync as _existsSync2,
   mkdirSync,
   readFileSync,
@@ -218,7 +220,12 @@ function shouldSendAttachmentsToAgent(settings: Record<string, unknown>): boolea
 const HERMIT_HOME = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit');
 const HERMIT_CONFIG_FILE = path.join(HERMIT_HOME, 'config.json');
 const HERMIT_APP_CONFIG_FILE = path.join(HERMIT_HOME, 'app-config.json');
-const HERMIT_CC_CONNECT_CONFIG_FILE = path.join(HERMIT_HOME, 'cc-connect', 'config.toml');
+const HERMIT_BRIDGE_DIR = path.join(HERMIT_HOME, 'hermit-bridge');
+const LEGACY_CC_CONNECT_DIR = path.join(HERMIT_HOME, 'cc-connect');
+const HERMIT_BRIDGE_CONFIG_FILE = path.join(HERMIT_BRIDGE_DIR, 'config.toml');
+const LEGACY_CC_CONNECT_CONFIG_FILE = path.join(LEGACY_CC_CONNECT_DIR, 'config.toml');
+const HERMIT_BRIDGE_DATA_DIR = path.join(HERMIT_BRIDGE_DIR, 'data');
+const LEGACY_CC_CONNECT_DATA_DIR = path.join(LEGACY_CC_CONNECT_DIR, 'data');
 const HERMIT_SETTINGS_FILE = path.join(HERMIT_HOME, 'settings.json');
 
 interface HermitConfig {
@@ -228,29 +235,74 @@ interface HermitConfig {
   ccBridgeToken: string;
 }
 
-function ensureWritableCcConnectConfigFile(): string {
-  if (_existsSync2(HERMIT_CC_CONNECT_CONFIG_FILE)) {
-    return HERMIT_CC_CONNECT_CONFIG_FILE;
-  }
-  throw new Error('cc-connect 配置文件不存在: ~/.hermit/cc-connect/config.toml');
+function normalizeMigratedHermitBridgeConfig(raw: string): string {
+  return raw
+    .split(LEGACY_CC_CONNECT_DATA_DIR)
+    .join(HERMIT_BRIDGE_DATA_DIR)
+    .split('~/.hermit/cc-connect/data')
+    .join('~/.hermit/hermit-bridge/data');
 }
 
-function readCcConnectConfigTomlRaw(): { path: string; content: string } {
-  if (!_existsSync2(HERMIT_CC_CONNECT_CONFIG_FILE)) {
-    throw new Error('cc-connect 配置文件不存在: ~/.hermit/cc-connect/config.toml');
+function migrateLegacyHermitBridgeDataIfNeeded(): boolean {
+  if (_existsSync2(HERMIT_BRIDGE_DATA_DIR) || !_existsSync2(LEGACY_CC_CONNECT_DATA_DIR))
+    return false;
+  mkdirSync(path.dirname(HERMIT_BRIDGE_DATA_DIR), { recursive: true });
+  try {
+    renameSync(LEGACY_CC_CONNECT_DATA_DIR, HERMIT_BRIDGE_DATA_DIR);
+  } catch {
+    cpSync(LEGACY_CC_CONNECT_DATA_DIR, HERMIT_BRIDGE_DATA_DIR, { recursive: true });
+    rmSync(LEGACY_CC_CONNECT_DATA_DIR, { recursive: true, force: true });
   }
+  return true;
+}
+
+function normalizeHermitBridgeConfigFileIfNeeded(): boolean {
+  if (!_existsSync2(HERMIT_BRIDGE_CONFIG_FILE)) return false;
+  const raw = readFileSync(HERMIT_BRIDGE_CONFIG_FILE, 'utf-8');
+  const normalized = normalizeMigratedHermitBridgeConfig(raw);
+  if (normalized === raw) return false;
+  writeFileSync(HERMIT_BRIDGE_CONFIG_FILE, normalized, 'utf-8');
+  return true;
+}
+
+function migrateLegacyHermitBridgeConfigIfNeeded(): void {
+  const migratedData = migrateLegacyHermitBridgeDataIfNeeded();
+  let migratedConfig = false;
+  if (!_existsSync2(HERMIT_BRIDGE_CONFIG_FILE) && _existsSync2(LEGACY_CC_CONNECT_CONFIG_FILE)) {
+    mkdirSync(path.dirname(HERMIT_BRIDGE_CONFIG_FILE), { recursive: true });
+    const migrated = normalizeMigratedHermitBridgeConfig(
+      readFileSync(LEGACY_CC_CONNECT_CONFIG_FILE, 'utf-8')
+    );
+    writeFileSync(HERMIT_BRIDGE_CONFIG_FILE, migrated, 'utf-8');
+    rmSync(LEGACY_CC_CONNECT_CONFIG_FILE, { force: true });
+    migratedConfig = true;
+  }
+  const normalizedConfig = normalizeHermitBridgeConfigFileIfNeeded();
+  if (migratedData || migratedConfig || normalizedConfig) {
+    console.info('[Hermit] migrated runtime files to ~/.hermit/hermit-bridge/');
+  }
+}
+
+function ensureWritableHermitBridgeConfigFile(): string {
+  migrateLegacyHermitBridgeConfigIfNeeded();
+  if (_existsSync2(HERMIT_BRIDGE_CONFIG_FILE)) {
+    return HERMIT_BRIDGE_CONFIG_FILE;
+  }
+  throw new Error('hermit-bridge 配置文件不存在: ~/.hermit/hermit-bridge/config.toml');
+}
+
+function readHermitBridgeConfigTomlRaw(): { path: string; content: string } {
+  const configFile = ensureWritableHermitBridgeConfigFile();
   return {
-    path: HERMIT_CC_CONNECT_CONFIG_FILE,
-    content: readFileSync(HERMIT_CC_CONNECT_CONFIG_FILE, 'utf-8'),
+    path: configFile,
+    content: readFileSync(configFile, 'utf-8'),
   };
 }
 
-function readCcConnectTomlToken(section: 'bridge' | 'management'): string {
+function readHermitBridgeTomlToken(section: 'bridge' | 'management'): string {
   try {
-    if (!_existsSync2(HERMIT_CC_CONNECT_CONFIG_FILE)) {
-      return '';
-    }
-    const raw = readFileSync(HERMIT_CC_CONNECT_CONFIG_FILE, 'utf-8');
+    const configFile = ensureWritableHermitBridgeConfigFile();
+    const raw = readFileSync(configFile, 'utf-8');
     const match = raw.match(new RegExp(`\\[${section}\\][^\\[]*token\\s*=\\s*"([^"]+)"`, 's'));
     return match?.[1]?.trim() ?? '';
   } catch {
@@ -259,19 +311,31 @@ function readCcConnectTomlToken(section: 'bridge' | 'management'): string {
 }
 
 function loadConfig(): HermitConfig {
-  const tomlManagementToken = readCcConnectTomlToken('management');
-  const tomlBridgeToken = readCcConnectTomlToken('bridge');
+  const tomlManagementToken = readHermitBridgeTomlToken('management');
+  const tomlBridgeToken = readHermitBridgeTomlToken('bridge');
   const defaults: HermitConfig = {
-    ccBaseUrl: process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820',
+    ccBaseUrl:
+      process.env.HERMIT_BRIDGE_BASE_URL ??
+      process.env.CC_CONNECT_BASE_URL ??
+      'http://127.0.0.1:9820',
     ccToken:
+      process.env.HERMIT_BRIDGE_TOKEN ||
+      process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
       process.env.CC_CONNECT_TOKEN ||
+      process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
       process.env.CC_CONNECT_MANAGEMENT_TOKEN ||
       tomlManagementToken,
-    ccBridgeUrl: process.env.CC_CONNECT_BRIDGE_URL ?? 'ws://127.0.0.1:9810/bridge/ws',
+    ccBridgeUrl:
+      process.env.HERMIT_BRIDGE_WS_URL ??
+      process.env.CC_CONNECT_BRIDGE_URL ??
+      'ws://127.0.0.1:9810/bridge/ws',
     ccBridgeToken:
       process.env.CC_CONNECT_BRIDGE_TOKEN ||
       tomlBridgeToken ||
+      process.env.HERMIT_BRIDGE_TOKEN ||
+      process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
       process.env.CC_CONNECT_TOKEN ||
+      process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
       process.env.CC_CONNECT_MANAGEMENT_TOKEN ||
       tomlManagementToken,
   };
@@ -1363,16 +1427,16 @@ app.post<{ Body: { content?: unknown } }>('/api/hermit-config/raw', async (reque
 });
 
 // ===========================================================================
-// cc-connect config (Hermit-managed: ~/.hermit/cc-connect/config.toml)
+// hermit-bridge config (Hermit-managed: ~/.hermit/hermit-bridge/config.toml)
 // ===========================================================================
 
 function readCcConnectConfigRaw(): { path: string; content: string } {
-  return readCcConnectConfigTomlRaw();
+  return readHermitBridgeConfigTomlRaw();
 }
 
-/** Simple TOML parser for cc-connect config (handles only the fields we need). */
+/** Simple TOML parser for hermit-bridge config (handles only the fields we need). */
 function readCcConnectConfig(): Record<string, unknown> {
-  const { content: raw } = readCcConnectConfigTomlRaw();
+  const { content: raw } = readHermitBridgeConfigTomlRaw();
 
   const result: Record<string, unknown> = {};
 
@@ -1431,7 +1495,7 @@ function readCcConnectConfig(): Record<string, unknown> {
 }
 
 function writeCcConnectConfig(updates: Record<string, unknown>): void {
-  const configFile = ensureWritableCcConnectConfigFile();
+  const configFile = ensureWritableHermitBridgeConfigFile();
   let raw = readFileSync(configFile, 'utf-8');
 
   // Update top-level fields
@@ -1509,7 +1573,7 @@ function writeCcConnectConfig(updates: Record<string, unknown>): void {
 }
 
 function writeCcConnectConfigRaw(content: string): void {
-  const configFile = ensureWritableCcConnectConfigFile();
+  const configFile = ensureWritableHermitBridgeConfigFile();
   writeFileSync(configFile, content, 'utf-8');
 }
 
@@ -7317,23 +7381,23 @@ function reply500(err: unknown) {
 // Start
 // ===========================================================================
 
-// Ensure the cc-connect bridge is running before Hermit connects to it. A no-op
-// when the management API already responds (an externally-managed cc-connect is
+// Ensure hermit-bridge is running before Hermit connects to it. A no-op
+// when the management API already responds (an externally-managed hermit-bridge is
 // left untouched); otherwise launches the bundled hermit-bridge sidecar. Best-effort:
 // a launch failure never blocks Hermit boot — the bridge just won't auto-start.
 await bridgeLauncher
   .ensureRunning({
     client: cc,
-    configPath: HERMIT_CC_CONNECT_CONFIG_FILE,
+    configPath: HERMIT_BRIDGE_CONFIG_FILE,
     extraArgs: ['--force'],
-    logFile: path.join(HERMIT_HOME, 'cc-connect', 'hermit-bridge.log'),
+    logFile: path.join(HERMIT_HOME, 'hermit-bridge', 'hermit-bridge.log'),
   })
   .then((r) => {
     if (r.launched) app.log.info({ pid: r.pid }, 'launched hermit-bridge sidecar');
     else app.log.info('hermit-bridge already running — skipping auto-launch');
   })
   .catch((err) => app.log.warn({ err }, 'hermit-bridge auto-launch skipped'));
-// 启动 cc-connect Bridge WebSocket 连接(注册 platform=hermit adapter)
+// 启动 hermit-bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
 await initializeTaskBusFromSettings();
 await ensureGlobalWorkflows();
@@ -7341,7 +7405,7 @@ await ensureGlobalWorkflows();
 try {
   await app.listen({ host: HOST, port: PORT });
   app.log.info(
-    `cc-connect:           ${process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820'}`
+    `hermit-bridge:        ${process.env.HERMIT_BRIDGE_BASE_URL ?? process.env.CC_CONNECT_BASE_URL ?? 'http://127.0.0.1:9820'}`
   );
   app.log.info(
     `bridge:               ${process.env.CC_CONNECT_BRIDGE_URL ?? 'ws://127.0.0.1:9810/bridge/ws'}`

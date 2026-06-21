@@ -494,7 +494,7 @@ export interface HttpServerAPI {
 // Teams API
 // =============================================================================
 
-/** cc-connect session returned by /api/teams/:name/sessions */
+/** hermit-bridge session returned by /api/teams/:name/sessions */
 export interface CcSession {
   id: string;
   title: string;
@@ -1175,7 +1175,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
   // Team management API
   teams: TeamsAPI;
 
-  // cc-connect connection config (baseUrl, token, bridgeUrl)
+  // hermit-bridge connection config (baseUrl, token, bridgeUrl)
   hermitConfig: {
     get: () => Promise<{
       ccBaseUrl: string;
@@ -1192,7 +1192,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
     updateRaw: (content: string) => Promise<void>;
   };
 
-  // cc-connect config.toml (兼容直接原文编辑)
+  // hermit-bridge config.toml (兼容直接原文编辑)
   ccConfig: {
     get: () => Promise<Record<string, unknown>>;
     update: (patch: Record<string, unknown>) => Promise<{ needsRestart: boolean }>;
@@ -1200,7 +1200,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
     updateRaw: (content: string) => Promise<void>;
   };
 
-  // cc-connect global runtime settings (language, rate limits, etc.)
+  // hermit-bridge global runtime settings (language, rate limits, etc.)
   ccSettings: {
     get: () => Promise<Record<string, unknown>>;
     patch: (patch: Record<string, unknown>) => Promise<void>;
@@ -1208,7 +1208,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
     reload: () => Promise<void>;
   };
 
-  // cc-connect setup flows (QR code + manual platform binding)
+  // hermit-bridge setup flows (QR code + manual platform binding)
   ccSetup: {
     feishuBegin: () => Promise<{
       device_code: string;

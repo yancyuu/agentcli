@@ -16,7 +16,20 @@
 
 import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import os from 'node:os';
@@ -56,7 +69,7 @@ Usage:
 
 Options:
   --port <number>    HTTP server port (default: 5680)
-  --no-cc-connect    Do not auto-start bundled runtime service
+  --no-hermit-bridge Do not auto-start bundled runtime service
   --daemon           Run openHermit in the background
   --version          Show current version
   --help             Show this help message
@@ -87,7 +100,8 @@ if (updateIndex !== -1) {
 
 const portIndex = args.indexOf('--port');
 const port = portIndex !== -1 && args[portIndex + 1] ? args[portIndex + 1] : '5680';
-const skipCcConnect = args.includes('--no-cc-connect') || process.env.HERMIT_NO_CC_CONNECT === '1';
+const skipHermitBridge =
+  args.includes('--no-hermit-bridge') || process.env.HERMIT_NO_HERMIT_BRIDGE === '1';
 const hermitHome = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
 const daemonRequested = args.includes('--daemon');
 const daemonChild = process.env.HERMIT_DAEMON_CHILD === '1';
@@ -95,10 +109,15 @@ const daemonPidPath = path.join(hermitHome, 'openhermit.pid');
 const daemonLogPath = path.join(hermitHome, 'logs', 'openhermit.log');
 const runtimeLogPath = path.join(hermitHome, 'logs', 'openhermit-runtime.log');
 const serverLogPath = path.join(hermitHome, 'logs', 'openhermit-server.log');
-const ccConnectConfigPath =
-  process.env.HERMIT_CC_CONNECT_CONFIG ||
-  process.env.CC_CONNECT_CONFIG ||
-  path.join(hermitHome, 'cc-connect', 'config.toml');
+const legacyRuntimeBridgeDir = path.join(hermitHome, 'cc-connect');
+const hermitBridgeDir = path.join(hermitHome, 'hermit-bridge');
+const legacyRuntimeBridgeConfigPath = path.join(legacyRuntimeBridgeDir, 'config.toml');
+const defaultHermitBridgeConfigPath = path.join(hermitBridgeDir, 'config.toml');
+const legacyRuntimeBridgeDataDir = path.join(legacyRuntimeBridgeDir, 'data');
+const defaultHermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
+const hermitBridgeConfigPath =
+  process.env.HERMIT_BRIDGE_CONFIG ||
+  defaultHermitBridgeConfigPath;
 const starterProjectName = 'my-project';
 
 // ---------------------------------------------------------------------------
@@ -126,6 +145,7 @@ async function runUpdate() {
         process.exit(1);
       }
       if (latestVersion === currentVersion) {
+        migrateLegacyHermitBridgeConfigIfNeeded();
         console.log(`[openHermit] Already on latest version (${currentVersion})`);
         process.exit(0);
       }
@@ -138,6 +158,7 @@ async function runUpdate() {
       execSync('npm install', { cwd: repoRoot, stdio: 'inherit' });
       console.log('[openHermit] Building frontend...');
       execSync('npm run build:web', { cwd: repoRoot, stdio: 'inherit' });
+      migrateLegacyHermitBridgeConfigIfNeeded();
       console.log(`\n[openHermit] Updated to ${latestVersion}. Restart with: openhermit\n`);
     } catch (err) {
       console.error('[openHermit] Update failed:', err instanceof Error ? err.message : String(err));
@@ -148,6 +169,7 @@ async function runUpdate() {
     console.log('[openHermit] Updating via npm...');
     try {
       execSync('npm install -g @yancyyu/openhermit@latest', { stdio: 'inherit' });
+      migrateLegacyHermitBridgeConfigIfNeeded();
       console.log(`\n[openHermit] Updated successfully. Restart with: openhermit\n`);
     } catch (err) {
       console.error('[openHermit] npm update failed. Try: sudo npm install -g @yancyyu/openhermit@latest');
@@ -299,7 +321,7 @@ function collectFallbackPids() {
     `lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true`,
     'lsof -tiTCP:9810 -sTCP:LISTEN 2>/dev/null || true',
     'lsof -tiTCP:9820 -sTCP:LISTEN 2>/dev/null || true',
-    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|cc-connect' 2>/dev/null || true",
+    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|hermit-bridge' 2>/dev/null || true",
   ];
 
   for (const command of commands) {
@@ -444,7 +466,7 @@ Please install dependencies first:
 }
 
 // ---------------------------------------------------------------------------
-// cc-connect sidecar
+// hermit-bridge sidecar
 // ---------------------------------------------------------------------------
 
 function escapeTomlPath(value) {
@@ -541,10 +563,10 @@ function hasTomlSection(raw, section) {
 }
 
 function buildOpenHermitStarterConfig(managementToken, bridgeToken) {
-  return `# cc-connect configuration
-# Docs: https://github.com/chenhg5/cc-connect
+  return `# hermit-bridge configuration
+# Runtime bridge packaged by Hermit.
 
-data_dir = "${escapeTomlPath(path.join(hermitHome, 'cc-connect', 'data'))}"
+data_dir = "${escapeTomlPath(defaultHermitBridgeDataDir)}"
 language = "zh"
 
 [management]
@@ -585,14 +607,62 @@ app_secret = "your-feishu-app-secret"
 `;
 }
 
+function normalizeMigratedHermitBridgeConfig(raw) {
+  return raw
+    .split(escapeTomlPath(legacyRuntimeBridgeDataDir))
+    .join(escapeTomlPath(defaultHermitBridgeDataDir))
+    .split('~/.hermit/cc-connect/data')
+    .join('~/.hermit/hermit-bridge/data');
+}
+
+function migrateLegacyHermitBridgeDataIfNeeded() {
+  if (existsSync(defaultHermitBridgeDataDir) || !existsSync(legacyRuntimeBridgeDataDir)) return false;
+  mkdirSync(path.dirname(defaultHermitBridgeDataDir), { recursive: true });
+  try {
+    renameSync(legacyRuntimeBridgeDataDir, defaultHermitBridgeDataDir);
+  } catch {
+    cpSync(legacyRuntimeBridgeDataDir, defaultHermitBridgeDataDir, { recursive: true });
+    rmSync(legacyRuntimeBridgeDataDir, { recursive: true, force: true });
+  }
+  return true;
+}
+
+function normalizeHermitBridgeConfigFileIfNeeded() {
+  if (!existsSync(hermitBridgeConfigPath)) return false;
+  const raw = readFileSync(hermitBridgeConfigPath, 'utf-8');
+  const normalized = normalizeMigratedHermitBridgeConfig(raw);
+  if (normalized === raw) return false;
+  writeFileSync(hermitBridgeConfigPath, normalized, 'utf-8');
+  return true;
+}
+
+function migrateLegacyHermitBridgeConfigIfNeeded() {
+  if (hermitBridgeConfigPath !== defaultHermitBridgeConfigPath) return;
+
+  const migratedData = migrateLegacyHermitBridgeDataIfNeeded();
+  let migratedConfig = false;
+  if (!existsSync(hermitBridgeConfigPath) && existsSync(legacyRuntimeBridgeConfigPath)) {
+    mkdirSync(path.dirname(hermitBridgeConfigPath), { recursive: true });
+    const migrated = normalizeMigratedHermitBridgeConfig(readFileSync(legacyRuntimeBridgeConfigPath, 'utf-8'));
+    writeFileSync(hermitBridgeConfigPath, migrated, 'utf-8');
+    rmSync(legacyRuntimeBridgeConfigPath, { force: true });
+    migratedConfig = true;
+  }
+  const normalizedConfig = normalizeHermitBridgeConfigFileIfNeeded();
+  if (migratedConfig || migratedData || normalizedConfig) {
+    console.log('[openHermit] Migrated runtime files to ~/.hermit/hermit-bridge/');
+  }
+}
+
 function ensureOpenHermitRuntimeConfig() {
-  mkdirSync(path.dirname(ccConnectConfigPath), { recursive: true });
-  if (!existsSync(ccConnectConfigPath)) {
-    writeFileSync(ccConnectConfigPath, buildOpenHermitStarterConfig(randomToken(), randomToken()), 'utf-8');
+  migrateLegacyHermitBridgeConfigIfNeeded();
+  mkdirSync(path.dirname(hermitBridgeConfigPath), { recursive: true });
+  if (!existsSync(hermitBridgeConfigPath)) {
+    writeFileSync(hermitBridgeConfigPath, buildOpenHermitStarterConfig(randomToken(), randomToken()), 'utf-8');
     return;
   }
 
-  let raw = readFileSync(ccConnectConfigPath, 'utf-8');
+  let raw = readFileSync(hermitBridgeConfigPath, 'utf-8');
   let changed = false;
   if (!hasTomlSection(raw, 'management')) {
     raw = `${raw.trimEnd()}
@@ -618,24 +688,24 @@ path = "/bridge/ws"
     changed = true;
   }
   if (changed) {
-    writeFileSync(ccConnectConfigPath, raw, 'utf-8');
+    writeFileSync(hermitBridgeConfigPath, raw, 'utf-8');
   }
 }
 
-function readCcConnectConfigState() {
+function readHermitBridgeConfigState() {
   ensureOpenHermitRuntimeConfig();
 
-  const raw = readFileSync(ccConnectConfigPath, 'utf-8');
+  const raw = readFileSync(hermitBridgeConfigPath, 'utf-8');
 
   return {
     configExists: true,
     managementToken:
-      process.env.CC_CONNECT_TOKEN ||
-      process.env.CC_CONNECT_MANAGEMENT_TOKEN ||
+      process.env.HERMIT_BRIDGE_TOKEN ||
+      process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
       parseTomlToken(raw, 'management'),
     bridgeToken:
-      process.env.CC_CONNECT_BRIDGE_TOKEN ||
-      process.env.CC_CONNECT_TOKEN ||
+      process.env.HERMIT_BRIDGE_WS_TOKEN ||
+      process.env.HERMIT_BRIDGE_TOKEN ||
       parseTomlToken(raw, 'bridge'),
     hasProjects: hasProjectEntries(raw),
     isStarterConfig: isStarterProjectConfig(raw),
@@ -643,7 +713,7 @@ function readCcConnectConfigState() {
   };
 }
 
-async function waitForCcConnect(baseUrl, token, timeoutMs = 15_000) {
+async function waitForHermitBridge(baseUrl, token, timeoutMs = 15_000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -707,8 +777,8 @@ async function waitForRuntimeReady(baseUrl, token, child, timeoutMs = 30_000) {
   throw new Error(`Runtime service did not become ready within ${Math.round(timeoutMs / 1000)}s`);
 }
 
-function resolveCcConnectRunner() {
-  const pkgPath = require.resolve('cc-connect/package.json');
+function resolveHermitBridgeRunner() {
+  const pkgPath = require.resolve('hermit-bridge/package.json');
   return path.join(path.dirname(pkgPath), 'run.js');
 }
 
@@ -766,25 +836,31 @@ async function assertWebPortAvailable() {
   }
 }
 
-let ccConnectProcess = null;
-let ccTokens = {
-  managementToken: process.env.CC_CONNECT_TOKEN || process.env.CC_CONNECT_MANAGEMENT_TOKEN || '',
-  bridgeToken: process.env.CC_CONNECT_BRIDGE_TOKEN || process.env.CC_CONNECT_TOKEN || '',
+let hermitBridgeProcess = null;
+let bridgeTokens = {
+  managementToken:
+    process.env.HERMIT_BRIDGE_TOKEN ||
+    process.env.HERMIT_BRIDGE_MANAGEMENT_TOKEN ||
+    '',
+  bridgeToken:
+    process.env.HERMIT_BRIDGE_WS_TOKEN ||
+    process.env.HERMIT_BRIDGE_TOKEN ||
+    '',
 };
 let runtimeSetupMode = false;
 
 await assertWebPortAvailable();
 
-if (!skipCcConnect) {
+if (!skipHermitBridge) {
   let shouldStartRuntime = false;
-  ccTokens = readCcConnectConfigState();
-  const ccBaseUrl = process.env.CC_CONNECT_BASE_URL || 'http://127.0.0.1:9820';
-  const alreadyRunning = await waitForCcConnect(ccBaseUrl, ccTokens.managementToken, 1_000);
+  bridgeTokens = readHermitBridgeConfigState();
+  const bridgeBaseUrl = process.env.HERMIT_BRIDGE_BASE_URL || 'http://127.0.0.1:9820';
+  const alreadyRunning = await waitForHermitBridge(bridgeBaseUrl, bridgeTokens.managementToken, 1_000);
   if (alreadyRunning) {
-    console.log(`[openHermit] Runtime service already running: ${ccBaseUrl}`);
-  } else if (ccTokens.hasProjects) {
+    console.log(`[openHermit] Runtime service already running: ${bridgeBaseUrl}`);
+  } else if (bridgeTokens.hasProjects) {
     try {
-      ensureClaudeCodeCliIfNeeded(ccTokens.raw);
+      ensureClaudeCodeCliIfNeeded(bridgeTokens.raw);
     } catch {
       printLogTail('Runtime', runtimeLogPath);
       process.exit(1);
@@ -792,43 +868,43 @@ if (!skipCcConnect) {
     shouldStartRuntime = true;
   } else {
     console.error('[openHermit] Runtime config has no projects. Please edit the config and try again.');
-    console.error(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
+    console.error(`[openHermit] Runtime config: ${hermitBridgeConfigPath}`);
     process.exit(1);
   }
 
   if (shouldStartRuntime) {
     console.log('[openHermit] Starting bundled runtime service...');
-    console.log(`[openHermit] Runtime config: ${ccConnectConfigPath}`);
-    ccConnectProcess = spawn(process.execPath, [resolveCcConnectRunner(), '-config', ccConnectConfigPath], {
+    console.log(`[openHermit] Runtime config: ${hermitBridgeConfigPath}`);
+    hermitBridgeProcess = spawn(process.execPath, [resolveHermitBridgeRunner(), '-config', hermitBridgeConfigPath], {
       cwd: repoRoot,
       detached: true,
       env: {
         ...process.env,
-        CC_CONNECT_TOKEN: ccTokens.managementToken,
-        CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
-        CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
+        HERMIT_BRIDGE_TOKEN: bridgeTokens.managementToken,
+        HERMIT_BRIDGE_MANAGEMENT_TOKEN: bridgeTokens.managementToken,
+        HERMIT_BRIDGE_WS_TOKEN: bridgeTokens.bridgeToken,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    ccConnectProcess.stdout?.on('data', (chunk) => {
+    hermitBridgeProcess.stdout?.on('data', (chunk) => {
       process.stdout.write(chunk);
       appendLog(runtimeLogPath, chunk);
     });
-    ccConnectProcess.stderr?.on('data', (chunk) => {
+    hermitBridgeProcess.stderr?.on('data', (chunk) => {
       process.stderr.write(chunk);
       appendLog(runtimeLogPath, chunk);
     });
 
     try {
-      await waitForRuntimeReady(ccBaseUrl, ccTokens.managementToken, ccConnectProcess, 30_000);
+      await waitForRuntimeReady(bridgeBaseUrl, bridgeTokens.managementToken, hermitBridgeProcess, 30_000);
     } catch (err) {
       console.error(
         `[openHermit] Runtime service failed to start: ${err instanceof Error ? err.message : String(err)}`
       );
       printLogTail('Runtime', runtimeLogPath);
-      signalDaemon(ccConnectProcess.pid, 'SIGTERM');
-      setTimeout(() => signalDaemon(ccConnectProcess?.pid, 'SIGKILL'), 2_000).unref();
+      signalDaemon(hermitBridgeProcess.pid, 'SIGTERM');
+      setTimeout(() => signalDaemon(hermitBridgeProcess?.pid, 'SIGKILL'), 2_000).unref();
       process.exit(1);
     }
   }
@@ -885,10 +961,10 @@ const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderReg
     NODE_ENV: 'production',
     HERMIT_HOME: hermitHome,
     HERMIT_RUNTIME_SETUP_MODE: runtimeSetupMode ? '1' : '0',
-    CC_CONNECT_TOKEN: ccTokens.managementToken,
-    CC_CONNECT_MANAGEMENT_TOKEN: ccTokens.managementToken,
-    CC_CONNECT_BRIDGE_TOKEN: ccTokens.bridgeToken,
-    CC_CONNECT_CONFIG: ccConnectConfigPath,
+    HERMIT_BRIDGE_TOKEN: bridgeTokens.managementToken,
+    HERMIT_BRIDGE_MANAGEMENT_TOKEN: bridgeTokens.managementToken,
+    HERMIT_BRIDGE_WS_TOKEN: bridgeTokens.bridgeToken,
+    HERMIT_BRIDGE_CONFIG: hermitBridgeConfigPath,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -905,7 +981,7 @@ serverProcess.stderr?.on('data', (chunk) => {
 
 serverProcess.on('exit', (code) => {
   if (shuttingDown) return;
-  signalDaemon(ccConnectProcess?.pid, 'SIGTERM');
+  signalDaemon(hermitBridgeProcess?.pid, 'SIGTERM');
   if (code !== 0) {
     console.error(`[openHermit] Server exited with code ${code}`);
     printServerLogTail();
@@ -919,10 +995,10 @@ function shutdown(exitCode = 0) {
   shuttingDown = true;
   console.log('\n[openHermit] Shutting down...');
   signalDaemon(serverProcess?.pid, 'SIGTERM');
-  signalDaemon(ccConnectProcess?.pid, 'SIGTERM');
+  signalDaemon(hermitBridgeProcess?.pid, 'SIGTERM');
   setTimeout(() => {
     signalDaemon(serverProcess?.pid, 'SIGKILL');
-    signalDaemon(ccConnectProcess?.pid, 'SIGKILL');
+    signalDaemon(hermitBridgeProcess?.pid, 'SIGKILL');
     process.exit(exitCode);
   }, 2_000).unref();
 }

@@ -158,9 +158,6 @@ importers:
       anser:
         specifier: ^2.3.5
         version: 2.3.5
-      cc-connect:
-        specifier: 1.3.3-beta.4
-        version: 1.3.3-beta.4
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -2708,10 +2705,6 @@ packages:
 
   caniuse-lite@1.0.30001781:
     resolution: {integrity: sha512-RdwNCyMsNBftLjW6w01z8bKEvT6e/5tpPVEgtn22TiLGlstHOVecsX2KHFkD5e/vRnIE4EGzpuIODb3mtswtkw==}
-
-  cc-connect@1.3.3-beta.4:
-    resolution: {integrity: sha512-Aw+r1N0bHi9sd1N9fWDXEJzLsuVDODZ2bDXvBQEPDC36MRzY/00//tdfgRqVwCYKbIfPX9E9dFaj2Xd73MLZUw==}
-    hasBin: true
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -8026,8 +8019,6 @@ snapshots:
   caniuse-lite@1.0.30001764: {}
 
   caniuse-lite@1.0.30001781: {}
-
-  cc-connect@1.3.3-beta.4: {}
 
   ccount@2.0.1: {}
 

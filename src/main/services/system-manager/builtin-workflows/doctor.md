@@ -1,7 +1,7 @@
 ---
 id: "doctor"
 label: "Doctor"
-description: "诊断 Hermit、Claude Code、cc-connect 和 Loop runtime 健康。"
+description: "诊断 Hermit、Claude Code、hermit-bridge 和 Loop runtime 健康。"
 category: health
 safety: read-only
 order: 20
@@ -26,7 +26,7 @@ filename: "doctor.md"
 
 - 操作系统、内存、磁盘、文件描述符限制
 - `claude` 是否可用、版本、登录状态
-- cc-connect / Hermit 服务是否运行
+- hermit-bridge / Hermit 服务是否运行
 - 当前工作区路径是否正确
 
 

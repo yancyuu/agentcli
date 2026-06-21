@@ -25,6 +25,7 @@
 </p>
 
 <p align="center">
+  <a href="README-CN.md"><strong>简体中文</strong></a> ·
   <a href="#try-it-in-30-seconds"><strong>Try it</strong></a> ·
   <a href="#why-openhermit"><strong>Why</strong></a> ·
   <a href="#screenshots"><strong>Screenshots</strong></a> ·
@@ -65,7 +66,7 @@ openHermit is the control plane around that loop.
 | Running CLIs by hand | A visible `/teams` workbench for Claude Code, Codex, Gemini, Cursor, OpenCode, and bridge adapters |
 | Hidden automation scripts | Auditable local state under `~/.hermit/`: teams, tasks, messages, events, and configuration |
 | Ad-hoc status updates | Kanban-style task state, comments, delivery records, and review checkpoints |
-| Platform-specific bots | Team routing, channel allowlists, and cc-connect powered bridge events |
+| Platform-specific bots | Team routing, channel allowlists, and hermit-bridge powered bridge events |
 | Fragile multi-agent edits | Optional worktree isolation for parallel agent workspaces |
 
 ### Built for
@@ -146,7 +147,7 @@ Hermit stores state locally by default in `~/.hermit/`. It does not provide mode
 
 ### Bridge external channels into team workflows
 
-Use cc-connect to connect team messages and events to Feishu/Lark, WeChat, Telegram, Discord, Slack, or other channel adapters. Hermit handles team routing, allowlists, and audit boundaries; platform Bot capabilities depend on your cc-connect setup.
+Use hermit-bridge to connect team messages and events to Feishu/Lark, WeChat, Telegram, Discord, Slack, or other channel adapters. Hermit handles team routing, allowlists, and audit boundaries; platform Bot capabilities depend on your hermit-bridge setup.
 
 ### Repeatable Loop Engineering
 
@@ -161,7 +162,7 @@ flowchart LR
   UI[Browser / Vite UI<br/>/teams workbench]
   API[Fastify API]
   Store[(~/.hermit<br/>teams · tasks · messages · audit)]
-  Bridge[cc-connect Bridge<br/>Management API · WebSocket events]
+  Bridge[hermit-bridge<br/>Management API · WebSocket events]
   Runtimes[Local runtimes<br/>Claude Code · Codex · Gemini · Cursor · OpenCode]
   Channels[External channels<br/>Feishu/Lark · WeChat · Telegram · Discord · Slack]
 
@@ -185,7 +186,7 @@ Current product shape:
 
 ## Supported Agent runtimes
 
-openHermit can coordinate the runtimes you have installed and authenticated locally. Adapter depth depends on the runtime and your cc-connect configuration.
+openHermit can coordinate the runtimes you have installed and authenticated locally. Adapter depth depends on the runtime and your hermit-bridge configuration.
 
 | Support level | Runtime identifiers |
 |:---|:---|
@@ -258,7 +259,7 @@ Agent-readable docs are also published at:
 | **Teams** | Team config, members, project workspace, runtime settings, optional worktree isolation |
 | **Tasks** | Team kanban, comments, external dispatch projection, delivery/review state |
 | **Messages** | Team messages, cross-team messages, channel messages, Bridge events |
-| **Channels** | Hermit handles routing, allowlists, and audit; cc-connect carries platform adapters |
+| **Channels** | Hermit handles routing, allowlists, and audit; hermit-bridge carries platform adapters |
 | **Cross-team collaboration** | Redis-backed dispatch supports receive/start/progress/complete/approve/revision style flows; the full offer/bid/lease/event Task Bus is the target model |
 | **Local-first storage** | Config, teams, tasks, messages, and audit data default to `~/.hermit/` |
 | **Not included here** | Hosted models, hosted repositories, Electron desktop packaging, embedded PTY terminal |
@@ -285,6 +286,14 @@ pnpm typecheck
 pnpm test
 pnpm build:web
 ```
+
+For local development that needs external channels (Feishu/Lark, WeChat, Telegram, Discord, Slack, etc.), start `hermit-bridge` before or alongside `pnpm dev`:
+
+```bash
+node node_modules/hermit-bridge/run.js --force -config ~/.hermit/hermit-bridge/config.toml
+```
+
+The published `openhermit` CLI auto-starts the bundled `hermit-bridge` when needed and migrates legacy runtime files from `~/.hermit/cc-connect/` to `~/.hermit/hermit-bridge/`. Local `pnpm dev` is intentionally explicit so developers can watch bridge logs and restart it independently.
 
 Use pnpm for this repository. Please do not describe Electron packaging, embedded PTY, hosted model serving, or the full target Task Bus as current shipped capability unless the implementation and docs have landed.
 
