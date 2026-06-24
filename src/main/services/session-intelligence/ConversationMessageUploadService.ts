@@ -940,7 +940,13 @@ function countsCoverAttempt(status: ConversationUploadStatus): boolean {
 }
 
 function shouldCountAsUploaded(status: ConversationUploadStatus): boolean {
-  if (status.attempted <= 0 || status.rejected > 0 || status.lastError) return false;
+  if (status.attempted <= 0) return false;
+  // Cursor-authoritative: a server-confirmed success means the cursor committed,
+  // even when accepted + duplicated != attempted. Counts can lag in a multi-server
+  // backend (items in-flight on another node), so the count equality is only a
+  // fallback signal — the batch status (success => cursor committed) is the truth.
+  if (status.lastUploadStatus === 'success') return true;
+  if (status.rejected > 0 || (status.failed ?? 0) > 0 || status.lastError) return false;
   return countsCoverAttempt(status);
 }
 
@@ -1028,7 +1034,7 @@ function uploadStatusFromResult(
   }
   if ((status.failed ?? 0) > 0) status.lastError = '部分消息处理失败，未推进本地假定游标';
   if (status.rejected > 0) status.lastError = '部分消息被拒绝，未推进本地假定游标';
-  if (!status.lastError && !countsCoverAttempt(status)) {
+  if (!status.lastError && status.lastUploadStatus !== 'success' && !countsCoverAttempt(status)) {
     status.lastError = '服务端最终处理计数未覆盖本批发送数，等待下次按服务端 cursor 重扫';
   }
   return status;
@@ -1160,7 +1166,10 @@ async function postPayload(
     await wait(statusRefreshDelayMs());
     try {
       const channel = await fetchUsageChannel(baseUrl, token, payload.platform, mode);
-      if (channel?.status) status.lastUploadStatus = channel.status;
+      // The channel's aggregate status (never_reported / processing / ...) is NOT
+      // the batch outcome — do not clobber lastUploadStatus (it holds the batch
+      // result, e.g. 'success', the cursor-committed signal). Channel is only for
+      // the in-flight + cursorCommitted checks below.
       if (channel?.lastUploadId && !status.uploadIds?.includes(channel.lastUploadId)) {
         status.uploadIds = [...(status.uploadIds ?? []), channel.lastUploadId];
       }

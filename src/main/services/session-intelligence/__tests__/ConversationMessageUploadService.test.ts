@@ -294,6 +294,93 @@ describe('ConversationMessageUploadService', () => {
     expect(result.lastError).toBeUndefined();
   });
 
+  it('treats a server-confirmed success as uploaded even when counts diverge (cursor authoritative)', async () => {
+    // 3 messages attempted, but the server's accepted + duplicated (2) < attempted.
+    // Counts can lag in a multi-server backend (items in-flight on another node);
+    // the authoritative signal is the committed cursor (batch success), not the
+    // count equality — so this must NOT be flagged as an error / failed upload.
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+    await mkdir(projectDir, { recursive: true });
+    const lines = [1, 2, 3].map((i) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'session-diverge',
+        uuid: `m${i}`,
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: `hello ${i}` },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-diverge.jsonl'), `${lines.join('\n')}\n`);
+
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/hermit/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/hermit/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              source: 'openhermit',
+              platform: 'claudecode',
+              mode: 'plain',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/hermit/conversation-messages')) {
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_div',
+            status: 'queued',
+            received: 3,
+            acceptedForProcessing: 3,
+            rejectedAtReceive: 0,
+            detailUrl: '/api/v1/hermit/uploads/upl_div',
+          },
+          { status: 202 }
+        );
+      }
+      if (url.endsWith('/api/v1/hermit/uploads/upl_div')) {
+        // success, but accepted (2) < attempted (3) — counts diverge.
+        return Response.json({
+          ok: true,
+          uploadId: 'upl_div',
+          status: 'success',
+          accepted: 2,
+          duplicated: 0,
+          rejected: 0,
+          failed: 0,
+          cursorCommitted: true,
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(result.attempted).toBe(3);
+    expect(result.lastUploadStatus).toBe('success');
+    expect(result.accepted).toBe(2);
+    // Cursor committed (success) even though the count (2) < attempted (3).
+    expect(result.lastError).toBeUndefined();
+  });
+
   it('withUploadLock releases the lock when the locked function throws', async () => {
     const lockPath = path.join(hermitHome, 'telemetry', 'conversation-message-upload.lock');
     await expect(
