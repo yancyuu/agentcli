@@ -2,6 +2,11 @@
 // log helpers, dependency resolution, and the bundled-runtime/tsx/alias-loader
 // resolvers. Depends only on env + branding.
 
+import crypto from 'node:crypto';
+import path from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
 import {
   repoRoot,
   binDir,
