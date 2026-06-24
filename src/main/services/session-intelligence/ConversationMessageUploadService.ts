@@ -611,7 +611,14 @@ function claudeUploadMessage(
   if (!role) return null;
 
   const content = textFromContent(msg.content ?? obj.content);
-  if (!content) return null;
+  const usage = usageFromMessage(msg);
+  // Keep a message if it has readable text OR token usage. Tool-use / tool-result
+  // turns carry no text but hold the bulk of token usage — dropping them made the
+  // server undercount tokens, and the cursor advances past them so they would
+  // never be retried. Textless usage-bearing messages get a placeholder content
+  // so their usage is still reported; the server dedupes by eventId.
+  if (!content && !usage) return null;
+  const reportedContent = content || (role === 'assistant' ? '[tool use]' : '[no text]');
 
   const sessionId = claudeSessionId(filePath, obj);
   const messageId = claudeMessageId(obj, msg);
@@ -646,9 +653,9 @@ function claudeUploadMessage(
       role,
       occurredAt,
       model: typeof msg.model === 'string' ? msg.model : undefined,
-      content,
+      content: reportedContent,
       contentFormat: 'text',
-      usage: usageFromMessage(msg),
+      usage,
     },
   };
 }
@@ -1350,10 +1357,16 @@ async function uploadPlatformModeMessages(
   }
 
   const conversationCfg = cfg.telemetry?.conversations;
+  // `usage report --full` backfill: ignore the server cursor so every file scans
+  // from offset 0 and re-uploads everything. The server dedupes by eventId, so
+  // already-uploaded messages become duplicates (not re-counted) and messages
+  // newly included by a filter change (e.g. tool-use turns that now keep their
+  // usage) get inserted. After success the server commits the full-range cursor.
+  const fullRescan = process.env.HERMIT_USAGE_FULL_RESCAN === '1';
   const { messages, clientCursor } = await collectMessagesForPlatform(
     platform,
     mode,
-    channel?.currentCursor,
+    fullRescan ? null : channel?.currentCursor,
     conversationCfg?.batchSize ?? 0,
     generatedAt
   );

@@ -290,8 +290,9 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
                      查看本地 Claude JSONL telemetry 状态，不上传
   usage today [--json]
                      查看今日本地 usage 摘要，不上传
-  usage report [--json]
-                     触发/准备本地 usage 报告，不上传
+  usage report [--full] [--json]
+                     扫描并按服务端游标增量上报新增消息
+                     --full 忽略游标、全量重扫重传（服务端按 eventId 去重，用于补报历史漏掉的消息）
   usage start [--no-autostart] [--json]
                      开启轻量后台 usage 采集并默认配置开机自启，仅扫描本机 JSONL
   usage stop [--keep-autostart] [--json]
@@ -1586,7 +1587,10 @@ async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = fa
   let stderr = '';
   child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
   child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
-  const code = await new Promise((resolve) => child.on('exit', resolve));
+  // Wait on 'close' (not 'exit') so stdio is fully drained + torn down before
+  // proceeding — 'exit' raced the pipe close and tripped libuv's
+  // UV_HANDLE_CLOSING assertion on Windows (win/async.c).
+  const code = await new Promise((resolve) => child.on('close', resolve));
   if (code !== 0) throw new Error(stderr.trim() || `telemetry worker scan exited with ${code}`);
   const parsed = JSON.parse(stdout.trim() || '{}');
   return parsed.status?.telemetry ? parsed.status.telemetry : emptyUsageTelemetryStatus();
@@ -1847,7 +1851,27 @@ async function printUsageReport({ exitOnDone = true } = {}) {
       return result;
     }
 
-    const data = await withUploadProgress('正在执行一次增量扫描并按需上报...', () => readUsageStatus({ scan: true, localOnly: false }));
+    const fullRescan = commandArgs.includes('--full');
+    let workerWasRunning = false;
+    if (fullRescan) {
+      // Temporarily stop the background worker so its upload lock can't block
+      // the full rescan, then restart it afterwards so background scanning
+      // resumes without the user having to re-run `usage start`.
+      const workerPid = readPidFile(telemetryWorkerPidPath);
+      workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
+      if (workerWasRunning) await stopTelemetryWorker();
+      process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+    }
+    const data = await withUploadProgress(
+      fullRescan
+        ? '正在全量重扫并重传（--full，服务端按 eventId 去重，可能耗时）...'
+        : '正在执行一次增量扫描并按需上报...',
+      () => readUsageStatus({ scan: true, localOnly: false })
+    );
+    if (fullRescan) {
+      delete process.env.HERMIT_USAGE_FULL_RESCAN;
+      if (workerWasRunning) startTelemetryWorker({ quiet: true });
+    }
     const upload = data.telemetry.conversationUpload;
     const result = {
       ok: true,
@@ -2679,7 +2703,10 @@ if (commandArgs[0] === '__telemetry-worker') {
     env: { ...process.env, HERMIT_HOME: hermitHome },
     stdio: 'inherit',
   });
-  const code = await new Promise((resolve) => child.on('exit', resolve));
+  // Wait on 'close' (not 'exit') so stdio is fully drained + torn down before
+  // proceeding — 'exit' raced the pipe close and tripped libuv's
+  // UV_HANDLE_CLOSING assertion on Windows (win/async.c).
+  const code = await new Promise((resolve) => child.on('close', resolve));
   process.exit(Number(code) || 0);
 }
 
