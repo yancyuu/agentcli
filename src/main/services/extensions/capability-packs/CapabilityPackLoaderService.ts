@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,6 +32,8 @@ import type {
   LoadedCapabilityPack,
   RegisteredSlashCommand,
   SkillCatalogItem,
+  TeamCapabilityTelemetryAsset,
+  TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
 
 import { McpConfigStateReader } from '../runtime/McpConfigStateReader';
@@ -80,6 +83,34 @@ const SUPPORTED_EXPORT_RUNTIMES = new Set<CapabilityPackExportRuntime>([
   'gemini',
   'opencode',
 ]);
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function fingerprintSnapshot(
+  snapshot: Omit<TeamCapabilityTelemetrySnapshot, 'fingerprint'>
+): string {
+  const { reportedAt: _reportedAt, ...stableSnapshot } = snapshot;
+  return createHash('sha256').update(stableJson(stableSnapshot)).digest('hex');
+}
+
+function slugifyCapabilityTelemetry(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'team'
+  );
+}
 
 export interface LocalTeamEntry {
   slug: string;
@@ -194,6 +225,140 @@ function filterStringUnion<T extends string>(
     throw new Error(`${fieldName} requires at least one value`);
   }
   return entries as T[];
+}
+
+function sortTelemetryAssets(
+  assets: TeamCapabilityTelemetryAsset[]
+): TeamCapabilityTelemetryAsset[] {
+  return [...assets].sort(
+    (a, b) =>
+      a.kind.localeCompare(b.kind) ||
+      a.name.localeCompare(b.name) ||
+      a.id.localeCompare(b.id) ||
+      a.packId.localeCompare(b.packId)
+  );
+}
+
+export function buildTeamCapabilityTelemetrySnapshots(
+  packs: LoadedCapabilityPack[],
+  options: { reportedAt?: string } = {}
+): TeamCapabilityTelemetrySnapshot[] {
+  const reportedAt = options.reportedAt ?? new Date().toISOString();
+  const grouped = new Map<
+    string,
+    {
+      teamName: string;
+      projectDir: string;
+      projectName: string;
+      sourcePackIds: Set<string>;
+      assets: TeamCapabilityTelemetryAsset[];
+      counts: TeamCapabilityTelemetrySnapshot['counts'];
+    }
+  >();
+
+  for (const pack of packs) {
+    if (!pack.enabled) continue;
+    const projectDir = path.resolve(pack.packDir || getHermitHome());
+    const projectName = path.basename(projectDir) || pack.manifest.name.trim() || 'unknown-project';
+    const teamName = pack.manifest.teamName?.trim() || pack.manifest.name.trim() || projectName;
+    const teamKey = slugifyCapabilityTelemetry(teamName) || teamName;
+    const entry = grouped.get(teamKey) ?? {
+      teamName,
+      projectDir,
+      projectName,
+      sourcePackIds: new Set<string>(),
+      assets: [],
+      counts: { commands: 0, skills: 0, workflows: 0, cron: 0, mcpServers: 0 },
+    };
+    entry.sourcePackIds.add(pack.manifest.id);
+
+    for (const command of pack.manifest.capabilities.commands ?? []) {
+      entry.counts.commands += 1;
+      entry.assets.push({
+        kind: 'command',
+        id: command.id,
+        name: command.title || command.alias,
+        description: command.description,
+        scope: command.scope.join(','),
+        safety: command.safety,
+        source: pack.source,
+        packId: pack.manifest.id,
+      });
+    }
+
+    for (const skill of pack.manifest.capabilities.skills ?? []) {
+      entry.counts.skills += 1;
+      entry.assets.push({
+        kind: 'skill',
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        source: pack.source,
+        packId: pack.manifest.id,
+      });
+    }
+
+    for (const workflow of pack.manifest.capabilities.workflows ?? []) {
+      entry.counts.workflows += 1;
+      entry.assets.push({
+        kind: 'workflow',
+        id: workflow.id,
+        name: workflow.name,
+        description: workflow.description,
+        source: pack.source,
+        packId: pack.manifest.id,
+      });
+    }
+
+    for (const cron of pack.manifest.capabilities.cron ?? []) {
+      entry.counts.cron += 1;
+      entry.assets.push({
+        kind: 'cron',
+        id: cron.id,
+        name: cron.name,
+        description: cron.description,
+        enabled: cron.enabled,
+        scope: cron.cronExpression,
+        source: pack.source,
+        packId: pack.manifest.id,
+      });
+    }
+
+    for (const server of pack.manifest.capabilities.mcpServers ?? []) {
+      entry.counts.mcpServers += 1;
+      entry.assets.push({
+        kind: 'mcp',
+        id: server.id,
+        name: server.name,
+        scope: server.scope,
+        transport: server.transport,
+        source: pack.source,
+        packId: pack.manifest.id,
+      });
+    }
+
+    grouped.set(teamKey, entry);
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
+      const snapshotWithoutFingerprint = {
+        teamSlug: slugifyCapabilityTelemetry(entry.teamName),
+        teamName: entry.teamName,
+        teamDisplayName: entry.teamName,
+        projectDir: entry.projectDir,
+        projectName: entry.projectName,
+        sourcePackIds: [...entry.sourcePackIds].sort(),
+        assets: sortTelemetryAssets(entry.assets),
+        counts: entry.counts,
+        reportedAt,
+      } satisfies Omit<TeamCapabilityTelemetrySnapshot, 'fingerprint'>;
+      return {
+        ...snapshotWithoutFingerprint,
+        fingerprint: fingerprintSnapshot(snapshotWithoutFingerprint),
+      };
+    })
+    .sort((a, b) => a.teamName.localeCompare(b.teamName));
 }
 
 export class CapabilityPackLoaderService {

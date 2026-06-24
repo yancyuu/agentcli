@@ -372,9 +372,10 @@ export interface HermitBridgePongMessage {
 
 /**
  * Per-turn token usage broadcast, fanned out to every connection that registered
- * with `observe_usage: true`. Carries token counts ONLY — no message content —
- * so it is safe to forward to external telemetry surfaces. Emitted by hermit-bridge
- * at turn-complete for every turn, regardless of which IM platform ran it
+ * with `observe_usage: true`. Carries token counts ONLY — no message content.
+ * Hermit treats this as local-session attribution metadata; remote token usage is
+ * derived from local Claude JSONL rows, not forwarded directly from this event.
+ * Emitted by hermit-bridge at turn-complete for every turn, regardless of which IM platform ran it
  * (the engine broadcasts via the process-wide bridge server).
  */
 export interface HermitBridgeUsageMessage {
@@ -382,12 +383,11 @@ export interface HermitBridgeUsageMessage {
   session_key: string;
   platform: string;
   agent_type?: string;
-  /** Stable per-turn id (the inbound IM message id). Drives dedup in reportTurn. */
+  /** Stable per-turn id (the inbound IM message id). Metadata only; token truth comes from local JSONL. */
   turn_id?: string;
   /** Current-turn sender/chat identity from hermit-bridge. No message content is included. */
   user_id?: string;
-  user_name?: string;
-  chat_name?: string;
+  chat_id?: string;
   input_tokens: number;
   output_tokens: number;
   cache_read_input_tokens: number;

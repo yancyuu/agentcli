@@ -6,8 +6,9 @@
  * https://github.com/lujinian1982/ccpal
  */
 
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -128,12 +129,35 @@ function extractToolCalls(content: unknown, counts: Record<string, number>): voi
   }
 }
 
+function canonicalizeProjectPath(cwd: string): string {
+  const raw = String(cwd || '')
+    .trim()
+    .normalize('NFC');
+  if (!raw) return '';
+
+  const expanded =
+    raw === '~'
+      ? os.homedir()
+      : raw.startsWith('~/') || raw.startsWith('~\\')
+        ? path.join(os.homedir(), raw.slice(2))
+        : raw;
+  const absolute = path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
+  const normalized = path.normalize(absolute);
+
+  try {
+    return realpathSync.native(normalized);
+  } catch {
+    return normalized;
+  }
+}
+
 function normalizeCwd(cwd: string): { normalized: string; isWorktree: boolean } {
   if (!cwd) return { normalized: cwd, isWorktree: false };
-  const parts = cwd.split('/');
+  const canonical = canonicalizeProjectPath(cwd);
+  const parts = canonical.split(path.sep);
   const idx = parts.indexOf('.claude');
   const isWorktree = idx >= 0 && idx + 1 < parts.length && parts[idx + 1] === 'worktrees';
-  const normalized = isWorktree ? parts.slice(0, idx).join('/') : cwd;
+  const normalized = isWorktree ? parts.slice(0, idx).join(path.sep) || path.sep : canonical;
   return { normalized, isWorktree };
 }
 

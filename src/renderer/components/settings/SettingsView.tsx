@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { PRODUCT_NAME } from '@shared/constants';
 import { useStore } from '@renderer/store';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -120,7 +121,7 @@ export const SettingsView = (): React.JSX.Element | null => {
               <div>
                 <h2 className="text-base font-semibold text-[var(--color-text)]">设置 Helm Loop</h2>
                 <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                  配置 Hermit 运行时、外观、数字员工渠道和本地控制行为。
+                  配置 {PRODUCT_NAME} 运行时、外观、数字员工渠道和本地控制行为。
                 </p>
               </div>
             </div>

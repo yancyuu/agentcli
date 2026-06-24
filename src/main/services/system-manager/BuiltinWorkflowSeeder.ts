@@ -1,8 +1,8 @@
 /**
  * Hermit Workflow 文件源 + 扫描器。
  *
- * 内置 workflow 以 markdown 文件随包分发在 ./builtin-workflows/*.md（YAML frontmatter
- * 承载 metadata，正文为 prompt）。启动时由 ensureGlobalWorkflows() 把 bundled 源复制到
+ * 内置 workflow 以 markdown prompt 或 JavaScript 动态 workflow 随包分发在
+ * ./builtin-workflows/*.{md,js}。启动时由 ensureGlobalWorkflows() 把 bundled 源复制到
  * ~/.hermit/.claude/workflow/，运行时由 scanHermitWorkflows() 扫描该目录得到。
  *
  * 这些 workflow 不再作为 Claude Code slash 命令（不再 seed 到 ~/.claude/commands/hermit/），
@@ -157,6 +157,22 @@ function parseFrontmatter(raw: string): ParsedFrontmatter {
   }
 }
 
+function parseJsMeta(raw: string): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const key of ['name', 'label', 'description', 'category', 'safety']) {
+    const pattern = '(?:^|[,{\\s])' + key + '\\s*:\\s*([\'"`])([^\'"`]+)\\1';
+    const match = new RegExp(pattern, 'u').exec(raw);
+    if (match) data[key] = match[2];
+  }
+  const orderMatch = /(?:^|[,{\s])order\s*:\s*(\d+)/u.exec(raw);
+  if (orderMatch) data.order = Number(orderMatch[1]);
+  return data;
+}
+
+function isWorkflowFile(name: string): boolean {
+  return name.endsWith('.md') || name.endsWith('.js');
+}
+
 function asCategory(value: unknown): BuiltinWorkflowDefinition['category'] {
   return WORKFLOW_CATEGORIES.includes(value as BuiltinWorkflowDefinition['category'])
     ? (value as BuiltinWorkflowDefinition['category'])
@@ -174,30 +190,35 @@ function asSafety(value: unknown): WorkflowPromptSafety {
 // ---------------------------------------------------------------------------
 
 /**
- * 扫描目录下的 *.md，解析 frontmatter，返回 workflow 列表（正文 = frontmatter 之后的 content）。
+ * 扫描目录下的 *.md / *.js workflow。
+ * - markdown workflow: YAML frontmatter 承载 metadata，content 为 frontmatter 后正文。
+ * - dynamic workflow: `export const meta = {...}` 承载 metadata，content 为完整 JS 脚本。
  * 按 order 升序、id 字典序兜底。
  */
 export async function scanHermitWorkflows(dir: string): Promise<BuiltinWorkflowDefinition[]> {
   const entries = await readdir(dir).catch(() => []);
   const result: BuiltinWorkflowDefinition[] = [];
   for (const name of entries) {
-    if (!name.endsWith('.md')) continue;
+    if (!isWorkflowFile(name)) continue;
     const full = path.join(dir, name);
     const stats = await stat(full).catch(() => null);
     if (!stats || !stats.isFile()) continue;
     const raw = await readFile(full, 'utf8');
-    const { data, body } = parseFrontmatter(raw);
-    const id = String(data.id ?? path.basename(name, '.md'));
+    const parsed = name.endsWith('.js')
+      ? { data: parseJsMeta(raw), body: raw }
+      : parseFrontmatter(raw);
+    const basename = path.basename(name, path.extname(name));
+    const id = String(parsed.data.id ?? parsed.data.name ?? basename);
     result.push({
       id,
       filename: name,
       commandName: `/${id}` as `/${string}`,
-      label: String(data.label ?? id),
-      description: String(data.description ?? ''),
-      category: asCategory(data.category),
-      safety: asSafety(data.safety),
-      order: Number.isFinite(Number(data.order)) ? Number(data.order) : 999,
-      content: body,
+      label: String(parsed.data.label ?? parsed.data.name ?? id),
+      description: String(parsed.data.description ?? ''),
+      category: asCategory(parsed.data.category),
+      safety: asSafety(parsed.data.safety),
+      order: Number.isFinite(Number(parsed.data.order)) ? Number(parsed.data.order) : 999,
+      content: parsed.body,
     });
   }
   result.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
@@ -224,7 +245,7 @@ async function seedBuiltinWorkflowsIntoDir(sourceDir: string, targetDir: string)
   const entries = await readdir(sourceDir).catch(() => []);
   let copied = 0;
   for (const name of entries) {
-    if (!name.endsWith('.md')) continue;
+    if (!isWorkflowFile(name)) continue;
     const bundledContent = await readFile(path.join(sourceDir, name), 'utf8');
     const targetPath = path.join(targetDir, name);
     const targetExists = await exists(targetPath);

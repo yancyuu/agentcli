@@ -1,10 +1,22 @@
 #!/usr/bin/env node
 
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { BRAND, brandCommand, brandLogPrefix } from './branding.mjs';
 
 const require = createRequire(import.meta.url);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,13 +43,49 @@ const legacyRuntimeBridgeConfigPath = path.join(legacyRuntimeBridgeDir, 'config.
 const hermitBridgeConfigPath = path.join(hermitBridgeDir, 'config.toml');
 const legacyRuntimeBridgeDataDir = path.join(legacyRuntimeBridgeDir, 'data');
 const hermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
+const bundledWorkflowsDir = path.join(packageRoot, 'src/main/services/system-manager/builtin-workflows');
+const hermitWorkflowDir = path.join(hermitHome, '.claude', 'workflow');
+const builtinWorkflowMarker = '<!-- hermit-builtin-workflow:v2-loop -->';
 
 function normalizeHermitBridgeConfig(raw) {
   return raw
     .split(legacyRuntimeBridgeDataDir)
     .join(hermitBridgeDataDir)
     .split('~/.hermit/cc-connect/data')
-    .join('~/.hermit/hermit-bridge/data');
+    .join(`~/${BRAND.defaultLocalHomeName}/${BRAND.runtimeBridgeName}/data`);
+}
+
+function seedBuiltinWorkflows() {
+  if (!existsSync(bundledWorkflowsDir)) return { copied: 0, refreshed: 0, skipped: 0 };
+  mkdirSync(hermitWorkflowDir, { recursive: true });
+  let copied = 0;
+  let refreshed = 0;
+  let skipped = 0;
+
+  for (const filename of readdirSync(bundledWorkflowsDir)) {
+    if (!filename.endsWith('.md') && !filename.endsWith('.js')) continue;
+    const sourcePath = path.join(bundledWorkflowsDir, filename);
+    const targetPath = path.join(hermitWorkflowDir, filename);
+    const bundled = readFileSync(sourcePath, 'utf-8');
+
+    if (!existsSync(targetPath)) {
+      writeFileSync(targetPath, bundled, 'utf-8');
+      copied += 1;
+      continue;
+    }
+
+    const existing = readFileSync(targetPath, 'utf-8');
+    if (!existing.includes(builtinWorkflowMarker)) {
+      skipped += 1;
+      continue;
+    }
+    if (existing !== bundled) {
+      writeFileSync(targetPath, bundled, 'utf-8');
+      refreshed += 1;
+    }
+  }
+
+  return { copied, refreshed, skipped };
 }
 
 function migrateLegacyHermitBridgeFiles() {
@@ -70,10 +118,26 @@ function migrateLegacyHermitBridgeFiles() {
 }
 
 const migratedRuntimeConfig = migrateLegacyHermitBridgeFiles();
+let seededWorkflows = { copied: 0, refreshed: 0, skipped: 0 };
+let workflowSeedError = null;
+try {
+  seededWorkflows = seedBuiltinWorkflows();
+} catch (err) {
+  workflowSeedError = err;
+}
 
-console.log(`[openHermit] Installed ${version}`);
-console.log(`[openHermit] Bundled hermit-bridge runtime service: ${runtimeVersion}`);
-console.log(`[openHermit] Data directory: ${hermitHome}`);
-if (migratedRuntimeConfig) console.log('[openHermit] Migrated runtime files to ~/.hermit/hermit-bridge/');
-console.log('[openHermit] Start with: openhermit');
-console.log('[openHermit] Background mode: openhermit --daemon');
+console.log(`${brandLogPrefix()} Installed ${version}`);
+console.log(`${brandLogPrefix()} Bundled ${BRAND.runtimeBridgeName} runtime service: ${runtimeVersion}`);
+console.log(`${brandLogPrefix()} Data directory: ${hermitHome}`);
+if (migratedRuntimeConfig) console.log(`${brandLogPrefix()} Migrated runtime files to ~/${BRAND.defaultLocalHomeName}/${BRAND.runtimeBridgeName}/`);
+if (workflowSeedError) {
+  console.log(`${brandLogPrefix()} Skipped workflow installation: ${workflowSeedError.message ?? String(workflowSeedError)}`);
+} else {
+  const changedWorkflows = seededWorkflows.copied + seededWorkflows.refreshed;
+  console.log(
+    `${brandLogPrefix()} Installed ${changedWorkflows} workflow(s) to ${hermitWorkflowDir}` +
+      (seededWorkflows.skipped ? `; skipped ${seededWorkflows.skipped} user-managed file(s)` : '')
+  );
+}
+console.log(`${brandLogPrefix()} Start with: ${brandCommand()}`);
+console.log(`${brandLogPrefix()} Background mode: ${brandCommand('--daemon')}`);

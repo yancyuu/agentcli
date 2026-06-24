@@ -54,7 +54,7 @@ describe('slashCommands', () => {
   });
 
   it('returns metadata for known commands only', () => {
-    expect(getKnownSlashCommand('MODEL')?.description).toContain('Claude model');
+    expect(getKnownSlashCommand('MODEL')?.description).toContain('Claude 模型');
     expect(getKnownSlashCommand('foo')).toBeNull();
   });
 
@@ -71,7 +71,7 @@ describe('buildSlashCommandMeta', () => {
     expect(buildSlashCommandMeta('COMPACT')).toEqual({
       name: 'compact',
       command: '/compact',
-      knownDescription: 'Compact conversation with optional focus instructions.',
+      knownDescription: '压缩当前对话，并可附加需要保留的重点说明。',
     });
   });
 
@@ -94,7 +94,7 @@ describe('buildSlashCommandMeta', () => {
 
   it('attaches knownDescription for a known command even without args', () => {
     const meta = buildSlashCommandMeta('model');
-    expect(meta.knownDescription).toContain('Claude model');
+    expect(meta.knownDescription).toContain('Claude 模型');
   });
 });
 
@@ -110,7 +110,7 @@ describe('buildStandaloneSlashCommandMeta', () => {
       name: 'plan',
       command: '/plan',
       args: 'rebuild the api',
-      knownDescription: 'Enter plan mode with an optional task description.',
+      knownDescription: '进入计划模式，可附加要规划的任务描述。',
     });
   });
 

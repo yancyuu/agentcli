@@ -20,9 +20,9 @@ const LOOP_COMMAND_SHORTCUTS: LoopCommandShortcut[] = [
     id: 'ops-workflow:doctor',
     name: 'hermit:doctor',
     command: '/hermit:doctor',
-    insertText: 'hermit:doctor 检查 Hermit 安装、运行时、cc-connect、MCP 和常见配置问题',
-    description: '诊断 Hermit / runtime / cc-connect 健康状态',
-    searchText: 'doctor hermit diagnose health runtime cc-connect mcp 诊断 健康 配置',
+    insertText: 'hermit:doctor 检查 Hermit 安装、运行时、hermit-bridge、MCP 和常见配置问题',
+    description: '诊断 Hermit / runtime / hermit-bridge 健康状态',
+    searchText: 'doctor hermit diagnose health runtime hermit-bridge mcp 诊断 健康 配置',
     category: 'diagnostic',
   },
   {

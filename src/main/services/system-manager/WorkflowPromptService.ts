@@ -6,11 +6,21 @@ import path from 'node:path';
 import type {
   WorkflowPromptContentResponse,
   WorkflowPromptListResponse,
+  WorkflowPromptSafety,
   WorkflowPromptSummary,
 } from '@shared/types/systemManager';
 
 const SUPPORTED_EXTENSIONS = new Set(['.md', '.txt', '.prompt', '.workflow']);
 const MAX_PROMPT_BYTES = 256 * 1024;
+const KNOWN_WORKFLOW_SAFETY = new Set<WorkflowPromptSafety>([
+  'read-only',
+  'reporting',
+  'audit',
+  'proposal-only',
+  'apply',
+  'destructive',
+  'unknown',
+]);
 
 function expandHome(input: string): string {
   const normalized = input.trim().replace(/^～/, '~');
@@ -39,6 +49,104 @@ function commandNameFromRelativePath(relativePath: string): `/${string}` {
   const withoutExt = relativePath.slice(0, -path.extname(relativePath).length);
   const commandName = withoutExt.split(path.sep).filter(Boolean).join(':');
   return `/${commandName}`;
+}
+
+interface WorkflowPromptFrontmatter {
+  id?: string;
+  label?: string;
+  description?: string;
+  category?: string;
+  safety?: WorkflowPromptSafety;
+  order?: number;
+}
+
+function stripInlineComment(value: string): string {
+  let quote: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if ((char === '"' || char === "'") && value[index - 1] !== '\\') {
+      quote = quote === char ? null : (quote ?? char);
+      continue;
+    }
+    if (char === '#' && quote === null && (index === 0 || /\s/.test(value[index - 1] ?? ''))) {
+      return value.slice(0, index).trim();
+    }
+  }
+  return value.trim();
+}
+
+function parseFrontmatterValue(raw: string): string | number | boolean | null {
+  const value = stripInlineComment(raw);
+  if (!value || value === '~' || value.toLowerCase() === 'null') return null;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
+    const inner = value.slice(1, -1);
+    return quote === '"'
+      ? inner.replace(/\\(["\\nrt])/g, (_match, escaped: string) => {
+          switch (escaped) {
+            case 'n':
+              return '\n';
+            case 'r':
+              return '\r';
+            case 't':
+              return '\t';
+            default:
+              return escaped;
+          }
+        })
+      : inner.replace(/''/g, "'");
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  return value;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asSafety(value: unknown): WorkflowPromptSafety | undefined {
+  const safety = asNonEmptyString(value);
+  return safety && KNOWN_WORKFLOW_SAFETY.has(safety as WorkflowPromptSafety)
+    ? (safety as WorkflowPromptSafety)
+    : undefined;
+}
+
+function asOrder(value: unknown): number | undefined {
+  const order = typeof value === 'number' ? value : Number(asNonEmptyString(value));
+  return Number.isSafeInteger(order) ? order : undefined;
+}
+
+function parseWorkflowPromptFrontmatter(content: string): WorkflowPromptFrontmatter {
+  if (!content.startsWith('---')) return {};
+  const lineEnd = content.indexOf('\n');
+  if (lineEnd !== 3 && !(lineEnd === 4 && content[3] === '\r')) return {};
+
+  const closeMatch = content.match(/\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (!closeMatch?.index) return {};
+
+  const block = content.slice(lineEnd + 1, closeMatch.index);
+  const values = new Map<string, string | number | boolean | null>();
+  for (const line of block.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separator = trimmed.indexOf(':');
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    values.set(key, parseFrontmatterValue(trimmed.slice(separator + 1)));
+  }
+
+  return {
+    id: asNonEmptyString(values.get('id')),
+    label: asNonEmptyString(values.get('label')),
+    description: asNonEmptyString(values.get('description') ?? values.get('desc')),
+    category: asNonEmptyString(values.get('category')),
+    safety: asSafety(values.get('safety')),
+    order: asOrder(values.get('order')),
+  };
 }
 
 export class WorkflowPromptService {
@@ -75,11 +183,13 @@ export class WorkflowPromptService {
           continue;
         }
 
+        const content = await readFile(filePath, 'utf-8');
+        const frontmatter = parseWorkflowPromptFrontmatter(content);
         const relativeCommandPath = path.relative(commandRoot, filePath);
         const commandName = commandNameFromRelativePath(relativeCommandPath);
         const summary: WorkflowPromptSummary = {
-          id: promptId(filePath),
-          label: labelFromFilename(entry.name),
+          id: frontmatter.id ?? promptId(filePath),
+          label: frontmatter.label ?? labelFromFilename(entry.name),
           filename: path.relative(folder, filePath),
           path: filePath,
           folder,
@@ -87,7 +197,10 @@ export class WorkflowPromptService {
           updatedAt: fileStat.mtime.toISOString(),
           source: 'claude-command',
           commandName,
-          safety: 'unknown',
+          description: frontmatter.description,
+          category: frontmatter.category,
+          safety: frontmatter.safety ?? 'unknown',
+          order: frontmatter.order,
         };
         prompts.push(summary);
       }

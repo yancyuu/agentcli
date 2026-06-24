@@ -79,7 +79,7 @@ function getMcpLibrary(): McpLibraryService {
   return mcpLibrary;
 }
 
-function getCapabilityPacks(): CapabilityPackLoaderService {
+export function getCapabilityPacks(): CapabilityPackLoaderService {
   if (!capabilityPacks) capabilityPacks = new CapabilityPackLoaderService();
   return capabilityPacks;
 }

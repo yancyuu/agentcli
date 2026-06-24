@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="resources/icons/png/1024x1024.png" alt="openHermit" width="96" />
+  <img src="resources/icons/png/1024x1024.png" alt="Hermit" width="96" />
 </p>
 
-<h1 align="center">openHermit</h1>
+<h1 align="center">Hermit</h1>
 
 <p align="center">
-  <strong>Local-first control plane for AI agent teams.</strong><br/>
-  Create teams, assign work, watch agents collaborate, review results, and keep every loop auditable on your machine.<br/>
-  <strong>本地优先的 AI Agent 团队工作台：</strong>创建团队、派发任务、观察协作、审核交付，把一次性聊天变成可重复的工程循环。
+  <strong>AI Workforce Panel for local agent teams.</strong><br/>
+  Manage digital employees, tasks, messages, runtimes, IM routing, usage, capability assets, and audit trails — local-first.<br/>
+  <strong>本地优先的 AI 数字员工团队面板：</strong>管理数字员工、任务、消息、运行时、IM 路由、用量、能力资产和审计轨迹。
 </p>
 
 <p align="center">
@@ -293,7 +293,6 @@ For local development that needs external channels (Feishu/Lark, WeChat, Telegra
 node node_modules/hermit-bridge/run.js --force -config ~/.hermit/hermit-bridge/config.toml
 ```
 
-The published `openhermit` CLI auto-starts the bundled `hermit-bridge` when needed and migrates legacy runtime files from `~/.hermit/cc-connect/` to `~/.hermit/hermit-bridge/`. Local `pnpm dev` is intentionally explicit so developers can watch bridge logs and restart it independently.
 
 Use pnpm for this repository. Please do not describe Electron packaging, embedded PTY, hosted model serving, or the full target Task Bus as current shipped capability unless the implementation and docs have landed.
 

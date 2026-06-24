@@ -5,6 +5,7 @@
 
 import React from 'react';
 
+import { PRODUCT_NAME } from '@shared/constants';
 import { RecentProjectsSection } from '@features/recent-projects/renderer';
 import { useStore } from '@renderer/store';
 import { Bot, MessageCircle, Settings, ShieldCheck, TerminalSquare, Users } from 'lucide-react';
@@ -12,22 +13,20 @@ import { useShallow } from 'zustand/react/shallow';
 
 const DASHBOARD_BOUNDARIES = [
   {
-    title: 'Helm Loop',
-    description:
-      '只放全局巡检、诊断、复盘、治理和改进提案。常用 workflow 不再铺成卡片，统一在指令台输入 / 查看。',
-    badge: '全局控制台',
+    title: '本地优先控制面',
+    description: '把项目、运行时、工作流和执行记录收束在本机；你掌握代码、上下文和团队协作边界。',
+    badge: 'Local-first',
   },
   {
-    title: 'Team Loop',
+    title: 'AI Workforce',
     description:
-      '只负责当前团队消息、runtime 注入和 Loop session，避免把 Admin workflow 混进普通团队。',
-    badge: '团队作用域',
+      '以团队为单位组织数字员工：分配任务、跟进进度、审阅结果，并在同一个工作区持续沉淀。',
+    badge: 'Agent Teams',
   },
   {
-    title: '消息面板',
-    description:
-      '默认读取最近 50 条动态；需要历史时手动分页加载，每次 50 条，不一次性渲染全部历史。',
-    badge: '分页边界',
+    title: 'Loop Engineering',
+    description: '把诊断、巡检、复盘和改进提案变成可重复运行的循环，让系统自己维护系统。',
+    badge: 'Self-improving',
   },
 ];
 
@@ -56,23 +55,23 @@ export const DashboardView = (): React.JSX.Element => {
         <section className="mb-6 overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-sm">
           <div className="grid gap-6 border-b border-border px-6 py-6 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-indigo-500/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-300">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-indigo-500/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-300">
                 <TerminalSquare className="size-3.5" />
-                Loop Engineering 首页
+                {PRODUCT_NAME} Command Center
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-text">
-                先从这里进入：全局控制、团队协作、社区入口分开
+                你的本地 AI 员工操作系统
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-text-secondary">
-                首页只做总览和入口；Helm Loop 是全局指令台，团队详情里的 Loop
-                是当前团队指令台，飞书群独立成扫码页。这样边界更清楚，也不会把常用命令堆在 Admin
-                Loop 下方。
+                {PRODUCT_NAME} 把 Claude Code、团队协作、任务看板、Loop
+                工作流和外部渠道连接到一个本地优先的控制面。你不是在打开一个聊天窗口，而是在管理一支可持续运行的
+                AI 工程团队。
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => void openSystemManager()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-500/35 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-100 transition-colors hover:bg-indigo-500/15"
+                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-500/35 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-500/15 dark:text-indigo-100"
                 >
                   <Bot className="size-4" />
                   打开 Helm Loop
@@ -83,7 +82,7 @@ export const DashboardView = (): React.JSX.Element => {
                   className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-overlay hover:text-text"
                 >
                   <Users className="size-4" />
-                  选择团队
+                  进入团队
                 </button>
                 <button
                   type="button"
@@ -100,21 +99,21 @@ export const DashboardView = (): React.JSX.Element => {
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="text-sm font-medium text-text">工作区状态</div>
                 <span className="rounded-full border border-border bg-surface-overlay px-2 py-0.5 text-[10px] text-text-muted">
-                  {teamsLoading ? 'loading' : `${teams.length} teams`}
+                  {teamsLoading ? '加载中' : `${teams.length} 个团队`}
                 </span>
               </div>
               <div className="space-y-2 text-xs text-text-muted">
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface-overlay px-3 py-2">
-                  <span>全局 workflow</span>
-                  <span>在 Helm Loop 输入 / 查看</span>
+                  <span>本地团队</span>
+                  <span>{teamsLoading ? '同步中' : `${teams.length} 支`}</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface-overlay px-3 py-2">
-                  <span>团队 Loop</span>
-                  <span>按团队隔离</span>
+                  <span>运行入口</span>
+                  <span>Team / Helm / Channel</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface-overlay px-3 py-2">
-                  <span>消息历史</span>
-                  <span>50 条分页加载</span>
+                  <span>数据边界</span>
+                  <span>Local-first by default</span>
                 </div>
               </div>
             </div>
@@ -141,7 +140,7 @@ export const DashboardView = (): React.JSX.Element => {
         {showQuickstartGuide ? (
           <section className="rounded-xl border border-border bg-surface-raised p-5">
             <div className="flex items-center gap-2 text-sm font-semibold text-text">
-              <ShieldCheck className="size-4 text-indigo-300" />
+              <ShieldCheck className="size-4 text-indigo-600 dark:text-indigo-300" />
               快速开始（2 步）
             </div>
             <p className="mt-1 text-xs text-text-muted">
@@ -176,7 +175,7 @@ export const DashboardView = (): React.JSX.Element => {
           <>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xs font-medium uppercase tracking-wider text-text-muted">
-                最近项目
+                最近打开的项目
               </h2>
               <button
                 type="button"

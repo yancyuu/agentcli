@@ -35,13 +35,16 @@ describe('buildSlashCommandSuggestions', () => {
       []
     );
 
-    expect(suggestions[0]?.type).toBe('command');
+    expect(suggestions[0]).toMatchObject({
+      type: 'command',
+      subtitle: '内置指令',
+    });
     expect(suggestions.some((suggestion) => suggestion.type === 'skill')).toBe(true);
     expect(suggestions.find((suggestion) => suggestion.id === 'skill:project-skill')).toMatchObject(
       {
         name: 'review-skill',
         command: '/review-skill',
-        subtitle: expect.stringContaining('Project skill'),
+        subtitle: expect.stringContaining('项目技能'),
         type: 'skill',
       }
     );

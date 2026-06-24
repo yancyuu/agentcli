@@ -22,57 +22,57 @@ export const KNOWN_SLASH_COMMANDS: readonly KnownSlashCommandDefinition[] = [
   {
     name: 'compact',
     command: '/compact',
-    description: 'Compact conversation with optional focus instructions.',
+    description: '压缩当前对话，并可附加需要保留的重点说明。',
   },
   {
     name: 'clear',
     command: '/clear',
-    description: 'Clear conversation history and free up context.',
+    description: '清空当前对话历史，释放上下文。',
   },
   {
     name: 'reset',
     command: '/reset',
-    description: 'Alias of /clear. Clear conversation history and free up context.',
+    description: '/clear 的别名：清空当前对话历史。',
   },
   {
     name: 'new',
     command: '/new',
-    description: 'Alias of /clear. Start a fresh conversation.',
+    description: '/clear 的别名：开始一轮新的对话。',
   },
   {
     name: 'plan',
     command: '/plan',
-    description: 'Enter plan mode with an optional task description.',
+    description: '进入计划模式，可附加要规划的任务描述。',
   },
   {
     name: 'model',
     command: '/model',
-    description: 'Select or change the Claude model.',
+    description: '选择或切换当前会话使用的 Claude 模型。',
   },
   {
     name: 'effort',
     command: '/effort',
-    description: 'Set reasoning effort for the current session.',
+    description: '设置当前会话的推理强度。',
   },
   {
     name: 'fast',
     command: '/fast',
-    description: 'Toggle fast mode on or off.',
+    description: '开启或关闭快速模式。',
   },
   {
     name: 'cost',
     command: '/cost',
-    description: 'Show token usage statistics.',
+    description: '查看本次会话的 token 与费用统计。',
   },
   {
     name: 'usage',
     command: '/usage',
-    description: 'Show plan usage limits and rate-limit status.',
+    description: '查看套餐用量、额度和限流状态。',
   },
   {
     name: 'workers',
     command: '/workers',
-    description: 'List currently discoverable digital workers.',
+    description: '列出当前可发现的数字员工。',
   },
 ] as const;
 

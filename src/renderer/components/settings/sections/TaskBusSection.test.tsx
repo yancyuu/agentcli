@@ -21,8 +21,8 @@ interface TelemetryProjectFixture {
 
 function telemetryProjects(projectCount: number): TelemetryProjectFixture[] {
   return Array.from({ length: projectCount }, (_, index) => ({
-    cwd: `/tmp/throughput-entry-${index + 1}`,
-    displayName: index === 10 ? 'zz-last-project' : `throughput-entry-${index + 1}`,
+    cwd: `/tmp/telemetry-entry-${index + 1}`,
+    displayName: `telemetry-entry-${index + 1}`,
     sessions: 1,
     messages: projectCount - index,
     tokensIn: 10,
@@ -47,7 +47,7 @@ function telemetryStatus(projects: TelemetryProjectFixture[]) {
     projects,
     workSecondsByDay: {},
     localUsers: [],
-    externalUsers: [],
+    teamCapabilitySnapshots: [],
     unresolvedUsage: { sessions: 0, messages: 0, tokensTotal: 0 },
   };
 }
@@ -99,119 +99,278 @@ async function renderTaskBusSection() {
   return { host, root };
 }
 
-describe('TaskBusSection project throughput', () => {
+describe('TaskBusSection telemetry settings', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     document.body.innerHTML = '';
   });
 
-  it('renders every project in the throughput list instead of truncating at ten', async () => {
-    mockFetch(11);
-
-    const { host, root } = await renderTaskBusSection();
-
-    expect(host.textContent).toContain('项目吞吐');
-    expect(host.textContent).toContain('throughput-entry-10');
-    expect(host.textContent).toContain('zz-last-project');
-
-    await act(async () => {
-      root.unmount();
-    });
-  });
-
-  it('hides soft-deleted teams from project throughput', async () => {
-    mockFetch([
-      ...telemetryProjects(1),
-      {
-        cwd: '/tmp/deleted-team',
-        displayName: 'deleted-team',
-        teamSlug: 'deleted-team',
-        bindProject: 'deleted-team',
-        deletedAt: '2026-06-15T00:00:00.000Z',
-        sessions: 1,
-        messages: 99,
-        tokensIn: 10,
-        tokensOut: 20,
-        tokensTotal: 30,
-      },
-    ]);
-
-    const { host, root } = await renderTaskBusSection();
-
-    expect(host.textContent).toContain('throughput-entry-1');
-    expect(host.textContent).not.toContain('deleted-team');
-
-    await act(async () => {
-      root.unmount();
-    });
-  });
-
-  it('renders external IM user usage and unresolved usage warnings', async () => {
-    mockFetch(1, {
-      externalUsers: [
+  it('renders local usage monitoring without sync controls or old IM attribution panels', async () => {
+    mockFetch(11, {
+      localUsers: [
         {
-          key: 'lark:user:ou_123',
-          kind: 'external-im',
+          key: 'local:user',
+          kind: 'local',
           identity: {
-            platform: 'lark',
+            platform: 'local',
             type: 'person',
-            displayName: 'Alice',
-            confidence: 'exact-id',
+            displayName: 'Local User',
+            confidence: 'session-key-only',
           },
-          teamDisplayName: 'Team Alpha',
-          projectName: 'team-alpha',
+          projectName: 'local-project',
           sessions: 1,
-          messages: 12,
-          tokensTotal: 3456,
+          messages: 7,
+          tokensTotal: 1200,
         },
       ],
+    });
+
+    const { host, root } = await renderTaskBusSection();
+
+    expect(host.textContent).toContain('Usage 监测');
+    expect(host.textContent).toContain('本地生成用量（source=local）');
+    expect(host.textContent).not.toContain('Usage 同步');
+    expect(host.textContent).not.toContain('后台持续同步');
+    expect(host.textContent).not.toContain('立即扫描一次');
+    expect(host.textContent).not.toContain('后台持续同步未开启，可手动同步一次');
+    expect(host.textContent).not.toContain('IM 接入归因用量（source=feishu/wechat/...）');
+    expect(host.textContent).toContain('local-project');
+    expect(host.textContent).not.toContain('项目吞吐');
+    expect(host.textContent).not.toContain('telemetry-entry-10');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('shows unresolved local sessions without rendering IM attribution rows', async () => {
+    mockFetch(1, {
       unresolvedUsage: { sessions: 2, messages: 8, tokensTotal: 900 },
     });
 
     const { host, root } = await renderTaskBusSection();
 
-    expect(host.textContent).toContain('外部 IM 用户用量');
-    expect(host.textContent).toContain('Alice');
-    expect(host.textContent).toContain('lark');
-    expect(host.textContent).toContain('3.5K');
+    expect(host.textContent).not.toContain('IM 接入归因用量（source=feishu/wechat/...）');
     expect(host.textContent).toContain('未映射会话：2 sessions');
+    expect(host.textContent).toContain('900 tokens');
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it('defaults data upload to Redis when saved telemetry has no explicit opt-out', async () => {
+  it('keeps digital employee capability assets folded until employee and kind are expanded', async () => {
+    mockFetch(1, {
+      capabilitySummary: { teams: 1, commands: 1, skills: 4, workflows: 1, cron: 1, mcpServers: 1 },
+      teamCapabilitySnapshots: [
+        {
+          teamName: 'agent-alpha',
+          teamDisplayName: 'Agent Alpha',
+          projectDir: '/tmp/agent-alpha',
+          projectName: 'agent-alpha',
+          sourcePackIds: ['pack-alpha'],
+          counts: { commands: 1, skills: 4, workflows: 1, cron: 1, mcpServers: 1 },
+          fingerprint: 'fp-1',
+          reportedAt: '2026-06-15T00:00:00.000Z',
+          assets: [
+            {
+              kind: 'skill',
+              id: 'skill-1',
+              name: 'Skill One',
+              description: 'Long skill description',
+              packId: 'pack-alpha',
+            },
+            { kind: 'skill', id: 'skill-2', name: 'Skill Two', packId: 'pack-alpha' },
+            { kind: 'skill', id: 'skill-3', name: 'Skill Three', packId: 'pack-alpha' },
+            { kind: 'skill', id: 'skill-4', name: 'Skill Four', packId: 'pack-alpha' },
+            {
+              kind: 'workflow',
+              id: 'wf-1',
+              name: 'Workflow One',
+              description: 'Workflow detail',
+              packId: 'pack-alpha',
+            },
+            {
+              kind: 'cron',
+              id: 'cron-1',
+              name: 'Cron One',
+              description: 'Cron detail',
+              enabled: true,
+              packId: 'pack-alpha',
+            },
+            {
+              kind: 'mcp',
+              id: 'mcp-1',
+              name: 'MCP One',
+              transport: 'stdio',
+              scope: 'project',
+              packId: 'pack-alpha',
+            },
+            { kind: 'command', id: 'cmd-1', name: 'Command One', packId: 'pack-alpha' },
+          ],
+        },
+      ],
+    });
+
+    const { host, root } = await renderTaskBusSection();
+
+    expect(host.textContent).toContain('数字员工能力资产');
+    expect(host.textContent).toContain('Agent Alpha');
+    expect(host.textContent).toContain('Skills 4');
+    expect(host.textContent).toContain('Workflows 1');
+    expect(host.textContent).toContain('Cron 1');
+    expect(host.textContent).toContain('MCP 1');
+    expect(host.textContent).not.toContain('Skill One');
+    expect(host.textContent).not.toContain('Long skill description');
+    expect(host.textContent).not.toContain('Workflow detail');
+
+    const agentButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Agent Alpha')
+    );
+    expect(agentButton).toBeTruthy();
+
+    await act(async () => {
+      agentButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(host.textContent).toContain('收起能力明细');
+    expect(host.textContent).toContain('Skills');
+    expect(host.textContent).not.toContain('Skill One');
+
+    const skillsButton = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Skills') && button.textContent?.includes('展开')
+    );
+    expect(skillsButton).toBeTruthy();
+
+    await act(async () => {
+      skillsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(host.textContent).toContain('Skill One');
+    expect(host.textContent).toContain('Skill Four');
+    expect(host.textContent).toContain('Long skill description');
+    expect(host.textContent).not.toContain('Workflow detail');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('aggregates local usage rows by project path', async () => {
+    mockFetch(0, {
+      localUsers: [
+        {
+          key: 'hermit:one',
+          kind: 'local',
+          identity: {
+            platform: 'local',
+            type: 'person',
+            displayName: 'hermit',
+            confidence: 'session-key-only',
+          },
+          projectName: 'hermit',
+          workDir: '/Users/yancyyu/code/hermit',
+          sessions: 1,
+          messages: 3100,
+          tokensTotal: 208_400_000,
+        },
+        {
+          key: 'hermit:two',
+          kind: 'local',
+          identity: {
+            platform: 'local',
+            type: 'person',
+            displayName: 'hermit',
+            confidence: 'session-key-only',
+          },
+          projectName: 'hermit',
+          workDir: '/Users/yancyyu/code/hermit',
+          sessions: 2,
+          messages: 5900,
+          tokensTotal: 410_900_000,
+        },
+        {
+          key: 'dot-hermit',
+          kind: 'local',
+          identity: {
+            platform: 'local',
+            type: 'person',
+            displayName: '.hermit',
+            confidence: 'session-key-only',
+          },
+          projectName: '.hermit',
+          workDir: '/Users/yancyyu/.hermit',
+          sessions: 1,
+          messages: 5,
+          tokensTotal: 93_600,
+        },
+        {
+          key: 'dot-hermit:auth-name',
+          kind: 'local',
+          identity: {
+            platform: 'local',
+            type: 'person',
+            displayName: 'auth',
+            confidence: 'session-key-only',
+          },
+          projectName: 'auth',
+          workDir: '/Users/yancyyu/.hermit/auth',
+          sessions: 1,
+          messages: 34,
+          tokensTotal: 728_600,
+        },
+        {
+          key: 'dot-hermit:auth-name-again',
+          kind: 'local',
+          identity: {
+            platform: 'local',
+            type: 'person',
+            displayName: '.hermit auth',
+            confidence: 'session-key-only',
+          },
+          projectName: '.hermit auth',
+          workDir: '/Users/yancyyu/.hermit/auth/',
+          sessions: 1,
+          messages: 7,
+          tokensTotal: 0,
+        },
+      ],
+    });
+
+    const { host, root } = await renderTaskBusSection();
+
+    expect(host.textContent).toContain('9.0K msg · 619.3M tokens');
+    expect(host.textContent).toContain('5 msg · 93.6K tokens');
+    expect(host.textContent).toContain('41 msg · 728.6K tokens');
+    expect(host.textContent).not.toContain('3.1K msg · 208.4M tokens');
+    expect(host.textContent).not.toContain('5.9K msg · 410.9M tokens');
+    expect(host.textContent).not.toContain('34 msg · 728.6K tokens');
+    expect(host.textContent).not.toContain('7 msg · 0 tokens');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('keeps Redis copy scoped to collaboration instead of usage upload', async () => {
     const fetchMock = mockFetch(1, {}, { enabled: true });
 
     const { host, root } = await renderTaskBusSection();
-    const uploadToggle = Array.from(host.querySelectorAll('[role="switch"]')).at(2);
 
-    expect(uploadToggle?.getAttribute('aria-checked')).toBe('true');
-    expect(host.textContent).toContain('IM 桥接的每轮 token 用量上报到 Redis');
-    expect(host.textContent).toContain('不会上传 IM 消息正文');
+    expect(host.textContent).toContain('Usage 统计不依赖 Redis');
+    expect(host.textContent).not.toContain('Claude Code 项目数据上报（自托管 Redis）');
+    expect(host.textContent).not.toContain(
+      '不会上传消息正文、助手回复、工具内容、cron prompt 或 MCP 密钥'
+    );
+    expect(host.textContent).toContain(
+      '开启本地/自托管团队总线基础能力，供后续任务池和协作视图使用；'
+    );
+    expect(host.textContent).not.toContain('不再提供手动派单入口');
 
     await act(async () => {
       root.unmount();
     });
     expect(fetchMock).toHaveBeenCalled();
-  });
-
-  it('keeps explicit data upload opt-out disabled', async () => {
-    mockFetch(
-      1,
-      {},
-      { enabled: true, telemetry: { enabled: true, uploadEnabled: false, platform: 'claudecode' } }
-    );
-
-    const { host, root } = await renderTaskBusSection();
-    const uploadToggle = Array.from(host.querySelectorAll('[role="switch"]')).at(2);
-
-    expect(uploadToggle?.getAttribute('aria-checked')).toBe('false');
-
-    await act(async () => {
-      root.unmount();
-    });
   });
 });

@@ -9,7 +9,6 @@ export {
   buildHermitBridgeProjectName as buildCcProjectName,
   ProjectMappingStore,
 } from '../hermitBridge/ProjectMappingStore';
-export { mapUsageEventToReportInput } from '../hermitBridge/usageEventMapper';
 export {
   HERMIT_BRIDGE_PLACEHOLDER_WORK_DIR as CC_CONNECT_PLACEHOLDER_WORK_DIR,
   isPlaceholderWorkDir,

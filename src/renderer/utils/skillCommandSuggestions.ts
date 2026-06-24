@@ -43,7 +43,7 @@ export function buildSlashCommandSuggestions(
     name: command.name,
     command: command.command,
     description: command.description,
-    subtitle: command.description,
+    subtitle: '内置指令',
     type: 'command',
   }));
 
@@ -67,7 +67,7 @@ export function buildSlashCommandSuggestions(
       name: skill.folderName,
       command: `/${normalizedFolderName}`,
       description: skill.description,
-      subtitle: `${skill.scope === 'project' ? 'Project skill' : 'Personal skill'} - ${getSkillAudienceLabel(skill.rootKind)}`,
+      subtitle: `${skill.scope === 'project' ? '项目技能' : '个人技能'} - ${getSkillAudienceLabel(skill.rootKind)}`,
       searchText: `${skill.name} ${skill.folderName}`,
       type: 'skill',
     });

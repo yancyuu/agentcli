@@ -126,6 +126,8 @@ describe('createTeam', () => {
     expect(claudeMd).toContain(HERMIT_OPS_GUIDE_URL);
     expect(claudeMd).toContain('/hermit:doctor');
     expect(claudeMd).toContain('/hermit:loop-scan');
+    expect(claudeMd).toContain('hermit-bridge / Management API');
+    expect(claudeMd).not.toContain('cc-connect Bridge / Management API');
   });
 
   it('does NOT inject MCP config or CLAUDE.md instructions for codex harness', async () => {

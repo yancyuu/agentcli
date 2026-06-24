@@ -25,8 +25,9 @@ function getBaseUrl(): string {
 async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init?.timeoutMs ?? 15_000);
+  const url = `${getBaseUrl()}/api/v1${path}`;
   try {
-    const res = await fetch(`${getBaseUrl()}/api/v1${path}`, {
+    const res = await fetch(url, {
       ...init,
       signal: controller.signal,
       headers: {
@@ -58,6 +59,14 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
       throw new Error(json.error ?? `HTTP ${res.status}`);
     }
     return (json.data ?? json) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Provider API 请求超时：${path}`);
+    }
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      throw new Error(`无法连接 Provider API：${url}。请确认 Hermit 本地后端正在运行。`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }

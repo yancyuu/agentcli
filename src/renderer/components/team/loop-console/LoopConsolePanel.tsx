@@ -13,8 +13,8 @@ import {
   FilePen,
   FileText,
   Globe,
-  MessageSquare,
   Search,
+  SquareTerminal,
   Terminal,
   Trash2,
   Wrench,
@@ -245,7 +245,7 @@ export function LoopConsolePanel({
     <div className="space-y-3 rounded-xl border border-indigo-500/15 bg-[var(--color-surface)] p-2">
       <div className="flex items-center justify-between gap-3 px-1">
         <div className="flex min-w-0 items-center gap-2">
-          <MessageSquare size={14} className="shrink-0 text-indigo-300" />
+          <SquareTerminal size={14} className="shrink-0 text-indigo-300" />
           <div className="truncate text-xs font-medium text-[var(--color-text)]">指令台</div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

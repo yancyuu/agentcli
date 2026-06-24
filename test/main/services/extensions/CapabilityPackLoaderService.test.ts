@@ -4,8 +4,11 @@ import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CapabilityPackLoaderService } from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
-import { ensureGlobalWorkflows } from '@main/services/system-manager/BuiltinWorkflowSeeder';
+import {
+  CapabilityPackLoaderService,
+  buildTeamCapabilityTelemetrySnapshots,
+} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
+import { ensureGlobalWorkflows, listHermitWorkflows } from '@main/services/system-manager/BuiltinWorkflowSeeder';
 
 import type { HermitBridgeCronJob } from '@shared/types/hermitBridge';
 import type { SkillCatalogItem } from '@shared/types/extensions';
@@ -154,6 +157,7 @@ afterEach(() => {
 describe('CapabilityPackLoaderService', () => {
   it('lists the built-in Hermit team ops pack by default', async () => {
     const service = createService();
+    const workflows = await listHermitWorkflows();
 
     const result = await service.list();
 
@@ -164,18 +168,26 @@ describe('CapabilityPackLoaderService', () => {
         id: 'hermit-team-ops',
         name: 'Hermit Team Ops',
         namespace: 'hermit',
-        capabilities: {
-          commands: expect.arrayContaining([
-            expect.objectContaining({
-              id: 'daily-workflow-extraction',
-              alias: 'daily-workflow-extraction',
-              scope: ['admin-loop', 'team-loop'],
-              execution: { type: 'loop-session', reuse: true },
-            }),
-          ]),
-        },
       },
     });
+    expect(result.packs[0].manifest.capabilities.commands).toEqual(
+      workflows.map((workflow) =>
+        expect.objectContaining({
+          id: workflow.id,
+          alias: workflow.id,
+          scope: ['admin-loop', 'team-loop'],
+          execution: { type: 'loop-session', reuse: true },
+        })
+      )
+    );
+    expect(result.packs[0].manifest.capabilities.workflows).toEqual(
+      workflows.map((workflow) =>
+        expect.objectContaining({
+          id: workflow.id,
+          path: `workflows/${workflow.filename}`,
+        })
+      )
+    );
   });
 
   it('loads local pack manifests from the capability-packs root', async () => {
@@ -322,6 +334,64 @@ describe('CapabilityPackLoaderService', () => {
       packId,
       counts: { skills: 1, cron: 0, mcpServers: 1 },
     });
+  });
+
+  it('builds sanitized capability telemetry snapshots with stable fingerprints', async () => {
+    const skill = buildSkill({ description: 'Review local changes safely' });
+    fs.mkdirSync(skill.skillDir, { recursive: true });
+    fs.writeFileSync(skill.skillFile, '# Local review secret body\n', 'utf8');
+    const service = createService({
+      skills: [skill],
+      cron: [buildCron({ prompt: 'SECRET CRON PROMPT', description: 'Weekday report' })],
+    });
+
+    const listResult = await service.list();
+    const snapshots = buildTeamCapabilityTelemetrySnapshots(listResult.packs, {
+      reportedAt: '2026-06-18T00:00:00.000Z',
+    });
+    const laterSnapshots = buildTeamCapabilityTelemetrySnapshots(listResult.packs, {
+      reportedAt: '2026-06-18T00:10:00.000Z',
+    });
+    const personalSnapshot = snapshots.find((snapshot) => snapshot.teamName === path.basename(tmpDir));
+    const laterPersonalSnapshot = laterSnapshots.find(
+      (snapshot) => snapshot.teamName === path.basename(tmpDir)
+    );
+    const cronSnapshot = snapshots.find((snapshot) => snapshot.teamName === 'hermit');
+
+    expect(personalSnapshot).toMatchObject({
+      teamSlug: path.basename(tmpDir).toLowerCase(),
+      counts: expect.objectContaining({ skills: 1, workflows: expect.any(Number), mcpServers: 1 }),
+    });
+    expect(personalSnapshot?.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'skill',
+          id: 'local-review',
+          name: 'local-review',
+          description: 'Review local changes safely',
+        }),
+        expect.objectContaining({ kind: 'mcp', id: 'context7', name: 'context7', transport: 'stdio' }),
+      ])
+    );
+    expect(cronSnapshot?.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'cron',
+          id: 'cron-local-review',
+          name: 'Weekday report',
+          description: 'Weekday report',
+          scope: '17 9 * * 1-5',
+        }),
+      ])
+    );
+    expect(laterPersonalSnapshot?.fingerprint).toBe(personalSnapshot?.fingerprint);
+
+    const serialized = JSON.stringify(snapshots);
+    expect(serialized).not.toContain(skill.skillDir);
+    expect(serialized).not.toContain(skill.skillFile);
+    expect(serialized).not.toContain('SECRET CRON PROMPT');
+    expect(serialized).not.toContain('@upstash/context7-mcp');
+    expect(serialized).not.toContain('"config"');
   });
 
   it('imports a source folder containing pack.json', async () => {

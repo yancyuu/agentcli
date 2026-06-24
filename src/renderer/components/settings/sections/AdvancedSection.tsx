@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { PRODUCT_NAME } from '@shared/constants';
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import {
@@ -105,7 +106,8 @@ const CcConnectConfigRawDialog = ({
             </div>
           )}
           <p className="text-xs text-[var(--color-text-muted)]">
-            保存后将直接覆盖 Hermit 管理的配置文件。若修改了端口或 token，请点击”重启服务”生效。
+            保存后将直接覆盖 {PRODUCT_NAME} 管理的配置文件。若修改了端口或
+            token，请点击”重启服务”生效。
           </p>
         </div>
         <DialogFooter>
@@ -167,7 +169,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
     <div className="space-y-5">
       <SettingsSectionCard
         title="服务配置"
-        description="编辑 Hermit 运行配置，或在配置变更后重启本地服务。"
+        description={`编辑 ${PRODUCT_NAME} 运行配置，或在配置变更后重启本地服务。`}
         icon={<ServerCog className="size-3.5" />}
       >
         <div className="flex flex-wrap gap-2 px-3 py-3">
@@ -218,7 +220,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
           <img src={appIcon} alt="应用图标" className="size-10 rounded-lg" />
           <div>
             <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              Hermit
+              {PRODUCT_NAME}
             </p>
             <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
               Version {version || '...'}

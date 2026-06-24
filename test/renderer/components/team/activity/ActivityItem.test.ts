@@ -301,7 +301,7 @@ describe('ActivityItem slash command rendering', () => {
 
     expect(host.textContent).toContain('command');
     expect(host.textContent).toContain('/compact');
-    expect(host.textContent).toContain('Compact conversation with optional focus instructions.');
+    expect(host.textContent).toContain('压缩当前对话，并可附加需要保留的重点说明。');
     expect(host.textContent).toContain('keep kanban aligned');
 
     await act(async () => {

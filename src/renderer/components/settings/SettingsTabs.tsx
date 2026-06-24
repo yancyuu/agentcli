@@ -41,7 +41,7 @@ const tabs: TabConfig[] = [
     id: 'task-bus',
     label: '团队总线',
     icon: Share2,
-    description: '配置 Redis 消息总线实现跨主机团队协作，以及使用数据采集和上报。',
+    description: '配置 Redis 消息总线实现跨主机团队协作，以及本地 Usage 数据采集。',
   },
   {
     id: 'advanced',

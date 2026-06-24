@@ -52,8 +52,28 @@ describe('buildWorkflowCommandSuggestion', () => {
     expect(suggestion.searchText).toContain('/loop-scan');
   });
 
-  it('falls back to a description from the label', () => {
-    const suggestion = buildWorkflowCommandSuggestion(prompt({ description: undefined }));
-    expect(suggestion.description).toBe('运行 Loop Scan');
+  it('falls back to a useful Chinese description for known Hermit workflows', () => {
+    const suggestion = buildWorkflowCommandSuggestion(
+      prompt({ label: 'loop scan', description: undefined, safety: 'unknown' })
+    );
+    expect(suggestion.description).toBe('扫描自动化、工作树、技能、连接器、子 Agent 和状态资产。');
+    expect(suggestion.subtitle).toBe('loop scan');
+    expect(suggestion.subtitle).not.toContain('unknown');
+    expect(suggestion.searchText).not.toContain('unknown');
+  });
+
+  it('normalizes legacy workflow suffixes when resolving fallback descriptions', () => {
+    const suggestion = buildWorkflowCommandSuggestion(
+      prompt({
+        commandName: '/doctor.legacy-workflow',
+        filename: 'doctor.legacy-workflow.md',
+        label: 'doctor legacy workflow',
+        description: undefined,
+        safety: 'unknown',
+      })
+    );
+    expect(suggestion.description).toBe(
+      '诊断 Hermit、Claude Code、hermit-bridge 和 Loop runtime 健康。'
+    );
   });
 });

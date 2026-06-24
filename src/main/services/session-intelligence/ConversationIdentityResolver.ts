@@ -3,6 +3,7 @@ import {
   looksLikeChannelId,
   normalizeOptionalString,
   parseExternalPlatformSessionKey,
+  stableExternalPlatformUserId,
 } from '@main/utils/externalPlatformSessionKey';
 
 import {
@@ -79,7 +80,9 @@ export class ConversationIdentityResolver {
     const platform = stored?.platform ?? parsed.platform ?? input.platform ?? 'unknown';
     const rawUserName = stored?.userName ?? normalizeOptionalString(input.userName);
     const rawChatName = stored?.chatName ?? normalizeOptionalString(input.chatName);
-    const userId = stored?.userId ?? parsed.userId;
+    const userId =
+      stableExternalPlatformUserId(platform, stored?.userId) ??
+      stableExternalPlatformUserId(platform, parsed.userId);
     const chatId = stored?.chatId ?? parsed.chatId;
     const chatName = rawChatName && !looksLikeChannelId(rawChatName) ? rawChatName : undefined;
     const userName = rawUserName && !looksLikeChannelId(rawUserName) ? rawUserName : undefined;

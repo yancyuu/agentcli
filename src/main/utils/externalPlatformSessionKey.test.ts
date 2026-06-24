@@ -30,12 +30,23 @@ describe('parseExternalPlatformSessionKey', () => {
     }
   });
 
-  it('parses feishu chatId/userId by their id prefixes', () => {
-    const parts = parseExternalPlatformSessionKey('feishu:oc_chat1:ou_user1');
-    expect(parts).toMatchObject({
+  it('parses Feishu/Lark userId only from union ids', () => {
+    expect(parseExternalPlatformSessionKey('feishu:oc_chat1:on_user1')).toMatchObject({
       platform: 'feishu',
       chatId: 'oc_chat1',
-      userId: 'ou_user1',
+      userId: 'on_user1',
+      kind: 'external-platform',
+    });
+    expect(parseExternalPlatformSessionKey('lark:oc_chat1:union_user1')).toMatchObject({
+      platform: 'lark',
+      chatId: 'oc_chat1',
+      userId: 'union_user1',
+      kind: 'external-platform',
+    });
+    expect(parseExternalPlatformSessionKey('feishu:oc_chat1:ou_openid')).toMatchObject({
+      platform: 'feishu',
+      chatId: 'oc_chat1',
+      userId: undefined,
       kind: 'external-platform',
     });
   });

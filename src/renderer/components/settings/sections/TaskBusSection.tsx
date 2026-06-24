@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
-import { downloadTextFile } from '../../team/CcSessionsSection';
 import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
+import type {
+  CapabilityTelemetrySummary,
+  TeamCapabilityTelemetrySnapshot,
+} from '@shared/types/extensions';
 import type { TaskBusConfig } from '@shared/types/team';
 import {
+  AlertCircle,
+  Calendar,
+  Clock,
   Loader2,
+  MessageSquare,
   Radio,
   Wifi,
   WifiOff,
-  BarChart3,
-  Clock,
-  MessageSquare,
   Zap,
-  Calendar,
-  AlertCircle,
 } from 'lucide-react';
 
 interface TelemetryStatus {
@@ -43,21 +45,33 @@ interface TelemetryStatus {
   }>;
   workSecondsByDay: Record<string, number>;
   localUsers?: UsageUserRow[];
-  externalUsers?: UsageUserRow[];
+  teamCapabilitySnapshots?: TeamCapabilityTelemetrySnapshot[];
+  capabilitySummary?: CapabilityTelemetrySummary;
   unresolvedUsage?: { sessions: number; messages: number; tokensTotal: number };
 }
 
 interface UsageUserRow {
   key: string;
-  kind: 'local' | 'external-im' | 'unresolved';
+  kind: 'local' | 'unresolved';
   identity: {
     platform: string;
     type: 'person' | 'group' | 'unknown';
     displayName: string;
+    userId?: string;
+    userName?: string;
+    chatId?: string;
+    chatName?: string;
     confidence: string;
   };
+  teamSlug?: string;
+  teamName?: string;
   teamDisplayName?: string;
   projectName?: string;
+  bindProject?: string;
+  workDir?: string;
+  agentType?: string;
+  model?: string;
+  provider?: string;
   sessions: number;
   messages: number;
   tokensTotal: number;
@@ -76,6 +90,29 @@ function formatDuration(secs: number): string {
   if (secs < 3600) return `${Math.round(secs / 60)}m`;
   return `${(secs / 3600).toFixed(1)}h`;
 }
+
+type CapabilityAsset = TeamCapabilityTelemetrySnapshot['assets'][number];
+type CapabilityAssetKind = CapabilityAsset['kind'];
+
+const CAPABILITY_KIND_LABELS: Record<CapabilityAssetKind, string> = {
+  command: 'Commands',
+  skill: 'Skills',
+  workflow: 'Workflows',
+  cron: 'Cron',
+  mcp: 'MCP',
+};
+const CAPABILITY_KIND_ORDER: CapabilityAssetKind[] = [
+  'skill',
+  'workflow',
+  'cron',
+  'mcp',
+  'command',
+];
+
+type BusSettingsPatch = Partial<{
+  enabled: boolean;
+  collaborationEnabled: boolean;
+}>;
 
 function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Element {
   const maxHourly = Math.max(...status.hourly, 1);
@@ -176,40 +213,11 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
         </div>
       )}
 
-      {status.projects.length > 0 && (
-        <div>
-          <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">项目吞吐</div>
-          {/* Header row */}
-          <div className="grid grid-cols-[minmax(180px,1fr)_88px_96px] items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
-            <span>名称</span>
-            <span className="text-right">Messages</span>
-            <span className="text-right">Total Tokens</span>
-          </div>
-          <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
-            {status.projects
-              .filter((proj) => !proj.deletedAt)
-              .map((proj) => (
-                <div
-                  key={proj.cwd || proj.displayName}
-                  className="grid grid-cols-[minmax(180px,1fr)_88px_96px] items-center gap-3 text-xs"
-                >
-                  <span className="break-words text-[var(--color-text-secondary)]" title={proj.cwd}>
-                    {proj.displayName || proj.cwd.split('/').pop() || proj.cwd}
-                  </span>
-                  <span className="text-right text-[var(--color-text-muted)]">
-                    {formatNum(proj.messages)}
-                  </span>
-                  <span className="text-right text-[var(--color-text-muted)]">
-                    {formatNum(proj.tokensTotal)}
-                  </span>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-
-      <UsageUserTable title="本地会话用量" rows={status.localUsers ?? []} />
-      <UsageUserTable title="外部 IM 用户用量" rows={status.externalUsers ?? []} />
+      <UsageUserTable title="本地生成用量（source=local）" rows={status.localUsers ?? []} />
+      <CapabilitySnapshotTable
+        summary={status.capabilitySummary}
+        snapshots={status.teamCapabilitySnapshots ?? []}
+      />
       {status.unresolvedUsage && status.unresolvedUsage.sessions > 0 && (
         <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
           未映射会话：{status.unresolvedUsage.sessions} sessions ·{' '}
@@ -222,43 +230,262 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
 }
 
 function UsageUserTable({
-  title,
   rows,
+  title,
 }: {
   title: string;
   rows: UsageUserRow[];
 }): React.JSX.Element {
-  if (rows.length === 0) return <></>;
   return (
     <div>
       <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">{title}</div>
-      <div className="grid grid-cols-[minmax(160px,1fr)_72px_88px_96px] items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
-        <span>用户</span>
-        <span>平台</span>
-        <span className="text-right">Messages</span>
-        <span className="text-right">Total Tokens</span>
-      </div>
-      <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
-        {rows.map((row) => (
-          <div
-            key={row.key}
-            className="grid grid-cols-[minmax(160px,1fr)_72px_88px_96px] items-center gap-3 text-xs"
-          >
+      {rows.length === 0 ? (
+        <div className="rounded bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+          暂无数据
+        </div>
+      ) : (
+        <UsageUserRows rows={rows} />
+      )}
+    </div>
+  );
+}
+
+function getUsageProjectName(row: UsageUserRow): string {
+  return row.projectName || row.teamDisplayName || row.teamName || row.identity.displayName;
+}
+
+function normalizeUsageProjectPath(value: string | undefined): string {
+  return String(value || '')
+    .trim()
+    .replace(/\\+/g, '/')
+    .replace(/\/+$/g, '');
+}
+
+function getUsageProjectPath(row: UsageUserRow): string {
+  return normalizeUsageProjectPath(
+    row.workDir || row.bindProject || row.projectName || row.identity.confidence
+  );
+}
+
+function mergeUsageProjectName(existing: UsageUserRow, row: UsageUserRow): string {
+  const existingName = getUsageProjectName(existing);
+  const nextName = getUsageProjectName(row);
+  return existingName.length >= nextName.length ? existingName : nextName;
+}
+
+function aggregateUsageRowsByProject(rows: UsageUserRow[]): UsageUserRow[] {
+  const grouped = new Map<string, UsageUserRow>();
+
+  for (const row of rows) {
+    const projectPath = getUsageProjectPath(row);
+    const projectName = getUsageProjectName(row);
+    const key = projectPath || projectName;
+    const existing = grouped.get(key);
+
+    if (!existing) {
+      grouped.set(key, {
+        ...row,
+        key,
+        identity: {
+          ...row.identity,
+          displayName: projectName,
+        },
+        workDir: projectPath,
+      });
+      continue;
+    }
+
+    const displayName = mergeUsageProjectName(existing, row);
+    grouped.set(key, {
+      ...existing,
+      identity: {
+        ...existing.identity,
+        displayName,
+      },
+      sessions: existing.sessions + row.sessions,
+      messages: existing.messages + row.messages,
+      tokensTotal: existing.tokensTotal + row.tokensTotal,
+      lastActiveAt:
+        !existing.lastActiveAt || (row.lastActiveAt && row.lastActiveAt > existing.lastActiveAt)
+          ? row.lastActiveAt
+          : existing.lastActiveAt,
+    });
+  }
+
+  return Array.from(grouped.values()).sort((a, b) => b.tokensTotal - a.tokensTotal);
+}
+
+function UsageUserRows({ rows }: { rows: UsageUserRow[] }): React.JSX.Element {
+  const projectRows = aggregateUsageRowsByProject(rows);
+
+  return (
+    <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
+      {projectRows.map((row) => (
+        <div
+          key={row.key}
+          className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2.5 py-2 text-xs"
+        >
+          <div className="flex items-start justify-between gap-3">
             <span className="min-w-0 text-[var(--color-text-secondary)]" title={row.key}>
-              <span className="block truncate">{row.identity.displayName}</span>
+              <span className="block truncate font-medium">{row.identity.displayName}</span>
               <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
-                {row.teamDisplayName || row.projectName || row.identity.confidence}
+                {row.workDir ||
+                  row.projectName ||
+                  row.teamDisplayName ||
+                  row.teamName ||
+                  row.identity.confidence}
+              </span>
+              {row.identity.chatName && (
+                <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
+                  群：{row.identity.chatName}
+                </span>
+              )}
+            </span>
+            <span className="shrink-0 text-right text-[10px] text-[var(--color-text-muted)]">
+              <span className="block uppercase">{row.identity.platform}</span>
+              <span className="block">
+                {formatNum(row.messages)} msg · {formatNum(row.tokensTotal)} tokens
               </span>
             </span>
-            <span className="truncate text-[var(--color-text-muted)]">{row.identity.platform}</span>
-            <span className="text-right text-[var(--color-text-muted)]">
-              {formatNum(row.messages)}
-            </span>
-            <span className="text-right text-[var(--color-text-muted)]">
-              {formatNum(row.tokensTotal)}
-            </span>
           </div>
-        ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CapabilityCountPills({
+  counts,
+}: {
+  counts: TeamCapabilityTelemetrySnapshot['counts'];
+}): React.JSX.Element {
+  const items = [
+    ['Skills', counts.skills],
+    ['Workflows', counts.workflows],
+    ['Cron', counts.cron],
+    ['MCP', counts.mcpServers],
+    ['Commands', counts.commands],
+  ] as const;
+  return (
+    <span className="flex flex-wrap justify-end gap-1">
+      {items.map(([label, value]) => (
+        <span
+          key={label}
+          className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+        >
+          {label} {value}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function CapabilitySnapshotTable({
+  snapshots,
+  summary,
+}: {
+  summary?: CapabilityTelemetrySummary;
+  snapshots: TeamCapabilityTelemetrySnapshot[];
+}): React.JSX.Element {
+  const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
+  const [expandedKinds, setExpandedKinds] = useState<Record<string, boolean>>({});
+  if (snapshots.length === 0) return <></>;
+
+  const counts = summary ?? {
+    teams: snapshots.length,
+    commands: snapshots.reduce((total, item) => total + item.counts.commands, 0),
+    skills: snapshots.reduce((total, item) => total + item.counts.skills, 0),
+    workflows: snapshots.reduce((total, item) => total + item.counts.workflows, 0),
+    cron: snapshots.reduce((total, item) => total + item.counts.cron, 0),
+    mcpServers: snapshots.reduce((total, item) => total + item.counts.mcpServers, 0),
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between text-xs font-medium text-[var(--color-text-muted)]">
+        <span>数字员工能力资产</span>
+        <span className="text-[10px]">
+          {formatNum(counts.teams)} agents · {formatNum(counts.skills)} skills ·{' '}
+          {formatNum(counts.workflows)} workflows · {formatNum(counts.cron)} cron ·{' '}
+          {formatNum(counts.mcpServers)} MCP
+        </span>
+      </div>
+      <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
+        {snapshots.map((snapshot) => {
+          const teamKey = snapshot.teamSlug || snapshot.teamName;
+          const isTeamExpanded = expandedTeams[teamKey] ?? false;
+          return (
+            <div key={teamKey} className="rounded bg-[var(--color-bg)] p-2">
+              <button
+                type="button"
+                className="flex w-full items-start justify-between gap-3 text-left text-xs"
+                onClick={() =>
+                  setExpandedTeams((prev) => ({ ...prev, [teamKey]: !isTeamExpanded }))
+                }
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-[var(--color-text-secondary)]">
+                    {snapshot.teamDisplayName || snapshot.teamName}
+                  </span>
+                  <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
+                    {isTeamExpanded ? '收起能力明细' : '展开查看 Skills / Workflows / Cron / MCP'}
+                  </span>
+                </span>
+                <CapabilityCountPills counts={snapshot.counts} />
+              </button>
+              {isTeamExpanded && (
+                <div className="mt-2 space-y-1 border-t border-[var(--color-border-subtle)] pt-2">
+                  {CAPABILITY_KIND_ORDER.map((kind) => {
+                    const assets = snapshot.assets.filter((asset) => asset.kind === kind);
+                    if (assets.length === 0) return null;
+                    const kindKey = `${teamKey}:${kind}`;
+                    const isKindExpanded = expandedKinds[kindKey] ?? false;
+                    return (
+                      <div
+                        key={kind}
+                        className="rounded border border-[var(--color-border-subtle)] p-2 text-[10px]"
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-2 text-left"
+                          onClick={() =>
+                            setExpandedKinds((prev) => ({ ...prev, [kindKey]: !isKindExpanded }))
+                          }
+                        >
+                          <span className="font-medium text-[var(--color-text-secondary)]">
+                            {CAPABILITY_KIND_LABELS[kind]}
+                          </span>
+                          <span className="text-[var(--color-text-muted)]">
+                            {assets.length} · {isKindExpanded ? '收起' : '展开'}
+                          </span>
+                        </button>
+                        {isKindExpanded && (
+                          <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                            {assets.map((asset) => (
+                              <div
+                                key={asset.id}
+                                className="rounded bg-[var(--color-surface-raised)] px-2 py-1"
+                              >
+                                <div className="truncate text-[var(--color-text-secondary)]">
+                                  {asset.name}
+                                </div>
+                                {asset.description && (
+                                  <div className="truncate text-[var(--color-text-muted)]">
+                                    {asset.description}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -293,13 +520,12 @@ export function TaskBusSection(): React.JSX.Element {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  const [collectionEnabled, setCollectionEnabled] = useState(false);
-  const [uploadEnabled, setUploadEnabled] = useState(true);
   const [collaborationEnabled, setCollaborationEnabled] = useState(false);
-  const [telemetryPlatform, setTelemetryPlatform] = useState('claudecode');
-  const [scanning, setScanning] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [telemetryPlatform, setTelemetryPlatform] = useState<'claudecode' | 'codex'>('claudecode');
+  const [telemetryConfig, setTelemetryConfig] = useState<TaskBusConfig['telemetry'] | undefined>(
+    undefined
+  );
   const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
 
   useEffect(() => {
@@ -313,8 +539,7 @@ export function TaskBusSection(): React.JSX.Element {
           setPassword(data.redis.password ?? '');
         }
         if (data.telemetry) {
-          setCollectionEnabled(data.telemetry.enabled);
-          setUploadEnabled(data.telemetry.uploadEnabled ?? true);
+          setTelemetryEnabled(data.telemetry.enabled);
           setTelemetryPlatform(data.telemetry.platform ?? 'claudecode');
         }
         setCollaborationEnabled(data.collaboration ?? false);
@@ -322,45 +547,22 @@ export function TaskBusSection(): React.JSX.Element {
       .catch(() => {})
       .finally(() => setLoading(false));
 
-    // Restore telemetry status on mount. Local data collection does not depend on Redis/task bus.
     fetch('/api/telemetry/status')
       .then((r) => r.json())
-      .then((s: TelemetryStatus) => {
-        setTelemetryStatus(s);
-        setConnected(s.connected === true);
+      .then((status: TelemetryStatus) => {
+        setTelemetryStatus(status);
+        setConnected(status.connected === true);
       })
       .catch(() => {});
+  }, []);
 
-    const poll = setInterval(() => {
-      if (collectionEnabled) {
-        fetch('/api/telemetry/status')
-          .then((r) => r.json())
-          .then((s: TelemetryStatus) => {
-            setTelemetryStatus(s);
-            setConnected(s.connected === true);
-          })
-          .catch(() => {});
-      }
-    }, 30000);
-    return () => clearInterval(poll);
-  }, [enabled, collectionEnabled]);
-
-  const buildConfig = (
-    overrides: Partial<{
-      enabled: boolean;
-      collectionEnabled: boolean;
-      uploadEnabled: boolean;
-      collaborationEnabled: boolean;
-      telemetryPlatform: string;
-    }> = {}
-  ): TaskBusConfig => ({
+  const buildConfig = (overrides: BusSettingsPatch = {}): TaskBusConfig => ({
     enabled: overrides.enabled ?? enabled,
     redis: { host, port, password: password || undefined },
     collaboration: overrides.collaborationEnabled ?? collaborationEnabled,
     telemetry: {
-      enabled: overrides.collectionEnabled ?? collectionEnabled,
-      uploadEnabled: overrides.uploadEnabled ?? uploadEnabled,
-      platform: (overrides.telemetryPlatform ?? telemetryPlatform) as 'claudecode',
+      enabled: telemetryEnabled,
+      platform: telemetryPlatform,
     },
   });
 
@@ -400,102 +602,6 @@ export function TaskBusSection(): React.JSX.Element {
       .catch(() => setMessage('操作失败'));
   };
 
-  const toggleCollection = async (value: boolean) => {
-    setCollectionEnabled(value);
-    const config = buildConfig({ collectionEnabled: value });
-    try {
-      await fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      if (value) triggerScan();
-      else setTelemetryStatus(null);
-    } catch {
-      setCollectionEnabled(!value);
-      setMessage('操作失败');
-    }
-  };
-
-  const toggleUpload = async (value: boolean) => {
-    if (!value) {
-      setUploadEnabled(false);
-      const config = buildConfig({ uploadEnabled: false });
-      fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      }).catch(() => setMessage('操作失败'));
-      return;
-    }
-
-    // Upload requires Redis
-    let redisReady = connected;
-    if (!redisReady) {
-      setMessage('正在测试 Redis 连接...');
-      redisReady = await testRedisConnection();
-      if (!redisReady) {
-        setUploadEnabled(false);
-        setMessage('Redis 连接失败，无法启用 IM 用量上报');
-        return;
-      }
-    }
-
-    setUploadEnabled(true);
-    setMessage(null);
-    const config = buildConfig({ uploadEnabled: true });
-    try {
-      await fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-    } catch {
-      setUploadEnabled(false);
-      setMessage('操作失败');
-    }
-  };
-
-  const triggerScan = () => {
-    if (scanning) return;
-    setScanning(true);
-    fetch('/api/telemetry/scan', { method: 'POST' })
-      .then((r) => r.json())
-      .then((result: TelemetryStatus & { ok?: boolean }) => {
-        if ('sessions' in result) {
-          setTelemetryStatus(result);
-        }
-      })
-      .catch(() => setMessage('采集失败，请检查本地 Claude Code 会话目录'))
-      .finally(() => setScanning(false));
-  };
-
-  const exportTelemetry = () => {
-    if (exporting) return;
-    setExporting(true);
-    fetch('/api/telemetry/export?format=csv')
-      .then((r) => r.json())
-      .then((payload: { filename?: string; mimeType?: string; content?: string }) => {
-        if (payload.filename && payload.mimeType && payload.content !== undefined) {
-          downloadTextFile(payload.content, payload.filename, payload.mimeType);
-          setMessage('采集数据已导出');
-        } else {
-          setMessage('导出失败：没有可导出的数据');
-        }
-      })
-      .catch(() => setMessage('导出失败，请稍后重试'))
-      .finally(() => setExporting(false));
-  };
-
-  const saveTelemetryPlatform = (nextPlatform = telemetryPlatform) => {
-    const config = buildConfig({ telemetryPlatform: nextPlatform });
-    fetch('/api/settings/task-bus', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    }).catch(() => {});
-  };
-
   const toggleCollaboration = (value: boolean) => {
     setCollaborationEnabled(value);
     const config = buildConfig({ collaborationEnabled: value });
@@ -518,88 +624,34 @@ export function TaskBusSection(): React.JSX.Element {
 
   return (
     <div>
-      <SettingsSectionHeader title="本地数据采集" icon={<BarChart3 size={12} />} />
-
-      <SettingRow
-        label="数据采集"
-        description="扫描本机 ~/.claude/projects 会话文件，采集 Loop 使用指标；不需要 Redis，也不会上传对话内容"
-      >
-        <div className="flex items-center gap-2">
-          <select
-            value={telemetryPlatform}
-            onChange={(e) => {
-              const nextPlatform = e.target.value;
-              setTelemetryPlatform(nextPlatform);
-              saveTelemetryPlatform(nextPlatform);
-            }}
-            className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent-border)]"
-          >
-            <option value="claudecode">Claude Code</option>
-          </select>
-          <SettingsToggle
-            enabled={collectionEnabled}
-            onChange={(value) => void toggleCollection(value)}
-          />
-        </div>
-      </SettingRow>
-
-      <div
-        className="flex items-center gap-3 border-b py-3"
-        style={{ borderColor: 'var(--color-border-subtle)' }}
-      >
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={triggerScan}
-          disabled={scanning || !collectionEnabled}
-          className="gap-1.5"
-        >
-          {scanning ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
-          {scanning ? '采集中...' : '立即采集'}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={exportTelemetry}
-          disabled={exporting || !telemetryStatus}
-          className="gap-1.5"
-        >
-          {exporting ? <Loader2 size={12} className="animate-spin" /> : <BarChart3 size={12} />}
-          导出 CSV
-        </Button>
-        <span className="text-[10px] text-[var(--color-text-muted)]">
-          本地扫描，不依赖团队总线或 Redis。{!collectionEnabled ? '开启数据采集后可手动刷新。' : ''}
-        </span>
-      </div>
-
+      <SettingsSectionHeader title="Usage 监测" icon={<Clock size={12} />} />
       <div className="py-3">
         {telemetryStatus ? (
           <UsageDashboard status={telemetryStatus} />
         ) : (
           <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4 text-xs text-[var(--color-text-muted)]">
-            Loop 使用概览加载中；开启数据采集后会扫描本机 Claude Code 会话文件。
+            Usage 监测概览加载中。
           </div>
         )}
       </div>
 
-      <SettingsSectionHeader title="团队总线" icon={<Radio size={12} />} />
+      <SettingsSectionHeader title="团队总线（本地 / 自托管）" icon={<Radio size={12} />} />
 
       <SettingRow
         label="启用团队总线"
-        description="用于 Redis 连接、IM 用量上报和跨团队协作；本地数据采集不依赖它"
+        description="用于本地/自托管 Redis 和跨团队协作；Usage 统计不依赖 Redis"
       >
         <SettingsToggle enabled={enabled} onChange={toggle} />
       </SettingRow>
 
       {enabled && (
         <>
-          {/* Redis 配置 - 必填 */}
           <div className="border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
             <div className="flex items-center gap-2 px-1 pb-2">
               <span className="text-sm font-medium text-red-500">*</span>
               <span className="text-sm font-medium">Redis</span>
               <span className="text-xs text-[var(--color-text-muted)]">
-                （上报和跨团队协作必填）
+                （仅用于本地/自托管协作）
               </span>
               <div className="ml-auto flex items-center gap-2">
                 {connected ? (
@@ -677,31 +729,10 @@ export function TaskBusSection(): React.JSX.Element {
             </div>
           </div>
 
-          {/* IM 用量上报 - 依赖 Redis，最下面 */}
-          <div>
-            <SettingRow
-              label="IM 用量上报"
-              description="将飞书等 IM 桥接的每轮 token 用量上报到 Redis，供团队看板统计；不会上传 IM 消息正文，关闭后只保留本地采集"
-            >
-              <SettingsToggle
-                enabled={uploadEnabled}
-                onChange={(value) => void toggleUpload(value)}
-              />
-            </SettingRow>
-
-            {!connected && (
-              <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
-                <AlertCircle size={12} />
-                <span>IM 用量上报需要 Redis；请先配置并测试 Redis 连接。</span>
-              </div>
-            )}
-          </div>
-
-          {/* 分布式团队协作 - 最下面 */}
           <div>
             <SettingRow
               label="分布式团队协作"
-              description="开启团队总线基础能力，供后续任务池和协作视图使用；不再提供手动派单入口"
+              description="开启本地/自托管团队总线基础能力，供后续任务池和协作视图使用；"
             >
               <SettingsToggle
                 enabled={collaborationEnabled}
@@ -712,7 +743,7 @@ export function TaskBusSection(): React.JSX.Element {
             {!connected && collaborationEnabled && (
               <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
                 <AlertCircle size={12} />
-                <span>跨团队协作需要 Redis 连接。</span>
+                <span>跨团队协作需要本地/自托管 Redis 连接。</span>
               </div>
             )}
           </div>

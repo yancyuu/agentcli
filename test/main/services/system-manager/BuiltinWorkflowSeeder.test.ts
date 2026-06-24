@@ -26,16 +26,32 @@ afterEach(() => {
 });
 
 describe('BuiltinWorkflowSeeder', () => {
-  it('seeds built-in workflows into ~/.hermit/.claude/workflow/', async () => {
+  it('seeds every bundled workflow file into ~/.hermit/.claude/workflow/', async () => {
+    const bundledDir = path.resolve(process.cwd(), 'src/main/services/system-manager/builtin-workflows');
+    const bundledFiles = fs
+      .readdirSync(bundledDir)
+      .filter((name) => name.endsWith('.md') || name.endsWith('.js'))
+      .sort();
+
     await ensureGlobalWorkflows();
     const scanDir = getHermitWorkflowScanDir();
 
     const workflows = await scanHermitWorkflows(scanDir);
-    expect(workflows.length).toBeGreaterThan(0);
-    expect(workflows.some((workflow) => workflow.id === 'daily-workflow-extraction')).toBe(true);
-    expect(fs.readFileSync(path.join(scanDir, 'daily-workflow-extraction.md'), 'utf8')).toContain(
-      'hermit-builtin-workflow:v2-loop'
-    );
+    expect(workflows.map((workflow) => workflow.filename).sort()).toEqual(bundledFiles);
+    for (const filename of bundledFiles) {
+      expect(fs.readFileSync(path.join(scanDir, filename), 'utf8')).toContain(
+        'hermit-builtin-workflow:v2-loop'
+      );
+    }
+    for (const filename of bundledFiles.filter((name) => name.endsWith('.js'))) {
+      expect(workflows).toContainEqual(
+        expect.objectContaining({
+          id: path.basename(filename, '.js'),
+          filename,
+          content: expect.stringContaining('export const meta'),
+        })
+      );
+    }
   });
 
   it('seeds the create-team workflow that provisions a team via the HTTP API', async () => {

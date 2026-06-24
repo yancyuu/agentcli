@@ -20,11 +20,40 @@ export function isExternalPlatformName(value: string | undefined): boolean {
   return Boolean(value && EXTERNAL_PLATFORM_RE.test(value));
 }
 
+export function isFeishuLikePlatform(value: string | undefined): boolean {
+  const normalized = value?.toLowerCase();
+  return normalized === 'feishu' || normalized === 'lark';
+}
+
+export function isFeishuUnionUserId(value: string | undefined): boolean {
+  return Boolean(value && (/^on_/i.test(value) || /^union/i.test(value)));
+}
+
+export function stableExternalPlatformUserId(
+  platform: string | undefined,
+  userId: string | undefined
+): string | undefined {
+  const normalized = normalizeOptionalString(userId);
+  if (!normalized) return undefined;
+  if (isFeishuLikePlatform(platform))
+    return isFeishuUnionUserId(normalized) ? normalized : undefined;
+  return normalized;
+}
+
+function userIdFromSessionIds(platform: string | undefined, ids: string[]): string | undefined {
+  if (isFeishuLikePlatform(platform)) {
+    return ids.find((id) => isFeishuUnionUserId(id));
+  }
+  return (
+    ids.find((id) => /^(ou|on|union|user|u)_/i.test(id)) ?? (ids.length >= 2 ? ids[1] : undefined)
+  );
+}
+
 export function parseExternalPlatformSessionKey(
   sessionKey: string
 ): ExternalPlatformSessionKeyParts {
   const [rawPlatform, ...ids] = sessionKey.split(':').filter(Boolean);
-  const platform = normalizeOptionalString(rawPlatform);
+  const platform = normalizeOptionalString(rawPlatform)?.toLowerCase();
   if (platform === 'hermit') {
     return { platform, kind: 'hermit-local' };
   }
@@ -32,8 +61,7 @@ export function parseExternalPlatformSessionKey(
   const chatId =
     ids.find((id) => /^(oc|chat|group|room|c)_/i.test(id)) ??
     (ids.length >= 2 ? ids[0] : undefined);
-  const userId =
-    ids.find((id) => /^(ou|on|union|user|u)_/i.test(id)) ?? (ids.length >= 2 ? ids[1] : undefined);
+  const userId = userIdFromSessionIds(platform, ids);
 
   return {
     platform,

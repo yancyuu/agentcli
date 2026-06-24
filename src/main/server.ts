@@ -14,7 +14,7 @@
  *   pnpm dev                # 后端 + vite dev(前端 5174,代理 /api 到 5680)
  *
  * 环境变量:
- *   HOST                       默认 127.0.0.1
+ *   HOST                       默认 0.0.0.0
  *   PORT                       默认 5680
  *   HERMIT_HOME                默认 ~/.hermit
  *   CC_CONNECT_BASE_URL        默认 http://127.0.0.1:9820
@@ -52,10 +52,8 @@ import type {
   HermitBridgeProjectPlatform,
   HermitBridgeSessionDetail,
   HermitBridgeSessionListItem,
-  HermitBridgeUsageMessage,
 } from '../shared/types/hermitBridge';
 import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
-import { mapUsageEventToReportInput } from './services/hermitBridge/usageEventMapper';
 import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
 import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
 import {
@@ -107,20 +105,32 @@ import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import type { TeamManifest } from './services/team-management/TeamWorkspaceService';
 import { UpdateService } from './services/UpdateService';
 import {
+  configureUsageTelemetry,
   startTelemetry,
   stopTelemetry,
   triggerScan,
   getTelemetryStatus,
+  getTelemetryRuntimeStatus,
 } from './services/session-intelligence/UsageTelemetryService';
+import {
+  getUsageTelemetryWorkerPaths,
+  isUsageTelemetryWorkerPidRunning,
+  readUsageTelemetryWorkerStatus,
+} from './telemetry/worker';
+import { buildTeamCapabilityTelemetrySnapshots } from './services/extensions/capability-packs/CapabilityPackLoaderService';
 import {
   ConversationTelemetryService,
   shouldIncludeContent,
 } from './services/session-intelligence/ConversationTelemetryService';
-import { ExternalImUsageReporter } from './services/session-intelligence/ExternalImUsageReporter';
 import type {
   UserUsageTelemetryRow,
+  UsageTelemetryStatus,
   UsageUnresolvedSummary,
 } from './services/session-intelligence/usageTypes';
+import type {
+  CapabilityTelemetrySummary,
+  TeamCapabilityTelemetrySnapshot,
+} from '@shared/types/extensions';
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
 import {
   filterHiddenTeamSessions,
@@ -142,13 +152,12 @@ import {
   isExternalPlatformSessionKey,
   resolveExternalPlatformSessionTeamSlug,
 } from './utils/externalPlatformSessionRouting';
-import { isImUsageUploadEnabled } from './utils/imUsageGate';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
-const HOST = process.env.HOST ?? '127.0.0.1';
+const HOST = process.env.HOST ?? '0.0.0.0';
 const PORT = Number.parseInt(process.env.PORT ?? '5680', 10);
 const STATIC_DIR = process.env.STATIC_DIR ?? path.resolve(REPO_ROOT, 'dist-renderer');
 const HARNESS_BRIDGE_CONNECT_TIMEOUT_MS = 10_000;
@@ -575,10 +584,8 @@ const conversationTelemetry = new ConversationTelemetryService({
   listTeams: () => svc.listTeams(),
   readTeamManifest: (teamName) => svc.readTeamManifest(teamName),
 });
+configureUsageTelemetry();
 const localSessionScanner = new LocalSessionScanner();
-const externalImUsageReporter = new ExternalImUsageReporter({
-  getRedisConfig: getImUplinkRedisConfig,
-});
 const loopAssetsScanner = new LoopAssetsScannerService();
 const TEAM_STATS_CACHE_TTL_MS = 30_000;
 const teamStatsCache = new Map<
@@ -679,14 +686,28 @@ async function readSavedTaskBusConfig(): Promise<TaskBusConfig | null> {
   }
 }
 
+async function isExternalTelemetryWorkerRunning(): Promise<boolean> {
+  try {
+    const pidRaw = await fs.readFile(getUsageTelemetryWorkerPaths(HERMIT_HOME).pidPath, 'utf-8');
+    const pid = Number.parseInt(pidRaw.trim(), 10);
+    return isUsageTelemetryWorkerPidRunning(pid);
+  } catch {
+    return false;
+  }
+}
+
 async function initializeTaskBusFromSettings(): Promise<void> {
   const config = await readSavedTaskBusConfig();
   if (!config) return;
 
   if (config.telemetry?.enabled) {
-    await startTelemetry(config).catch((err) => {
-      app.log.warn({ err }, 'telemetry startup failed');
-    });
+    if (await isExternalTelemetryWorkerRunning()) {
+      app.log.info('usage telemetry worker already running — server telemetry interval skipped');
+    } else {
+      await startTelemetry(config).catch((err) => {
+        app.log.warn({ err }, 'telemetry startup failed');
+      });
+    }
   }
 
   if (!config.enabled) {
@@ -1014,41 +1035,6 @@ directCliManager.on('event', (event: DirectCliEvent) => {
     toolInput: 'toolInput' in event ? event.toolInput : undefined,
     from: route.from,
   });
-});
-
-/**
- * Consume a cc-connect per-turn usage event → Redis. The bridge registers with
- * observe_usage:true, so it fans out token counts for every platform turn
- * (Feishu, ...). The event carries NO message content; identity is parsed from
- * session_key inside reportTurn, so no project/session lookup is needed here.
- * reportTurn applies the team-bus + telemetry gate itself.
- */
-function reportBridgeUsageEvent(msg: HermitBridgeUsageMessage): void {
-  const input = mapUsageEventToReportInput(msg);
-  if (!input) return;
-  void externalImUsageReporter
-    .reportTurn(input)
-    .then((result) => {
-      if (result.reported) {
-        app.log.info({ sessionKey: msg.session_key }, 'external IM usage reported');
-      } else if (
-        result.reason &&
-        result.reason !== 'not-external-im' &&
-        result.reason !== 'duplicate'
-      ) {
-        app.log.warn(
-          { reason: result.reason, sessionKey: msg.session_key },
-          'external IM usage report skipped'
-        );
-      }
-    })
-    .catch((err) => {
-      app.log.warn({ err, sessionKey: msg.session_key }, 'bridge usage report failed');
-    });
-}
-
-bridge.on('usage', (msg) => {
-  reportBridgeUsageEvent(msg);
 });
 
 bridge.on('reply', (msg) => {
@@ -6227,7 +6213,7 @@ app.post<{
 
 // GET /api/settings/task-bus → full config including telemetry
 app.get('/api/settings/task-bus', async () => {
-  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  const configPath = HERMIT_SETTINGS_FILE;
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const settings = JSON.parse(raw);
@@ -6235,7 +6221,7 @@ app.get('/api/settings/task-bus', async () => {
       settings.taskBus ?? {
         enabled: false,
         redis: { host: '127.0.0.1', port: 6379 },
-        telemetry: { enabled: false, uploadEnabled: true, platform: 'claudecode' },
+        telemetry: { enabled: false, platform: 'claudecode' },
       }
     );
   } catch {
@@ -6254,7 +6240,7 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
       ? (request.body as unknown as { taskBus: TaskBusConfig }).taskBus
       : request.body
   ) as TaskBusConfig;
-  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  const configPath = HERMIT_SETTINGS_FILE;
   let settings: Record<string, unknown> = {};
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
@@ -6266,9 +6252,14 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify(settings, null, 2));
 
-  // Sync telemetry service
+  // Sync telemetry service. The lightweight usage worker owns scans when active;
+  // avoid starting a duplicate Web-bound telemetry interval.
   if (config.telemetry?.enabled) {
-    await startTelemetry(config);
+    if (await isExternalTelemetryWorkerRunning()) {
+      await stopTelemetry();
+    } else {
+      await startTelemetry(config);
+    }
   } else {
     await stopTelemetry();
   }
@@ -6349,6 +6340,16 @@ type TelemetryProjectRow = {
 type TelemetryStatusShape = {
   ok?: boolean;
   connected: boolean;
+  scan?: ReturnType<typeof getTelemetryRuntimeStatus>;
+  worker?: {
+    running: boolean;
+    state?: string;
+    pid?: number | null;
+    telemetryEnabled?: boolean;
+    lastScan?: string | null;
+    updatedAt?: string | null;
+    lastError?: string | null;
+  };
   lastScan: string | null;
   sessions: number;
   messages: number;
@@ -6361,13 +6362,15 @@ type TelemetryStatusShape = {
   hourly: number[];
   projects: TelemetryProjectRow[];
   workSecondsByDay: Record<string, number>;
+  daily?: UsageTelemetryStatus['daily'];
   localUsers?: UserUsageTelemetryRow[];
-  externalUsers?: UserUsageTelemetryRow[];
+  teamCapabilitySnapshots?: TeamCapabilityTelemetrySnapshot[];
+  capabilitySummary?: CapabilityTelemetrySummary;
   unresolvedUsage?: UsageUnresolvedSummary;
 };
 
 async function readTaskBusSettings(): Promise<TaskBusConfig> {
-  const configPath = path.join(os.homedir(), '.hermit', 'settings.json');
+  const configPath = HERMIT_SETTINGS_FILE;
   let settings: Record<string, unknown> = {};
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
@@ -6378,20 +6381,63 @@ async function readTaskBusSettings(): Promise<TaskBusConfig> {
   return (settings.taskBus ?? {}) as TaskBusConfig;
 }
 
-/**
- * IM "digital employee" usage is reported to the team-bus Redis only when the
- * operator has enabled the team bus (this box is part of a distributed Hermit
- * fleet — Redis itself is the collaboration bus) AND turned on usage reporting.
- * No secret gate: the bus being on already means usage uplink is just another
- * message on the shared bus. Local JSONL scans are never routed through here.
- */
-async function getImUplinkRedisConfig(): Promise<TaskBusConfig['redis'] | null> {
-  const taskBus = await readTaskBusSettings();
-  // All three gates (bus on + telemetry on + IM-usage upload opt-in) must be on.
-  // This single choke point feeds both the report pre-check and the reporter's
-  // own getRedisConfig, so every switch takes effect everywhere reporting runs.
-  if (!isImUsageUploadEnabled(taskBus)) return null;
-  return taskBus.redis ?? null;
+const CAPABILITY_REPORT_TTL_MS = 10 * 60 * 1000;
+let capabilityReportCache: {
+  expiresAt: number;
+  promise?: Promise<TeamCapabilityTelemetrySnapshot[]>;
+  value: TeamCapabilityTelemetrySnapshot[];
+} | null = null;
+
+function summarizeCapabilities(
+  snapshots: TeamCapabilityTelemetrySnapshot[]
+): CapabilityTelemetrySummary {
+  const summary: CapabilityTelemetrySummary = {
+    teams: 0,
+    commands: 0,
+    skills: 0,
+    workflows: 0,
+    cron: 0,
+    mcpServers: 0,
+  };
+  for (const snapshot of snapshots) {
+    summary.teams += 1;
+    summary.commands += snapshot.counts.commands;
+    summary.skills += snapshot.counts.skills;
+    summary.workflows += snapshot.counts.workflows;
+    summary.cron += snapshot.counts.cron;
+    summary.mcpServers += snapshot.counts.mcpServers;
+    if (!summary.lastReportedAt || summary.lastReportedAt < snapshot.reportedAt) {
+      summary.lastReportedAt = snapshot.reportedAt;
+    }
+  }
+  return summary;
+}
+
+async function getCapabilityTelemetrySnapshots(): Promise<TeamCapabilityTelemetrySnapshot[]> {
+  const now = Date.now();
+  if (capabilityReportCache?.value && capabilityReportCache.expiresAt > now) {
+    return capabilityReportCache.value;
+  }
+  if (capabilityReportCache?.promise) return capabilityReportCache.promise;
+
+  const previousValue = capabilityReportCache?.value ?? [];
+  const promise = (async () => {
+    try {
+      const listResult = await getCapabilityPacks().list();
+      const snapshots = buildTeamCapabilityTelemetrySnapshots(listResult.packs);
+      capabilityReportCache = {
+        expiresAt: Date.now() + CAPABILITY_REPORT_TTL_MS,
+        value: snapshots,
+      };
+      return snapshots;
+    } catch (err) {
+      capabilityReportCache = previousValue.length ? { expiresAt: 0, value: previousValue } : null;
+      throw err;
+    }
+  })();
+
+  capabilityReportCache = { expiresAt: 0, promise, value: previousValue };
+  return promise;
 }
 
 function sanitizeDownloadFilename(value: string): string {
@@ -6565,12 +6611,23 @@ async function enrichTelemetryProjectNames<T extends { projects: TelemetryProjec
 }
 
 async function enrichTelemetryStatus(status: TelemetryStatusShape): Promise<TelemetryStatusShape> {
-  return enrichTelemetryProjectNames(status);
+  const enriched = await enrichTelemetryProjectNames(status);
+  const capabilities = await getCapabilityTelemetrySnapshots().catch((err) => {
+    app.log.warn({ err }, 'capability telemetry snapshot build failed');
+    return [] as TeamCapabilityTelemetrySnapshot[];
+  });
+  return {
+    ...enriched,
+    teamCapabilitySnapshots: capabilities,
+    capabilitySummary: summarizeCapabilities(capabilities),
+  };
 }
 
 function telemetryEmptyStatus(): TelemetryStatusShape {
   return {
     connected: false,
+    scan: getTelemetryRuntimeStatus(),
+    worker: { running: false },
     lastScan: null,
     sessions: 0,
     messages: 0,
@@ -6583,6 +6640,26 @@ function telemetryEmptyStatus(): TelemetryStatusShape {
     hourly: [],
     projects: [],
     workSecondsByDay: {},
+    daily: {},
+    localUsers: [],
+    teamCapabilitySnapshots: [],
+    capabilitySummary: { teams: 0, commands: 0, skills: 0, workflows: 0, cron: 0, mcpServers: 0 },
+    unresolvedUsage: { sessions: 0, messages: 0, tokensTotal: 0 },
+  };
+}
+
+function telemetryWorkerSummary(
+  workerStatus: Awaited<ReturnType<typeof readUsageTelemetryWorkerStatus>>
+): TelemetryStatusShape['worker'] {
+  const status = workerStatus.status;
+  return {
+    running: Boolean(status?.running),
+    state: status?.state,
+    pid: status?.pid ?? null,
+    telemetryEnabled: Boolean(status?.telemetryEnabled),
+    lastScan: status?.lastScan ?? null,
+    updatedAt: status?.updatedAt ?? null,
+    lastError: status?.lastError ?? null,
   };
 }
 
@@ -6615,6 +6692,14 @@ function buildUsageTelemetryExport(status: TelemetryStatusShape, format: 'csv' |
       'activeDays',
       'durationSeconds',
       'cwd',
+      'teamSlug',
+      'teamName',
+      'teamDisplayName',
+      'projectName',
+      'bindProject',
+      'sourceKind',
+      'assetKind',
+      'description',
     ],
     [
       'summary',
@@ -6661,20 +6746,30 @@ function buildUsageTelemetryExport(status: TelemetryStatusShape, format: 'csv' |
       '',
       user.projectName ?? user.teamName ?? '',
     ]),
-    ...(status.externalUsers ?? []).map((user) => [
-      'external-user',
-      user.identity.displayName,
-      user.sessions,
-      user.messages,
-      user.tokensIn,
-      user.tokensOut,
-      user.cacheRead,
-      user.cacheCreation,
-      user.tokensTotal,
-      '',
-      '',
-      user.identity.userId ?? user.identity.id ?? user.key,
-    ]),
+    ...(status.teamCapabilitySnapshots ?? []).flatMap((snapshot) =>
+      snapshot.assets.map((asset) => [
+        `capability-${asset.kind}`,
+        asset.name,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        asset.scope ?? '',
+        snapshot.teamSlug ?? '',
+        snapshot.teamName,
+        snapshot.teamDisplayName ?? '',
+        snapshot.projectName ?? '',
+        snapshot.bindProject ?? '',
+        asset.source ?? '',
+        asset.kind,
+        asset.description ?? '',
+      ])
+    ),
     [
       'unresolved-usage',
       '未映射会话',
@@ -6709,9 +6804,12 @@ app.post('/api/telemetry/scan', async (request, reply) => {
     if (!result) {
       return reply.code(503).send({ error: 'Telemetry scan failed' });
     }
+    const workerStatus = await readUsageTelemetryWorkerStatus(HERMIT_HOME);
     return await enrichTelemetryStatus({
       ...result,
       ok: true,
+      scan: getTelemetryRuntimeStatus(),
+      worker: telemetryWorkerSummary(workerStatus),
     });
   } catch (err) {
     return reply.code(500).send({ error: String(err) });
@@ -6831,13 +6929,16 @@ app.get<{
 // GET /api/telemetry/status → current telemetry status (full stats)
 app.get('/api/telemetry/status', async (request, reply) => {
   try {
+    const workerStatus = await readUsageTelemetryWorkerStatus(HERMIT_HOME);
     const status = await enrichTelemetryStatus(
-      (await getTelemetryStatus()) ?? telemetryEmptyStatus()
+      workerStatus.status?.telemetry ?? (await getTelemetryStatus()) ?? telemetryEmptyStatus()
     );
     // `connected` drives the Redis status badge in the UI. The local scan never
     // knows about Redis, so reflect the live team-bus connection instead of
     // leaving the hardcoded `false` — otherwise a healthy bus always shows red.
     status.connected = taskDispatch.isRedisConnected();
+    status.scan = getTelemetryRuntimeStatus();
+    status.worker = telemetryWorkerSummary(workerStatus);
     return status;
   } catch {
     return telemetryEmptyStatus();
@@ -6930,6 +7031,7 @@ const SSE_FALLBACK_RE = /^\/api\/(.*\/(events|stream|notifications\/stream))$/;
 
 import {
   extensionHandlers as ext,
+  getCapabilityPacks,
   setCapabilityPackLocalSource,
   setSkillsWatcherEmitter,
 } from './ipc/extensions';

@@ -26,25 +26,30 @@ function manifest(
 }
 
 describe('external platform session routing', () => {
-  it('detects and parses Feishu/Lark style session keys', () => {
-    expect(isExternalPlatformSessionKey('feishu:chat_A:ou_user')).toBe(true);
+  it('detects and parses Feishu/Lark style session keys with union user ids only', () => {
+    expect(isExternalPlatformSessionKey('feishu:chat_A:on_user')).toBe(true);
     expect(isExternalPlatformSessionKey('hermit:team:session')).toBe(false);
-    expect(parseExternalPlatformSessionKey('feishu:chat_A:ou_user')).toEqual({
+    expect(parseExternalPlatformSessionKey('feishu:chat_A:on_user')).toEqual({
       platform: 'feishu',
       chatId: 'chat_A',
-      userId: 'ou_user',
+      userId: 'on_user',
+    });
+    expect(parseExternalPlatformSessionKey('feishu:chat_A:ou_openid')).toEqual({
+      platform: 'feishu',
+      chatId: 'chat_A',
+      userId: undefined,
     });
   });
 
   it('maps a Feishu session key to the Hermit team slug using allow_chat/allow_from', () => {
-    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:ou_user', [
+    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:on_user', [
       manifest('other-team', {
         platformAllowChat: { feishu: 'chat_B' },
         platformAllowFrom: { feishu: '*' },
       }),
       manifest('hermit-team', {
         platformAllowChat: { feishu: 'chat_A' },
-        platformAllowFrom: { feishu: 'ou_user' },
+        platformAllowFrom: { feishu: 'on_user' },
       }),
     ]);
 
@@ -52,10 +57,10 @@ describe('external platform session routing', () => {
   });
 
   it('treats feishu and lark allow-list keys as aliases', () => {
-    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:ou_user', [
+    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:on_user', [
       manifest('hermit-team', {
         platformAllowChat: { lark: 'chat_A' },
-        platformAllowFrom: { lark: 'ou_user' },
+        platformAllowFrom: { lark: 'on_user' },
       }),
     ]);
 
@@ -64,11 +69,11 @@ describe('external platform session routing', () => {
 
   it('treats Feishu oc_ and c_ chat IDs as the same allow_chat target', () => {
     const teamSlug = resolveExternalPlatformSessionTeamSlug(
-      'feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_user',
+      'feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:on_user',
       [
         manifest('hermit-team', {
           platformAllowChat: { feishu: 'c_efa2fbf5d5bd75da117eaebb6bbc730d' },
-          platformAllowFrom: { feishu: 'ou_user' },
+          platformAllowFrom: { feishu: 'on_user' },
         }),
       ]
     );
@@ -77,9 +82,9 @@ describe('external platform session routing', () => {
   });
 
   it('routes an Helm Loop Feishu session through QR-persisted owner metadata', () => {
-    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_admin:ou_admin', [
+    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_admin:on_admin', [
       manifest('system-manager', {
-        platformAllowFrom: { lark: 'ou_admin' },
+        platformAllowFrom: { lark: 'on_admin' },
       }),
     ]);
 
@@ -87,7 +92,7 @@ describe('external platform session routing', () => {
   });
 
   it('does not guess when multiple teams match equally', () => {
-    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:ou_user', [
+    const teamSlug = resolveExternalPlatformSessionTeamSlug('feishu:chat_A:on_user', [
       manifest('team-a', { platformAllowChat: { feishu: '*' } }),
       manifest('team-b', { platformAllowChat: { feishu: '*' } }),
     ]);
@@ -115,11 +120,11 @@ describe('external platform session routing', () => {
 
   it('falls back to bindProject when the winning manifest has no slug', () => {
     const manifestNoSlug = manifest('', {
-      platformAllowFrom: { feishu: 'ou_user' },
+      platformAllowFrom: { feishu: 'on_user' },
     });
     const bindProject = (manifestNoSlug as TeamManifest).bindProject;
     const teamSlug = resolveExternalPlatformSessionTeamSlug(
-      'feishu:chat_A:ou_user',
+      'feishu:chat_A:on_user',
       [manifestNoSlug]
     );
 
@@ -127,6 +132,6 @@ describe('external platform session routing', () => {
   });
 
   it('resolves to null when no manifests are provided', () => {
-    expect(resolveExternalPlatformSessionTeamSlug('feishu:chat_A:ou_user', [])).toBeNull();
+    expect(resolveExternalPlatformSessionTeamSlug('feishu:chat_A:on_user', [])).toBeNull();
   });
 });

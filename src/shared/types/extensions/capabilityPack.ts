@@ -58,6 +58,51 @@ export interface CapabilityMcpServer {
   config?: Record<string, unknown>;
 }
 
+export type TeamCapabilityTelemetryAssetKind = 'command' | 'skill' | 'workflow' | 'cron' | 'mcp';
+
+export interface TeamCapabilityTelemetryAsset {
+  kind: TeamCapabilityTelemetryAssetKind;
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  scope?: string;
+  safety?: CapabilitySafety;
+  transport?: string;
+  source?: CapabilityPackSource;
+  packId: string;
+}
+
+export interface TeamCapabilityTelemetrySnapshot {
+  teamSlug?: string;
+  teamName: string;
+  teamDisplayName?: string;
+  projectDir?: string;
+  projectName?: string;
+  bindProject?: string;
+  sourcePackIds: string[];
+  assets: TeamCapabilityTelemetryAsset[];
+  counts: {
+    commands: number;
+    skills: number;
+    workflows: number;
+    cron: number;
+    mcpServers: number;
+  };
+  fingerprint: string;
+  reportedAt: string;
+}
+
+export interface CapabilityTelemetrySummary {
+  teams: number;
+  commands: number;
+  skills: number;
+  workflows: number;
+  cron: number;
+  mcpServers: number;
+  lastReportedAt?: string;
+}
+
 export type CapabilityPackExportRuntime = 'claudecode' | 'codex' | 'cursor' | 'gemini' | 'opencode';
 
 export interface CapabilityPackManifest {

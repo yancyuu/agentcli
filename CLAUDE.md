@@ -247,3 +247,62 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 - Keep persistence concerns split by responsibility: schema/normalization, repository interface, concrete storage implementation, and UI adapter logic should live in separate modules.
 - Prefer designs where the high-level feature code can swap local browser/Electron storage for a server-backed implementation without rewriting the rendering layer.
 - Reuse generic persistence/layout infrastructure when adding new draggable/resizable surfaces instead of copying feature-specific storage code.
+
+<!-- hermit:team-collaboration:start -->
+
+## Hermit Team Context
+
+Current team slug: `hermit`
+
+Available teams:
+- 1111-1tj9 (测试团1111)
+- hermit-agent-1cce (hermit-agent)
+- team-4 (产品经理团队)
+- team-2 (汇报)
+- team (爬虫)
+- my-project
+- system-manager (Helm Loop): 项目级 Claude Code Helm Loop，负责插件、MCP、Env、数字员工和统计数据的托管管理。
+- feishu:oc_efa2fbf5d5bd75da117eaebb6bbc730d:ou_82906a790206a1e6698714b2bae9e070
+- feishu:oc_efabb1d1fec43969e26a2ba3030fece2:ou_2958f97a00a467185404905b06e8016f
+
+Cross-team collaboration is handled through Hermit's team bus and task-pool surfaces.
+
+Do not call cross-team dispatch APIs yourself and do not invent dispatch IDs.
+You may use the team list only to understand which teams exist and when a user is referring to one.
+
+<!-- hermit:ops-runbook-context:start -->
+
+## Hermit Ops Runbook Context
+
+Public operations guide: https://yancyuu.github.io/Hermit/
+Local canonical docs: README.md, docs/README.md, docs/team-management/README.md
+
+Hermit/openHermit is a local-first Loop Engineering control plane. Use /teams as the
+main operations surface and treat ~/.hermit/ as the default local data directory.
+Hermit coordinates teams, tasks, message routing, channel allowlists, audit trails,
+and Loop workflows; actual runtime execution is delegated to the local Agent CLI /
+hermit-bridge / Management API.
+
+Common ops workflows to suggest or use when appropriate. Hermit preinstalls them as
+user-level Claude commands under ~/.claude/commands/hermit/ so every team can run
+the same namespaced commands from its own cwd:
+- /hermit:doctor — diagnose install/runtime/config health.
+- /hermit:loop-scan — inspect Loop assets and recommended recurring loops.
+- /hermit:summary — summarize team/session status and next actions.
+- /hermit:daily-folder-hygiene — check temporary files, stale reports, and workspace clutter.
+- /hermit:daily-memory-conflict-check — check CLAUDE/AGENTS/memory/settings conflicts.
+- /hermit:daily-workflow-extraction — extract reusable prompts/workflows from recent work.
+- /hermit:worktree-scan — inspect dirty or stale worktrees before cleanup decisions.
+
+Safety boundary for operations workflows:
+- Default to read-only diagnosis. Do not modify, delete, move, format, commit, push,
+  publish, deploy, or run destructive commands unless the user explicitly approves.
+- Explain the purpose before commands; prefer read-only commands for diagnostics.
+- Do not expose secrets, tokens, cookies, private keys, or full sensitive paths.
+- If a fix is needed, report recommendations, verification steps, and an optional
+  patch plan before applying changes.
+- Treat the public guide and local docs as operational references; verify against
+  the current repository/config before making exact claims.
+
+<!-- hermit:ops-runbook-context:end -->
+<!-- hermit:team-collaboration:end -->

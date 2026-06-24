@@ -1,10 +1,12 @@
-import type { ConversationTelemetryRow } from '@shared/types/api';
-import type { ParseResult, UsageAggregate } from './SessionUsageParser';
+import type {
+  CapabilityTelemetrySummary,
+  TeamCapabilityTelemetrySnapshot,
+} from '@shared/types/extensions';
+import type { DailyMetrics, ParseResult } from './SessionUsageParser';
 
 export interface UsageCollectionResult {
   computedAt: string;
   legacyParseResult: ParseResult;
-  conversations: ConversationTelemetryRow[];
 }
 
 export interface UsageTokenMetrics {
@@ -17,11 +19,26 @@ export interface UsageTokenMetrics {
 
 export interface UserUsageTelemetryRow {
   key: string;
-  kind: 'local' | 'external-im' | 'unresolved';
-  identity: ConversationTelemetryRow['identity'];
+  kind: 'local' | 'unresolved';
+  identity: {
+    platform: string;
+    type: 'person' | 'group' | 'unknown';
+    displayName: string;
+    userId?: string;
+    userName?: string;
+    chatId?: string;
+    chatName?: string;
+    confidence: string;
+  };
+  teamSlug?: string;
   teamName?: string;
   teamDisplayName?: string;
   projectName?: string;
+  bindProject?: string;
+  workDir?: string;
+  agentType?: string;
+  model?: string;
+  provider?: string;
   sessions: number;
   messages: number;
   tokensIn: number;
@@ -36,14 +53,6 @@ export interface UsageUnresolvedSummary {
   sessions: number;
   messages: number;
   tokensTotal: number;
-}
-
-export interface UsageAttributionResult {
-  computedAt: string;
-  global: UsageAggregate;
-  localUsers: UserUsageTelemetryRow[];
-  externalUsers: UserUsageTelemetryRow[];
-  unresolved: UsageUnresolvedSummary;
 }
 
 export interface UsageTelemetryProjectRow {
@@ -69,7 +78,28 @@ export interface UsageTelemetryStatus {
   hourly: number[];
   projects: UsageTelemetryProjectRow[];
   workSecondsByDay: Record<string, number>;
+  daily: Record<string, DailyMetrics>;
   localUsers: UserUsageTelemetryRow[];
-  externalUsers: UserUsageTelemetryRow[];
+  teamCapabilitySnapshots?: TeamCapabilityTelemetrySnapshot[];
+  capabilitySummary?: CapabilityTelemetrySummary;
   unresolvedUsage: UsageUnresolvedSummary;
+  conversationUpload?: {
+    enabled: boolean;
+    endpointConfigured: boolean;
+    totalDiscovered?: number;
+    skippedAlreadyUploaded?: number;
+    pending?: number;
+    attempted: number;
+    accepted: number;
+    duplicated: number;
+    rejected: number;
+    inserted?: number;
+    failed?: number;
+    queued?: number;
+    uploadIds?: string[];
+    lastUploadStatus?: string;
+    lastReceiptId?: string;
+    lastStatusUrl?: string;
+    lastError?: string;
+  };
 }

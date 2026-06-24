@@ -19,7 +19,7 @@ Hermit/openHermit is a local-first Loop Engineering control plane. Use /teams as
 main operations surface and treat ~/.hermit/ as the default local data directory.
 Hermit coordinates teams, tasks, message routing, channel allowlists, audit trails,
 and Loop workflows; actual runtime execution is delegated to the local Agent CLI /
-cc-connect Bridge / Management API.
+hermit-bridge / Management API.
 
 Common ops workflows to suggest or use when appropriate. Hermit preinstalls them as
 user-level Claude commands under ~/.claude/commands/hermit/ so every team can run

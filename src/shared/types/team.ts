@@ -222,9 +222,19 @@ export interface TaskBusConfig {
   collaboration?: boolean;
   telemetry?: {
     enabled: boolean;
+    /** Data source platform. 'claudecode' remains the local JSONL scanner default. */
+    platform: 'claudecode' | 'codex';
+    /** Explicit CLI upload providers selected by the user. */
+    uploadProviders?: Array<'claudecode' | 'codex'>;
+    /** Upload conversation messages to the Bearer-only openHermit message API. */
+    conversationUploadEnabled?: boolean;
+    /** Legacy metadata upload flag; do not use for message-body upload. */
     uploadEnabled?: boolean;
-    /** Data source platform. Currently only 'claudecode'. */
-    platform: 'claudecode';
+    conversations?: {
+      uploadEnabled?: boolean;
+      baseUrl?: string;
+      batchSize?: number;
+    };
   };
 }
 

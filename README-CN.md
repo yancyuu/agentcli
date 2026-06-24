@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="resources/icons/png/1024x1024.png" alt="openHermit" width="96" />
+  <img src="resources/icons/png/1024x1024.png" alt="Hermit" width="96" />
 </p>
 
-<h1 align="center">openHermit</h1>
+<h1 align="center">Hermit</h1>
 
 <p align="center">
   <a href="README.md"><strong>English</strong></a> ·
@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <strong>本地优先的 AI Agent 团队控制平面。</strong><br/>
-  创建团队、派发任务、观察 Agent 协作、审核结果，并把每一次循环都留在本机可审计。<br/>
-  <strong>Local-first control plane for AI agent teams:</strong> create teams, assign work, watch agents collaborate, review results, and keep every loop auditable on your machine.
+  <strong>本地优先的 AI 数字员工团队面板。</strong><br/>
+  管理数字员工、任务、消息、运行时、IM 路由、用量、能力资产和审计轨迹。<br/>
+  <strong>AI Workforce Panel for local agent teams:</strong> manage digital employees, tasks, messages, runtimes, IM routing, usage, capability assets, and audit trails — local-first.
 </p>
 
 <p align="center">
@@ -297,7 +297,6 @@ pnpm build:web
 node node_modules/hermit-bridge/run.js --force -config ~/.hermit/hermit-bridge/config.toml
 ```
 
-发布版 `openhermit` CLI 会在需要时自动启动内置的 `hermit-bridge`，并把旧运行时文件从 `~/.hermit/cc-connect/` 迁移到 `~/.hermit/hermit-bridge/`。本地 `pnpm dev` 保持显式启动，方便开发者观察 bridge 日志并独立重启。
 
 本仓库使用 pnpm。除非对应实现和文档已经落地，请不要把 Electron 打包、嵌入式 PTY、托管模型服务或完整目标 Task Bus 描述成当前已发布能力。
 
