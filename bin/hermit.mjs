@@ -1448,6 +1448,10 @@ function latestUsageWorkerSourceMtime() {
 function markTelemetryWorkerRestarting(reason = '正在重启 worker') {
   try {
     mkdirSync(telemetryDir, { recursive: true, mode: 0o700 });
+    // Preserve the last scan's telemetry so "查看同步状态" does not briefly show
+    // all-zero while the restarted worker completes its first scan — only the
+    // state flips to 'restarting', the last-known counts stay visible.
+    const previous = readTelemetryWorkerStatusFile().status;
     writeFileSync(telemetryWorkerStatusPath, `${JSON.stringify({
       schemaVersion: 1,
       state: 'restarting',
@@ -1455,11 +1459,11 @@ function markTelemetryWorkerRestarting(reason = '正在重启 worker') {
       pid: null,
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      lastScan: null,
+      lastScan: previous?.lastScan ?? null,
       source: 'claude-jsonl',
-      telemetryEnabled: true,
+      telemetryEnabled: previous?.telemetryEnabled ?? true,
       restartReason: reason,
-      telemetry: emptyUsageTelemetryStatus(),
+      telemetry: previous?.telemetry ?? emptyUsageTelemetryStatus(),
     }, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
   } catch {}
 }
