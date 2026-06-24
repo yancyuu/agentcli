@@ -399,6 +399,8 @@ describe('ConversationMessageUploadService', () => {
   });
 
   it('withUploadLock returns null when the lock is held by a live process', async () => {
+    // Skip the wait-retry so the test is fast (the default waits up to 60s).
+    process.env.HERMIT_UPLOAD_LOCK_WAIT_MS = '0';
     const lockPath = path.join(hermitHome, 'telemetry', 'conversation-message-upload.lock');
     await mkdir(path.dirname(lockPath), { recursive: true });
     await writeFile(
@@ -407,5 +409,6 @@ describe('ConversationMessageUploadService', () => {
     );
     const result = await withUploadLock(hermitHome, async () => 'should-not-run');
     expect(result).toBeNull();
+    delete process.env.HERMIT_UPLOAD_LOCK_WAIT_MS;
   });
 });

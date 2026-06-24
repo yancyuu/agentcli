@@ -288,33 +288,53 @@ async function clearStaleUploadLock(filePath: string): Promise<boolean> {
   }
 }
 
+// Create the lock file, retrying on contention so a manual `usage report` (or
+// --full) completes instead of being skipped when the background worker is
+// mid-scan. The bg scan holds the lock only briefly between cycles, so waiting
+// a short while usually acquires it. Returns true once acquired, false on
+// timeout. (Wait read at call time so tests can override via env.)
+async function acquireUploadLock(hermitHome: string, filePath: string): Promise<boolean> {
+  const deadline = Date.now() + Number(process.env.HERMIT_UPLOAD_LOCK_WAIT_MS ?? '60000');
+  let loggedWaiting = false;
+  while (Date.now() < deadline) {
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
+    try {
+      handle = await open(filePath, 'wx', 0o600);
+      await handle.writeFile(
+        JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
+      );
+      return true;
+    } catch {
+      // contention or transient error — fall through to retry
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+    const stale = await clearStaleUploadLock(filePath);
+    if (!stale) {
+      if (!loggedWaiting) {
+        loggedWaiting = true;
+        await appendUploadLog(hermitHome, 'upload-lock-busy-waiting', {
+          lockPath: 'telemetry/conversation-message-upload.lock',
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return false;
+}
+
 export async function withUploadLock<T>(
   hermitHome: string,
   fn: () => Promise<T>
 ): Promise<T | null> {
   const filePath = uploadLockPath(hermitHome);
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(filePath, 'wx', 0o600);
-    await handle.writeFile(
-      JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
-    );
-  } catch {
-    const stale = await clearStaleUploadLock(filePath);
-    if (stale) {
-      handle = await open(filePath, 'wx', 0o600);
-      await handle.writeFile(
-        JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
-      );
-    } else {
-      await appendUploadLog(hermitHome, 'upload-lock-busy', {
-        lockPath: 'telemetry/conversation-message-upload.lock',
-      });
-      return null;
-    }
-  } finally {
-    await handle?.close().catch(() => undefined);
+  const acquired = await acquireUploadLock(hermitHome, filePath);
+  if (!acquired) {
+    await appendUploadLog(hermitHome, 'upload-lock-busy', {
+      lockPath: 'telemetry/conversation-message-upload.lock',
+    });
+    return null;
   }
 
   try {
