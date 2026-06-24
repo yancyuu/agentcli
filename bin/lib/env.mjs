@@ -82,3 +82,30 @@ export const defaultHermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
 export const hermitBridgeConfigPath =
   process.env.HERMIT_BRIDGE_CONFIG || defaultHermitBridgeConfigPath;
 export const starterProjectName = 'my-project';
+export function findOptionValue(name) {
+  const index = commandArgs.indexOf(name);
+  return index !== -1 ? commandArgs[index + 1] : undefined;
+}
+
+export function findOptionValues(name) {
+  const values = [];
+  for (let index = 0; index < commandArgs.length; index += 1) {
+    if (commandArgs[index] === name && commandArgs[index + 1] && !commandArgs[index + 1].startsWith('--')) {
+      values.push(commandArgs[index + 1]);
+    }
+  }
+  return values;
+}
+
+export function findAnyOptionValues(names) {
+  return names.flatMap((name) => findOptionValues(name));
+}
+
+export function findAnyOptionValue(names) {
+  for (const name of names) {
+    const value = findOptionValue(name);
+    if (value !== undefined) return value;
+  }
+
+  return undefined;
+}
