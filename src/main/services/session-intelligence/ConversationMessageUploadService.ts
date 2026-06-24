@@ -4,6 +4,11 @@ import { appendFile, mkdir, open, readdir, readFile, stat, unlink } from 'node:f
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
+import {
+  authedFetch,
+  getValidBearerToken,
+  refreshAccessToken,
+} from '@main/services/auth/OpenHermitAuthClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
 type ConversationUploadTelemetryConfig = {
   enabled?: boolean;
@@ -250,6 +255,16 @@ function uploadLockPath(hermitHome: string): string {
   return path.join(hermitHome, 'telemetry', UPLOAD_LOCK_FILE);
 }
 
+/**
+ * Clear a leftover upload lock from a previous (crashed/killed/rebooted) run.
+ * Safe to call at worker startup so a stale lock from the previous boot is gone
+ * before the first scan, instead of only being cleared on the next acquisition
+ * attempt. No-op when there is no lock or it belongs to a live process.
+ */
+export async function sweepStaleUploadLock(home: string): Promise<boolean> {
+  return clearStaleUploadLock(uploadLockPath(home));
+}
+
 async function clearStaleUploadLock(filePath: string): Promise<boolean> {
   try {
     const raw = await readFile(filePath, 'utf-8');
@@ -273,7 +288,10 @@ async function clearStaleUploadLock(filePath: string): Promise<boolean> {
   }
 }
 
-async function withUploadLock<T>(hermitHome: string, fn: () => Promise<T>): Promise<T | null> {
+export async function withUploadLock<T>(
+  hermitHome: string,
+  fn: () => Promise<T>
+): Promise<T | null> {
   const filePath = uploadLockPath(hermitHome);
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   let handle: Awaited<ReturnType<typeof open>> | null = null;
@@ -312,10 +330,6 @@ function apiUrl(baseUrl: string, apiPath: string): string {
     return `${base}${apiPath.slice('/api/v1'.length)}`;
   }
   return `${base}${apiPath}`;
-}
-
-function fetchWithTimeout(input: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(API_TIMEOUT_MS) });
 }
 
 function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
@@ -403,24 +417,18 @@ async function* walkJsonl(dir: string): AsyncGenerator<string> {
   }
 }
 
-async function readBearerToken(home: string): Promise<string | null> {
-  try {
-    const raw = await readFile(path.join(home, 'auth', 'openhermit.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { token?: { accessToken?: string; expiresAt?: string } };
-    if (!parsed.token?.accessToken) return null;
-    if (parsed.token.expiresAt && Date.parse(parsed.token.expiresAt) <= Date.now()) return null;
-    return parsed.token.accessToken;
-  } catch {
-    return null;
-  }
-}
-
-async function probeAuth(baseUrl: string, token: string, home: string): Promise<string | null> {
-  const res = await fetchWithTimeout(apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
+async function probeAuthOnce(
+  baseUrl: string,
+  token: string,
+  home: string
+): Promise<{ reason: string | null; accessExpired: boolean }> {
+  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const status = typeof body.status === 'string' ? body.status : `HTTP ${res.status}`;
+  const accessExpired = body.access_expired === true;
   const scopes = Array.isArray(body.scopes)
     ? body.scopes.filter((scope) => typeof scope === 'string')
     : null;
@@ -432,14 +440,37 @@ async function probeAuth(baseUrl: string, token: string, home: string): Promise<
       res.ok && body.authenticated !== false && status === 'ok' && missingUploadScopes.length === 0,
     status,
     feishuAuthorized: body.feishu_authorized,
-    accessExpired: body.access_expired,
+    accessExpired,
     scopes,
     missingUploadScopes,
   });
-  if (!res.ok || body.authenticated === false || status !== 'ok') return `授权不可用：${status}`;
-  if (missingUploadScopes.length > 0)
-    return `缺少 ${missingUploadScopes.join('/')} 授权，请重新登录`;
-  return null;
+  if (!res.ok || body.authenticated === false || status !== 'ok') {
+    return { reason: `授权不可用：${status}`, accessExpired };
+  }
+  if (missingUploadScopes.length > 0) {
+    return { reason: `缺少 ${missingUploadScopes.join('/')} 授权，请重新登录`, accessExpired };
+  }
+  return { reason: null, accessExpired };
+}
+
+async function probeAuth(baseUrl: string, token: string, home: string): Promise<string | null> {
+  let result = await probeAuthOnce(baseUrl, token, home);
+  // The server may report access_expired as 200 + access_expired:true (not a
+  // 401) even when the local expiresAt still looks valid — authedFetch only
+  // refreshes on 401. Mirror bin/lib/auth.mjs: refresh and retry /me once.
+  if (result.accessExpired) {
+    await appendUploadLog(home, 'auth-refresh-attempted', { reason: 'access_expired' });
+    const refreshed = await refreshAccessToken(home, baseUrl);
+    const nextToken = refreshed?.token?.accessToken;
+    if (nextToken) {
+      await appendUploadLog(home, 'auth-retry-after-401', {
+        endpoint: '/me',
+        reason: 'access_expired',
+      });
+      result = await probeAuthOnce(baseUrl, nextToken, home);
+    }
+  }
+  return result.reason;
 }
 
 async function fetchUsageChannel(
@@ -457,8 +488,9 @@ async function fetchUsageChannel(
         url: `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`,
       })
     : Promise.resolve());
-  const res = await fetchWithTimeout(url, {
+  const res = await authedFetch(home ?? hermitHome(), baseUrl, url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   if (!res.ok) {
@@ -1033,8 +1065,9 @@ async function queryUploadResult(
 ): Promise<UploadResult | null> {
   const url = absoluteStatusUrl(baseUrl, receipt);
   if (!url) return null;
-  const res = await fetchWithTimeout(url, {
+  const res = await authedFetch(hermitHome(), baseUrl, url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`upload status ${await responseDiagnostic(res)}`);
   const text = await res.text().catch(() => '');
@@ -1097,13 +1130,14 @@ async function postPayload(
       Object.prototype.hasOwnProperty.call(payload, 'uploadId') ||
       Object.prototype.hasOwnProperty.call(payload, 'upload_id'),
   });
-  const res = await fetchWithTimeout(apiUrl(baseUrl, endpointPath), {
+  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, endpointPath), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   await appendUploadLog(home, 'upload-response', {
@@ -1401,7 +1435,7 @@ async function uploadConversationMessagesLocked(
     cursorAuthority: 'server-usage-status',
   });
 
-  const token = await readBearerToken(home);
+  const token = await getValidBearerToken(home, baseUrl);
   if (!token) {
     await appendUploadLog(home, 'waiting-login', { providers });
     return emptyStatus(true, Boolean(baseUrl), { lastError: '等待登录' });

@@ -311,7 +311,7 @@ describe('openHermit CLI read-only workspace commands', () => {
         harness: 'claudecode',
       });
       expect(parsed.warnings).toHaveLength(1);
-      expect(parsed.warnings[0].path).toContain('bad/team.json');
+      expect(parsed.warnings[0].path).toContain(path.join('bad', 'team.json'));
     });
   });
 
@@ -730,7 +730,7 @@ describe('openHermit CLI read-only workspace commands', () => {
     });
   });
 
-  it('manages usage worker autostart with a launchd plist that supervises the foreground worker', async () => {
+  it.skipIf(process.platform !== 'darwin')('manages usage worker autostart with a launchd plist that supervises the foreground worker (macOS launchd only)', async () => {
     await withHermitHome(async (hermitHome) => {
       const enabled = await runCli(
         hermitHome,

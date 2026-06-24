@@ -195,7 +195,12 @@ function normalizeControlUrl(value, optionName = '--control-url') {
 }
 
 const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
-const OPENHERMIT_AUTH_BROKER_URL = process.env.OPENHERMIT_AUTH_BASE_URL || process.env.OPENHERMIT_CLOUD_AUTH_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:3001`;
+// Per the AI Monitor contract there is a SINGLE base URL (https://<ai-monitor-host>/api/v1):
+// the auth endpoints (/auth/hermit/*) and the hermit endpoints (/hermit/*) live on the
+// SAME host. The legacy separate :3001 auth broker is dropped — no backward compat.
+// Both default to the ai-monitor (:8088); override either via env only if you truly
+// split them (not recommended — the contract assumes one host).
+const OPENHERMIT_AUTH_BROKER_URL = process.env.OPENHERMIT_AUTH_BASE_URL || process.env.OPENHERMIT_CLOUD_AUTH_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
 const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL = process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL || process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
 const DEV_AUTH_UNLOCK_CODE = process.env.OPENHERMIT_DEV_UNLOCK_CODE || '';
 
@@ -272,10 +277,12 @@ async function openExternalUrl(url) {
   }
 
   const platform = process.platform;
-  const command = platform === 'darwin' ? 'open' : platform === 'win32' ? 'powershell.exe' : 'xdg-open';
-  const commandArgsForPlatform = platform === 'win32'
-    ? ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $args[0]', url]
-    : [url];
+  // explorer.exe opens the URL in the default browser and takes the whole URL
+  // as a single argument, so query characters (& ? =) need no shell quoting.
+  // The previous powershell `Start-Process -FilePath $args[0]` form exited
+  // non-zero and the browser silently never opened on Windows.
+  const command = platform === 'darwin' ? 'open' : platform === 'win32' ? 'explorer.exe' : 'xdg-open';
+  const commandArgsForPlatform = [url];
 
   return new Promise((resolve) => {
     let settled = false;
@@ -680,9 +687,12 @@ async function performDeviceAuthLogin({ quiet = false, controlUrl = null } = {})
   const interactiveCancel = !quiet && process.stdin.isTTY;
   let previousRawMode = false;
   const onCancelKey = (chunk) => {
-    for (const key of parseMenuKeys(chunk)) {
-      if (key.type === 'exit' || key.type === 'back') cancelAuth();
-    }
+    const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
+    // Cancel on Ctrl+C (\x03), bare Esc (\x1b), or left-arrow (\x1b[D) — the same
+    // keys the nav menu treats as exit/back. Inlined so auth.mjs does not depend
+    // on hermit.mjs's parseMenuKeys (which was left behind when this module was
+    // extracted, causing ReferenceError on the login cancel handler).
+    if (text.includes('\x03') || text === '\x1b' || text.startsWith('\x1b[D')) cancelAuth();
   };
 
   if (interactiveCancel) {
@@ -708,11 +718,14 @@ async function performDeviceAuthLogin({ quiet = false, controlUrl = null } = {})
 
     if (!quiet) {
       printCliRows('飞书授权登录', [
-        ['地址', loginUrl],
-        ['授权码', '浏览器页面已包含授权信息'],
-        ['状态', browser.skipped ? '请复制地址到浏览器完成飞书授权' : '已打开浏览器，等待飞书授权确认'],
+        ['状态', browser.skipped ? '请复制下面的地址到浏览器完成飞书授权' : '已打开浏览器，等待飞书授权确认'],
         ['安全', `CLI 只保存 ${BRAND.authProviderName} 授权状态`],
       ], '浏览器完成授权后，CLI 会自动继续；Esc/Ctrl+C 可取消。');
+      // Print the full URL on its own line(s). The status panel truncates long
+      // values, so the URL must be emitted directly to stay visible + copyable.
+      console.log('');
+      console.log('授权地址（若浏览器未自动打开，复制此行到浏览器）：');
+      console.log(loginUrl);
     }
 
     const tokenPayload = await pollDeviceAuthToken(config, session, { signal: abortController.signal });

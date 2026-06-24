@@ -86,6 +86,7 @@ import {
   ansi,
   ui,
   glyphs,
+  useUnicodeUi,
   CLI_MENU_WIDTH,
   isInteractiveCli,
   createPromptInterface,
@@ -146,6 +147,14 @@ import {
   assertWebPortAvailable,
 } from './lib/runtime.mjs';
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
+import {
+  USAGE_UPLOAD_PROVIDER_OPTIONS,
+  fetchAuthoritativeUsage,
+  fetchRemoteUsageStatus,
+  formatUploadProviders,
+  normalizeUploadProviders,
+  uploadProviderLabel,
+} from './lib/usageRemote.mjs';
 import {
   readDaemonPid,
   refreshDaemonPidFromReadyServer,
@@ -268,6 +277,7 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
 
 命令:
   ${BRAND.cliCommand}         打开终端导航，选择本地使用、团队协作或账号授权
+  web [--json]       直接启动并打开本地数字员工工作台（Web），跳过终端导航
   status [--json]    查看后台服务状态
   doctor [--json]    运行只读本地诊断
   teams list [--json]
@@ -525,28 +535,8 @@ const RUNTIME_ACTIONS = [
   },
 ];
 
-const USAGE_UPLOAD_PROVIDER_OPTIONS = [
-  { id: 'claudecode', label: 'Claude Code', description: '扫描本机 Claude Code 会话 usage，并按 ${BRAND.authProviderName} 消息上报协议分批增量上传' },
-  { id: 'codex', label: 'Codex', description: '扫描本机 Codex 会话 usage，并按 ${BRAND.authProviderName} 消息上报协议分批增量上传' },
-];
-
-function normalizeUploadProviders(value) {
-  const rawItems = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
-  const items = rawItems.flatMap((item) => String(item).split(/[,+，、\s]+/u));
-  const normalized = items
-    .map((item) => String(item).trim())
-    .filter((item) => USAGE_UPLOAD_PROVIDER_OPTIONS.some((option) => option.id === item));
-  return Array.from(new Set(normalized));
-}
-
-function uploadProviderLabel(provider) {
-  return USAGE_UPLOAD_PROVIDER_OPTIONS.find((option) => option.id === provider)?.label || provider;
-}
-
-function formatUploadProviders(providers) {
-  const normalized = normalizeUploadProviders(providers);
-  return normalized.length ? normalized.map(uploadProviderLabel).join(' + ') : '未选择';
-}
+// Upload-provider options + helpers now live in ./lib/usageRemote.mjs (imported
+// at the top), alongside the read-only server usage-status fetch.
 
 const LOCAL_COLLECTION_ACTIONS = [
   {
@@ -1149,61 +1139,8 @@ async function fetchBackendUsageStatus() {
   }
 }
 
-function parseJsonText(text) {
-  try {
-    const value = JSON.parse(text);
-    return value && typeof value === 'object' ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-// Read-only preview of the server /usage/status channels. NEVER uploads, never
-// writes a cursor — pure GET so "查看同步状态" can show the real server cursor /
-// in-flight batches / recent error without triggering a report.
-async function fetchRemoteUsageStatus() {
-  const auth = await refreshOpenHermitAuthStatus();
-  if (!auth.authorized) {
-    return { authorized: false, channels: [], lastError: auth.expired ? '登录已失效，请重新登录' : '等待登录' };
-  }
-  const baseUrl = resolveConversationUploadBaseUrl();
-  const token = readOpenHermitAuthStore().store?.token?.accessToken;
-  if (!token) return { authorized: false, channels: [], lastError: '等待登录' };
-  const providers = normalizeUploadProviders(currentFeatureStates().uploadProviders);
-  const platforms = providers.length ? providers : ['claudecode'];
-  const channels = [];
-  let lastError = null;
-  for (const platform of platforms) {
-    for (const mode of ['plain', 'im']) {
-      const url = `${baseUrl}/api/v1/hermit/usage/status?platform=${encodeURIComponent(platform)}&mode=${encodeURIComponent(mode)}`;
-      try {
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-          signal: AbortSignal.timeout(8_000),
-        });
-        const text = await res.text().catch(() => '');
-        if (!res.ok) {
-          lastError = `usage status ${platform}/${mode} HTTP ${res.status}`;
-          continue;
-        }
-        const body = parseJsonText(text);
-        const channel = (Array.isArray(body?.channels) ? body.channels : [])
-          .find((c) => c && c.platform === platform && c.mode === mode) || null;
-        channels.push({
-          platform,
-          mode,
-          status: channel?.status || 'unknown',
-          cursorHash: channel?.currentCursor?.targetCursorHash || null,
-          hasCursor: Boolean(channel?.currentCursor),
-          inFlight: Number(channel?.inFlight?.count ?? 0),
-        });
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-      }
-    }
-  }
-  return { authorized: true, channels, lastError };
-}
+// fetchRemoteUsageStatus + fetchAuthoritativeUsage live in ./lib/usageRemote.mjs
+// (imported above). They are read-only GETs against the ai-monitor base.
 
 // Surface the server's failure response body + what we sent, so a 500 can be
 // diagnosed ("为啥被拒") instead of just showing the status code. Both events are
@@ -1232,7 +1169,11 @@ function latestUploadResponseFailure() {
 async function readUsageStatus({ scan = false, localOnly = false } = {}) {
   await restartTelemetryWorkerIfStale();
   if (scan) return scanUsageTelemetryOnce({ localOnly });
-  const [backend, remote] = await Promise.all([fetchBackendUsageStatus(), fetchRemoteUsageStatus()]);
+  const [backend, remote, authoritative] = await Promise.all([
+    fetchBackendUsageStatus(),
+    fetchRemoteUsageStatus(currentFeatureStates().uploadProviders),
+    fetchAuthoritativeUsage(),
+  ]);
   let base;
   if (backend) {
     base = backend;
@@ -1247,6 +1188,7 @@ async function readUsageStatus({ scan = false, localOnly = false } = {}) {
     };
   }
   base.remoteUsage = remote;
+  base.authoritativeUsage = authoritative;
   return base;
 }
 
@@ -1271,42 +1213,18 @@ function hasUploadScopes(auth = readOpenHermitAuthStatus()) {
 
 function conversationUploadRows(upload = {}, auth = readOpenHermitAuthStatus(), remote = null) {
   const statusText = upload.lastError;
-  const unavailableReason = uploadStatusUnavailableReason(String(statusText || ''));
-  const missingUploadScope = auth.authorized && !hasUploadScopes(auth);
-  const waitingLogin = !auth.authorized;
-  if (waitingLogin) {
-    return [
-      ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
-      ['服务端游标', '等待登录后从 /usage/status 确认', 'warn'],
-      ['本次增量', '等待登录后由服务端 cursor 确认', 'warn'],
-      ['发送状态', '未登录，未尝试上报', 'warn'],
-      ['错误日志', '等待登录', 'warn'],
-    ];
-  }
-  if (missingUploadScope || unavailableReason) {
-    const reason = unavailableReason || '缺少 upload:read/upload:write 授权，请重新登录';
-    return [
-      ['历史消息', '未知（服务端状态不可读）', 'warn'],
-      ['服务端游标', '读取失败，不能确认 currentCursor', 'error'],
-      ['本次增量', '未知，避免把空状态误报为 0', 'warn'],
-      ['发送状态', '已暂停，请重新登录授权后再上报', 'warn'],
-      ['错误日志', reason, 'error'],
-    ];
-  }
-  if (upload.lastError === '等待登录') {
-    return [
-      ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
-      ['服务端游标', '已登录，下一次扫描从 /usage/status 确认', 'info'],
-      ['本次增量', '等待重新扫描确认', 'warn'],
-      ['发送状态', '尚未重新尝试上报', 'warn'],
-      ['错误日志', '上次扫描时未登录；现在已登录', 'info'],
-    ];
-  }
   const failed = Boolean(statusText);
   const confirmed = Number(upload.accepted || 0) + Number(upload.duplicated || 0);
   const failedCount = Number(upload.failed || 0);
   const queued = Number(upload.queued || 0);
   const requestRejected = failed && confirmed === 0 && upload.attempted > 0;
+  const unavailableReason = uploadStatusUnavailableReason(String(statusText || ''));
+  const missingUploadScope = auth.authorized && !hasUploadScopes(auth);
+
+  // LIVE server status — always rendered from the read-only /usage/status fetch,
+  // so this status bar reflects the server's real cursor / in-flight even when
+  // the last upload attempt errored or was skipped. (Previously the waiting-login
+  // and last-error branches discarded `remote` and showed hardcoded placeholders.)
   const remoteChannels = Array.isArray(remote?.channels) ? remote.channels : [];
   const remoteRows = remoteChannels.length
     ? remoteChannels.map((c) => [
@@ -1314,21 +1232,34 @@ function conversationUploadRows(upload = {}, auth = readOpenHermitAuthStatus(), 
         `${c.status || '未知'} · ${c.hasCursor ? `cursor ${String(c.cursorHash).slice(0, 12)}` : '尚未上报'}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}`,
         c.inFlight ? 'warn' : 'info',
       ])
-    : [['服务端状态', remote?.lastError ? `读取失败：${remote.lastError}` : '等待读取 /usage/status', remote?.lastError ? 'warn' : 'info']];
-  const failure = latestUploadResponseFailure();
-  return [
-    ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
+    : [['服务端状态', remote?.lastError ? `读取失败：${remote.lastError}` : auth.authorized ? '等待读取 /usage/status' : '等待登录后读取 /usage/status', remote?.lastError ? 'warn' : 'info']];
+
+  const rows = [
     ['本次增量', upload.pending === undefined ? '等待服务端 cursor' : `${formatNumber(upload.pending)} 条待上报`, upload.pending ? 'warn' : 'ok'],
     ...remoteRows,
-    ['请求尝试', `${formatNumber(upload.attempted || 0)} 条`, upload.attempted ? failed ? 'warn' : 'ok' : 'info'],
-    requestRejected
-      ? ['服务端确认', '请求被拒绝，未进入批次处理', 'error']
-      : ['服务端确认', `${formatNumber(confirmed)} 条（${formatNumber(upload.accepted || 0)} 接收 / ${formatNumber(upload.duplicated || 0)} 重复 / ${formatNumber(upload.rejected || 0)} 拒绝${failedCount ? ` / ${formatNumber(failedCount)} 失败` : ''}${queued ? ` / ${formatNumber(queued)} 排队` : ''}）`, upload.rejected || failedCount || failed ? 'warn' : 'info'],
-    ...(upload.lastUploadStatus ? [['批次状态', upload.lastUploadStatus, failed ? 'error' : 'info']] : []),
-    ...(statusText ? [['错误日志', statusText, failed ? 'error' : 'info']] : []),
-    ...(failure && failed ? [['服务端返回', failure.body || `(HTTP ${failure.status}，无响应体)`, 'error']] : []),
-    ...(failure && failed ? [['已发送请求', `${failure.endpoint || '?'} · ${failure.platform || '?'} · ${formatNumber(failure.messageCount)} 条 · cursor ${failure.cursorHash ? String(failure.cursorHash).slice(0, 12) : '无'} · 首条 ${failure.firstEventId || '?'}`, 'info']] : []),
   ];
+
+  // Last upload-attempt summary — only meaningful once an attempt happened.
+  if (upload.attempted || statusText) {
+    rows.push(['请求尝试', `${formatNumber(upload.attempted || 0)} 条`, upload.attempted ? (failed ? 'warn' : 'ok') : 'info']);
+    rows.push(
+      requestRejected
+        ? ['服务端确认', '请求被拒绝，未进入批次处理', 'error']
+        : ['服务端确认', `${formatNumber(confirmed)} 条（${formatNumber(upload.accepted || 0)} 接收 / ${formatNumber(upload.duplicated || 0)} 重复 / ${formatNumber(upload.rejected || 0)} 拒绝${failedCount ? ` / ${formatNumber(failedCount)} 失败` : ''}${queued ? ` / ${formatNumber(queued)} 排队` : ''}）`, upload.rejected || failedCount || failed ? 'warn' : 'info']
+    );
+    if (upload.lastUploadStatus) rows.push(['批次状态', upload.lastUploadStatus, failed ? 'error' : 'info']);
+  }
+
+  if (missingUploadScope) rows.push(['授权', '缺少 upload:read/upload:write，请重新登录', 'warn']);
+  else if (!auth.authorized) rows.push(['授权', '未登录，运行 openhermit auth login', 'warn']);
+  else if (unavailableReason) rows.push(['授权', unavailableReason, 'error']);
+  else if (statusText) rows.push(['错误日志', statusText, failed ? 'error' : 'info']);
+
+  const failure = latestUploadResponseFailure();
+  if (failure && failed) {
+    rows.push(['服务端返回', failure.body || `(HTTP ${failure.status}，无响应体)`, 'error']);
+  }
+  return rows;
 }
 
 async function printUsageRows(title, data, hint) {
@@ -1497,12 +1428,17 @@ function telemetryWorkerChildArgs(extraArgs = []) {
 }
 
 function latestUsageWorkerSourceMtime() {
+  // Only files the worker PROCESS actually imports (src/main TS). bin/hermit.mjs
+  // and bin/lib/*.mjs are CLI-only — editing them must NOT force a worker
+  // restart, which previously blanked status.json mid-view and made
+  // "查看同步状态" briefly show all-zero telemetry.
   return Math.max(
     ...[
-      'bin/hermit.mjs',
       'src/main/telemetry/worker.ts',
       'src/main/services/session-intelligence/UsageTelemetryService.ts',
       'src/main/services/session-intelligence/ConversationMessageUploadService.ts',
+      'src/main/services/session-intelligence/AiMonitorUsageClient.ts',
+      'src/main/services/auth/OpenHermitAuthClient.ts',
     ].map((rel) => {
       try { return statSync(path.join(repoRoot, rel)).mtimeMs; } catch { return 0; }
     })
@@ -1701,14 +1637,47 @@ function launchctlBestEffort(args) {
   }
 }
 
+// --- Windows boot autostart via Task Scheduler (schtasks) ------------------
+// Mirrors the macOS launchd behavior: run at logon + restart on crash, so the
+// telemetry worker survives reboots and recovers from process crashes with no
+// manual intervention. HERMIT_HOME defaults to ~/.hermit for the current user.
+function usageAutostartXmlPath() {
+  return path.join(telemetryDir, 'windows-autostart.xml');
+}
+
+function buildUsageAutostartXml() {
+  const nodeExe = process.execPath;
+  const hermitEntry = fileURLToPath(import.meta.url);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit_task">\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Settings>\n    <AllowHardTerminate>true</AllowHardTerminate>\n    <StartWhenAvailable>true</StartWhenAvailable>\n    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <RestartOnFailure>\n      <Interval>PT1M</Interval>\n      <Count>999</Count>\n    </RestartOnFailure>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n  </Settings>\n  <Actions Context="Author">\n    <Exec>\n      <Command>${xmlEscape(nodeExe)}</Command>\n      <Arguments>"${xmlEscape(hermitEntry)}" __telemetry-worker</Arguments>\n    </Exec>\n  </Actions>\n  <Principals>\n    <Principal id="Author">\n      <LogonType>InteractiveToken</LogonType>\n      <RunLevel>LeastPrivilege</RunLevel>\n    </Principal>\n  </Principals>\n</Task>\n`;
+}
+
+function cmdQuote(value) {
+  const str = String(value);
+  // cmd.exe: quote only when the value has spaces/special chars. Do NOT use
+  // JSON.stringify — it doubles backslashes and breaks Windows paths (C:\\Users).
+  return /[\s"&|<>^]/.test(str) ? `"${str}"` : str;
+}
+
+function schtasksBestEffort(args) {
+  if (process.env.OPENHERMIT_SKIP_SCHTASKS === '1') return { ok: true, output: 'skipped' };
+  try {
+    const output = execSync(`schtasks ${args.join(' ')}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ok: true, output };
+  } catch (err) {
+    return { ok: false, output: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function getUsageAutostartStatus() {
+  const label = usageLaunchdLabel();
   const plistPath = usageLaunchdPlistPath();
-  if (process.platform !== 'darwin') return { supported: false, enabled: false, loaded: false, label: usageLaunchdLabel(), plistPath };
-  const print = launchctlBestEffort(['print', `gui/${process.getuid?.() ?? ''}/${usageLaunchdLabel()}`]);
-  return { supported: true, enabled: existsSync(plistPath), loaded: print.ok, label: usageLaunchdLabel(), plistPath };
+  if (process.platform !== 'darwin') return { supported: false, enabled: false, loaded: false, label, plistPath };
+  const print = launchctlBestEffort(['print', `gui/${process.getuid?.() ?? ''}/${label}`]);
+  return { supported: true, enabled: existsSync(plistPath), loaded: print.ok, label, plistPath };
 }
 
 async function enableUsageAutostart() {
+  const label = usageLaunchdLabel();
   const plistPath = usageLaunchdPlistPath();
   if (process.platform !== 'darwin') return getUsageAutostartStatus();
   mkdirSync(path.dirname(plistPath), { recursive: true });
@@ -1718,13 +1687,14 @@ async function enableUsageAutostart() {
   if (uid !== undefined) {
     launchctlBestEffort(['bootout', `gui/${uid}`, plistPath]);
     launchctlBestEffort(['bootstrap', `gui/${uid}`, plistPath]);
-    launchctlBestEffort(['enable', `gui/${uid}/${usageLaunchdLabel()}`]);
-    launchctlBestEffort(['kickstart', '-k', `gui/${uid}/${usageLaunchdLabel()}`]);
+    launchctlBestEffort(['enable', `gui/${uid}/${label}`]);
+    launchctlBestEffort(['kickstart', '-k', `gui/${uid}/${label}`]);
   }
   return getUsageAutostartStatus();
 }
 
 async function disableUsageAutostart() {
+  const label = usageLaunchdLabel();
   const plistPath = usageLaunchdPlistPath();
   const uid = process.getuid?.();
   if (process.platform === 'darwin' && uid !== undefined) launchctlBestEffort(['bootout', `gui/${uid}`, plistPath]);
@@ -2684,7 +2654,17 @@ if (commandArgs[0] === 'collaboration' && commandArgs[1] === 'start') {
 }
 
 if (commandArgs[0] === '__telemetry-worker') {
+  // Single-instance guard: launchd RunAtLoad / Task Scheduler logon trigger call
+  // this wrapper. If a worker is already running (e.g. `usage start` started one,
+  // or the supervisor already fired), do NOT spawn a duplicate — the supervisor
+  // (KeepAlive / RestartOnFailure) restarts on a real crash, but stacking
+  // parallel workers causes the orphan/pid-mismatch problem. --scan-once is a
+  // one-shot and bypasses the guard.
   const extraArgs = args.includes('--scan-once') ? ['--scan-once'] : [];
+  const existingPid = readPidFile(telemetryWorkerPidPath);
+  if (!extraArgs.includes('--scan-once') && existingPid && isPidRunning(existingPid)) {
+    process.exit(0);
+  }
   const child = spawn(process.execPath, telemetryWorkerChildArgs(extraArgs), {
     cwd: repoRoot,
     env: { ...process.env, HERMIT_HOME: hermitHome },
@@ -2735,8 +2715,43 @@ if (commandArgs[0] === 'tasks' && commandArgs[1] === 'list') {
   printTasksList();
 }
 
+// `openhermit web` — start the local workbench (if not already running) and
+// open it in the browser, bypassing the terminal nav menu. Thin orchestrator:
+// heavy lifting (spawn/ready-wait) lives in daemon.mjs; browser open reuses the
+// auth module's cross-platform opener.
+async function runWebCommand() {
+  const url = `http://127.0.0.1:${port}`;
+  const server = await checkExistingOpenHermitServer();
+  if (!server.running) {
+    startDaemon({ exitOnDone: false, quiet: true });
+    const ready = await waitForOpenHermitServerReady(readDaemonPid(), 30_000);
+    if (!ready.ready) {
+      if (jsonRequested)
+        printJson({ ok: false, command: 'web', url, reason: ready.reason, logPath: daemonLogPath }, 1);
+      printCliRows(`${BRAND.stylizedName} 工作台`, [
+        ['状态', '启动失败或仍在启动中', 'error'],
+        ['地址', url],
+        ['日志', daemonLogPath],
+        ['原因', ready.reason || '请查看日志'],
+      ], `排查后重试：${brandCommand('web')} 或 ${brandCommand('status')}`);
+      process.exit(1);
+    }
+  }
+  await openExternalUrl(url);
+  if (jsonRequested) printJson({ ok: true, command: 'web', url });
+  printCliRows(`${BRAND.stylizedName} 工作台`, [
+    ['状态', '已就绪', 'ok'],
+    ['地址', url],
+  ], `已在浏览器打开；停止服务：${brandCommand('stop')}`);
+  process.exit(0);
+}
+
 if (commandArgs[0] === 'stop') {
   await stopDaemon();
+}
+
+if (commandArgs[0] === 'web') {
+  await runWebCommand();
 }
 
 if (commandArgs.length > 0 && !daemonRequested && !daemonChild) {
@@ -2744,7 +2759,7 @@ if (commandArgs.length > 0 && !daemonRequested && !daemonChild) {
   const result = { ok: false, command, error: `Unknown command: ${command}` };
   if (jsonRequested) printJson(result, 1);
   console.error(`${brandLogPrefix()} 未知命令：${command}`);
-  console.error(`${brandLogPrefix()} 可用命令：status | doctor | services | services start/stop | teams list/create | tasks list | usage status/today/report/start/stop/autostart | auth status/login/logout | stop`);
+  console.error(`${brandLogPrefix()} 可用命令：web | status | doctor | services | services start/stop | teams list/create | tasks list | usage status/today/report/start/stop/autostart | auth status/login/logout | stop`);
   process.exit(1);
 }
 
