@@ -1180,12 +1180,13 @@ async function postPayload(
       if (channel?.lastUploadId && !status.uploadIds?.includes(channel.lastUploadId)) {
         status.uploadIds = [...(status.uploadIds ?? []), channel.lastUploadId];
       }
-      if (channel?.inFlight && Number(channel.inFlight.count ?? 0) > 0) {
-        status.lastError = '服务端仍有处理中批次，等待 /usage/status 更新 cursor';
-      }
-      if (result.status === 'success' && channel?.cursorCommitted === false) {
-        status.lastError = '批次成功但 /usage/status 尚未确认 cursor 提交';
-      }
+      // in-flight batches and a not-yet-committed cursor right after a batch
+      // success are NORMAL — the server processes asynchronously, so the
+      // /usage/status read lags behind. They must NOT set lastError (that would
+      // stop the batch loop mid-run, leaving later batches unattempted). The
+      // batch's own success status is the cursor-committed signal; this channel
+      // read is display-only. (The pre-scan inFlight guard in
+      // uploadPlatformModeMessages still skips a NEW run while the server is busy.)
     } catch (error) {
       status.lastError = `批次已处理，但刷新 /usage/status 失败：${sanitizeUploadError(error)}`;
     }
