@@ -41,17 +41,40 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { BRAND, brandCommand, brandLogPrefix } from './branding.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
-const require = createRequire(import.meta.url);
-
-// ---------------------------------------------------------------------------
-// Load version
-// ---------------------------------------------------------------------------
-
-const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf-8'));
-const currentVersion = pkg.version;
+import {
+  args,
+  commandArgs,
+  jsonRequested,
+  currentVersion,
+  pkg,
+  repoRoot,
+  binDir,
+  require,
+  port,
+  skipHermitBridge,
+  hermitHome,
+  daemonRequested,
+  daemonChild,
+  daemonPidPath,
+  daemonLogPath,
+  runtimeLogPath,
+  serverLogPath,
+  hermitSettingsPath,
+  telemetryDir,
+  telemetryWorkerPidPath,
+  telemetryWorkerStatusPath,
+  telemetryWorkerLogPath,
+  telemetryWorkerErrorLogPath,
+  conversationUploadLogPath,
+  legacyRuntimeBridgeDir,
+  hermitBridgeDir,
+  legacyRuntimeBridgeConfigPath,
+  defaultHermitBridgeConfigPath,
+  legacyRuntimeBridgeDataDir,
+  defaultHermitBridgeDataDir,
+  hermitBridgeConfigPath,
+  starterProjectName,
+} from './lib/env.mjs';
 
 let cancelHandled = false;
 
@@ -64,28 +87,6 @@ function cancelCli() {
 }
 
 process.once('SIGINT', cancelCli);
-
-// ---------------------------------------------------------------------------
-// Parse CLI args
-// ---------------------------------------------------------------------------
-
-const args = process.argv.slice(2);
-const jsonRequested = args.includes('--json');
-const commandArgs = parseCommandArgs(args);
-
-function parseCommandArgs(rawArgs) {
-  const parsed = [];
-  for (let i = 0; i < rawArgs.length; i += 1) {
-    const arg = rawArgs[i];
-    if (arg === '--json' || arg === '--daemon' || arg === '--no-hermit-bridge') continue;
-    if (arg === '--port' || arg === '--control-url') {
-      i += 1;
-      continue;
-    }
-    parsed.push(arg);
-  }
-  return parsed;
-}
 
 const versionIndex = args.indexOf('--version');
 if (versionIndex !== -1) {
@@ -166,35 +167,6 @@ if (commandArgs[0] === 'update') {
   runUpdate();
   process.exit(0);
 }
-
-const portIndex = args.indexOf('--port');
-const port = portIndex !== -1 && args[portIndex + 1] ? args[portIndex + 1] : '5680';
-const skipHermitBridge =
-  args.includes('--no-hermit-bridge') || process.env.HERMIT_NO_HERMIT_BRIDGE === '1';
-const hermitHome = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
-const daemonRequested = args.includes('--daemon');
-const daemonChild = process.env.HERMIT_DAEMON_CHILD === '1';
-const daemonPidPath = path.join(hermitHome, 'openhermit.pid');
-const daemonLogPath = path.join(hermitHome, 'logs', 'openhermit.log');
-const runtimeLogPath = path.join(hermitHome, 'logs', 'openhermit-runtime.log');
-const serverLogPath = path.join(hermitHome, 'logs', 'openhermit-server.log');
-const hermitSettingsPath = path.join(hermitHome, 'settings.json');
-const telemetryDir = path.join(hermitHome, 'telemetry');
-const telemetryWorkerPidPath = path.join(telemetryDir, 'worker.pid');
-const telemetryWorkerStatusPath = path.join(telemetryDir, 'status.json');
-const telemetryWorkerLogPath = path.join(hermitHome, 'logs', 'telemetry-worker.log');
-const telemetryWorkerErrorLogPath = path.join(hermitHome, 'logs', 'telemetry-worker.err.log');
-const conversationUploadLogPath = path.join(hermitHome, 'logs', 'conversation-upload.log');
-const legacyRuntimeBridgeDir = path.join(hermitHome, 'cc-connect');
-const hermitBridgeDir = path.join(hermitHome, 'hermit-bridge');
-const legacyRuntimeBridgeConfigPath = path.join(legacyRuntimeBridgeDir, 'config.toml');
-const defaultHermitBridgeConfigPath = path.join(hermitBridgeDir, 'config.toml');
-const legacyRuntimeBridgeDataDir = path.join(legacyRuntimeBridgeDir, 'data');
-const defaultHermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
-const hermitBridgeConfigPath =
-  process.env.HERMIT_BRIDGE_CONFIG ||
-  defaultHermitBridgeConfigPath;
-const starterProjectName = 'my-project';
 
 // ---------------------------------------------------------------------------
 // Update command
@@ -4822,7 +4794,7 @@ function resolveTsxLoader() {
 }
 
 function resolveAliasLoaderRegister() {
-  const aliasLoaderUrl = pathToFileURL(path.join(__dirname, 'alias-loader.mjs')).href;
+  const aliasLoaderUrl = pathToFileURL(path.join(binDir, 'alias-loader.mjs')).href;
   return `data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register(${JSON.stringify(aliasLoaderUrl)}, pathToFileURL("./"));`;
 }
 
