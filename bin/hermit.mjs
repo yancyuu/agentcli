@@ -1732,8 +1732,10 @@ function readConversationUploadLogEvents(limit = 200) {
   });
 }
 
-function latestConversationUploadProgress() {
-  const events = readConversationUploadLogEvents();
+function latestConversationUploadProgress(sinceMs = 0) {
+  const events = readConversationUploadLogEvents().filter(
+    (event) => Date.parse(event?.timestamp || '') >= sinceMs
+  );
   let latestScan = null;
   let latestBatch = null;
   let latestFailure = null;
@@ -1752,8 +1754,8 @@ function progressBar(percent, width = 18) {
   return `${ui.accent('█'.repeat(filled))}${ui.dim('░'.repeat(empty))}`;
 }
 
-function uploadProgressLabel() {
-  const { latestScan, latestBatch, latestFailure } = latestConversationUploadProgress();
+function uploadProgressLabel(sinceMs = 0) {
+  const { latestScan, latestBatch, latestFailure } = latestConversationUploadProgress(sinceMs);
   if (!latestScan) return `${progressBar(0)} 扫描本地消息中`;
   const total = Number(latestBatch?.totalMessages ?? latestScan.pendingPlain ?? latestScan.pending ?? 0);
   if (!latestBatch) return `${progressBar(0)} 发现 ${formatNumber(Number(latestScan.totalDiscovered || 0))} 条，准备上报`;
@@ -1799,9 +1801,12 @@ function fitProgressLine(text) {
 
 async function withUploadProgress(label, task) {
   if (jsonRequested || !process.stdout.isTTY) return task();
+  // Only consider log events from THIS run — otherwise the bar inherits the
+  // previous run's last batch and shows 100% on entry before dropping to 0.
+  const sinceMs = Date.now() - 1000;
   let lastWidth = 0;
   const render = () => {
-    const text = fitProgressLine(`${label} ${uploadProgressLabel()}`);
+    const text = fitProgressLine(`${label} ${uploadProgressLabel(sinceMs)}`);
     process.stdout.write(`\r\x1b[2K${ui.dim(text)}`);
     lastWidth = displayWidth(text);
   };
