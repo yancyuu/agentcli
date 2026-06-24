@@ -101,6 +101,10 @@ import {
   boxContentLine,
   boxColumnsLine,
   menuColumnsLine,
+  printCliRows,
+  menuBrandTitle,
+  printWelcomeLogo,
+  clearTerminal,
 } from './lib/terminal.mjs';
 import {
   checkDependency,
@@ -1502,22 +1506,6 @@ function findAnyOptionValue(names) {
 }
 
 
-function printCliRows(title, rows = [], hint = '', options = {}) {
-  if (options.screen === true && isInteractiveCli() && !jsonRequested) {
-    clearTerminal();
-    printWelcomeLogo();
-    console.log(menuBrandTitle());
-  }
-  const labelWidth = Math.max(4, ...rows.map(([label]) => displayWidth(label)));
-  console.log('');
-  console.log(ui.bold(title));
-  for (const [label, value, state] of rows) {
-    const resolvedState = state || rowStateFromValue(value);
-    console.log(`  ${statusDot(resolvedState)} ${fitDisplay(label, labelWidth)}  ${colorByState(value, resolvedState)}`);
-  }
-  if (hint) console.log(ui.dim(`\n提示: ${hint}`));
-}
-
 const NAV_ACTIONS = [
   {
     id: 'web',
@@ -1945,39 +1933,6 @@ function visibleMenuRows(actions, expandedActionIds) {
     }
   }
   return rows;
-}
-
-function menuBrandTitle() {
-  return `${ui.accent('🦀')} ${ui.accent(ui.bold(BRAND.stylizedName))} ${ui.dim(`v${currentVersion}`)}`;
-}
-
-function logoBorderLine() {
-  const columns = Number(process.stdout.columns || 80);
-  const width = Math.max(32, Math.min(44, columns - 8));
-  return ui.dim('…'.repeat(width));
-}
-
-function welcomeLogoLines() {
-  return [
-    logoBorderLine(),
-    `        ${ui.accent('☀')}                    ${ui.dim('*')}      `,
-    '              _     _              ',
-    '           __(.)< <(.)__           ',
-    '        __/             \\__        ',
-    `   ${ui.dim('~')}   /  ${ui.accent('███████████')}  \\   ${ui.dim('~')}   `,
-    `      |  ${ui.accent('██▄█████▄██')}  |      `,
-    `       \\  ${ui.accent('█████████')}  /       `,
-    `   ${ui.dim('~')}    /_/  /___\\  \\_\\   ${ui.dim('~')}    `,
-    logoBorderLine(),
-  ];
-}
-
-function printWelcomeLogo() {
-  for (const line of welcomeLogoLines()) console.log(line);
-}
-
-function clearTerminal() {
-  process.stdout.write('\x1b[2J\x1b[H');
 }
 
 let navigationIntroShown = false;

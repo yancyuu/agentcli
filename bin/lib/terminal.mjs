@@ -1,10 +1,11 @@
 // terminal.mjs — ANSI/display primitives, status pills, box drawing, prompts,
-// generic JSON output, and the cancel-on-SIGINT handler bound to the readline
-// prompt interface. Pure leaf module (only branding deps).
+// generic table/logo/welcome rendering, JSON output, and the cancel-on-SIGINT
+// handler bound to the readline prompt interface. Pure leaf (env + branding).
 
 import { createInterface } from 'node:readline/promises';
 
 import { BRAND } from '../branding.mjs';
+import { currentVersion, jsonRequested } from './env.mjs';
 
 let cancelHandled = false;
 
@@ -191,6 +192,56 @@ function menuColumnsLine(left = '', right = '') {
   return `${leftVisible}${gap}${rightVisible}`;
 }
 
+function printCliRows(title, rows = [], hint = '', options = {}) {
+  if (options.screen === true && isInteractiveCli() && !jsonRequested) {
+    clearTerminal();
+    printWelcomeLogo();
+    console.log(menuBrandTitle());
+  }
+  const labelWidth = Math.max(4, ...rows.map(([label]) => displayWidth(label)));
+  console.log('');
+  console.log(ui.bold(title));
+  for (const [label, value, state] of rows) {
+    const resolvedState = state || rowStateFromValue(value);
+    console.log(`  ${statusDot(resolvedState)} ${fitDisplay(label, labelWidth)}  ${colorByState(value, resolvedState)}`);
+  }
+  if (hint) console.log(ui.dim(`\n提示: ${hint}`));
+}
+
+function menuBrandTitle() {
+  return `${ui.accent('🦀')} ${ui.accent(ui.bold(BRAND.stylizedName))} ${ui.dim(`v${currentVersion}`)}`;
+}
+
+function logoBorderLine() {
+  const columns = Number(process.stdout.columns || 80);
+  const width = Math.max(32, Math.min(44, columns - 8));
+  return ui.dim('…'.repeat(width));
+}
+
+function welcomeLogoLines() {
+  return [
+    logoBorderLine(),
+    `        ${ui.accent('☀')}                    ${ui.dim('*')}      `,
+    '              _     _              ',
+    '           __(.)< <(.)__           ',
+    '        __/             \\__        ',
+    `   ${ui.dim('~')}   /  ${ui.accent('███████████')}  \\   ${ui.dim('~')}   `,
+    `      |  ${ui.accent('██▄█████▄██')}  |      `,
+    `       \\  ${ui.accent('█████████')}  /       `,
+    `   ${ui.dim('~')}    /_/  /___\\  \\_\\   ${ui.dim('~')}    `,
+    logoBorderLine(),
+  ];
+}
+
+function printWelcomeLogo() {
+  for (const line of welcomeLogoLines()) console.log(line);
+}
+
+function clearTerminal() {
+  process.stdout.write('\x1b[2J\x1b[H');
+}
+
+
 export {
   cancelCli,
   printJson,
@@ -219,4 +270,10 @@ export {
   boxContentLine,
   boxColumnsLine,
   menuColumnsLine,
+  printCliRows,
+  menuBrandTitle,
+  logoBorderLine,
+  welcomeLogoLines,
+  printWelcomeLogo,
+  clearTerminal,
 };

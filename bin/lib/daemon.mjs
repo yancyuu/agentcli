@@ -16,7 +16,7 @@ import {
   repoRoot,
 } from './env.mjs';
 import { brandCommand } from '../branding.mjs';
-import { printJson } from './terminal.mjs';
+import { printCliRows, printJson } from './terminal.mjs';
 import { checkExistingOpenHermitServer } from './runtime.mjs';
 
 function readDaemonPid() {
