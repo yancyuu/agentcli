@@ -3,6 +3,7 @@
 // resolvers. Depends only on env + branding.
 
 import crypto from 'node:crypto';
+import net from 'node:net';
 import path from 'node:path';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';

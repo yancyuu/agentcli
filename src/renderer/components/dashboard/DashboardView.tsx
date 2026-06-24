@@ -20,7 +20,7 @@ const DASHBOARD_BOUNDARIES = [
   {
     title: 'AI Workforce',
     description:
-      '以团队为单位组织数字员工：分配任务、跟进进度、审阅结果，并在同一个工作区持续沉淀。',
+      '以团队为单位组织数字员工，对接飞书等渠道、进入真实业务场景：接需求、跟进任务、审阅交付，在业务里持续提供服务。',
     badge: 'Agent Teams',
   },
   {
@@ -63,9 +63,9 @@ export const DashboardView = (): React.JSX.Element => {
                 你的本地 AI 员工操作系统
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-text-secondary">
-                {PRODUCT_NAME} 把 Claude Code、团队协作、任务看板、Loop
-                工作流和外部渠道连接到一个本地优先的控制面。你不是在打开一个聊天窗口，而是在管理一支可持续运行的
-                AI 工程团队。
+                {PRODUCT_NAME} 把 Claude Code、团队协作和 Loop
+                工作流收束到一个本地优先的控制面。你的数字员工对接飞书等外部渠道、深入真实业务场景，按团队分工自主跟进任务、审阅结果——不是开一个聊天窗口，而是养一支能接业务、持续交付服务的
+                AI 团队。
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <button

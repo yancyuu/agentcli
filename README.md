@@ -215,14 +215,18 @@ openhermit
 ### Useful commands
 
 ```bash
-openhermit                # start the workbench
-openhermit --daemon       # run in the background
+openhermit                # open the terminal navigator (local use, teams, account)
+openhermit web            # start + open the local workbench (Web UI) in the browser
+openhermit --daemon       # run the workbench in the background
 openhermit status         # inspect daemon status
 openhermit stop           # stop the daemon
 openhermit --port 8080    # choose a port
 openhermit --version      # print version
 openhermit update         # self-update
 ```
+
+> `openhermit` with no arguments opens the **terminal navigator** (the control-plane
+> menu). To jump straight into the browser-based workbench, run `openhermit web`.
 
 ### Let an agent install it
 

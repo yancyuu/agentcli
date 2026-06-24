@@ -4,9 +4,9 @@
 import { spawn, execSync } from 'node:child_process';
 import path from 'node:path';
 import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import {
+  binDir,
   currentVersion,
   daemonLogPath,
   daemonPidPath,
@@ -17,7 +17,13 @@ import {
 } from './env.mjs';
 import { brandCommand } from '../branding.mjs';
 import { printCliRows, printJson } from './terminal.mjs';
-import { checkExistingOpenHermitServer } from './runtime.mjs';
+import { appendLog, checkExistingOpenHermitServer } from './runtime.mjs';
+
+// The daemon child must re-enter bin/hermit.mjs (which owns the server-start
+// fall-through at the bottom of that file). Spawning daemon.mjs itself does
+// nothing — it has no run-as-script entry — so the child exited immediately and
+// the web console never came up.
+const hermitEntry = path.join(binDir, 'hermit.mjs');
 
 function readDaemonPid() {
   try {
@@ -246,7 +252,11 @@ function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {
   const out = openSync(daemonLogPath, 'a');
   const err = openSync(daemonLogPath, 'a');
   const daemonChildArgs = childArgs ?? process.argv.slice(2).filter((arg) => arg !== '--daemon');
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...daemonChildArgs], {
+  appendLog(
+    daemonLogPath,
+    `${new Date().toISOString()} daemon-child-spawn entry=${hermitEntry} args=[${daemonChildArgs.join(' ')}] port=${port}\n`
+  );
+  const child = spawn(process.execPath, [hermitEntry, ...daemonChildArgs], {
     cwd: repoRoot,
     detached: true,
     env: {

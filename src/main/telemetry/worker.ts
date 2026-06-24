@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import type { TaskBusConfig } from '@shared/types/team';
 
 import { scanTelemetryOnce } from '@main/services/session-intelligence/UsageTelemetryService';
+import { sweepStaleUploadLock } from '@main/services/session-intelligence/ConversationMessageUploadService';
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
 
 const STATUS_SCHEMA_VERSION = 1;
@@ -227,6 +228,9 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
   startedAt = new Date().toISOString();
   await mkdir(path.dirname(paths.logPath), { recursive: true, mode: 0o700 });
   await writePid(paths);
+  // Clear any upload lock left by a previous crash/reboot before the first scan,
+  // so a stale lock never blocks the first cycle of a fresh boot.
+  await sweepStaleUploadLock(hermitHome);
   await writeStatus(paths, 'starting', await readTaskBusConfig(paths));
 
   const stop = async () => {

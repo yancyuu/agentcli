@@ -4,6 +4,11 @@ import { appendFile, mkdir, open, readdir, readFile, stat, unlink } from 'node:f
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
+import {
+  authedFetch,
+  getValidBearerToken,
+  refreshAccessToken,
+} from '@main/services/auth/OpenHermitAuthClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
 type ConversationUploadTelemetryConfig = {
   enabled?: boolean;
@@ -250,6 +255,16 @@ function uploadLockPath(hermitHome: string): string {
   return path.join(hermitHome, 'telemetry', UPLOAD_LOCK_FILE);
 }
 
+/**
+ * Clear a leftover upload lock from a previous (crashed/killed/rebooted) run.
+ * Safe to call at worker startup so a stale lock from the previous boot is gone
+ * before the first scan, instead of only being cleared on the next acquisition
+ * attempt. No-op when there is no lock or it belongs to a live process.
+ */
+export async function sweepStaleUploadLock(home: string): Promise<boolean> {
+  return clearStaleUploadLock(uploadLockPath(home));
+}
+
 async function clearStaleUploadLock(filePath: string): Promise<boolean> {
   try {
     const raw = await readFile(filePath, 'utf-8');
@@ -273,30 +288,53 @@ async function clearStaleUploadLock(filePath: string): Promise<boolean> {
   }
 }
 
-async function withUploadLock<T>(hermitHome: string, fn: () => Promise<T>): Promise<T | null> {
-  const filePath = uploadLockPath(hermitHome);
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(filePath, 'wx', 0o600);
-    await handle.writeFile(
-      JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
-    );
-  } catch {
-    const stale = await clearStaleUploadLock(filePath);
-    if (stale) {
+// Create the lock file, retrying on contention so a manual `usage report` (or
+// --full) completes instead of being skipped when the background worker is
+// mid-scan. The bg scan holds the lock only briefly between cycles, so waiting
+// a short while usually acquires it. Returns true once acquired, false on
+// timeout. (Wait read at call time so tests can override via env.)
+async function acquireUploadLock(hermitHome: string, filePath: string): Promise<boolean> {
+  const deadline = Date.now() + Number(process.env.HERMIT_UPLOAD_LOCK_WAIT_MS ?? '60000');
+  let loggedWaiting = false;
+  while (Date.now() < deadline) {
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
+    try {
       handle = await open(filePath, 'wx', 0o600);
       await handle.writeFile(
         JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
       );
-    } else {
-      await appendUploadLog(hermitHome, 'upload-lock-busy', {
-        lockPath: 'telemetry/conversation-message-upload.lock',
-      });
-      return null;
+      return true;
+    } catch {
+      // contention or transient error — fall through to retry
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
-  } finally {
-    await handle?.close().catch(() => undefined);
+    const stale = await clearStaleUploadLock(filePath);
+    if (!stale) {
+      if (!loggedWaiting) {
+        loggedWaiting = true;
+        await appendUploadLog(hermitHome, 'upload-lock-busy-waiting', {
+          lockPath: 'telemetry/conversation-message-upload.lock',
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return false;
+}
+
+export async function withUploadLock<T>(
+  hermitHome: string,
+  fn: () => Promise<T>
+): Promise<T | null> {
+  const filePath = uploadLockPath(hermitHome);
+  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const acquired = await acquireUploadLock(hermitHome, filePath);
+  if (!acquired) {
+    await appendUploadLog(hermitHome, 'upload-lock-busy', {
+      lockPath: 'telemetry/conversation-message-upload.lock',
+    });
+    return null;
   }
 
   try {
@@ -312,10 +350,6 @@ function apiUrl(baseUrl: string, apiPath: string): string {
     return `${base}${apiPath.slice('/api/v1'.length)}`;
   }
   return `${base}${apiPath}`;
-}
-
-function fetchWithTimeout(input: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(API_TIMEOUT_MS) });
 }
 
 function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
@@ -403,24 +437,18 @@ async function* walkJsonl(dir: string): AsyncGenerator<string> {
   }
 }
 
-async function readBearerToken(home: string): Promise<string | null> {
-  try {
-    const raw = await readFile(path.join(home, 'auth', 'openhermit.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { token?: { accessToken?: string; expiresAt?: string } };
-    if (!parsed.token?.accessToken) return null;
-    if (parsed.token.expiresAt && Date.parse(parsed.token.expiresAt) <= Date.now()) return null;
-    return parsed.token.accessToken;
-  } catch {
-    return null;
-  }
-}
-
-async function probeAuth(baseUrl: string, token: string, home: string): Promise<string | null> {
-  const res = await fetchWithTimeout(apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
+async function probeAuthOnce(
+  baseUrl: string,
+  token: string,
+  home: string
+): Promise<{ reason: string | null; accessExpired: boolean }> {
+  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const status = typeof body.status === 'string' ? body.status : `HTTP ${res.status}`;
+  const accessExpired = body.access_expired === true;
   const scopes = Array.isArray(body.scopes)
     ? body.scopes.filter((scope) => typeof scope === 'string')
     : null;
@@ -432,14 +460,37 @@ async function probeAuth(baseUrl: string, token: string, home: string): Promise<
       res.ok && body.authenticated !== false && status === 'ok' && missingUploadScopes.length === 0,
     status,
     feishuAuthorized: body.feishu_authorized,
-    accessExpired: body.access_expired,
+    accessExpired,
     scopes,
     missingUploadScopes,
   });
-  if (!res.ok || body.authenticated === false || status !== 'ok') return `授权不可用：${status}`;
-  if (missingUploadScopes.length > 0)
-    return `缺少 ${missingUploadScopes.join('/')} 授权，请重新登录`;
-  return null;
+  if (!res.ok || body.authenticated === false || status !== 'ok') {
+    return { reason: `授权不可用：${status}`, accessExpired };
+  }
+  if (missingUploadScopes.length > 0) {
+    return { reason: `缺少 ${missingUploadScopes.join('/')} 授权，请重新登录`, accessExpired };
+  }
+  return { reason: null, accessExpired };
+}
+
+async function probeAuth(baseUrl: string, token: string, home: string): Promise<string | null> {
+  let result = await probeAuthOnce(baseUrl, token, home);
+  // The server may report access_expired as 200 + access_expired:true (not a
+  // 401) even when the local expiresAt still looks valid — authedFetch only
+  // refreshes on 401. Mirror bin/lib/auth.mjs: refresh and retry /me once.
+  if (result.accessExpired) {
+    await appendUploadLog(home, 'auth-refresh-attempted', { reason: 'access_expired' });
+    const refreshed = await refreshAccessToken(home, baseUrl);
+    const nextToken = refreshed?.token?.accessToken;
+    if (nextToken) {
+      await appendUploadLog(home, 'auth-retry-after-401', {
+        endpoint: '/me',
+        reason: 'access_expired',
+      });
+      result = await probeAuthOnce(baseUrl, nextToken, home);
+    }
+  }
+  return result.reason;
 }
 
 async function fetchUsageChannel(
@@ -457,8 +508,9 @@ async function fetchUsageChannel(
         url: `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`,
       })
     : Promise.resolve());
-  const res = await fetchWithTimeout(url, {
+  const res = await authedFetch(home ?? hermitHome(), baseUrl, url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   if (!res.ok) {
@@ -579,7 +631,14 @@ function claudeUploadMessage(
   if (!role) return null;
 
   const content = textFromContent(msg.content ?? obj.content);
-  if (!content) return null;
+  const usage = usageFromMessage(msg);
+  // Keep a message if it has readable text OR token usage. Tool-use / tool-result
+  // turns carry no text but hold the bulk of token usage — dropping them made the
+  // server undercount tokens, and the cursor advances past them so they would
+  // never be retried. Textless usage-bearing messages get a placeholder content
+  // so their usage is still reported; the server dedupes by eventId.
+  if (!content && !usage) return null;
+  const reportedContent = content || (role === 'assistant' ? '[tool use]' : '[no text]');
 
   const sessionId = claudeSessionId(filePath, obj);
   const messageId = claudeMessageId(obj, msg);
@@ -614,9 +673,9 @@ function claudeUploadMessage(
       role,
       occurredAt,
       model: typeof msg.model === 'string' ? msg.model : undefined,
-      content,
+      content: reportedContent,
       contentFormat: 'text',
-      usage: usageFromMessage(msg),
+      usage,
     },
   };
 }
@@ -908,7 +967,13 @@ function countsCoverAttempt(status: ConversationUploadStatus): boolean {
 }
 
 function shouldCountAsUploaded(status: ConversationUploadStatus): boolean {
-  if (status.attempted <= 0 || status.rejected > 0 || status.lastError) return false;
+  if (status.attempted <= 0) return false;
+  // Cursor-authoritative: a server-confirmed success means the cursor committed,
+  // even when accepted + duplicated != attempted. Counts can lag in a multi-server
+  // backend (items in-flight on another node), so the count equality is only a
+  // fallback signal — the batch status (success => cursor committed) is the truth.
+  if (status.lastUploadStatus === 'success') return true;
+  if (status.rejected > 0 || (status.failed ?? 0) > 0 || status.lastError) return false;
   return countsCoverAttempt(status);
 }
 
@@ -996,7 +1061,7 @@ function uploadStatusFromResult(
   }
   if ((status.failed ?? 0) > 0) status.lastError = '部分消息处理失败，未推进本地假定游标';
   if (status.rejected > 0) status.lastError = '部分消息被拒绝，未推进本地假定游标';
-  if (!status.lastError && !countsCoverAttempt(status)) {
+  if (!status.lastError && status.lastUploadStatus !== 'success' && !countsCoverAttempt(status)) {
     status.lastError = '服务端最终处理计数未覆盖本批发送数，等待下次按服务端 cursor 重扫';
   }
   return status;
@@ -1033,8 +1098,9 @@ async function queryUploadResult(
 ): Promise<UploadResult | null> {
   const url = absoluteStatusUrl(baseUrl, receipt);
   if (!url) return null;
-  const res = await fetchWithTimeout(url, {
+  const res = await authedFetch(hermitHome(), baseUrl, url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`upload status ${await responseDiagnostic(res)}`);
   const text = await res.text().catch(() => '');
@@ -1097,13 +1163,14 @@ async function postPayload(
       Object.prototype.hasOwnProperty.call(payload, 'uploadId') ||
       Object.prototype.hasOwnProperty.call(payload, 'upload_id'),
   });
-  const res = await fetchWithTimeout(apiUrl(baseUrl, endpointPath), {
+  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, endpointPath), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   await appendUploadLog(home, 'upload-response', {
@@ -1126,16 +1193,20 @@ async function postPayload(
     await wait(statusRefreshDelayMs());
     try {
       const channel = await fetchUsageChannel(baseUrl, token, payload.platform, mode);
-      if (channel?.status) status.lastUploadStatus = channel.status;
+      // The channel's aggregate status (never_reported / processing / ...) is NOT
+      // the batch outcome — do not clobber lastUploadStatus (it holds the batch
+      // result, e.g. 'success', the cursor-committed signal). Channel is only for
+      // the in-flight + cursorCommitted checks below.
       if (channel?.lastUploadId && !status.uploadIds?.includes(channel.lastUploadId)) {
         status.uploadIds = [...(status.uploadIds ?? []), channel.lastUploadId];
       }
-      if (channel?.inFlight && Number(channel.inFlight.count ?? 0) > 0) {
-        status.lastError = '服务端仍有处理中批次，等待 /usage/status 更新 cursor';
-      }
-      if (result.status === 'success' && channel?.cursorCommitted === false) {
-        status.lastError = '批次成功但 /usage/status 尚未确认 cursor 提交';
-      }
+      // in-flight batches and a not-yet-committed cursor right after a batch
+      // success are NORMAL — the server processes asynchronously, so the
+      // /usage/status read lags behind. They must NOT set lastError (that would
+      // stop the batch loop mid-run, leaving later batches unattempted). The
+      // batch's own success status is the cursor-committed signal; this channel
+      // read is display-only. (The pre-scan inFlight guard in
+      // uploadPlatformModeMessages still skips a NEW run while the server is busy.)
     } catch (error) {
       status.lastError = `批次已处理，但刷新 /usage/status 失败：${sanitizeUploadError(error)}`;
     }
@@ -1307,10 +1378,16 @@ async function uploadPlatformModeMessages(
   }
 
   const conversationCfg = cfg.telemetry?.conversations;
+  // `usage report --full` backfill: ignore the server cursor so every file scans
+  // from offset 0 and re-uploads everything. The server dedupes by eventId, so
+  // already-uploaded messages become duplicates (not re-counted) and messages
+  // newly included by a filter change (e.g. tool-use turns that now keep their
+  // usage) get inserted. After success the server commits the full-range cursor.
+  const fullRescan = process.env.HERMIT_USAGE_FULL_RESCAN === '1';
   const { messages, clientCursor } = await collectMessagesForPlatform(
     platform,
     mode,
-    channel?.currentCursor,
+    fullRescan ? null : channel?.currentCursor,
     conversationCfg?.batchSize ?? 0,
     generatedAt
   );
@@ -1354,7 +1431,7 @@ async function uploadPlatformModeMessages(
     baseUrl,
   });
 
-  const { status } = await postMessagesInBatches(
+  const { status, uploadedCount } = await postMessagesInBatches(
     home,
     baseUrl,
     endpointForMode(mode),
@@ -1366,7 +1443,13 @@ async function uploadPlatformModeMessages(
     messages.length,
     0
   );
-  const result = { ...status, ...baseStatus };
+  // pending = discovered − uploaded (remaining), not the raw discovered count —
+  // otherwise it shows "N 待上报" even after a fully-successful upload.
+  const result = {
+    ...status,
+    ...baseStatus,
+    pending: Math.max(0, messages.length - uploadedCount),
+  };
   await appendUploadLog(home, 'upload-finished', {
     platform,
     mode,
@@ -1401,7 +1484,7 @@ async function uploadConversationMessagesLocked(
     cursorAuthority: 'server-usage-status',
   });
 
-  const token = await readBearerToken(home);
+  const token = await getValidBearerToken(home, baseUrl);
   if (!token) {
     await appendUploadLog(home, 'waiting-login', { providers });
     return emptyStatus(true, Boolean(baseUrl), { lastError: '等待登录' });
