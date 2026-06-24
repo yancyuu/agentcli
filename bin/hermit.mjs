@@ -29,6 +29,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -167,6 +168,7 @@ import {
   readOpenHermitAuthStore,
   isAuthTokenExpired,
   authStatusFromStore,
+  normalizeScopes,
   normalizeAccessTokenPayload,
   mergeAuthToken,
   readOpenHermitAuthStatus,
@@ -332,23 +334,23 @@ if (commandArgs[0] === 'add') {
 
 const NAV_ACTIONS = [
   {
-    id: 'web',
-    label: '本地数字员工工作台',
-    description: '回车展开；在二级项里用 ✓ 表示已开启，回车可开启或关闭',
-    recommended: true,
-    children: [
-      { id: 'toggle-web', label: '本地数字员工工作台', toggle: 'web' },
-    ],
-  },
-  {
     id: 'data-sync',
     label: '用量上报',
     description: '回车展开；消息上报会启动后台增量扫描，首次补齐历史，后续只上传新增消息',
+    recommended: true,
     children: [
       { id: 'toggle-message-upload', label: '消息上报', toggle: 'conversation-upload' },
       { id: 'overview', label: '查看同步状态' },
       { id: 'scan', label: '立即扫描并上报一次' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
+    ],
+  },
+  {
+    id: 'web',
+    label: '本地数字员工工作台',
+    description: '回车展开；在二级项里用 ✓ 表示已开启，回车可开启或关闭',
+    children: [
+      { id: 'toggle-web', label: '本地数字员工工作台', toggle: 'web' },
     ],
   },
   {
@@ -1147,42 +1149,191 @@ async function fetchBackendUsageStatus() {
   }
 }
 
-async function readUsageStatus({ scan = false, localOnly = false } = {}) {
-  if (scan) return scanUsageTelemetryOnce({ localOnly });
-  const backend = await fetchBackendUsageStatus();
-  if (backend) return backend;
-  const { status, error } = readTelemetryWorkerStatusFile();
-  const autostart = await getUsageAutostartStatus();
+function parseJsonText(text) {
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Read-only preview of the server /usage/status channels. NEVER uploads, never
+// writes a cursor — pure GET so "查看同步状态" can show the real server cursor /
+// in-flight batches / recent error without triggering a report.
+async function fetchRemoteUsageStatus() {
+  const auth = await refreshOpenHermitAuthStatus();
+  if (!auth.authorized) {
+    return { authorized: false, channels: [], lastError: auth.expired ? '登录已失效，请重新登录' : '等待登录' };
+  }
+  const baseUrl = resolveConversationUploadBaseUrl();
+  const token = readOpenHermitAuthStore().store?.token?.accessToken;
+  if (!token) return { authorized: false, channels: [], lastError: '等待登录' };
+  const providers = normalizeUploadProviders(currentFeatureStates().uploadProviders);
+  const platforms = providers.length ? providers : ['claudecode'];
+  const channels = [];
+  let lastError = null;
+  for (const platform of platforms) {
+    for (const mode of ['plain', 'im']) {
+      const url = `${baseUrl}/api/v1/hermit/usage/status?platform=${encodeURIComponent(platform)}&mode=${encodeURIComponent(mode)}`;
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(8_000),
+        });
+        const text = await res.text().catch(() => '');
+        if (!res.ok) {
+          lastError = `usage status ${platform}/${mode} HTTP ${res.status}`;
+          continue;
+        }
+        const body = parseJsonText(text);
+        const channel = (Array.isArray(body?.channels) ? body.channels : [])
+          .find((c) => c && c.platform === platform && c.mode === mode) || null;
+        channels.push({
+          platform,
+          mode,
+          status: channel?.status || 'unknown',
+          cursorHash: channel?.currentCursor?.targetCursorHash || null,
+          hasCursor: Boolean(channel?.currentCursor),
+          inFlight: Number(channel?.inFlight?.count ?? 0),
+        });
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  return { authorized: true, channels, lastError };
+}
+
+// Surface the server's failure response body + what we sent, so a 500 can be
+// diagnosed ("为啥被拒") instead of just showing the status code. Both events are
+// already appended to conversation-upload.log by the worker; this just reads them.
+function latestUploadResponseFailure() {
+  const events = readConversationUploadLogEvents();
+  let lastResponse = null;
+  let lastRequest = null;
+  for (const event of events) {
+    if (event.message === 'upload-response' && event.ok === false) lastResponse = event;
+    if (event.message === 'upload-request') lastRequest = event;
+  }
+  if (!lastResponse) return null;
+  const body = typeof lastResponse.body === 'string' ? lastResponse.body : '';
   return {
-    daemon: usageDaemonPayload({ running: false, url: `http://127.0.0.1:${port}`, version: '' }),
-    worker: telemetryWorkerPayload({ status, statusError: error, autostart }),
-    telemetry: telemetryFromWorkerStatus(status),
-    source: 'claude-jsonl',
+    status: lastResponse.status,
+    body: body.length > 300 ? `${body.slice(0, 300)}…` : body,
+    endpoint: lastRequest?.endpoint || '',
+    platform: lastRequest?.platform || '',
+    messageCount: Number(lastRequest?.messageCount || 0),
+    cursorHash: lastRequest?.cursorHash || '',
+    firstEventId: lastRequest?.firstEventId || '',
   };
 }
 
-function conversationUploadRows(upload = {}, auth = readOpenHermitAuthStatus()) {
-  const waitingLogin = upload.lastError === '等待登录';
-  const statusText = waitingLogin && auth.authorized ? '已登录，等待下一次增量扫描上报' : upload.lastError;
-  const failed = Boolean(statusText) && !waitingLogin;
+async function readUsageStatus({ scan = false, localOnly = false } = {}) {
+  await restartTelemetryWorkerIfStale();
+  if (scan) return scanUsageTelemetryOnce({ localOnly });
+  const [backend, remote] = await Promise.all([fetchBackendUsageStatus(), fetchRemoteUsageStatus()]);
+  let base;
+  if (backend) {
+    base = backend;
+  } else {
+    const { status, error } = readTelemetryWorkerStatusFile();
+    const autostart = await getUsageAutostartStatus();
+    base = {
+      daemon: usageDaemonPayload({ running: false, url: `http://127.0.0.1:${port}`, version: '' }),
+      worker: telemetryWorkerPayload({ status, statusError: error, autostart }),
+      telemetry: telemetryFromWorkerStatus(status),
+      source: 'claude-jsonl',
+    };
+  }
+  base.remoteUsage = remote;
+  return base;
+}
+
+function uploadStatusUnavailableReason(errorText = '') {
+  if (!errorText) return '';
+  if (/insufficient_scope|upload:read/u.test(errorText)) return '缺少 upload:read 授权，请重新登录';
+  if (/usage status HTTP 401/u.test(errorText)) return '登录已失效，请重新登录';
+  if (/usage status HTTP 403/u.test(errorText)) return '服务端拒绝读取 /usage/status';
+  if (/usage status .*HTTP \d+/u.test(errorText)) return errorText;
+  return '';
+}
+
+function authScopes(auth = readOpenHermitAuthStatus()) {
+  const scopes = Array.isArray(auth.scopes) ? auth.scopes : normalizeScopes({ scope: auth.scope }) || [];
+  return new Set(scopes);
+}
+
+function hasUploadScopes(auth = readOpenHermitAuthStatus()) {
+  const scopes = authScopes(auth);
+  return scopes.has('upload:read') && scopes.has('upload:write');
+}
+
+function conversationUploadRows(upload = {}, auth = readOpenHermitAuthStatus(), remote = null) {
+  const statusText = upload.lastError;
+  const unavailableReason = uploadStatusUnavailableReason(String(statusText || ''));
+  const missingUploadScope = auth.authorized && !hasUploadScopes(auth);
+  const waitingLogin = !auth.authorized;
+  if (waitingLogin) {
+    return [
+      ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
+      ['服务端游标', '等待登录后从 /usage/status 确认', 'warn'],
+      ['本次增量', '等待登录后由服务端 cursor 确认', 'warn'],
+      ['发送状态', '未登录，未尝试上报', 'warn'],
+      ['错误日志', '等待登录', 'warn'],
+    ];
+  }
+  if (missingUploadScope || unavailableReason) {
+    const reason = unavailableReason || '缺少 upload:read/upload:write 授权，请重新登录';
+    return [
+      ['历史消息', '未知（服务端状态不可读）', 'warn'],
+      ['服务端游标', '读取失败，不能确认 currentCursor', 'error'],
+      ['本次增量', '未知，避免把空状态误报为 0', 'warn'],
+      ['发送状态', '已暂停，请重新登录授权后再上报', 'warn'],
+      ['错误日志', reason, 'error'],
+    ];
+  }
+  if (upload.lastError === '等待登录') {
+    return [
+      ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
+      ['服务端游标', '已登录，下一次扫描从 /usage/status 确认', 'info'],
+      ['本次增量', '等待重新扫描确认', 'warn'],
+      ['发送状态', '尚未重新尝试上报', 'warn'],
+      ['错误日志', '上次扫描时未登录；现在已登录', 'info'],
+    ];
+  }
+  const failed = Boolean(statusText);
   const confirmed = Number(upload.accepted || 0) + Number(upload.duplicated || 0);
   const failedCount = Number(upload.failed || 0);
   const queued = Number(upload.queued || 0);
-  const statusState = waitingLogin ? 'warn' : failed ? 'error' : 'info';
+  const requestRejected = failed && confirmed === 0 && upload.attempted > 0;
+  const remoteChannels = Array.isArray(remote?.channels) ? remote.channels : [];
+  const remoteRows = remoteChannels.length
+    ? remoteChannels.map((c) => [
+        `${uploadProviderLabel(c.platform)}/${c.mode}`,
+        `${c.status || '未知'} · ${c.hasCursor ? `cursor ${String(c.cursorHash).slice(0, 12)}` : '尚未上报'}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}`,
+        c.inFlight ? 'warn' : 'info',
+      ])
+    : [['服务端状态', remote?.lastError ? `读取失败：${remote.lastError}` : '等待读取 /usage/status', remote?.lastError ? 'warn' : 'info']];
+  const failure = latestUploadResponseFailure();
   return [
-    ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条已发现`, 'info'],
-    ['本次增量', upload.pending === undefined ? '等待扫描' : `${formatNumber(upload.pending)} 条待上报`, upload.pending ? 'warn' : 'ok'],
-    ['已跳过', upload.skippedAlreadyUploaded === undefined ? '等待扫描' : `${formatNumber(upload.skippedAlreadyUploaded)} 条已上报`, 'info'],
-    ['已尝试发送', `${formatNumber(upload.attempted || 0)} 条`, upload.attempted ? failed ? 'warn' : 'ok' : 'info'],
-    ['服务端确认', `${formatNumber(confirmed)} 条（${formatNumber(upload.accepted || 0)} 接收 / ${formatNumber(upload.duplicated || 0)} 重复 / ${formatNumber(upload.rejected || 0)} 拒绝${failedCount ? ` / ${formatNumber(failedCount)} 失败` : ''}${queued ? ` / ${formatNumber(queued)} 排队` : ''}）`, upload.rejected || failedCount || failed ? 'warn' : 'info'],
+    ['历史消息', upload.totalDiscovered === undefined ? '等待扫描' : `${formatNumber(upload.totalDiscovered)} 条本地已发现`, 'info'],
+    ['本次增量', upload.pending === undefined ? '等待服务端 cursor' : `${formatNumber(upload.pending)} 条待上报`, upload.pending ? 'warn' : 'ok'],
+    ...remoteRows,
+    ['请求尝试', `${formatNumber(upload.attempted || 0)} 条`, upload.attempted ? failed ? 'warn' : 'ok' : 'info'],
+    requestRejected
+      ? ['服务端确认', '请求被拒绝，未进入批次处理', 'error']
+      : ['服务端确认', `${formatNumber(confirmed)} 条（${formatNumber(upload.accepted || 0)} 接收 / ${formatNumber(upload.duplicated || 0)} 重复 / ${formatNumber(upload.rejected || 0)} 拒绝${failedCount ? ` / ${formatNumber(failedCount)} 失败` : ''}${queued ? ` / ${formatNumber(queued)} 排队` : ''}）`, upload.rejected || failedCount || failed ? 'warn' : 'info'],
     ...(upload.lastUploadStatus ? [['批次状态', upload.lastUploadStatus, failed ? 'error' : 'info']] : []),
-    ...(statusText ? [['错误日志', statusText, statusState], ['本地游标', '未推进，后续会按 eventId 幂等重试', failed ? 'warn' : 'info']] : []),
+    ...(statusText ? [['错误日志', statusText, failed ? 'error' : 'info']] : []),
+    ...(failure && failed ? [['服务端返回', failure.body || `(HTTP ${failure.status}，无响应体)`, 'error']] : []),
+    ...(failure && failed ? [['已发送请求', `${failure.endpoint || '?'} · ${failure.platform || '?'} · ${formatNumber(failure.messageCount)} 条 · cursor ${failure.cursorHash ? String(failure.cursorHash).slice(0, 12) : '无'} · 首条 ${failure.firstEventId || '?'}`, 'info']] : []),
   ];
 }
 
-function printUsageRows(title, data, hint) {
+async function printUsageRows(title, data, hint) {
   const states = currentFeatureStates();
-  const auth = readOpenHermitAuthStatus();
+  const auth = await refreshOpenHermitAuthStatus();
   const upload = data.telemetry.conversationUpload;
   const uploadEnabled = Boolean(states.conversationUploadEnabled || upload?.enabled);
   const workerText = states.usageRunning ? `后台运行中 (pid ${states.usagePid})，每 5 分钟增量扫描` : '后台未运行';
@@ -1196,16 +1347,16 @@ function printUsageRows(title, data, hint) {
     ['消息数', formatNumber(data.telemetry.messages), 'info'],
     ['Token 总量', formatNumber(data.telemetry.totalTokens), 'info'],
     ['来源', `${formatUploadProviders(states.uploadProviders)} 本地消息记录`, 'info'],
-    ...(uploadEnabled && upload ? conversationUploadRows(upload, auth) : []),
+    ...(uploadEnabled && upload ? conversationUploadRows(upload, auth, data.remoteUsage) : []),
   ], hint || '消息上报会后台增量扫描：首次补齐历史消息，后续只上报新增消息。');
 }
 
 async function printUsageStatus({ exitOnDone = true } = {}) {
   try {
-    const data = await readUsageStatus({ scan: false });
+    const data = await withCliProgress('正在读取用量状态...', () => readUsageStatus({ scan: false }));
     const result = { ok: true, command: 'usage status', hermitHome, ...data };
     if (jsonRequested) printJson(result);
-    printUsageRows('用量上报状态', data, data.daemon.running ? '触发扫描：openhermit usage report' : '启动本地采集：openhermit usage start');
+    await printUsageRows('用量上报状态', data, data.daemon.running ? '触发扫描：openhermit usage report' : '启动本地采集：openhermit usage start');
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
@@ -1345,9 +1496,78 @@ function telemetryWorkerChildArgs(extraArgs = []) {
   return ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/telemetry/worker.ts', ...extraArgs];
 }
 
-function startTelemetryWorker({ quiet = false } = {}) {
+function latestUsageWorkerSourceMtime() {
+  return Math.max(
+    ...[
+      'bin/hermit.mjs',
+      'src/main/telemetry/worker.ts',
+      'src/main/services/session-intelligence/UsageTelemetryService.ts',
+      'src/main/services/session-intelligence/ConversationMessageUploadService.ts',
+    ].map((rel) => {
+      try { return statSync(path.join(repoRoot, rel)).mtimeMs; } catch { return 0; }
+    })
+  );
+}
+
+function markTelemetryWorkerRestarting(reason = '正在重启 worker') {
+  try {
+    mkdirSync(telemetryDir, { recursive: true, mode: 0o700 });
+    writeFileSync(telemetryWorkerStatusPath, `${JSON.stringify({
+      schemaVersion: 1,
+      state: 'restarting',
+      running: false,
+      pid: null,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastScan: null,
+      source: 'claude-jsonl',
+      telemetryEnabled: true,
+      restartReason: reason,
+      telemetry: emptyUsageTelemetryStatus(),
+    }, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+  } catch {}
+}
+
+async function restartTelemetryWorker({ quiet = true, reason = '手动重启 worker' } = {}) {
+  await stopTelemetryWorker();
+  await clearStaleConversationUploadLock();
+  markTelemetryWorkerRestarting(reason);
+  return startTelemetryWorker({ quiet, forceRestart: true });
+}
+
+async function clearStaleConversationUploadLock() {
+  const lockPath = path.join(telemetryDir, 'conversation-message-upload.lock');
+  try {
+    const raw = readFileSync(lockPath, 'utf-8');
+    const lock = JSON.parse(raw);
+    const pid = Number(lock.pid);
+    const ageMs = Date.now() - Date.parse(lock.createdAt || '');
+    let staleByPid = false;
+    if (Number.isInteger(pid) && pid > 0) {
+      try { process.kill(pid, 0); } catch { staleByPid = true; }
+    }
+    if (staleByPid || (Number.isFinite(ageMs) && ageMs > 30 * 60 * 1000)) unlinkSync(lockPath);
+  } catch {}
+}
+
+function workerNeedsRestart(status) {
+  if (!status?.startedAt) return true;
+  const pid = readPidFile(telemetryWorkerPidPath);
+  if (status.pid && pid && Number(status.pid) !== Number(pid)) return true;
+  const startedAt = Date.parse(status.startedAt);
+  return !Number.isFinite(startedAt) || latestUsageWorkerSourceMtime() > startedAt;
+}
+
+async function restartTelemetryWorkerIfStale({ quiet = true } = {}) {
+  const { status } = readTelemetryWorkerStatusFile();
+  const pid = readPidFile(telemetryWorkerPidPath);
+  if (!pid || !isPidRunning(pid) || !workerNeedsRestart(status)) return null;
+  return restartTelemetryWorker({ quiet, reason: '源码已更新，正在重启 worker' });
+}
+
+function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
   const existingPid = readPidFile(telemetryWorkerPidPath);
-  if (existingPid && isPidRunning(existingPid)) {
+  if (!forceRestart && existingPid && isPidRunning(existingPid)) {
     return { started: false, running: true, pid: existingPid, pidPath: telemetryWorkerPidPath, statusPath: telemetryWorkerStatusPath, logPath: telemetryWorkerLogPath };
   }
 
@@ -1545,31 +1765,50 @@ function latestConversationUploadProgress() {
   let latestFailure = null;
   for (const event of events) {
     if (event.message === 'scan-collected') latestScan = event;
-    if (event.message === 'upload-batch-start' || event.message === 'upload-batch-finished') latestBatch = event;
-    if (event.message === 'upload-batch-failed' || event.message === 'upload-failed') latestFailure = event;
+    if (event.message === 'upload-batch-start' || event.message === 'upload-batch-finished' || event.message === 'upload-status-polled' || event.message === 'upload-status-timeout') latestBatch = event;
+    if (event.message === 'upload-batch-failed' || event.message === 'upload-failed' || event.message === 'upload-status-timeout') latestFailure = event;
   }
   return { latestScan, latestBatch, latestFailure };
 }
 
+function progressBar(percent, width = 18) {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const filled = Math.round((safePercent / 100) * width);
+  const empty = Math.max(0, width - filled);
+  return `${ui.accent('█'.repeat(filled))}${ui.dim('░'.repeat(empty))}`;
+}
+
 function uploadProgressLabel() {
   const { latestScan, latestBatch, latestFailure } = latestConversationUploadProgress();
-  if (!latestScan) return '扫描本地消息中';
+  if (!latestScan) return `${progressBar(0)} 扫描本地消息中`;
   const total = Number(latestBatch?.totalMessages ?? latestScan.pendingPlain ?? latestScan.pending ?? 0);
-  if (!latestBatch) return `发现 ${formatNumber(Number(latestScan.totalDiscovered || 0))} 条，准备上报`;
+  if (!latestBatch) return `${progressBar(0)} 发现 ${formatNumber(Number(latestScan.totalDiscovered || 0))} 条，准备上报`;
+  // Progress must reflect *confirmed* uploads, not "attempted". A batch's
+  // upload-batch-start event already carries attemptedAfterBatch = full batch
+  // size, so counting it as done made the bar jump to 100% before the POST
+  // finished. Only upload-batch-finished / upload-status-polled advance `done`.
+  const confirmedAfter = Number(latestBatch.uploadedAfterBatch ?? -1);
+  const confirmedBefore = Number(latestBatch.uploadedBeforeBatch ?? 0);
   const done = Number(
-    latestBatch.attemptedAfterFailure
-      ?? latestBatch.attemptedAfterBatch
-      ?? latestBatch.uploadedAfterBatch
-      ?? latestBatch.uploadedBeforeBatch
-      ?? latestBatch.uploadedBeforeFailure
-      ?? 0
+    latestBatch.message === 'upload-batch-start'
+      ? confirmedBefore
+      : confirmedAfter >= 0
+        ? confirmedAfter
+        : confirmedBefore
   );
   const batchIndex = Number(latestBatch.batchIndex || 0);
   const totalBatches = Number(latestBatch.totalBatches || 0);
   const percent = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const failed = latestFailure && latestFailure.timestamp >= latestBatch.timestamp;
-  const state = failed ? '失败' : percent >= 100 ? '完成' : '上报中';
-  return `${percent}% 批次 ${batchIndex}/${totalBatches} 消息 ${formatNumber(done)}/${formatNumber(total)} ${state}`;
+  const polling = latestBatch.message === 'upload-status-polled';
+  const state = failed
+    ? '失败'
+    : polling
+      ? `等服务端 ${latestBatch.status || '处理中'} #${Number(latestBatch.attempt || 0) + 1}`
+      : percent >= 100
+        ? '完成'
+        : '上报中';
+  return `${progressBar(percent)} ${percent}% · 批次 ${batchIndex}/${totalBatches} · 消息 ${formatNumber(done)}/${formatNumber(total)} · ${state}`;
 }
 
 function fitProgressLine(text) {
@@ -1604,7 +1843,11 @@ async function withUploadProgress(label, task) {
 
 async function printUsageReport({ exitOnDone = true } = {}) {
   try {
-    const auth = readOpenHermitAuthStatus();
+    // Refresh the bearer (hits /me, auto-refreshes expired tokens) BEFORE the
+    // scan, so the worker reads a fresh token from openhermit.json instead of
+    // seeing an expired one and bailing to "等待登录". readOpenHermitAuthStatus()
+    // alone never refreshes, which is why manual uploads failed after expiry.
+    const auth = await refreshOpenHermitAuthStatus();
     const states = currentFeatureStates();
     if (states.conversationUploadEnabled && !auth.authorized) {
       const result = {
@@ -1634,7 +1877,7 @@ async function printUsageReport({ exitOnDone = true } = {}) {
       localOnly: false,
       upload: {
         enabled: Boolean(upload?.enabled),
-        authorized: readOpenHermitAuthStatus().authorized,
+        authorized: auth.authorized,
         attempted: upload?.attempted || 0,
         accepted: upload?.accepted || 0,
         duplicated: upload?.duplicated || 0,
@@ -1643,7 +1886,7 @@ async function printUsageReport({ exitOnDone = true } = {}) {
       ...data,
     };
     if (jsonRequested) printJson(result);
-    printUsageRows('用量上报报告', data, '已执行一次增量扫描；消息上报开启时会按本地游标只上传新增消息。');
+    await printUsageRows('用量上报报告', data, '已执行一次增量扫描；消息上报开启时会按本地游标只上传新增消息。');
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
@@ -2244,13 +2487,17 @@ async function runNavigationAction(action) {
       return;
     }
     setConversationUploadEnabled(false, states.uploadProviders);
+    const worker = await stopTelemetryWorker();
+    await clearStaleConversationUploadLock();
+    markTelemetryWorkerRestarting('消息上报已关闭，worker 已停止');
     const updatedStates = currentFeatureStates();
     printCliRows('消息上报', [
-      ['状态', '已关闭', 'off'],
+      ['状态', '已关闭，worker 已重启/停止', 'off'],
       ['菜单显示', updatedStates.conversationUploadEnabled ? '仍显示开启，请刷新状态' : '已更新为关闭', updatedStates.conversationUploadEnabled ? 'warn' : 'ok'],
+      ['worker', worker.stopped ? `已停止 pid ${worker.pid}` : '未运行', 'info'],
       ['来源', formatUploadProviders(states.uploadProviders), 'info'],
-      ['说明', '后台扫描仍可保留；消息正文不会继续上报', 'info'],
-    ], '再次开启后会读取本地游标，只上传未上报过的新增消息。');
+      ['说明', '关闭消息上报会停止 worker 并清理上报锁', 'info'],
+    ], '再次开启会重新启动 worker，并从服务端 /usage/status 读取 cursor。');
     return;
   }
   if (action.id === 'start-web') {
@@ -2277,6 +2524,7 @@ async function runNavigationAction(action) {
   }
   if (action.id === 'stop-web') {
     await stopDaemon({ exitOnDone: false, quiet: true });
+    clearWebRunningOptimistic();
     printCliRows('本地数字员工工作台', [
       ['状态', '已关闭', 'off'],
       ['用量上报', '不受影响', 'info'],

@@ -84,21 +84,31 @@ function authStatusFromStore(store, warning = null) {
     refreshable: Boolean(token.refreshToken),
     expired,
     warning,
+    scope: typeof token.scope === 'string' ? token.scope : null,
+    scopes: Array.isArray(token.scopes) ? token.scopes : normalizeScopes({ scope: token.scope }),
     developerMode: Boolean(store?.developerMode),
   };
 }
 
+function normalizeScopes(payload) {
+  if (Array.isArray(payload?.scopes)) return payload.scopes.filter((scope) => typeof scope === 'string' && scope);
+  if (typeof payload?.scope === 'string') return payload.scope.split(/\s+/u).filter(Boolean);
+  return null;
+}
+
 function normalizeAccessTokenPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
-  const accessToken = payload.access_token || payload.accessToken;
+  const accessToken = payload.access_token;
   if (typeof accessToken !== 'string' || !accessToken) return null;
+  const scopes = normalizeScopes(payload);
   return {
     accessToken,
-    refreshToken: payload.refresh_token || payload.refreshToken,
-    tokenType: payload.token_type || payload.tokenType,
-    scope: payload.scope,
-    expiresAt: normalizeExpiry(payload.access_expires_in ?? payload.expires_in ?? payload.expiresIn, payload.expires_at || payload.expiresAt),
-    refreshExpiresAt: normalizeExpiry(payload.refresh_expires_in, payload.refresh_expires_at || payload.refreshExpiresAt),
+    refreshToken: payload.refresh_token || null,
+    tokenType: payload.token_type || 'Bearer',
+    scope: typeof payload.scope === 'string' ? payload.scope : scopes?.join(' '),
+    scopes,
+    expiresAt: normalizeExpiry(payload.access_expires_in, payload.access_expires_at),
+    refreshExpiresAt: normalizeExpiry(payload.refresh_expires_in, payload.refresh_expires_at),
   };
 }
 
@@ -109,6 +119,7 @@ function mergeAuthToken(existingToken = {}, tokenPatch) {
     refreshToken: tokenPatch.refreshToken || existingToken.refreshToken || null,
     tokenType: tokenPatch.tokenType || existingToken.tokenType || 'Bearer',
     scope: tokenPatch.scope || existingToken.scope || null,
+    scopes: tokenPatch.scopes || existingToken.scopes || null,
     expiresAt: tokenPatch.expiresAt || null,
     refreshExpiresAt: tokenPatch.refreshExpiresAt || existingToken.refreshExpiresAt || null,
   };
@@ -158,7 +169,7 @@ function getOAuthConfig() {
     userInfoUrl: process.env.OPENHERMIT_OAUTH_USERINFO_URL || process.env.OPENHERMIT_USAGE_OAUTH_USERINFO_URL || '',
     issuer: process.env.OPENHERMIT_OAUTH_ISSUER || (authorizeUrl ? new URL(authorizeUrl).origin : ''),
     clientId: process.env.OPENHERMIT_OAUTH_CLIENT_ID || process.env.OPENHERMIT_USAGE_OAUTH_CLIENT_ID || 'openhermit-cli',
-    scope: process.env.OPENHERMIT_OAUTH_SCOPE || process.env.OPENHERMIT_USAGE_OAUTH_SCOPE || 'openid profile email usage:write',
+    scope: process.env.OPENHERMIT_OAUTH_SCOPE || process.env.OPENHERMIT_USAGE_OAUTH_SCOPE || 'auth:user.id:read upload:read upload:write',
     timeoutMs: Number.parseInt(process.env.OPENHERMIT_OAUTH_TIMEOUT_MS || '120000', 10),
   };
 }
@@ -206,12 +217,11 @@ function getDeviceAuthConfig({ controlUrl = null } = {}) {
     baseUrl,
     startUrl: process.env.OPENHERMIT_AUTH_START_URL || `${baseUrl}/api/v1/auth/hermit/start`,
     pollUrl: process.env.OPENHERMIT_AUTH_POLL_URL || `${baseUrl}/api/v1/auth/hermit/poll`,
-    tokenUrl: process.env.OPENHERMIT_AUTH_TOKEN_URL || `${baseUrl}/api/cli-auth/token`,
     refreshUrl: process.env.OPENHERMIT_AUTH_REFRESH_URL || `${baseUrl}/api/v1/auth/hermit/refresh`,
     meUrl: process.env.OPENHERMIT_AUTH_ME_URL || `${baseUrl}/api/v1/auth/hermit/me`,
     logoutUrl: process.env.OPENHERMIT_AUTH_LOGOUT_URL || `${baseUrl}/api/v1/auth/hermit/logout`,
     clientId: process.env.OPENHERMIT_OAUTH_CLIENT_ID || process.env.OPENHERMIT_AUTH_CLIENT_ID || 'openhermit-cli',
-    scope: process.env.OPENHERMIT_OAUTH_SCOPE || process.env.OPENHERMIT_AUTH_SCOPE || 'openid profile email usage:write',
+    scope: process.env.OPENHERMIT_OAUTH_SCOPE || process.env.OPENHERMIT_AUTH_SCOPE || 'auth:user.id:read upload:read upload:write',
     timeoutMs: Number.parseInt(process.env.OPENHERMIT_AUTH_TIMEOUT_MS || process.env.OPENHERMIT_OAUTH_TIMEOUT_MS || '600000', 10),
   };
 }
@@ -596,32 +606,17 @@ async function startDeviceAuthSession(config) {
     throw new Error(`CLI auth start failed (HTTP ${res.status})`);
   }
 
-  if (payload.flow_id && payload.poll_secret && payload.authorization_url) {
-    return {
-      mode: 'hermit-feishu',
-      flowId: payload.flow_id,
-      pollSecret: payload.poll_secret,
-      verificationUrl: payload.authorization_url,
-      verificationUriComplete: payload.authorization_url,
-      userCode: null,
-      expiresIn: Number(payload.expires_in || 600),
-      interval: Math.max(1, Number(payload.interval || 2)),
-    };
+  if (!payload.flow_id || !payload.poll_secret || !payload.authorization_url) {
+    throw new Error(`Hermit auth start returned an unsupported response (HTTP ${res.status})`);
   }
 
-  if (payload.deviceCode && payload.verificationUrl) {
-    return {
-      mode: 'legacy-device',
-      deviceCode: payload.deviceCode,
-      userCode: payload.userCode || null,
-      verificationUrl: payload.verificationUrl,
-      verificationUriComplete: payload.verificationUriComplete || payload.verification_url_complete || null,
-      expiresIn: Number(payload.expiresIn || payload.expires_in || 600),
-      interval: Math.max(1, Number(payload.interval || 2)),
-    };
-  }
-
-  throw new Error(`CLI auth start returned an unsupported response (HTTP ${res.status})`);
+  return {
+    flowId: payload.flow_id,
+    pollSecret: payload.poll_secret,
+    authorizationUrl: payload.authorization_url,
+    expiresIn: Number(payload.expires_in || 600),
+    interval: Math.max(1, Number(payload.interval || 2)),
+  };
 }
 
 function normalizeHermitAuthIdentity(identity) {
@@ -656,19 +651,12 @@ async function pollDeviceAuthToken(config, session, { signal = null } = {}) {
   while (Date.now() < timeoutAt) {
     if (signal?.aborted) throw signal.reason || new Error('CLI auth cancelled');
     const fetchSignal = AbortSignal.timeout(30_000);
-    const res = session.mode === 'hermit-feishu'
-      ? await fetch(`${config.pollUrl}?flow_id=${encodeURIComponent(session.flowId)}&poll_secret=${encodeURIComponent(session.pollSecret)}`, {
-        headers: { Accept: 'application/json' },
-        signal: fetchSignal,
-      })
-      : await fetch(config.tokenUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ deviceCode: session.deviceCode, clientId: config.clientId }),
-        signal: fetchSignal,
-      });
+    const res = await fetch(`${config.pollUrl}?flow_id=${encodeURIComponent(session.flowId)}&poll_secret=${encodeURIComponent(session.pollSecret)}`, {
+      headers: { Accept: 'application/json' },
+      signal: fetchSignal,
+    });
     const payload = await res.json().catch(() => null);
-    if (res.ok && (payload?.accessToken || payload?.access_token)) return payload;
+    if (res.ok && payload?.status === 'authorized' && payload?.access_token) return payload;
     const status = payload?.status || '';
     const error = payload?.error || status;
     if (error === 'authorization_pending') {
@@ -715,13 +703,13 @@ async function performDeviceAuthLogin({ quiet = false, controlUrl = null } = {})
 
     const session = await startDeviceAuthSession(config);
     if (abortController.signal.aborted) throw abortController.signal.reason;
-    const loginUrl = session.verificationUriComplete || session.verificationUrl;
+    const loginUrl = session.authorizationUrl;
     const browser = await openExternalUrl(loginUrl);
 
     if (!quiet) {
       printCliRows('飞书授权登录', [
         ['地址', loginUrl],
-        ['授权码', session.userCode || '浏览器页面已包含授权信息'],
+        ['授权码', '浏览器页面已包含授权信息'],
         ['状态', browser.skipped ? '请复制地址到浏览器完成飞书授权' : '已打开浏览器，等待飞书授权确认'],
         ['安全', `CLI 只保存 ${BRAND.authProviderName} 授权状态`],
       ], '浏览器完成授权后，CLI 会自动继续；Esc/Ctrl+C 可取消。');
@@ -743,7 +731,6 @@ async function performDeviceAuthLogin({ quiet = false, controlUrl = null } = {})
 }
 
 async function performOpenHermitLogin(options = {}) {
-  if (hasRawOAuthConfig()) return performRawOAuthLogin(options);
   return performDeviceAuthLogin(options);
 }
 
@@ -755,7 +742,7 @@ async function refreshExpiredOpenHermitToken(store) {
     const res = await fetch(config.refreshUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ refreshToken, clientId: store.clientId || config.clientId }),
+      body: JSON.stringify({ refresh_token: refreshToken }),
       signal: AbortSignal.timeout(10_000),
     });
     const payload = await res.json().catch(() => null);
@@ -808,6 +795,7 @@ async function refreshOpenHermitAuthStatus() {
     }
 
     if (!res.ok) return readOpenHermitAuthStatus();
+    const responseScopes = normalizeScopes(payload);
     if (payload?.authenticated === false || payload?.refresh_expired === true || payload?.revoked_at) {
       writeOpenHermitAuthStore({
         ...store,
@@ -827,6 +815,8 @@ async function refreshOpenHermitAuthStatus() {
       account,
       token: {
         ...store.token,
+        scope: typeof payload?.scope === 'string' ? payload.scope : responseScopes?.join(' ') || store.token?.scope,
+        scopes: responseScopes || store.token?.scopes || null,
         expiresAt: nextExpiresAt,
       },
       updatedAt: new Date().toISOString(),
@@ -917,7 +907,7 @@ function buildDevAuthStore() {
       accessToken: `dev-unlock-${crypto.randomBytes(16).toString('hex')}`,
       refreshToken: null,
       tokenType: 'Bearer',
-      scope: 'openid profile email usage:write dev:local',
+      scope: 'auth:user.id:read upload:read upload:write dev:local',
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     },
     createdAt: now,
@@ -1041,9 +1031,9 @@ async function runAuthLogin({ exitOnDone = true, interactiveMenu = false, quiet 
     printCliRows('登录失败', [
       ['原因', message],
       ['默认', `通过 ${BRAND.authProviderName} 打开飞书授权，可用 --control-url 指定控制台地址`],
-      ['调试', '显式配置 OAuth authorize/token/userinfo 时才走原始 PKCE'],
+      ['协议', '/api/v1/auth/hermit/start + poll'],
       ['安全', 'CLI 不保存飞书 app secret、飞书 token 或 Claude Code 凭证，也不会打印 token'],
-    ], '本地调试可运行 scripts/openhermit-device-auth-debug-server.mjs。');
+    ], '请确认授权服务已按最新 Hermit API 返回 flow_id / poll_secret / authorization_url。');
     if (exitOnDone && !interactiveMenu) process.exit(1);
     return result;
   }
@@ -1057,6 +1047,7 @@ normalizeExpiry,
 readOpenHermitAuthStore,
 isAuthTokenExpired,
 authStatusFromStore,
+normalizeScopes,
 normalizeAccessTokenPayload,
 mergeAuthToken,
 readOpenHermitAuthStatus,

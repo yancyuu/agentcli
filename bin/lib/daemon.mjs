@@ -3,7 +3,7 @@
 
 import { spawn, execSync } from 'node:child_process';
 import path from 'node:path';
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -177,7 +177,6 @@ async function printDaemonStatus({ exitOnDone = true } = {}) {
 }
 
 async function stopDaemon({ exitOnDone = true, quiet = false } = {}) {
-  clearWebRunningOptimistic();
   const pid = readDaemonPid();
   if (!pid || !isPidRunning(pid)) {
     if (pid) removeDaemonPidFile();

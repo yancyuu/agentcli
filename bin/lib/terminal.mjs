@@ -214,7 +214,7 @@ function menuBrandTitle() {
 
 function logoBorderLine() {
   const columns = Number(process.stdout.columns || 80);
-  const width = Math.max(32, Math.min(44, columns - 8));
+  const width = Math.max(24, Math.min(30, columns - 16));
   return ui.dim('…'.repeat(width));
 }
 
@@ -225,9 +225,9 @@ function welcomeLogoLines() {
     '              _     _              ',
     '           __(.)< <(.)__           ',
     '        __/             \\__        ',
-    `   ${ui.dim('~')}   /  ${ui.accent('███████████')}  \\   ${ui.dim('~')}   `,
-    `      |  ${ui.accent('██▄█████▄██')}  |      `,
-    `       \\  ${ui.accent('█████████')}  /       `,
+    `   ${ui.dim('~')}   /  ${ui.accent('███████████')}   \\   ${ui.dim('~')}   `,
+    `      |  ${ui.accent('██▄█████▄██')}   |      `,
+    `       \\  ${ui.accent('█████████')}   /       `,
     `   ${ui.dim('~')}    /_/  /___\\  \\_\\   ${ui.dim('~')}    `,
     logoBorderLine(),
   ];

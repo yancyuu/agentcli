@@ -1,21 +1,25 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import {
-  appendFile,
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
-import type { TaskBusConfig } from '@shared/types/team';
+type ConversationUploadTelemetryConfig = {
+  enabled?: boolean;
+  platform?: UploadPlatform;
+  uploadProviders?: UploadPlatform[];
+  conversationUploadEnabled?: boolean;
+  conversations?: {
+    uploadEnabled?: boolean;
+    batchSize?: number;
+    uploadBatchSize?: number;
+  };
+};
+
+interface ConversationUploadConfig {
+  telemetry?: ConversationUploadTelemetryConfig;
+}
 
 const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
 const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
@@ -23,9 +27,11 @@ const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
   process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL ||
   `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
 
-function resolveConversationUploadBaseUrl(): string {
-  return OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
-}
+const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
+const UPLOAD_LOG_FILE = 'conversation-upload.log';
+const SOURCE = 'openhermit' as const;
+const TERMINAL_UPLOAD_STATUSES = new Set(['success', 'partial', 'failed', 'dead_letter']);
+const API_TIMEOUT_MS = 8_000;
 
 export interface ConversationUploadStatus {
   enabled: boolean;
@@ -47,14 +53,18 @@ export interface ConversationUploadStatus {
   lastError?: string;
 }
 
+type UploadPlatform = 'claudecode' | 'codex';
+type UploadMode = 'plain' | 'im';
+type MessageKind = 'conversation_message' | 'im_conversation_message';
+
 interface UploadMessage {
-  kind: 'conversation_message' | 'im_conversation_message';
+  kind: MessageKind;
   eventId: string;
   reportedAt: string;
   project: {
     projectRef: string;
-    name: string;
-    pathHash: string;
+    name?: string;
+    pathHash?: string;
   };
   conversation: {
     conversationId: string;
@@ -81,14 +91,33 @@ interface UploadMessage {
   im?: Record<string, unknown>;
 }
 
-type UploadPlatform = 'claudecode' | 'codex';
+interface CursorFileRange {
+  fileKey: string;
+  pathHash: string;
+  size: number;
+  mtimeMs: number;
+  fromOffset: number;
+  toOffset: number;
+}
+
+interface ClientCursor {
+  schemaVersion: 1;
+  purpose: 'local-jsonl-scan-position';
+  transactionId: string;
+  baseCursorHash: string;
+  targetCursorHash: string;
+  fileCount: number;
+  messageCount: number;
+  generatedAt: string;
+  files: CursorFileRange[];
+}
 
 interface UploadPayload {
   schemaVersion: 1;
-  uploadId: string;
   generatedAt: string;
-  source: 'openhermit';
+  source: typeof SOURCE;
   platform: UploadPlatform;
+  clientCursor?: ClientCursor;
   messages: UploadMessage[];
 }
 
@@ -111,12 +140,15 @@ interface UploadResult {
   uploadId?: string;
   receiptId?: string;
   status?: string;
+  mode?: UploadMode;
   received?: number;
   accepted?: number;
   inserted?: number;
   duplicated?: number;
   rejected?: number;
   failed?: number;
+  totalTokens?: number;
+  cursorCommitted?: boolean;
   errors?: unknown;
   items?: Array<{
     eventId?: string;
@@ -126,22 +158,71 @@ interface UploadResult {
   }>;
 }
 
-interface ScanCursorFileState {
+interface ServerCursorFileState {
+  fileKey: string;
   pathHash: string;
   size: number;
   mtimeMs: number;
-  offset: number;
+  fromOffset?: number;
+  toOffset: number;
 }
 
-interface ScanCursor {
-  schemaVersion: 1;
-  purpose: 'local-jsonl-scan-position';
-  files: Record<string, ScanCursorFileState>;
+interface ServerCursor {
+  schemaVersion?: number;
+  purpose?: string;
+  transactionId?: string;
+  baseCursorHash?: string;
+  targetCursorHash?: string;
+  fileCount?: number;
+  messageCount?: number;
+  generatedAt?: string;
+  files?: ServerCursorFileState[];
 }
 
-const SCAN_CURSOR_FILE = 'conversation-message-scan-cursor.json';
-const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
-const UPLOAD_LOG_FILE = 'conversation-upload.log';
+interface UsageStatusChannel {
+  source?: string;
+  platform?: UploadPlatform;
+  mode?: UploadMode;
+  status?: string;
+  lastUploadId?: string | null;
+  inFlight?: { count?: number; uploadIds?: string[] } | null;
+  currentCursor?: ServerCursor | null;
+  lastAttemptedCursor?: ServerCursor | null;
+  cursorCommitted?: boolean;
+}
+
+interface UsageStatusResponse {
+  checkedAt?: string;
+  channels?: UsageStatusChannel[];
+}
+
+interface CollectedMessages {
+  messages: UploadMessage[];
+  clientCursor: ClientCursor;
+}
+
+function resolveConversationUploadBaseUrl(): string {
+  return OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
+}
+
+function emptyStatus(
+  enabled: boolean,
+  endpointConfigured: boolean,
+  patch: Partial<ConversationUploadStatus> = {}
+): ConversationUploadStatus {
+  return {
+    enabled,
+    endpointConfigured,
+    totalDiscovered: 0,
+    skippedAlreadyUploaded: 0,
+    pending: 0,
+    attempted: 0,
+    accepted: 0,
+    duplicated: 0,
+    rejected: 0,
+    ...patch,
+  };
+}
 
 function uploadLogPath(hermitHome: string): string {
   return path.join(hermitHome, 'logs', UPLOAD_LOG_FILE);
@@ -165,39 +246,31 @@ async function appendUploadLog(
   }
 }
 
-function emptyStatus(
-  enabled: boolean,
-  endpointConfigured: boolean,
-  patch: Partial<ConversationUploadStatus> = {}
-): ConversationUploadStatus {
-  return {
-    enabled,
-    endpointConfigured,
-    totalDiscovered: 0,
-    skippedAlreadyUploaded: 0,
-    pending: 0,
-    attempted: 0,
-    accepted: 0,
-    duplicated: 0,
-    rejected: 0,
-    ...patch,
-  };
-}
-
-function scanCursorPath(hermitHome: string, platform: UploadPlatform = 'claudecode'): string {
-  const fileName =
-    platform === 'claudecode'
-      ? SCAN_CURSOR_FILE
-      : `conversation-message-scan-cursor-${platform}.json`;
-  return path.join(hermitHome, 'telemetry', fileName);
-}
-
 function uploadLockPath(hermitHome: string): string {
   return path.join(hermitHome, 'telemetry', UPLOAD_LOCK_FILE);
 }
 
-function cursorHash(cursor: ScanCursor): string {
-  return sha(JSON.stringify(cursor));
+async function clearStaleUploadLock(filePath: string): Promise<boolean> {
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    const lock = JSON.parse(raw) as { pid?: number; createdAt?: string };
+    const pid = Number(lock.pid);
+    const ageMs = Date.now() - Date.parse(lock.createdAt || '');
+    const staleByAge = Number.isFinite(ageMs) && ageMs > 30 * 60 * 1000;
+    let staleByPid = false;
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        staleByPid = true;
+      }
+    }
+    if (!staleByPid && !staleByAge) return false;
+    await unlink(filePath).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function withUploadLock<T>(hermitHome: string, fn: () => Promise<T>): Promise<T | null> {
@@ -210,10 +283,18 @@ async function withUploadLock<T>(hermitHome: string, fn: () => Promise<T>): Prom
       JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
     );
   } catch {
-    await appendUploadLog(hermitHome, 'upload-lock-busy', {
-      lockPath: 'telemetry/conversation-message-upload.lock',
-    });
-    return null;
+    const stale = await clearStaleUploadLock(filePath);
+    if (stale) {
+      handle = await open(filePath, 'wx', 0o600);
+      await handle.writeFile(
+        JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
+      );
+    } else {
+      await appendUploadLog(hermitHome, 'upload-lock-busy', {
+        lockPath: 'telemetry/conversation-message-upload.lock',
+      });
+      return null;
+    }
   } finally {
     await handle?.close().catch(() => undefined);
   }
@@ -225,71 +306,31 @@ async function withUploadLock<T>(hermitHome: string, fn: () => Promise<T>): Prom
   }
 }
 
-async function commitScanCursorIfUnchanged(
-  hermitHome: string,
-  platform: UploadPlatform,
-  baseCursorHash: string,
-  nextCursor: ScanCursor
-): Promise<boolean> {
-  const currentCursor = await readScanCursor(hermitHome, platform);
-  if (cursorHash(currentCursor) !== baseCursorHash) return false;
-  await writeScanCursor(hermitHome, platform, nextCursor);
-  return true;
-}
-
-async function readScanCursor(
-  hermitHome: string,
-  platform: UploadPlatform = 'claudecode'
-): Promise<ScanCursor> {
-  try {
-    const raw = await readFile(scanCursorPath(hermitHome, platform), 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<ScanCursor>;
-    if (
-      parsed.schemaVersion !== 1 ||
-      parsed.purpose !== 'local-jsonl-scan-position' ||
-      !parsed.files ||
-      typeof parsed.files !== 'object'
-    ) {
-      return { schemaVersion: 1, purpose: 'local-jsonl-scan-position', files: {} };
-    }
-    return {
-      schemaVersion: 1,
-      purpose: 'local-jsonl-scan-position',
-      files: parsed.files as Record<string, ScanCursorFileState>,
-    };
-  } catch {
-    return { schemaVersion: 1, purpose: 'local-jsonl-scan-position', files: {} };
+function apiUrl(baseUrl: string, apiPath: string): string {
+  const base = baseUrl.replace(/\/+$/, '');
+  if (base.endsWith('/api/v1') && apiPath.startsWith('/api/v1/')) {
+    return `${base}${apiPath.slice('/api/v1'.length)}`;
   }
+  return `${base}${apiPath}`;
 }
 
-async function writeScanCursor(
-  hermitHome: string,
-  platform: UploadPlatform,
-  cursor: ScanCursor
-): Promise<void> {
-  const filePath = scanCursorPath(hermitHome, platform);
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(cursor, null, 2)}\n`, {
-    encoding: 'utf-8',
-    mode: 0o600,
-  });
-  await rename(tmpPath, filePath);
+function fetchWithTimeout(input: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(API_TIMEOUT_MS) });
 }
 
-function fileKey(filePath: string): string {
-  return sha(filePath);
+function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
+  const url = receipt.statusUrl || receipt.detailUrl;
+  if (!url)
+    return receipt.uploadId
+      ? `/api/v1/hermit/uploads/${encodeURIComponent(receipt.uploadId)}`
+      : null;
+  return url;
 }
 
-function validCursorState(
-  state: ScanCursorFileState | undefined,
-  fileStat: Awaited<ReturnType<typeof stat>>
-): state is ScanCursorFileState {
-  if (!state) return false;
-  if (!Number.isFinite(state.offset) || state.offset < 0) return false;
-  if (state.offset > fileStat.size) return false;
-  if (state.size > fileStat.size) return false;
-  return true;
+function absoluteStatusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
+  const url = statusUrl(baseUrl, receipt);
+  if (!url) return null;
+  return url.startsWith('http://') || url.startsWith('https://') ? url : apiUrl(baseUrl, url);
 }
 
 function sha(value: string): string {
@@ -298,6 +339,18 @@ function sha(value: string): string {
 
 function safeRef(prefix: string, value: string): string {
   return `${prefix}-${sha(value).slice(0, 24)}`;
+}
+
+function cursorHash(cursor: unknown): string {
+  return sha(JSON.stringify(cursor ?? null));
+}
+
+function fileKey(filePath: string): string {
+  return sha(filePath);
+}
+
+function hermitHome(): string {
+  return process.env.HERMIT_HOME || path.join(process.env.HOME || '', '.hermit');
 }
 
 function textFromContent(content: unknown): string {
@@ -328,8 +381,9 @@ function usageFromMessage(
       usage.totalTokens ??
       inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
   );
-  if (!inputTokens && !outputTokens && !cacheReadTokens && !cacheCreationTokens && !totalTokens)
+  if (!inputTokens && !outputTokens && !cacheReadTokens && !cacheCreationTokens && !totalTokens) {
     return undefined;
+  }
   return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens };
 }
 
@@ -343,14 +397,15 @@ async function* walkJsonl(dir: string): AsyncGenerator<string> {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) yield* walkJsonl(full);
-    else if (entry.isFile() && entry.name.endsWith('.jsonl') && !entry.name.startsWith('agent_'))
+    else if (entry.isFile() && entry.name.endsWith('.jsonl') && !entry.name.startsWith('agent_')) {
       yield full;
+    }
   }
 }
 
-async function readBearerToken(hermitHome: string): Promise<string | null> {
+async function readBearerToken(home: string): Promise<string | null> {
   try {
-    const raw = await readFile(path.join(hermitHome, 'auth', 'openhermit.json'), 'utf-8');
+    const raw = await readFile(path.join(home, 'auth', 'openhermit.json'), 'utf-8');
     const parsed = JSON.parse(raw) as { token?: { accessToken?: string; expiresAt?: string } };
     if (!parsed.token?.accessToken) return null;
     if (parsed.token.expiresAt && Date.parse(parsed.token.expiresAt) <= Date.now()) return null;
@@ -360,61 +415,254 @@ async function readBearerToken(hermitHome: string): Promise<string | null> {
   }
 }
 
-async function collectClaudeCodeMessages(
-  hermitHome: string,
-  limit: number
-): Promise<{
-  plain: UploadMessage[];
-  im: UploadMessage[];
-  baseCursorHash: string;
-  nextCursor: ScanCursor;
-}> {
-  const plain: UploadMessage[] = [];
-  const im: UploadMessage[] = [];
-  const base = getProjectsBasePath();
-  const reportedAt = new Date().toISOString();
-  const maxMessages = Math.max(0, limit);
-  const currentCursor = await readScanCursor(hermitHome, 'claudecode');
-  const baseCursorHash = cursorHash(currentCursor);
-  const nextCursor: ScanCursor = {
+async function probeAuth(baseUrl: string, token: string, home: string): Promise<string | null> {
+  const res = await fetchWithTimeout(apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const status = typeof body.status === 'string' ? body.status : `HTTP ${res.status}`;
+  const scopes = Array.isArray(body.scopes)
+    ? body.scopes.filter((scope) => typeof scope === 'string')
+    : null;
+  const missingUploadScopes = scopes
+    ? ['upload:read', 'upload:write'].filter((scope) => !scopes.includes(scope))
+    : [];
+  await appendUploadLog(home, 'auth-me-checked', {
+    ok:
+      res.ok && body.authenticated !== false && status === 'ok' && missingUploadScopes.length === 0,
+    status,
+    feishuAuthorized: body.feishu_authorized,
+    accessExpired: body.access_expired,
+    scopes,
+    missingUploadScopes,
+  });
+  if (!res.ok || body.authenticated === false || status !== 'ok') return `授权不可用：${status}`;
+  if (missingUploadScopes.length > 0)
+    return `缺少 ${missingUploadScopes.join('/')} 授权，请重新登录`;
+  return null;
+}
+
+async function fetchUsageChannel(
+  baseUrl: string,
+  token: string,
+  platform: UploadPlatform,
+  mode: UploadMode,
+  home?: string
+): Promise<UsageStatusChannel | null> {
+  const url = apiUrl(baseUrl, `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`);
+  await (home
+    ? appendUploadLog(home, 'usage-status-request', {
+        platform,
+        mode,
+        url: `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`,
+      })
+    : Promise.resolve());
+  const res = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  const text = await res.text().catch(() => '');
+  if (!res.ok) {
+    const diagnostic = responseDiagnosticFromText(res.status, text);
+    await (home
+      ? appendUploadLog(home, 'usage-status-response', {
+          platform,
+          mode,
+          ok: false,
+          status: res.status,
+          body: sanitizeDiagnosticText(text),
+        })
+      : Promise.resolve());
+    throw new Error(`usage status ${platform}/${mode} ${diagnostic}`);
+  }
+  const body = parseJsonObject(text) as UsageStatusResponse;
+  const channel =
+    body.channels?.find(
+      (item) => item.source === SOURCE && item.platform === platform && item.mode === mode
+    ) ??
+    body.channels?.[0] ??
+    null;
+  await (home
+    ? appendUploadLog(home, 'usage-status-response', {
+        platform,
+        mode,
+        ok: true,
+        status: res.status,
+        channelStatus: channel?.status,
+        inFlightCount: channel?.inFlight?.count ?? 0,
+        hasCurrentCursor: Boolean(channel?.currentCursor),
+        cursorHash: channel?.currentCursor?.targetCursorHash,
+      })
+    : Promise.resolve());
+  return channel;
+}
+
+function cursorOffsetMap(
+  cursor: ServerCursor | null | undefined
+): Map<string, ServerCursorFileState> {
+  const files = Array.isArray(cursor?.files) ? cursor.files : [];
+  return new Map(
+    files
+      .filter(
+        (file): file is ServerCursorFileState =>
+          Boolean(file?.fileKey) &&
+          Number.isFinite(Number(file.toOffset)) &&
+          Number(file.toOffset) >= 0
+      )
+      .map((file) => [file.fileKey, file])
+  );
+}
+
+function startOffsetFromServerCursor(
+  remoteState: ServerCursorFileState | undefined,
+  fileStat: Awaited<ReturnType<typeof stat>>
+): number {
+  if (!remoteState) return 0;
+  const offset = Number(remoteState.toOffset);
+  if (!Number.isFinite(offset) || offset < 0 || offset > fileStat.size) return 0;
+  if (Number(remoteState.size) > fileStat.size) return 0;
+  return offset;
+}
+
+function buildClientCursor(
+  baseCursor: ServerCursor | null | undefined,
+  files: CursorFileRange[],
+  messageCount: number,
+  generatedAt: string
+): ClientCursor {
+  const targetShape = {
     schemaVersion: 1,
     purpose: 'local-jsonl-scan-position',
-    files: { ...currentCursor.files },
+    files: files.map((file) => ({
+      fileKey: file.fileKey,
+      pathHash: file.pathHash,
+      size: file.size,
+      mtimeMs: file.mtimeMs,
+      toOffset: file.toOffset,
+    })),
   };
+  return {
+    schemaVersion: 1,
+    purpose: 'local-jsonl-scan-position',
+    transactionId: `tx-${generatedAt.replace(/[^0-9A-Za-z]/g, '')}-${sha(`${generatedAt}:${messageCount}:${files.length}`).slice(0, 12)}`,
+    baseCursorHash: cursorHash(baseCursor ?? null),
+    targetCursorHash: cursorHash(targetShape),
+    fileCount: files.length,
+    messageCount,
+    generatedAt,
+    files,
+  };
+}
 
-  for await (const filePath of walkJsonl(base)) {
-    if (maxMessages > 0 && plain.length + im.length >= maxMessages) break;
+function claudeMessageId(obj: Record<string, unknown>, msg: Record<string, unknown>): string {
+  return String(obj.uuid ?? msg.uuid ?? obj.messageId ?? msg.id ?? obj.requestId ?? '');
+}
+
+function claudeSessionId(filePath: string, obj: Record<string, unknown>): string {
+  return String(obj.sessionId ?? obj.session_id ?? path.basename(filePath, '.jsonl'));
+}
+
+function parentMessageRef(parent: unknown): string | null {
+  return typeof parent === 'string' && parent ? parent : null;
+}
+
+function claudeUploadMessage(
+  filePath: string,
+  obj: Record<string, unknown>,
+  reportedAt: string,
+  startedAt: string | undefined
+): UploadMessage | null {
+  const msg = (obj.message && typeof obj.message === 'object' ? obj.message : obj) as Record<
+    string,
+    unknown
+  >;
+  const role = msg.role === 'user' || msg.role === 'assistant' ? msg.role : undefined;
+  if (!role) return null;
+
+  const content = textFromContent(msg.content ?? obj.content);
+  if (!content) return null;
+
+  const sessionId = claudeSessionId(filePath, obj);
+  const messageId = claudeMessageId(obj, msg);
+  if (!sessionId || !messageId) return null;
+
+  const projectPath = typeof obj.cwd === 'string' ? obj.cwd : path.dirname(filePath);
+  const occurredAt =
+    typeof obj.timestamp === 'string'
+      ? obj.timestamp
+      : typeof msg.timestamp === 'string'
+        ? msg.timestamp
+        : undefined;
+  const eventId = `claudecode:${sessionId}:${messageId}`;
+  return {
+    kind: 'conversation_message',
+    eventId,
+    reportedAt,
+    project: {
+      projectRef: safeRef('project', projectPath),
+      name: path.basename(projectPath),
+      pathHash: `sha256-${sha(projectPath)}`,
+    },
+    conversation: {
+      conversationId: sessionId,
+      sessionRef: `claudecode:${sessionId}`,
+      claudeSessionRef: sessionId,
+      startedAt,
+    },
+    message: {
+      messageRef: messageId,
+      parentRef: parentMessageRef(obj.parentUuid ?? obj.parentMessageId),
+      role,
+      occurredAt,
+      model: typeof msg.model === 'string' ? msg.model : undefined,
+      content,
+      contentFormat: 'text',
+      usage: usageFromMessage(msg),
+    },
+  };
+}
+
+async function collectClaudeCodeMessages(
+  mode: UploadMode,
+  serverCursor: ServerCursor | null | undefined,
+  limit: number,
+  generatedAt: string
+): Promise<CollectedMessages> {
+  const messages: UploadMessage[] = [];
+  const files: CursorFileRange[] = [];
+  const maxMessages = Math.max(0, limit);
+  const offsets = cursorOffsetMap(serverCursor);
+
+  for await (const filePath of walkJsonl(getProjectsBasePath())) {
+    if (maxMessages > 0 && messages.length >= maxMessages) break;
     const fileStat = await stat(filePath).catch(() => null);
-    if (!fileStat || !fileStat.isFile()) continue;
+    if (!fileStat?.isFile()) continue;
+
     const key = fileKey(filePath);
     const pathHash = `sha256-${sha(filePath)}`;
-    const cursorState = currentCursor.files[key];
-    const startOffset = validCursorState(cursorState, fileStat) ? cursorState.offset : 0;
+    const fromOffset = startOffsetFromServerCursor(offsets.get(key), fileStat);
     const scanEndOffset = fileStat.size;
-    if (startOffset >= scanEndOffset) {
-      nextCursor.files[key] = {
+    if (fromOffset >= scanEndOffset) {
+      files.push({
+        fileKey: key,
         pathHash,
         size: fileStat.size,
-        mtimeMs: fileStat.mtimeMs,
-        offset: scanEndOffset,
-      };
+        mtimeMs: Math.trunc(fileStat.mtimeMs),
+        fromOffset,
+        toOffset: scanEndOffset,
+      });
       continue;
     }
 
-    const projectPath = path.dirname(filePath);
-    const projectRef = safeRef('project', projectPath);
-    const sessionRef = safeRef('session', filePath);
-    const conversationId = safeRef('conv', filePath);
+    let consumedOffset = fromOffset;
     let startedAt: string | undefined;
-    let consumedOffset = startOffset;
     const stream = createReadStream(filePath, {
       encoding: 'utf-8',
-      start: startOffset,
-      end: Math.max(startOffset, scanEndOffset - 1),
+      start: fromOffset,
+      end: Math.max(fromOffset, scanEndOffset - 1),
     });
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
     for await (const rawLine of rl) {
-      if (maxMessages > 0 && plain.length + im.length >= maxMessages) break;
+      if (maxMessages > 0 && messages.length >= maxMessages) break;
       consumedOffset += Buffer.byteLength(rawLine, 'utf-8') + 1;
       let obj: Record<string, unknown>;
       try {
@@ -422,61 +670,37 @@ async function collectClaudeCodeMessages(
       } catch {
         continue;
       }
-      const msg = (obj.message && typeof obj.message === 'object' ? obj.message : obj) as Record<
-        string,
-        unknown
-      >;
-      const role = msg.role === 'user' || msg.role === 'assistant' ? msg.role : undefined;
-      if (!role) continue;
-      const content = textFromContent(msg.content ?? obj.content);
-      if (!content) continue;
-      const occurredAt =
-        typeof obj.timestamp === 'string'
-          ? obj.timestamp
-          : typeof msg.timestamp === 'string'
-            ? msg.timestamp
-            : undefined;
+      const occurredAt = typeof obj.timestamp === 'string' ? obj.timestamp : undefined;
       startedAt ||= occurredAt;
-      const messageRefSource = String(
-        obj.uuid ??
-          msg.uuid ??
-          obj.requestId ??
-          `${filePath}:${occurredAt}:${role}:${content.slice(0, 80)}`
-      );
-      const messageRef = safeRef('msg', messageRefSource);
-      const baseMessage: UploadMessage = {
-        kind: 'conversation_message',
-        eventId: safeRef('evt', messageRefSource),
-        reportedAt,
-        project: {
-          projectRef,
-          name: path.basename(projectPath),
-          pathHash: `sha256-${sha(projectPath)}`,
-        },
-        conversation: { conversationId, sessionRef, claudeSessionRef: sessionRef, startedAt },
-        message: {
-          messageRef,
-          parentRef: typeof obj.parentUuid === 'string' ? safeRef('msg', obj.parentUuid) : null,
-          role,
-          occurredAt,
-          model: typeof msg.model === 'string' ? msg.model : undefined,
-          content,
-          contentFormat: 'text',
-          usage: usageFromMessage(msg),
-        },
-      };
-      const maybeIm =
-        obj.im && typeof obj.im === 'object' ? (obj.im as Record<string, unknown>) : null;
-      if (maybeIm) im.push({ ...baseMessage, kind: 'im_conversation_message', im: maybeIm });
-      else plain.push(baseMessage);
+      const baseMessage = claudeUploadMessage(filePath, obj, generatedAt, startedAt);
+      if (!baseMessage) continue;
+      const im = obj.im && typeof obj.im === 'object' ? (obj.im as Record<string, unknown>) : null;
+      if (mode === 'im') {
+        if (!im) continue;
+        messages.push({ ...baseMessage, kind: 'im_conversation_message', im });
+      } else if (!im) {
+        messages.push(baseMessage);
+      }
     }
-    const offset =
-      maxMessages > 0 && plain.length + im.length >= maxMessages
+
+    const toOffset =
+      maxMessages > 0 && messages.length >= maxMessages
         ? Math.min(consumedOffset, scanEndOffset)
         : scanEndOffset;
-    nextCursor.files[key] = { pathHash, size: fileStat.size, mtimeMs: fileStat.mtimeMs, offset };
+    files.push({
+      fileKey: key,
+      pathHash,
+      size: fileStat.size,
+      mtimeMs: Math.trunc(fileStat.mtimeMs),
+      fromOffset,
+      toOffset,
+    });
   }
-  return { plain, im, baseCursorHash, nextCursor };
+
+  return {
+    messages,
+    clientCursor: buildClientCursor(serverCursor, files, messages.length, generatedAt),
+  };
 }
 
 function codexHome(): string {
@@ -537,59 +761,54 @@ function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
 }
 
 async function collectCodexMessages(
-  hermitHome: string,
-  limit: number
-): Promise<{
-  plain: UploadMessage[];
-  im: UploadMessage[];
-  baseCursorHash: string;
-  nextCursor: ScanCursor;
-}> {
-  const plain: UploadMessage[] = [];
-  const im: UploadMessage[] = [];
-  const reportedAt = new Date().toISOString();
+  mode: UploadMode,
+  serverCursor: ServerCursor | null | undefined,
+  limit: number,
+  generatedAt: string
+): Promise<CollectedMessages> {
+  const messages: UploadMessage[] = [];
+  const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
-  const currentCursor = await readScanCursor(hermitHome, 'codex');
-  const baseCursorHash = cursorHash(currentCursor);
-  const nextCursor: ScanCursor = {
-    schemaVersion: 1,
-    purpose: 'local-jsonl-scan-position',
-    files: { ...currentCursor.files },
-  };
-  const roots = [path.join(codexHome(), 'sessions'), path.join(codexHome(), 'archived_sessions')];
+  const offsets = cursorOffsetMap(serverCursor);
+  if (mode === 'im')
+    return { messages, clientCursor: buildClientCursor(serverCursor, files, 0, generatedAt) };
 
-  for (const root of roots) {
+  for (const root of [
+    path.join(codexHome(), 'sessions'),
+    path.join(codexHome(), 'archived_sessions'),
+  ]) {
     for await (const filePath of walkJsonl(root)) {
-      if (maxMessages > 0 && plain.length >= maxMessages) break;
+      if (maxMessages > 0 && messages.length >= maxMessages) break;
       const fileStat = await stat(filePath).catch(() => null);
-      if (!fileStat || !fileStat.isFile()) continue;
+      if (!fileStat?.isFile()) continue;
+
       const key = fileKey(filePath);
       const pathHash = `sha256-${sha(filePath)}`;
-      const cursorState = currentCursor.files[key];
-      const startOffset = validCursorState(cursorState, fileStat) ? cursorState.offset : 0;
+      const fromOffset = startOffsetFromServerCursor(offsets.get(key), fileStat);
       const scanEndOffset = fileStat.size;
-      if (startOffset >= scanEndOffset) {
-        nextCursor.files[key] = {
+      if (fromOffset >= scanEndOffset) {
+        files.push({
+          fileKey: key,
           pathHash,
           size: fileStat.size,
-          mtimeMs: fileStat.mtimeMs,
-          offset: scanEndOffset,
-        };
+          mtimeMs: Math.trunc(fileStat.mtimeMs),
+          fromOffset,
+          toOffset: scanEndOffset,
+        });
         continue;
       }
 
-      const sessionRef = safeRef('codex-session', filePath);
-      const conversationId = safeRef('codex-conv', filePath);
-      let consumedOffset = startOffset;
+      const sessionId = path.basename(filePath, '.jsonl');
+      let consumedOffset = fromOffset;
       let startedAt: string | undefined;
       const stream = createReadStream(filePath, {
         encoding: 'utf-8',
-        start: startOffset,
-        end: Math.max(startOffset, scanEndOffset - 1),
+        start: fromOffset,
+        end: Math.max(fromOffset, scanEndOffset - 1),
       });
       const rl = createInterface({ input: stream, crlfDelay: Infinity });
       for await (const rawLine of rl) {
-        if (maxMessages > 0 && plain.length >= maxMessages) break;
+        if (maxMessages > 0 && messages.length >= maxMessages) break;
         consumedOffset += Buffer.byteLength(rawLine, 'utf-8') + 1;
         let obj: Record<string, unknown>;
         try {
@@ -604,35 +823,30 @@ async function collectCodexMessages(
         if (!isCodexTokenCountRecord(obj) && !isCodexTokenCountRecord(record)) continue;
         const usage = codexTokenUsageFromRecord(record);
         if (!usage) continue;
+
         const occurredAt =
           typeof obj.timestamp === 'string'
             ? obj.timestamp
             : typeof record.timestamp === 'string'
               ? record.timestamp
-              : reportedAt;
+              : generatedAt;
         startedAt ||= occurredAt;
-        const messageRefSource = String(
-          obj.id ??
-            obj.uuid ??
-            record.id ??
-            `${filePath}:${occurredAt}:${plain.length}:${usage.totalTokens}`
+        const messageId = String(
+          obj.id ?? obj.uuid ?? record.id ?? `${sessionId}:${consumedOffset}`
         );
-        const projectName = typeof record.project === 'string' ? record.project : 'Codex';
-        plain.push({
+        const projectPath = String(record.cwd ?? record.project_path ?? filePath);
+        messages.push({
           kind: 'conversation_message',
-          eventId: safeRef('codex-evt', messageRefSource),
-          reportedAt,
+          eventId: `codex:${sessionId}:${messageId}`,
+          reportedAt: generatedAt,
           project: {
-            projectRef: safeRef(
-              'codex-project',
-              String(record.cwd ?? record.project_path ?? filePath)
-            ),
-            name: projectName,
-            pathHash: `sha256-${sha(String(record.cwd ?? filePath))}`,
+            projectRef: safeRef('codex-project', projectPath),
+            name: typeof record.project === 'string' ? record.project : 'Codex',
+            pathHash: `sha256-${sha(projectPath)}`,
           },
-          conversation: { conversationId, sessionRef, startedAt },
+          conversation: { conversationId: sessionId, sessionRef: `codex:${sessionId}`, startedAt },
           message: {
-            messageRef: safeRef('codex-msg', messageRefSource),
+            messageRef: messageId,
             parentRef: null,
             role: 'assistant',
             occurredAt,
@@ -648,260 +862,54 @@ async function collectCodexMessages(
           },
         });
       }
-      const offset =
-        maxMessages > 0 && plain.length >= maxMessages
+
+      const toOffset =
+        maxMessages > 0 && messages.length >= maxMessages
           ? Math.min(consumedOffset, scanEndOffset)
           : scanEndOffset;
-      nextCursor.files[key] = { pathHash, size: fileStat.size, mtimeMs: fileStat.mtimeMs, offset };
+      files.push({
+        fileKey: key,
+        pathHash,
+        size: fileStat.size,
+        mtimeMs: Math.trunc(fileStat.mtimeMs),
+        fromOffset,
+        toOffset,
+      });
     }
-    if (maxMessages > 0 && plain.length >= maxMessages) break;
+    if (maxMessages > 0 && messages.length >= maxMessages) break;
   }
-  return { plain, im, baseCursorHash, nextCursor };
+
+  return {
+    messages,
+    clientCursor: buildClientCursor(serverCursor, files, messages.length, generatedAt),
+  };
+}
+
+async function collectMessagesForPlatform(
+  platform: UploadPlatform,
+  mode: UploadMode,
+  serverCursor: ServerCursor | null | undefined,
+  limit: number,
+  generatedAt: string
+): Promise<CollectedMessages> {
+  return platform === 'codex'
+    ? collectCodexMessages(mode, serverCursor, limit, generatedAt)
+    : collectClaudeCodeMessages(mode, serverCursor, limit, generatedAt);
+}
+
+function endpointForMode(mode: UploadMode): string {
+  return mode === 'im'
+    ? '/api/v1/hermit/im-conversation-messages'
+    : '/api/v1/hermit/conversation-messages';
 }
 
 function countsCoverAttempt(status: ConversationUploadStatus): boolean {
   return status.accepted + status.duplicated === status.attempted;
 }
 
-function countMismatchError(status: ConversationUploadStatus): string | null {
-  if (
-    status.accepted < 0 ||
-    status.duplicated < 0 ||
-    status.rejected < 0 ||
-    (status.failed ?? 0) < 0
-  )
-    return '服务端返回负数计数，已保留本地待上报状态';
-  if (status.accepted + status.duplicated > status.attempted)
-    return '服务端确认数超过本批发送数，已保留本地待上报状态';
-  if (status.rejected > status.attempted || (status.failed ?? 0) > status.attempted)
-    return '服务端拒绝/失败数超过本批发送数，已保留本地待上报状态';
-  if (!countsCoverAttempt(status))
-    return '服务端最终处理计数未覆盖本批发送数，已保留本地待上报状态';
-  return null;
-}
-
-function apiUrl(baseUrl: string, pathName: string): string {
-  return `${baseUrl.replace(/\/$/, '')}${pathName}`;
-}
-
-function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
-  const url = receipt.statusUrl || receipt.detailUrl;
-  if (!url)
-    return receipt.uploadId
-      ? `/api/v1/hermit/uploads/${encodeURIComponent(receipt.uploadId)}`
-      : null;
-  return url;
-}
-
-async function probeAuth(
-  baseUrl: string,
-  token: string,
-  hermitHome: string
-): Promise<string | null> {
-  const res = await fetch(apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  });
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  const status = typeof body.status === 'string' ? body.status : `HTTP ${res.status}`;
-  await appendUploadLog(hermitHome, 'auth-me-checked', {
-    ok: res.ok && body.authenticated !== false,
-    status,
-    feishuAuthorized: body.feishu_authorized,
-    accessExpired: body.access_expired,
-  });
-  if (!res.ok || body.authenticated === false || status !== 'ok') return `授权不可用：${status}`;
-  return null;
-}
-
-async function queryUploadResult(
-  baseUrl: string,
-  token: string,
-  receipt: UploadReceipt
-): Promise<UploadResult | null> {
-  const url = statusUrl(baseUrl, receipt);
-  if (!url) return null;
-  const absoluteUrl =
-    url.startsWith('http://') || url.startsWith('https://') ? url : apiUrl(baseUrl, url);
-  const res = await fetch(absoluteUrl, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  });
-  if (!res.ok) throw new Error(`upload status ${await responseDiagnostic(res)}`);
-  const text = await res.text().catch(() => '');
-  if (!text) return null;
-  return parseJsonObject(text) as UploadResult;
-}
-
-async function postPayload(
-  baseUrl: string,
-  endpointPath: string,
-  token: string,
-  payload: UploadPayload
-): Promise<ConversationUploadStatus> {
-  const endpoint = apiUrl(baseUrl, endpointPath);
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-  const text = await res.text().catch(() => '');
-  const receipt = parseJsonObject(text) as UploadReceipt;
-  if (!res.ok)
-    throw new Error(
-      await responseDiagnostic(
-        new Response(text, { status: res.status, statusText: res.statusText })
-      )
-    );
-
-  const received =
-    typeof receipt.received === 'number' ? receipt.received : payload.messages.length;
-  const receiveRejected =
-    typeof receipt.rejectedAtReceive === 'number' ? receipt.rejectedAtReceive : 0;
-  const queued =
-    typeof receipt.acceptedForProcessing === 'number'
-      ? receipt.acceptedForProcessing
-      : Math.max(0, received - receiveRejected);
-  const baseStatus: ConversationUploadStatus = {
-    enabled: true,
-    endpointConfigured: true,
-    attempted: payload.messages.length,
-    accepted: 0,
-    duplicated: typeof receipt.duplicatedAtReceive === 'number' ? receipt.duplicatedAtReceive : 0,
-    rejected: receiveRejected,
-    queued,
-    uploadIds: [receipt.uploadId || payload.uploadId],
-    lastReceiptId: receipt.receiptId,
-    lastStatusUrl: statusUrl(baseUrl, receipt) || undefined,
-    lastUploadStatus: receipt.status,
-    ...(receipt.ok === false || receipt.errors
-      ? { lastError: '服务端接收阶段返回错误，已保留本地待上报状态' }
-      : {}),
-  };
-  if (baseStatus.lastError || receiveRejected > 0)
-    return { ...baseStatus, lastError: baseStatus.lastError || '部分消息在接收阶段被拒绝' };
-
-  const result = await queryUploadResult(baseUrl, token, receipt);
-  if (!result) return { ...baseStatus, lastError: '服务端未返回上报结果，已保留本地待上报状态' };
-
-  const status: ConversationUploadStatus = {
-    ...baseStatus,
-    accepted: typeof result.accepted === 'number' ? result.accepted : 0,
-    inserted: typeof result.inserted === 'number' ? result.inserted : undefined,
-    duplicated: typeof result.duplicated === 'number' ? result.duplicated : baseStatus.duplicated,
-    rejected: typeof result.rejected === 'number' ? result.rejected : baseStatus.rejected,
-    failed: typeof result.failed === 'number' ? result.failed : 0,
-    lastReceiptId: result.receiptId || baseStatus.lastReceiptId,
-    lastUploadStatus: result.status || baseStatus.lastUploadStatus,
-    lastError:
-      result.errors && Array.isArray(result.errors) && result.errors.length > 0
-        ? '服务端最终处理返回错误，已保留本地待上报状态'
-        : undefined,
-  };
-  if (status.lastUploadStatus && !['success'].includes(status.lastUploadStatus)) {
-    status.lastError = `服务端批次状态为 ${status.lastUploadStatus}，已保留本地待上报状态`;
-  }
-  if ((status.failed ?? 0) > 0) status.lastError = '部分消息处理失败，已保留本地待上报状态';
-  if (status.rejected > 0) status.lastError = '部分消息被拒绝，已保留本地待上报状态';
-  if (!status.lastError) {
-    const mismatch = countMismatchError(status);
-    if (mismatch) status.lastError = mismatch;
-  }
-  return status;
-}
-
-async function postMessagesInBatches(
-  hermitHome: string,
-  baseUrl: string,
-  endpointPath: string,
-  token: string,
-  payloadBase: Omit<UploadPayload, 'uploadId' | 'messages'>,
-  uploadIdPrefix: string,
-  messages: UploadMessage[],
-  batchSize: number,
-  runTotalMessages: number,
-  uploadedBeforeRun: number
-): Promise<{ status: ConversationUploadStatus; uploadedMessages: UploadMessage[] }> {
-  const statuses: ConversationUploadStatus[] = [];
-  const uploadedMessages: UploadMessage[] = [];
-  const size = Math.max(1, batchSize);
-  const totalBatches = Math.ceil(messages.length / size);
-
-  for (let offset = 0; offset < messages.length; offset += size) {
-    const batchIndex = Math.floor(offset / size) + 1;
-    const batchMessages = messages.slice(offset, offset + size);
-    await appendUploadLog(hermitHome, 'upload-batch-start', {
-      batchIndex,
-      totalBatches,
-      batchSize: batchMessages.length,
-      attemptedBeforeBatch: offset,
-      attemptedAfterBatch: Math.min(messages.length, offset + batchMessages.length),
-      uploadedBeforeBatch: uploadedBeforeRun + uploadedMessages.length,
-      totalMessages: runTotalMessages,
-    });
-    try {
-      const status = await postPayload(baseUrl, endpointPath, token, {
-        ...payloadBase,
-        uploadId: `${uploadIdPrefix}-${String(batchIndex).padStart(4, '0')}-${randomUUID()}`,
-        messages: batchMessages,
-      });
-      statuses.push(status);
-      const serverConfirmed = shouldCountAsUploaded(status);
-      if (serverConfirmed) {
-        uploadedMessages.push(...batchMessages);
-      }
-      const serverCoveredCount = status.accepted + status.duplicated;
-      await appendUploadLog(hermitHome, 'upload-batch-finished', {
-        batchIndex,
-        totalBatches,
-        attempted: status.attempted,
-        accepted: status.accepted,
-        duplicated: status.duplicated,
-        rejected: status.rejected,
-        serverConfirmed,
-        serverConfirmedCount: serverConfirmed ? batchMessages.length : 0,
-        serverConfirmReason: serverConfirmed
-          ? 'server-confirmed-full-batch'
-          : `server-covered-${serverCoveredCount}-of-${status.attempted}`,
-        attemptedAfterBatch: offset + status.attempted,
-        uploadedAfterBatch: uploadedBeforeRun + uploadedMessages.length,
-        totalMessages: runTotalMessages,
-        lastError: status.lastError,
-      });
-    } catch (error) {
-      const message = sanitizeUploadError(error);
-      await appendUploadLog(hermitHome, 'upload-batch-failed', {
-        batchIndex,
-        totalBatches,
-        batchSize: batchMessages.length,
-        attemptedBeforeFailure: offset,
-        attemptedAfterFailure: offset + batchMessages.length,
-        uploadedBeforeFailure: uploadedBeforeRun + uploadedMessages.length,
-        totalMessages: runTotalMessages,
-        lastError: message,
-      });
-      statuses.push(
-        emptyStatus(true, true, {
-          attempted: batchMessages.length,
-          pending: messages.length,
-          lastError: message,
-        })
-      );
-      return { status: mergeStatuses(statuses), uploadedMessages };
-    }
-  }
-
-  return { status: mergeStatuses(statuses), uploadedMessages };
-}
-
 function shouldCountAsUploaded(status: ConversationUploadStatus): boolean {
   if (status.attempted <= 0 || status.rejected > 0 || status.lastError) return false;
   return countsCoverAttempt(status);
-}
-
-function sanitizeUploadError(error: unknown): string {
-  return sanitizeDiagnosticText(error instanceof Error ? error.message : String(error));
 }
 
 function sanitizeDiagnosticText(value: unknown): string {
@@ -914,10 +922,18 @@ function sanitizeDiagnosticText(value: unknown): string {
     .slice(0, 1200);
 }
 
+function sanitizeUploadError(error: unknown): string {
+  return sanitizeDiagnosticText(error instanceof Error ? error.message : String(error));
+}
+
+function responseDiagnosticFromText(status: number, text = ''): string {
+  if (!text) return `HTTP ${status}`;
+  return `HTTP ${status}: ${sanitizeDiagnosticText(text)}`;
+}
+
 async function responseDiagnostic(res: Response): Promise<string> {
   const text = await res.text().catch(() => '');
-  if (!text) return `HTTP ${res.status}`;
-  return `HTTP ${res.status}: ${sanitizeDiagnosticText(text)}`;
+  return responseDiagnosticFromText(res.status, text);
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
@@ -927,6 +943,204 @@ function parseJsonObject(text: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function uploadStatusFromResult(
+  receipt: UploadReceipt,
+  result: UploadResult | null,
+  attempted: number,
+  baseUrl: string
+): ConversationUploadStatus {
+  const received = typeof receipt.received === 'number' ? receipt.received : attempted;
+  const rejectedAtReceive =
+    typeof receipt.rejectedAtReceive === 'number' ? receipt.rejectedAtReceive : 0;
+  const queued =
+    typeof receipt.acceptedForProcessing === 'number'
+      ? receipt.acceptedForProcessing
+      : Math.max(0, received - rejectedAtReceive);
+  const baseStatus: ConversationUploadStatus = {
+    enabled: true,
+    endpointConfigured: true,
+    attempted,
+    accepted: 0,
+    duplicated: typeof receipt.duplicatedAtReceive === 'number' ? receipt.duplicatedAtReceive : 0,
+    rejected: rejectedAtReceive,
+    queued,
+    uploadIds: receipt.uploadId ? [receipt.uploadId] : [],
+    lastReceiptId: receipt.receiptId,
+    lastStatusUrl: statusUrl(baseUrl, receipt) || undefined,
+    lastUploadStatus: receipt.status,
+  };
+
+  if (receipt.ok === false || receipt.errors || rejectedAtReceive > 0) {
+    return { ...baseStatus, lastError: '服务端接收阶段返回错误，已保留待上报状态' };
+  }
+
+  if (!result) {
+    return { ...baseStatus, lastError: '服务端批次仍在处理中，等待后续状态确认' };
+  }
+
+  const status: ConversationUploadStatus = {
+    ...baseStatus,
+    accepted: typeof result.accepted === 'number' ? result.accepted : 0,
+    inserted: typeof result.inserted === 'number' ? result.inserted : undefined,
+    duplicated: typeof result.duplicated === 'number' ? result.duplicated : baseStatus.duplicated,
+    rejected: typeof result.rejected === 'number' ? result.rejected : baseStatus.rejected,
+    failed: typeof result.failed === 'number' ? result.failed : 0,
+    lastReceiptId: result.receiptId || baseStatus.lastReceiptId,
+    lastUploadStatus: result.status || baseStatus.lastUploadStatus,
+  };
+
+  if (status.lastUploadStatus && status.lastUploadStatus !== 'success') {
+    status.lastError = `服务端批次状态为 ${status.lastUploadStatus}，未推进本地假定游标`;
+  }
+  if ((status.failed ?? 0) > 0) status.lastError = '部分消息处理失败，未推进本地假定游标';
+  if (status.rejected > 0) status.lastError = '部分消息被拒绝，未推进本地假定游标';
+  if (!status.lastError && !countsCoverAttempt(status)) {
+    status.lastError = '服务端最终处理计数未覆盖本批发送数，等待下次按服务端 cursor 重扫';
+  }
+  return status;
+}
+
+function statusPollAttempts(): number {
+  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_STATUS_POLL_ATTEMPTS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 10;
+}
+
+function statusPollIntervalMs(): number {
+  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_STATUS_POLL_INTERVAL_MS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1_500;
+}
+
+function batchDelayMs(): number {
+  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
+}
+
+function statusRefreshDelayMs(): number {
+  const raw = Number.parseInt(process.env.OPENHERMIT_USAGE_STATUS_REFRESH_DELAY_MS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function queryUploadResult(
+  baseUrl: string,
+  token: string,
+  receipt: UploadReceipt
+): Promise<UploadResult | null> {
+  const url = absoluteStatusUrl(baseUrl, receipt);
+  if (!url) return null;
+  const res = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`upload status ${await responseDiagnostic(res)}`);
+  const text = await res.text().catch(() => '');
+  if (!text) return null;
+  return parseJsonObject(text) as UploadResult;
+}
+
+async function waitForUploadResult(
+  home: string,
+  baseUrl: string,
+  token: string,
+  receipt: UploadReceipt,
+  batchContext: Record<string, unknown>
+): Promise<UploadResult | null> {
+  const attempts = statusPollAttempts();
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    const result = await queryUploadResult(baseUrl, token, receipt);
+    await appendUploadLog(home, 'upload-status-polled', {
+      ...batchContext,
+      uploadId: receipt.uploadId,
+      attempt,
+      status: result?.status || 'unknown',
+    });
+    if (!result?.status || TERMINAL_UPLOAD_STATUSES.has(result.status)) return result;
+    if (attempt < attempts) await wait(statusPollIntervalMs());
+  }
+  await appendUploadLog(home, 'upload-status-timeout', {
+    ...batchContext,
+    uploadId: receipt.uploadId,
+    attempts,
+  });
+  return null;
+}
+
+async function postPayload(
+  home: string,
+  baseUrl: string,
+  endpointPath: string,
+  token: string,
+  payload: UploadPayload,
+  mode: UploadMode,
+  batchContext: Record<string, unknown>
+): Promise<ConversationUploadStatus> {
+  const firstMessage = payload.messages[0];
+  await appendUploadLog(home, 'upload-request', {
+    endpoint: endpointPath,
+    mode,
+    platform: payload.platform,
+    schemaVersion: payload.schemaVersion,
+    source: payload.source,
+    messageCount: payload.messages.length,
+    hasClientCursor: Boolean(payload.clientCursor),
+    cursorHash: payload.clientCursor?.targetCursorHash,
+    cursorFileCount: payload.clientCursor?.fileCount,
+    cursorMessageCount: payload.clientCursor?.messageCount,
+    firstEventId: firstMessage?.eventId,
+    firstKind: firstMessage?.kind,
+    firstProjectRef: firstMessage?.project?.projectRef,
+    hasRequestUploadId:
+      Object.prototype.hasOwnProperty.call(payload, 'uploadId') ||
+      Object.prototype.hasOwnProperty.call(payload, 'upload_id'),
+  });
+  const res = await fetchWithTimeout(apiUrl(baseUrl, endpointPath), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text().catch(() => '');
+  await appendUploadLog(home, 'upload-response', {
+    endpoint: endpointPath,
+    mode,
+    platform: payload.platform,
+    ok: res.ok,
+    status: res.status,
+    body: sanitizeDiagnosticText(text),
+  });
+  const receipt = parseJsonObject(text) as UploadReceipt;
+  if (!res.ok) {
+    throw new Error(
+      `upload ${endpointPath} ${await responseDiagnostic(new Response(text, { status: res.status, statusText: res.statusText }))}`
+    );
+  }
+  const result = await waitForUploadResult(home, baseUrl, token, receipt, batchContext);
+  const status = uploadStatusFromResult(receipt, result, payload.messages.length, baseUrl);
+  if (result && TERMINAL_UPLOAD_STATUSES.has(String(result.status || ''))) {
+    await wait(statusRefreshDelayMs());
+    try {
+      const channel = await fetchUsageChannel(baseUrl, token, payload.platform, mode);
+      if (channel?.status) status.lastUploadStatus = channel.status;
+      if (channel?.lastUploadId && !status.uploadIds?.includes(channel.lastUploadId)) {
+        status.uploadIds = [...(status.uploadIds ?? []), channel.lastUploadId];
+      }
+      if (channel?.inFlight && Number(channel.inFlight.count ?? 0) > 0) {
+        status.lastError = '服务端仍有处理中批次，等待 /usage/status 更新 cursor';
+      }
+      if (result.status === 'success' && channel?.cursorCommitted === false) {
+        status.lastError = '批次成功但 /usage/status 尚未确认 cursor 提交';
+      }
+    } catch (error) {
+      status.lastError = `批次已处理，但刷新 /usage/status 失败：${sanitizeUploadError(error)}`;
+    }
+  }
+  return status;
 }
 
 function mergeStatuses(statuses: ConversationUploadStatus[]): ConversationUploadStatus {
@@ -955,7 +1169,9 @@ function mergeStatuses(statuses: ConversationUploadStatus[]): ConversationUpload
   );
 }
 
-function resolveUploadProviders(telemetry: TaskBusConfig['telemetry']): UploadPlatform[] {
+function resolveUploadProviders(
+  telemetry: ConversationUploadTelemetryConfig | undefined
+): UploadPlatform[] {
   const providers = telemetry?.uploadProviders?.length
     ? telemetry.uploadProviders
     : [telemetry?.platform || 'claudecode'];
@@ -968,54 +1184,153 @@ function resolveUploadProviders(telemetry: TaskBusConfig['telemetry']): UploadPl
   ];
 }
 
-async function collectMessagesForPlatform(
-  platform: UploadPlatform,
-  hermitHome: string,
-  limit: number
-) {
-  return platform === 'codex'
-    ? collectCodexMessages(hermitHome, limit)
-    : collectClaudeCodeMessages(hermitHome, limit);
+async function postMessagesInBatches(
+  home: string,
+  baseUrl: string,
+  endpointPath: string,
+  mode: UploadMode,
+  token: string,
+  payloadBase: Omit<UploadPayload, 'messages'>,
+  messages: UploadMessage[],
+  batchSize: number,
+  runTotalMessages: number,
+  uploadedBeforeRun: number
+): Promise<{ status: ConversationUploadStatus; uploadedCount: number }> {
+  const statuses: ConversationUploadStatus[] = [];
+  let uploadedCount = 0;
+  const size = Math.max(1, batchSize);
+  const totalBatches = Math.ceil(messages.length / size);
+
+  for (let offset = 0; offset < messages.length; offset += size) {
+    const batchIndex = Math.floor(offset / size) + 1;
+    const batchMessages = messages.slice(offset, offset + size);
+    await appendUploadLog(home, 'upload-batch-start', {
+      batchIndex,
+      totalBatches,
+      batchSize: batchMessages.length,
+      attemptedBeforeBatch: offset,
+      attemptedAfterBatch: Math.min(messages.length, offset + batchMessages.length),
+      uploadedBeforeBatch: uploadedBeforeRun + uploadedCount,
+      totalMessages: runTotalMessages,
+    });
+
+    try {
+      const isLastBatch = offset + size >= messages.length;
+      const { clientCursor, ...payloadWithoutCursor } = payloadBase;
+      const status = await postPayload(
+        home,
+        baseUrl,
+        endpointPath,
+        token,
+        {
+          ...(isLastBatch ? payloadBase : payloadWithoutCursor),
+          messages: batchMessages,
+        },
+        mode,
+        {
+          batchIndex,
+          totalBatches,
+          batchSize: batchMessages.length,
+          attemptedBeforeBatch: offset,
+          attemptedAfterBatch: Math.min(messages.length, offset + batchMessages.length),
+          uploadedBeforeBatch: uploadedBeforeRun + uploadedCount,
+          totalMessages: runTotalMessages,
+        }
+      );
+      statuses.push(status);
+      if (shouldCountAsUploaded(status)) uploadedCount += batchMessages.length;
+      await appendUploadLog(home, 'upload-batch-finished', {
+        batchIndex,
+        totalBatches,
+        attempted: status.attempted,
+        accepted: status.accepted,
+        duplicated: status.duplicated,
+        rejected: status.rejected,
+        failed: status.failed,
+        uploadIds: status.uploadIds,
+        lastUploadStatus: status.lastUploadStatus,
+        serverConfirmed: shouldCountAsUploaded(status),
+        uploadedAfterBatch: uploadedBeforeRun + uploadedCount,
+        totalMessages: runTotalMessages,
+        lastError: status.lastError,
+      });
+      if (status.lastError) return { status: mergeStatuses(statuses), uploadedCount };
+      if (batchIndex < totalBatches) await wait(batchDelayMs());
+    } catch (error) {
+      const message = sanitizeUploadError(error);
+      await appendUploadLog(home, 'upload-batch-failed', {
+        batchIndex,
+        totalBatches,
+        batchSize: batchMessages.length,
+        attemptedBeforeFailure: offset,
+        attemptedAfterFailure: offset + batchMessages.length,
+        uploadedBeforeFailure: uploadedBeforeRun + uploadedCount,
+        totalMessages: runTotalMessages,
+        lastError: message,
+      });
+      statuses.push(
+        emptyStatus(true, true, {
+          attempted: batchMessages.length,
+          pending: messages.length,
+          lastError: message,
+        })
+      );
+      return { status: mergeStatuses(statuses), uploadedCount };
+    }
+  }
+
+  return { status: mergeStatuses(statuses), uploadedCount };
 }
 
-async function uploadPlatformMessages(
+async function uploadPlatformModeMessages(
   platform: UploadPlatform,
-  cfg: TaskBusConfig,
-  hermitHome: string,
+  mode: UploadMode,
+  channel: UsageStatusChannel | null,
+  cfg: ConversationUploadConfig,
+  home: string,
   baseUrl: string,
   token: string,
   generatedAt: string
-): Promise<ConversationUploadStatus & { scanCursorAdvanced?: boolean }> {
-  const conversationCfg = cfg.telemetry?.conversations;
-  const { plain, im, baseCursorHash, nextCursor } = await collectMessagesForPlatform(
-    platform,
-    hermitHome,
-    conversationCfg?.batchSize ?? 0
-  );
-  const totalDiscovered = plain.length + im.length;
-  const pending = totalDiscovered;
-  const baseStatus = { totalDiscovered, skippedAlreadyUploaded: 0, pending };
-  await appendUploadLog(hermitHome, 'scan-collected', {
-    platform,
-    ...baseStatus,
-    pendingPlain: plain.length,
-    pendingIm: im.length,
-    skipSource: 'remote-authoritative-not-local-cursor',
-  });
-
-  if (!pending) {
-    await appendUploadLog(hermitHome, 'no-incremental-messages', { platform, ...baseStatus });
-    return emptyStatus(true, true, baseStatus);
+): Promise<ConversationUploadStatus> {
+  const inFlightCount = Number(channel?.inFlight?.count ?? 0);
+  if (inFlightCount > 0) {
+    await appendUploadLog(home, 'server-channel-inflight', {
+      platform,
+      mode,
+      uploadIds: channel?.inFlight?.uploadIds ?? [],
+    });
+    return emptyStatus(true, true, {
+      lastUploadStatus: channel?.status || 'processing',
+      uploadIds: channel?.inFlight?.uploadIds ?? [],
+      lastError: '服务端仍有处理中批次，本轮按服务端实时状态跳过',
+    });
   }
 
-  const authError = await probeAuth(baseUrl, token, hermitHome);
-  if (authError) {
-    await appendUploadLog(hermitHome, 'auth-unavailable', {
-      platform,
-      ...baseStatus,
-      lastError: authError,
-    });
-    return emptyStatus(true, Boolean(baseUrl), { ...baseStatus, lastError: authError });
+  const conversationCfg = cfg.telemetry?.conversations;
+  const { messages, clientCursor } = await collectMessagesForPlatform(
+    platform,
+    mode,
+    channel?.currentCursor,
+    conversationCfg?.batchSize ?? 0,
+    generatedAt
+  );
+  const baseStatus = {
+    totalDiscovered: messages.length,
+    skippedAlreadyUploaded: 0,
+    pending: messages.length,
+  };
+  await appendUploadLog(home, 'scan-collected', {
+    platform,
+    mode,
+    ...baseStatus,
+    cursorSource: 'server-usage-status-currentCursor',
+    baseCursorHash: clientCursor.baseCursorHash,
+    targetCursorHash: clientCursor.targetCursorHash,
+  });
+
+  if (!messages.length) {
+    await appendUploadLog(home, 'no-incremental-messages', { platform, mode, ...baseStatus });
+    return emptyStatus(true, true, baseStatus);
   }
 
   const uploadBatchSize = Number(
@@ -1023,92 +1338,54 @@ async function uploadPlatformMessages(
       process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE ??
       500
   );
-  const statuses: ConversationUploadStatus[] = [];
-  const uploadedMessages: UploadMessage[] = [];
-  const payloadBase = {
-    schemaVersion: 1 as const,
+  const payloadBase: Omit<UploadPayload, 'messages'> = {
+    schemaVersion: 1,
     generatedAt,
-    source: 'openhermit' as const,
+    source: SOURCE,
     platform,
+    clientCursor,
   };
 
-  await appendUploadLog(hermitHome, 'upload-start', {
+  await appendUploadLog(home, 'upload-start', {
     platform,
-    pendingPlain: plain.length,
-    pendingIm: im.length,
+    mode,
+    pending: messages.length,
     batchSize: uploadBatchSize,
     baseUrl,
   });
-  if (plain.length) {
-    const plainResult = await postMessagesInBatches(
-      hermitHome,
-      baseUrl,
-      '/api/v1/hermit/conversation-messages',
-      token,
-      payloadBase,
-      `upload-${platform}-${generatedAt.slice(0, 10).replace(/-/g, '')}`,
-      plain,
-      uploadBatchSize,
-      pending,
-      uploadedMessages.length
-    );
-    statuses.push(plainResult.status);
-    uploadedMessages.push(...plainResult.uploadedMessages);
-  }
-  if (im.length) {
-    const imResult = await postMessagesInBatches(
-      hermitHome,
-      baseUrl,
-      '/api/v1/hermit/im-conversation-messages',
-      token,
-      payloadBase,
-      `upload-${platform}-${generatedAt.slice(0, 10).replace(/-/g, '')}-im`,
-      im,
-      uploadBatchSize,
-      pending,
-      uploadedMessages.length
-    );
-    statuses.push(imResult.status);
-    uploadedMessages.push(...imResult.uploadedMessages);
-  }
-  const result = {
-    ...mergeStatuses(statuses),
-    totalDiscovered,
-    skippedAlreadyUploaded: 0,
-    pending,
-  };
-  const fullyConfirmed =
-    result.attempted > 0 &&
-    result.rejected === 0 &&
-    !result.lastError &&
-    countsCoverAttempt(result);
-  let scanCursorAdvanced = false;
-  if (fullyConfirmed) {
-    scanCursorAdvanced = await commitScanCursorIfUnchanged(
-      hermitHome,
-      platform,
-      baseCursorHash,
-      nextCursor
-    );
-    if (!scanCursorAdvanced) result.lastError = '本地扫描游标已被其他任务更新，本轮不推进游标';
-  }
-  await appendUploadLog(hermitHome, 'upload-finished', {
+
+  const { status } = await postMessagesInBatches(
+    home,
+    baseUrl,
+    endpointForMode(mode),
+    mode,
+    token,
+    payloadBase,
+    messages,
+    uploadBatchSize,
+    messages.length,
+    0
+  );
+  const result = { ...status, ...baseStatus };
+  await appendUploadLog(home, 'upload-finished', {
     platform,
+    mode,
     attempted: result.attempted,
     accepted: result.accepted,
     duplicated: result.duplicated,
     rejected: result.rejected,
-    skippedAlreadyUploaded: 0,
-    pending,
-    serverConfirmed: fullyConfirmed,
-    serverConfirmedCount: fullyConfirmed ? uploadedMessages.length : 0,
-    scanCursorAdvanced,
+    failed: result.failed,
+    pending: result.pending,
+    uploadIds: result.uploadIds,
+    lastUploadStatus: result.lastUploadStatus,
+    cursorAuthority: 'server',
+    lastError: result.lastError,
   });
-  return { ...result, scanCursorAdvanced };
+  return result;
 }
 
 async function uploadConversationMessagesLocked(
-  cfg: TaskBusConfig
+  cfg: ConversationUploadConfig
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
@@ -1116,39 +1393,83 @@ async function uploadConversationMessagesLocked(
   const baseUrl = resolveConversationUploadBaseUrl();
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
 
-  const hermitHome = process.env.HERMIT_HOME || path.join(process.env.HOME || '', '.hermit');
+  const home = hermitHome();
   const providers = resolveUploadProviders(telemetry);
-  await appendUploadLog(hermitHome, 'scan-start', {
+  await appendUploadLog(home, 'scan-start', {
     endpointConfigured: Boolean(baseUrl),
     providers,
+    cursorAuthority: 'server-usage-status',
   });
 
-  const token = await readBearerToken(hermitHome);
+  const token = await readBearerToken(home);
   if (!token) {
-    await appendUploadLog(hermitHome, 'waiting-login', { providers });
+    await appendUploadLog(home, 'waiting-login', { providers });
     return emptyStatus(true, Boolean(baseUrl), { lastError: '等待登录' });
   }
 
+  const authError = await probeAuth(baseUrl, token, home);
+  if (authError) {
+    await appendUploadLog(home, 'auth-unavailable', { providers, lastError: authError });
+    return emptyStatus(true, Boolean(baseUrl), { lastError: authError });
+  }
+
   const generatedAt = new Date().toISOString();
+  const channels = new Map<string, UsageStatusChannel | null>();
+  try {
+    for (const platform of providers) {
+      for (const mode of ['plain', 'im'] as const) {
+        channels.set(
+          `${platform}:${mode}`,
+          await fetchUsageChannel(baseUrl, token, platform, mode, home)
+        );
+      }
+    }
+  } catch (error) {
+    const message = `服务端 /usage/status 不可用，未扫描未上报：${sanitizeUploadError(error)}`;
+    await appendUploadLog(home, 'server-cursor-unavailable', { providers, lastError: message });
+    return emptyStatus(true, true, { lastError: message });
+  }
+
   const statuses: ConversationUploadStatus[] = [];
   for (const platform of providers) {
     statuses.push(
-      await uploadPlatformMessages(platform, cfg, hermitHome, baseUrl, token, generatedAt)
+      await uploadPlatformModeMessages(
+        platform,
+        'plain',
+        channels.get(`${platform}:plain`) ?? null,
+        cfg,
+        home,
+        baseUrl,
+        token,
+        generatedAt
+      )
+    );
+    statuses.push(
+      await uploadPlatformModeMessages(
+        platform,
+        'im',
+        channels.get(`${platform}:im`) ?? null,
+        cfg,
+        home,
+        baseUrl,
+        token,
+        generatedAt
+      )
     );
   }
   return mergeStatuses(statuses);
 }
 
 export async function uploadConversationMessages(
-  cfg: TaskBusConfig
+  cfg: ConversationUploadConfig
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
   const enabled = Boolean(telemetry?.conversationUploadEnabled || conversationCfg?.uploadEnabled);
   const baseUrl = resolveConversationUploadBaseUrl();
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
-  const hermitHome = process.env.HERMIT_HOME || path.join(process.env.HOME || '', '.hermit');
-  const result = await withUploadLock(hermitHome, () => uploadConversationMessagesLocked(cfg));
+  const home = hermitHome();
+  const result = await withUploadLock(home, () => uploadConversationMessagesLocked(cfg));
   return (
     result ??
     emptyStatus(true, Boolean(baseUrl), { lastError: '已有消息上报任务正在运行，本轮已跳过' })

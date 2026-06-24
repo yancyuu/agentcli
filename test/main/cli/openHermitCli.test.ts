@@ -594,6 +594,14 @@ describe('openHermit CLI read-only workspace commands', () => {
       expect(parsedStatus.telemetry.totalTokens).toBe(0);
       expect(status.stderr).toBe('');
 
+      // 查看同步状态 must be a read-only preview: it runs the remote
+      // /usage/status probe but never uploads — no cursor file, no upload log.
+      expect(parsedStatus.remoteUsage).toMatchObject({ authorized: false });
+      expect(existsSync(path.join(hermitHome, 'telemetry', 'conversation-message-scan-cursor.json'))).toBe(false);
+      const uploadLogPath = path.join(hermitHome, 'telemetry', 'conversation-upload.log');
+      const uploadLog = existsSync(uploadLogPath) ? await readFile(uploadLogPath, 'utf-8') : '';
+      expect(uploadLog).not.toContain('upload-request');
+
       const today = await runCli(hermitHome, ['--port', '5999', 'usage', 'today', '--json']);
       const parsedToday = JSON.parse(today.stdout);
       expect(parsedToday).toMatchObject({
