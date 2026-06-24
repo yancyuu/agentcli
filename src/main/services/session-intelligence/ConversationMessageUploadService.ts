@@ -1411,7 +1411,7 @@ async function uploadPlatformModeMessages(
     baseUrl,
   });
 
-  const { status } = await postMessagesInBatches(
+  const { status, uploadedCount } = await postMessagesInBatches(
     home,
     baseUrl,
     endpointForMode(mode),
@@ -1423,7 +1423,13 @@ async function uploadPlatformModeMessages(
     messages.length,
     0
   );
-  const result = { ...status, ...baseStatus };
+  // pending = discovered − uploaded (remaining), not the raw discovered count —
+  // otherwise it shows "N 待上报" even after a fully-successful upload.
+  const result = {
+    ...status,
+    ...baseStatus,
+    pending: Math.max(0, messages.length - uploadedCount),
+  };
   await appendUploadLog(home, 'upload-finished', {
     platform,
     mode,
