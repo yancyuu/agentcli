@@ -1,6 +1,12 @@
 // terminal.mjs — ANSI/display primitives, status pills, box drawing, prompts,
 // generic table/logo/welcome rendering, JSON output, and the cancel-on-SIGINT
 // handler bound to the readline prompt interface. Pure leaf (env + branding).
+//
+// Visual language follows Claude Code's editorial style: warm-terra-cotta accent
+// (#da7756) over 24-bit truecolor with graceful 8-color fallback, rounded panels
+// (╭╮╰╯), muted secondary text, and a minimal 🦀 wordmark. Capability (truecolor
+// + Unicode box drawing) is DETECTED, not assumed by platform — modern Windows
+// Terminal renders UTF-8 fine, only legacy conhost/dumb terminals degrade.
 
 import { createInterface } from 'node:readline/promises';
 
@@ -21,23 +27,75 @@ function printJson(value, exitCode = 0) {
   process.exit(exitCode);
 }
 const CLI_MENU_WIDTH = 72;
-const useAnsi = process.stdout.isTTY && process.env.NO_COLOR !== '1';
-const useUnicodeUi = process.platform !== 'win32';
+
+// --- Capability detection --------------------------------------------------
+// Replaces the old `useUnicodeUi = platform !== 'win32'` blanket, which degraded
+// every Windows install to ASCII boxes even on Windows Terminal.
+function detectAnsi() {
+  return Boolean(process.stdout.isTTY) && process.env.NO_COLOR !== '1';
+}
+function detectTruecolor() {
+  if (process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit') return true;
+  if (process.env.WT_SESSION) return true; // Windows Terminal advertises 24-bit
+  return false;
+}
+function detectUnicode() {
+  if (process.env.HERMIT_FORCE_UNICODE === '1') return true;
+  if (process.env.HERMIT_FORCE_UNICODE === '0') return false;
+  const term = (process.env.TERM || '').toLowerCase();
+  if (term === 'dumb') return false;
+  if (process.platform === 'win32') {
+    return Boolean(
+      process.env.WT_SESSION ||
+        process.env.TERM_PROGRAM ||
+        process.env.ConPTY ||
+        process.env.COLORTERM ||
+        /xterm|screen|cygwin|tmux|alacritty|wezterm|kitty/u.test(term)
+    );
+  }
+  return true;
+}
+
+const useAnsi = detectAnsi();
+const useTruecolor = useAnsi && detectTruecolor();
+const useUnicodeUi = detectUnicode();
+
 const glyphs = useUnicodeUi
   ? { h: '─', v: '│', tl: '╭', tr: '╮', ml: '├', mr: '┤', bl: '╰', br: '╯', dot: '●', pointer: '❯', checked: '✓', unchecked: ' ', caretOpen: '▾', caretClosed: '▸' }
   : { h: '-', v: '|', tl: '+', tr: '+', ml: '+', mr: '+', bl: '+', br: '+', dot: '*', pointer: '>', checked: 'x', unchecked: ' ', caretOpen: 'v', caretClosed: '>' };
+
+// 24-bit palette (R;G;B) with basic 8-color SGR fallbacks for terminals without
+// truecolor. Accent is blue (the previous CLI accent color); status colors stay
+// muted (olive/sand/terracotta) so they read clearly against the blue accent.
+const TRUECOLOR = {
+  accent: '79;195;247', // #4FC3F7 sky blue (menu pointer / title / brand)
+  success: '120;140;93', // #788c5d muted olive
+  warn: '212;162;127', // #d4a27f warm sand
+  danger: '193;95;60', // #C15F3C deep terracotta
+  info: '106;155;204', // #6a9bcc muted blue
+  dim: '150;146;137', // muted gray (panel borders / secondary text)
+};
+const ANSI_FALLBACK = { accent: '36', success: '32', warn: '33', danger: '31', info: '36', dim: '2' };
 
 function ansi(value, code) {
   return useAnsi ? `\x1b[${code}m${value}\x1b[0m` : value;
 }
 
+function paint(value, rgbCode, ansiCode) {
+  if (!useAnsi) return value;
+  return useTruecolor
+    ? `\x1b[38;2;${rgbCode}m${value}\x1b[0m`
+    : `\x1b[${ansiCode}m${value}\x1b[0m`;
+}
+
 const ui = {
   bold: (value) => ansi(value, '1'),
-  dim: (value) => ansi(value, '2'),
-  accent: (value) => ansi(value, '36'),
-  success: (value) => ansi(value, '32'),
-  warn: (value) => ansi(value, '33'),
-  danger: (value) => ansi(value, '31'),
+  dim: (value) => paint(value, TRUECOLOR.dim, ANSI_FALLBACK.dim),
+  accent: (value) => paint(value, TRUECOLOR.accent, ANSI_FALLBACK.accent),
+  success: (value) => paint(value, TRUECOLOR.success, ANSI_FALLBACK.success),
+  warn: (value) => paint(value, TRUECOLOR.warn, ANSI_FALLBACK.warn),
+  danger: (value) => paint(value, TRUECOLOR.danger, ANSI_FALLBACK.danger),
+  info: (value) => paint(value, TRUECOLOR.info, ANSI_FALLBACK.info),
 };
 function isInteractiveCli() {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -80,7 +138,7 @@ async function askChoice(rl, label, choices, defaultValue) {
 }
 
 function charDisplayWidth(char) {
-  return /[ᄀ-ᅟ〈〉⺀-꓏가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦]/u.test(char) ? 2 : 1;
+  return /[ᄀ-ᅟ〈〉⺀-꓏가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦]/u.test(char) ? 2 : 1;
 }
 
 function stripAnsi(value) {
@@ -192,18 +250,66 @@ function menuColumnsLine(left = '', right = '') {
   return `${leftVisible}${gap}${rightVisible}`;
 }
 
+// Adaptive panel width for the rounded status panels (printCliRows). Falls back
+// to a sane fixed width when stdout has no columns (pipes, tests).
+function panelWidth() {
+  const columns = Number(process.stdout.columns) || 80;
+  return Math.max(52, Math.min(columns - 2, 80));
+}
+
+// Build the lines of a rounded status panel (╭─ title ─╮ │ rows │ ╰─╯). Pure
+// (returns string[]) so it can be unit-tested and snapshotted independently of
+// the detected terminal capabilities.
+function renderRowsPanel(title, rows = [], hint = '') {
+  const width = panelWidth();
+  const inner = Math.max(20, width - 2); // between left/right border chars
+  const contentW = Math.max(10, inner - 2); // minus one space pad each side
+  const lines = [];
+
+  const titleVis = title ? displayWidth(title) : 0;
+  if (title) {
+    const trailing = Math.max(0, inner - 3 - titleVis); // "─ title " + dashes
+    lines.push(
+      `${ui.dim(glyphs.tl)}${ui.dim('─ ')}${ui.accent(ui.bold(title))}${ui.dim(` ${glyphs.h.repeat(trailing)}`)}${ui.dim(glyphs.tr)}`
+    );
+  } else {
+    lines.push(`${ui.dim(glyphs.tl)}${ui.dim(glyphs.h.repeat(inner))}${ui.dim(glyphs.tr)}`);
+  }
+
+  const labelWidth = Math.max(4, ...rows.map(([label]) => displayWidth(String(label))));
+  for (const [label, value, state] of rows) {
+    const resolvedState = state || rowStateFromValue(value);
+    const valueW = Math.max(8, contentW - labelWidth - 4);
+    const valueText = truncateDisplay(colorByState(String(value), resolvedState), valueW);
+    const labelText = fitDisplay(String(label), labelWidth);
+    const content = `${statusDot(resolvedState)} ${labelText}  ${valueText}`;
+    const pad = ' '.repeat(Math.max(0, contentW - displayWidth(content)));
+    lines.push(`${ui.dim(glyphs.v)} ${content}${pad} ${ui.dim(glyphs.v)}`);
+  }
+
+  lines.push(`${ui.dim(glyphs.bl)}${ui.dim(glyphs.h.repeat(inner))}${ui.dim(glyphs.br)}`);
+  if (hint) lines.push(` ${ui.dim(hint)}`);
+  return lines;
+}
+
 function printCliRows(title, rows = [], hint = '', options = {}) {
   if (options.screen === true && isInteractiveCli() && !jsonRequested) {
     clearTerminal();
     printWelcomeLogo();
     console.log(menuBrandTitle());
   }
-  const labelWidth = Math.max(4, ...rows.map(([label]) => displayWidth(label)));
+  if (useUnicodeUi) {
+    // Claude-style rounded panel. Non-Unicode terminals fall through to the
+    // plain aligned rows below so output stays readable without box chars.
+    for (const line of renderRowsPanel(title, rows, hint)) console.log(line);
+    return;
+  }
+  const labelWidth = Math.max(4, ...rows.map(([label]) => displayWidth(String(label))));
   console.log('');
   console.log(ui.bold(title));
   for (const [label, value, state] of rows) {
     const resolvedState = state || rowStateFromValue(value);
-    console.log(`  ${statusDot(resolvedState)} ${fitDisplay(label, labelWidth)}  ${colorByState(value, resolvedState)}`);
+    console.log(`  ${statusDot(resolvedState)} ${fitDisplay(String(label), labelWidth)}  ${colorByState(value, resolvedState)}`);
   }
   if (hint) console.log(ui.dim(`\n提示: ${hint}`));
 }
@@ -218,19 +324,12 @@ function logoBorderLine() {
   return ui.dim('…'.repeat(width));
 }
 
+// The header wordmark is printed by menuBrandTitle() (callers in hermit.mjs do
+// `printWelcomeLogo()` then `console.log(menuBrandTitle())`). Returning [] here
+// keeps printWelcomeLogo as a no-op so the wordmark renders exactly once instead
+// of duplicating across the nav menu and status panels.
 function welcomeLogoLines() {
-  return [
-    logoBorderLine(),
-    `        ${ui.accent('☀')}                    ${ui.dim('*')}      `,
-    '              _     _              ',
-    '           __(.)< <(.)__           ',
-    '        __/             \\__        ',
-    `   ${ui.dim('~')}   /  ${ui.accent('███████████')}   \\   ${ui.dim('~')}   `,
-    `      |  ${ui.accent('██▄█████▄██')}   |      `,
-    `       \\  ${ui.accent('█████████')}   /       `,
-    `   ${ui.dim('~')}    /_/  /___\\  \\_\\   ${ui.dim('~')}    `,
-    logoBorderLine(),
-  ];
+  return [];
 }
 
 function printWelcomeLogo() {
@@ -246,11 +345,16 @@ export {
   cancelCli,
   printJson,
   ansi,
+  paint,
   ui,
   glyphs,
   CLI_MENU_WIDTH,
   useAnsi,
+  useTruecolor,
   useUnicodeUi,
+  detectAnsi,
+  detectTruecolor,
+  detectUnicode,
   isInteractiveCli,
   createPromptInterface,
   askText,
@@ -270,6 +374,8 @@ export {
   boxContentLine,
   boxColumnsLine,
   menuColumnsLine,
+  panelWidth,
+  renderRowsPanel,
   printCliRows,
   menuBrandTitle,
   logoBorderLine,
