@@ -13,6 +13,44 @@ import { AlertTriangle, Bug, Check, Copy, RefreshCw } from 'lucide-react';
 
 const logger = createLogger('Component:ErrorBoundary');
 
+// Stale-chunk recovery. When the deployed bundle is rebuilt (Vite rotates the
+// content hashes in dist-renderer) while a tab still holds the old index.html,
+// React's lazy() dynamic import 404s with a dynamic-import-fetch error. That is
+// ALWAYS fixed by a plain reload (fresh index.html → correct hashes), so instead
+// of stranding the user on the global error screen we auto-reload once. A short
+// sessionStorage cooldown prevents a loop if a chunk is genuinely missing.
+const STALE_CHUNK_ERROR_RE =
+  /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i;
+const STALE_CHUNK_RELOAD_KEY = 'openhermit:staleChunkReloadAt';
+const STALE_CHUNK_RELOAD_COOLDOWN_MS = 10_000;
+
+export function isStaleChunkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return STALE_CHUNK_ERROR_RE.test(message);
+}
+
+interface StaleChunkReloadDeps {
+  now?: () => number;
+  storage?: Storage;
+  reload?: () => void;
+}
+
+// Returns true when it triggered a reload (caller bails out of rendering the
+// error screen); false when suppressed — within the cooldown, meaning a prior
+// reload did not cure it, so fall through to the normal error UI instead of
+// looping. The cooldown also lets a LATER deploy auto-recover again.
+export function maybeReloadForStaleChunk({
+  now = Date.now,
+  storage = window.sessionStorage,
+  reload = () => window.location.reload(),
+}: StaleChunkReloadDeps = {}): boolean {
+  const last = Number(storage.getItem(STALE_CHUNK_RELOAD_KEY) ?? 0);
+  if (last && now() - last < STALE_CHUNK_RELOAD_COOLDOWN_MS) return false;
+  storage.setItem(STALE_CHUNK_RELOAD_KEY, String(now()));
+  reload();
+  return true;
+}
+
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
@@ -52,6 +90,13 @@ export class ErrorBoundary extends Component<Props, State> {
         componentStack: errorInfo.componentStack,
         ...this.getBugReportContext(),
       });
+    }
+
+    // Auto-recover from stale-chunk errors (a rebuild swapped chunk hashes under
+    // a live tab). A reload always cures it; maybeReloadForStaleChunk's cooldown
+    // guards against a loop if a chunk is genuinely missing.
+    if (isStaleChunkError(error) && maybeReloadForStaleChunk()) {
+      return;
     }
   }
 
