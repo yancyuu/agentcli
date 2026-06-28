@@ -19,7 +19,6 @@ describe('ConversationMessageUploadService', () => {
     claudeBase = path.join(tmpDir, '.claude');
     process.env.HERMIT_HOME = hermitHome;
     process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL = 'http://monitor.test';
-    process.env.OPENHERMIT_UPLOAD_STATUS_POLL_ATTEMPTS = '0';
     await mkdir(path.join(hermitHome, 'auth'), { recursive: true });
     await writeFile(
       path.join(hermitHome, 'auth', 'openhermit.json'),
@@ -36,7 +35,8 @@ describe('ConversationMessageUploadService', () => {
     setClaudeBasePathOverride(null);
     delete process.env.HERMIT_HOME;
     delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
-    delete process.env.OPENHERMIT_UPLOAD_STATUS_POLL_ATTEMPTS;
+    delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
+    delete process.env.HERMIT_USAGE_FULL_RESCAN;
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -51,7 +51,7 @@ describe('ConversationMessageUploadService', () => {
         uuid: 'message-1',
         cwd: '/tmp/project',
         timestamp: '2026-06-24T08:20:00.000Z',
-        message: { role: 'user', content: 'hello' },
+        message: { role: 'user', content: 'hello', model: 'claude-test-model' },
       })}\n`
     );
 
@@ -78,7 +78,7 @@ describe('ConversationMessageUploadService', () => {
           ],
         });
       }
-      if (url.endsWith('/api/v1/hermit/conversation-messages')) {
+      if (url.endsWith('/api/v1/report/messages')) {
         const body = JSON.parse(String(init?.body));
         expect(body).not.toHaveProperty('uploadId');
         expect(body).not.toHaveProperty('upload_id');
@@ -88,12 +88,17 @@ describe('ConversationMessageUploadService', () => {
           messageCount: 1,
         });
         expect(body.messages).toHaveLength(1);
+        expect(body.schemaVersion).toBe(1);
+        expect(body.scene).toBe('coding');
+        expect(body).not.toHaveProperty('platform');
+        expect(body).toMatchObject({ reporter: 'openhermit', client: { tool: 'claudecode' } });
         expect(body.messages[0]).toMatchObject({
           kind: 'conversation_message',
           eventId: 'claudecode:session-1:message-1',
           conversation: { conversationId: 'session-1', sessionRef: 'claudecode:session-1' },
-          message: { messageRef: 'message-1' },
+          message: { messageRef: 'message-1', modelName: 'claude-test-model' },
         });
+        expect(body.messages[0].message).not.toHaveProperty('model');
         return Response.json(
           {
             ok: true,
@@ -108,21 +113,7 @@ describe('ConversationMessageUploadService', () => {
           { status: 202 }
         );
       }
-      if (url.endsWith('/api/v1/hermit/uploads/upl_server_generated')) {
-        return Response.json({
-          ok: true,
-          uploadId: 'upl_server_generated',
-          receiptId: 'receipt-1',
-          status: 'success',
-          accepted: 1,
-          inserted: 1,
-          duplicated: 0,
-          rejected: 0,
-          failed: 0,
-          cursorCommitted: true,
-          errors: [],
-        });
-      }
+      // No per-batch status polling: the /uploads/:id endpoint is never fetched.
       throw new Error(`unexpected fetch ${url}`);
     });
 
@@ -142,6 +133,191 @@ describe('ConversationMessageUploadService', () => {
     await expect(
       readFile(path.join(hermitHome, 'telemetry', 'conversation-message-scan-cursor.json'), 'utf-8')
     ).rejects.toThrow();
+  });
+
+  it('attributes a Claude session to the IM channel via hermit-bridge composite + builds the IM-contract payload', async () => {
+    // hermit-bridge indexes each IM conversation by TWO composite keys sharing the
+    // same chat: one keyed by sender (ou_), one by the triggering message (on_).
+    // Merging them yields an envelope with BOTH sender id and message id. The
+    // legacy `sessions[*].agent_session_id` shape is kept too, exercising back-compat.
+    const bridgeSessionsDir = path.join(hermitHome, 'hermit-bridge', 'data', 'sessions');
+    await mkdir(bridgeSessionsDir, { recursive: true });
+    await writeFile(
+      path.join(bridgeSessionsDir, 'team-im.json'),
+      JSON.stringify({
+        user_sessions: {
+          'feishu:oc_testchat:ou_testsender': ['im-session-1'],
+          'feishu:oc_testchat:on_testmsgid': ['im-session-1'],
+        },
+        active_session: {
+          'feishu:oc_testchat:ou_testsender': 'im-session-1',
+          'feishu:oc_testchat:on_testmsgid': 'im-session-1',
+        },
+        user_meta: {
+          'feishu:oc_testchat:ou_testsender': { chat_name: '研发群', user_name: '发送人' },
+          'feishu:oc_testchat:on_testmsgid': { chat_name: '研发群' },
+        },
+        sessions: {
+          s1: { id: 's1', agent_session_id: 'im-session-1', past_agent_session_ids: [] },
+        },
+      })
+    );
+
+    // Team that owns the agent workspace — routing.target resolves from the
+    // session cwd matching this workDir.
+    const teamDir = path.join(hermitHome, 'teams', 'test-team');
+    await mkdir(teamDir, { recursive: true });
+    await writeFile(
+      path.join(teamDir, 'team.json'),
+      JSON.stringify({ slug: 'test-team', displayName: '测试团队', workDir: '/tmp/project' })
+    );
+
+    // Logged-in tenant for the im.tenantKey field.
+    await writeFile(
+      path.join(hermitHome, 'auth', 'openhermit.json'),
+      JSON.stringify({
+        token: { accessToken: 'token', expiresAt: '2999-01-01T00:00:00.000Z' },
+        account: { tenantKey: 'tenant-test' },
+      })
+    );
+
+    // Claude session jsonl whose FILENAME equals agent_session_id, carrying NO
+    // obj.im field — attribution relies entirely on the hermit-bridge intersection.
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'im-session-1.jsonl'),
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'im-session-1',
+        uuid: 'msg-1',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-25T08:00:00.000Z',
+        message: { role: 'user', content: 'from feishu', model: 'claude-im-model' },
+      })}\n`
+    );
+
+    const posted = {
+      plain: [] as Array<Record<string, any>>,
+      im: [] as Array<Record<string, any>>,
+    };
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/hermit/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          feishu_authorized: true,
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/hermit/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              source: 'openhermit',
+              platform: 'claudecode',
+              mode: url.includes('mode=im') ? 'im' : 'plain',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        // One unified endpoint: scene distinguishes digital_employee (IM) from coding (plain).
+        if (body.scene === 'digital_employee') {
+          posted.im.push(body);
+          return Response.json(
+            {
+              ok: true,
+              uploadId: 'upl-im',
+              receiptId: 'r-im',
+              status: 'queued',
+              received: 1,
+              acceptedForProcessing: 1,
+              rejectedAtReceive: 0,
+            },
+            { status: 202 }
+          );
+        }
+        posted.plain.push(body);
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl-plain',
+            status: 'queued',
+            received: 0,
+            acceptedForProcessing: 0,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(result.lastError).toBeUndefined();
+    // IM-origin session → routed to the IM endpoint; must NOT leak into plain.
+    expect(posted.im).toHaveLength(1);
+    expect(posted.plain).toHaveLength(0);
+
+    const imPayload = posted.im[0];
+    // Unified contract: scene flags digital_employee; schemaVersion is 1; the
+    // client declares client.tool explicitly and MUST NOT send platform.
+    expect(imPayload).toMatchObject({
+      schemaVersion: 1,
+      scene: 'digital_employee',
+      reporter: 'openhermit',
+      client: { tool: 'claudecode' },
+    });
+    expect(imPayload).not.toHaveProperty('platform');
+    // No top-level project/conversation: every message carries its own context now.
+    expect(imPayload).not.toHaveProperty('project');
+    expect(imPayload).not.toHaveProperty('conversation');
+    expect(imPayload.messages).toHaveLength(1);
+    const imMessage = imPayload.messages[0];
+    // Unified contract allows per-message project/conversation — IM KEEPS them.
+    expect(imMessage).toMatchObject({
+      kind: 'im_conversation_message',
+      eventId: 'claudecode:im-session-1:msg-1',
+      project: { projectRef: expect.any(String) },
+      conversation: { conversationId: 'im-session-1', sessionRef: 'claudecode:im-session-1' },
+      message: {
+        messageRef: 'msg-1',
+        modelName: 'claude-im-model',
+        role: expect.any(String),
+        content: expect.any(String),
+      },
+      im: {
+        provider: 'feishu',
+        channel: 'feishu',
+        tenantKey: 'tenant-test',
+        chat: { id: 'oc_testchat', type: 'group', name: '研发群' },
+        sender: { id: 'ou_testsender', idType: 'open_id', name: '发送人' },
+        message: { id: 'on_testmsgid' },
+      },
+      routing: {
+        trigger: 'im_message',
+        triggerSource: 'feishu',
+        matchedBy: 'chat_id',
+        routeRef: 'route-test-team',
+        target: { type: 'team', teamSlug: 'test-team', teamName: '测试团队' },
+      },
+    });
+    expect(imMessage.message).not.toHaveProperty('model');
+    // Regression guard: the legacy `via` placeholder is gone (server 422s it).
+    expect(imMessage.im).not.toHaveProperty('via');
   });
 
   it('skips uploading when server reports in-flight batches for the channel', async () => {
@@ -181,9 +357,169 @@ describe('ConversationMessageUploadService', () => {
 
     expect(result.attempted).toBe(0);
     expect(result.uploadIds).toEqual(['upl_inflight', 'upl_inflight']);
-    expect(result.lastError).toContain('服务端仍有处理中批次');
+    expect(result.lastError).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/hermit/conversation-messages'),
+      expect.stringContaining('/api/v1/report/messages'),
+      expect.anything()
+    );
+  });
+
+  it('drains past in-flight on a foreground scan (--scan-once) instead of skipping', async () => {
+    // Regression: 扫描一次 / `usage report` run as --scan-once children with
+    // HERMIT_USAGE_FOREGROUND_SCAN=1. A pending backlog must actually upload,
+    // not skip forever while the server finishes a prior batch.
+    process.env.HERMIT_USAGE_FOREGROUND_SCAN = '1';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'session-1.jsonl'),
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'session-1',
+        uuid: 'message-1',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: 'hello' },
+      })}\n`
+    );
+
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/hermit/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/hermit/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              source: 'openhermit',
+              platform: url.includes('platform=codex') ? 'codex' : 'claudecode',
+              mode: url.includes('mode=im') ? 'im' : 'plain',
+              status: 'processing',
+              inFlight: { count: 1, uploadIds: ['upl_inflight'] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_new',
+            receiptId: 'receipt-1',
+            status: 'queued',
+            received: 1,
+            acceptedForProcessing: 1,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    // It pushed through the in-flight state and uploaded — the backlog drains.
+    expect(result.attempted).toBe(1);
+    expect(result.accepted).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/report/messages'),
+      expect.anything()
+    );
+  });
+
+  it('proceeds to upload (relying on server eventId dedup) when a prior upload has no committed cursor', async () => {
+    // The client never skips on a missing cursor: a prior upload without a
+    // committed cursor just means the server-side cursor commit hasn't landed yet
+    // (or this is the channel's first upload). The client re-scans and re-posts;
+    // the server dedupes by eventId, so already-uploaded messages come back as
+    // duplicates (not double-counted). Skipping here would stall the channel
+    // forever while a backlog sits — the documented behavior at the upload site.
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'session-no-cursor.jsonl'),
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'session-no-cursor',
+        uuid: 'message-no-cursor',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: 'hello' },
+      })}\n`
+    );
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/hermit/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/hermit/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              source: 'openhermit',
+              platform: 'claudecode',
+              mode: url.includes('mode=im') ? 'im' : 'plain',
+              status: url.includes('mode=im') ? 'never_reported' : 'success',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+              lastUploadId: url.includes('mode=im') ? null : 'upl_prior_without_cursor',
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        // Server-side dedup: a re-sent eventId comes back as a duplicate, not a
+        // double-count. The client still POSTs it (attempted), relying on the server.
+        const received = body.messages.length;
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_dedup',
+            status: 'queued',
+            received,
+            acceptedForProcessing: 0,
+            duplicatedAtReceive: received,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    // It PROCEEDED (did not skip) and POSTed to the unified endpoint; the server
+    // accepted the dedup without an intake error.
+    expect(result.attempted).toBe(1);
+    expect(result.lastError).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/report/messages'),
       expect.anything()
     );
   });
@@ -248,7 +584,7 @@ describe('ConversationMessageUploadService', () => {
           ],
         });
       }
-      if (url.endsWith('/api/v1/hermit/conversation-messages')) {
+      if (url.endsWith('/api/v1/report/messages')) {
         return Response.json(
           {
             ok: true,
@@ -262,19 +598,7 @@ describe('ConversationMessageUploadService', () => {
           { status: 202 }
         );
       }
-      if (url.endsWith('/api/v1/hermit/uploads/upl_refresh')) {
-        return Response.json({
-          ok: true,
-          uploadId: 'upl_refresh',
-          status: 'success',
-          accepted: 1,
-          inserted: 1,
-          duplicated: 0,
-          rejected: 0,
-          failed: 0,
-          cursorCommitted: true,
-        });
-      }
+      // No per-batch status polling: the /uploads/:id endpoint is never fetched.
       throw new Error(`unexpected fetch ${url}`);
     });
 
@@ -294,26 +618,31 @@ describe('ConversationMessageUploadService', () => {
     expect(result.lastError).toBeUndefined();
   });
 
-  it('treats a server-confirmed success as uploaded even when counts diverge (cursor authoritative)', async () => {
-    // 3 messages attempted, but the server's accepted + duplicated (2) < attempted.
-    // Counts can lag in a multi-server backend (items in-flight on another node);
-    // the authoritative signal is the committed cursor (batch success), not the
-    // count equality — so this must NOT be flagged as an error / failed upload.
+  it('sends all batches off the receipt without per-batch status polling — no UI freeze', async () => {
+    // Regression guard for the "首次上报卡死" bug: the removed per-batch
+    // terminal-status poll (up to 10 x 1.5s = ~15s/batch) made a 199-batch first
+    // backfill take an hour and froze the interactive menu. Upload must POST every
+    // batch off the receipt alone and NEVER hit the /uploads/:id status endpoint —
+    // /usage/status is the server-authoritative fact source for committed cursor
+    // and aggregate counts.
+    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE = '2'; // 3 messages => 2 batches
     const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
     await mkdir(projectDir, { recursive: true });
     const lines = [1, 2, 3].map((i) =>
       JSON.stringify({
         type: 'user',
-        sessionId: 'session-diverge',
+        sessionId: 'session-fast',
         uuid: `m${i}`,
         cwd: '/tmp/project',
         timestamp: '2026-06-24T08:20:00.000Z',
         message: { role: 'user', content: `hello ${i}` },
       })
     );
-    await writeFile(path.join(projectDir, 'session-diverge.jsonl'), `${lines.join('\n')}\n`);
+    await writeFile(path.join(projectDir, 'session-fast.jsonl'), `${lines.join('\n')}\n`);
 
-    fetchMock.mockImplementation(async (url: string) => {
+    let uploadPosts = 0;
+    let statusPolls = 0;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/api/v1/auth/hermit/me')) {
         return Response.json({
           authenticated: true,
@@ -327,7 +656,7 @@ describe('ConversationMessageUploadService', () => {
             {
               source: 'openhermit',
               platform: 'claudecode',
-              mode: 'plain',
+              mode: url.includes('mode=im') ? 'im' : 'plain',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -335,32 +664,27 @@ describe('ConversationMessageUploadService', () => {
           ],
         });
       }
-      if (url.endsWith('/api/v1/hermit/conversation-messages')) {
+      if (url.endsWith('/api/v1/report/messages')) {
+        uploadPosts += 1;
+        const count = JSON.parse(String(init?.body)).messages.length;
+        // Receipt is non-terminal ('queued') — on the confirm path this would
+        // trigger polling; the fast path must NOT poll.
         return Response.json(
           {
             ok: true,
-            uploadId: 'upl_div',
+            uploadId: `upl_fast_${uploadPosts}`,
             status: 'queued',
-            received: 3,
-            acceptedForProcessing: 3,
+            received: count,
+            acceptedForProcessing: count,
             rejectedAtReceive: 0,
-            detailUrl: '/api/v1/hermit/uploads/upl_div',
+            detailUrl: `/api/v1/hermit/uploads/upl_fast_${uploadPosts}`,
           },
           { status: 202 }
         );
       }
-      if (url.endsWith('/api/v1/hermit/uploads/upl_div')) {
-        // success, but accepted (2) < attempted (3) — counts diverge.
-        return Response.json({
-          ok: true,
-          uploadId: 'upl_div',
-          status: 'success',
-          accepted: 2,
-          duplicated: 0,
-          rejected: 0,
-          failed: 0,
-          cursorCommitted: true,
-        });
+      if (url.includes('/api/v1/hermit/uploads/')) {
+        statusPolls += 1;
+        return Response.json({ ok: true, status: 'success', accepted: 2, cursorCommitted: true });
       }
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -374,11 +698,12 @@ describe('ConversationMessageUploadService', () => {
       },
     });
 
+    expect(uploadPosts).toBe(2); // both batches sent
+    expect(statusPolls).toBe(0); // NO per-batch polling — this is the freeze fix
     expect(result.attempted).toBe(3);
-    expect(result.lastUploadStatus).toBe('success');
-    expect(result.accepted).toBe(2);
-    // Cursor committed (success) even though the count (2) < attempted (3).
-    expect(result.lastError).toBeUndefined();
+    expect(result.lastError).toBeUndefined(); // non-terminal receipt must NOT abort the run
+    expect(result.pending).toBe(0); // batches count as sent; no misleading "N 待上报"
+    delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE;
   });
 
   it('withUploadLock releases the lock when the locked function throws', async () => {

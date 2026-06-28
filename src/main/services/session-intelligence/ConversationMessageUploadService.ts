@@ -1,15 +1,19 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import {
   authedFetch,
   getValidBearerToken,
+  readAuthStore,
   refreshAccessToken,
 } from '@main/services/auth/OpenHermitAuthClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
+import { loadImOriginEnvelopes, type ImEnvelope } from './ImOriginSessionReader';
+import { ImTeamAttributor, type TeamIdentity } from './ImTeamAttributor';
 type ConversationUploadTelemetryConfig = {
   enabled?: boolean;
   platform?: UploadPlatform;
@@ -35,8 +39,76 @@ const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
 const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
 const UPLOAD_LOG_FILE = 'conversation-upload.log';
 const SOURCE = 'openhermit' as const;
-const TERMINAL_UPLOAD_STATUSES = new Set(['success', 'partial', 'failed', 'dead_letter']);
 const API_TIMEOUT_MS = 8_000;
+// Unified upload endpoint (replaces the legacy split /conversation-messages and
+// /im-conversation-messages). scene + per-message kind/im/routing carry the
+// scene; `mode` stays an internal collection/dedup-channel switch, not an endpoint selector.
+const UPLOAD_ENDPOINT = '/api/v1/report/messages';
+
+// Builds the `im` block for an IM-attributed message from the envelope hermit-bridge
+// records per conversation (see ImOriginSessionReader): provider/chatId/chatType come
+// from the composite key that indexes user_sessions; chat/sender display names from
+// user_meta; senderId/messageId from the composite's third segment (ou_/on_/om_);
+// tenantKey from the logged-in auth account.
+function buildImBlock(envelope: ImEnvelope, tenantKey?: string): NonNullable<UploadMessage['im']> {
+  const block: NonNullable<UploadMessage['im']> = {
+    provider: envelope.provider,
+    channel: envelope.provider,
+  };
+  if (tenantKey) block.tenantKey = tenantKey;
+  if (envelope.chatId) {
+    const chat: { id: string; type?: string; name?: string } = { id: envelope.chatId };
+    if (envelope.chatType) chat.type = envelope.chatType;
+    if (envelope.chatName) chat.name = envelope.chatName;
+    block.chat = chat;
+  }
+  if (envelope.senderId) {
+    const sender: { id: string; idType?: string; name?: string } = { id: envelope.senderId };
+    // Feishu open_id carries the ou_ prefix; record it so the server can resolve identity.
+    if (envelope.senderId.startsWith('ou_')) sender.idType = 'open_id';
+    if (envelope.senderName) sender.name = envelope.senderName;
+    block.sender = sender;
+  }
+  if (envelope.messageId) {
+    block.message = { id: envelope.messageId };
+  }
+  return block;
+}
+
+// IM routing fact: how this conversation reached the agent. trigger/triggerSource/
+// matchedBy are constant for an IM-origin turn; target is the Hermit team that owns
+// the agent's workspace (resolved from the session cwd). When no team matches the
+// cwd, target is omitted rather than fabricated — the server then has the trigger
+// facts without an invented identity.
+function buildRoutingBlock(
+  envelope: ImEnvelope,
+  team: TeamIdentity | null
+): NonNullable<UploadMessage['routing']> {
+  const routing: NonNullable<UploadMessage['routing']> = {
+    schemaVersion: 1,
+    source: 'openhermit-router',
+    trigger: 'im_message',
+    triggerSource: envelope.provider,
+    matchedBy: 'chat_id',
+  };
+  if (team) {
+    routing.routeRef = `route-${team.teamSlug}`;
+    routing.target = {
+      type: 'team',
+      teamSlug: team.teamSlug,
+      teamName: team.teamName,
+    };
+  }
+  return routing;
+}
+
+// tenantKey for the im block: read from the auth store's account (the logged-in
+// tenant). Absent when not logged in or when the account lacks a tenant.
+async function readTenantKey(home: string): Promise<string | undefined> {
+  const store = await readAuthStore(home);
+  const account = store?.account as { tenantKey?: unknown } | undefined;
+  return typeof account?.tenantKey === 'string' ? account.tenantKey : undefined;
+}
 
 export interface ConversationUploadStatus {
   enabled: boolean;
@@ -66,23 +138,29 @@ interface UploadMessage {
   kind: MessageKind;
   eventId: string;
   reportedAt: string;
-  project: {
+  // Per-message context, kept on each message as collected. Plain messages carry
+  // project/conversation; IM messages additionally carry im/routing. The unified
+  // contract allows per-message project/conversation (message-level wins over a
+  // top-level fallback), so nothing is stripped or hoisted anymore.
+  project?: {
     projectRef: string;
     name?: string;
     pathHash?: string;
   };
-  conversation: {
+  conversation?: {
     conversationId: string;
     sessionRef: string;
     claudeSessionRef?: string;
     startedAt?: string;
   };
+  // IM-only routing fact (trigger/target team). Plain messages never carry this.
+  routing?: Record<string, unknown>;
   message: {
     messageRef: string;
     parentRef: string | null;
     role: 'user' | 'assistant';
     occurredAt?: string;
-    model?: string;
+    modelName?: string;
     content: string;
     contentFormat: 'text' | 'markdown';
     usage?: {
@@ -120,9 +198,19 @@ interface ClientCursor {
 interface UploadPayload {
   schemaVersion: 1;
   generatedAt: string;
-  source: typeof SOURCE;
-  platform: UploadPlatform;
+  reporter: string;
+  // `client.tool` declares the producing tool explicitly (claudecode/codex); the
+  // server registers it as the channel key with no model→platform inference.
+  client: { tool: string; version?: string; instanceId?: string };
+  // scene drives server-side routing: coding (plain Claude/Codex turns) vs
+  // digital_employee (IM-origin turns).
+  scene: 'coding' | 'digital_employee';
   clientCursor?: ClientCursor;
+  // Unified contract: project/conversation/im may live per-message (message-level
+  // wins) OR at top-level as a fallback. Collected messages always carry their own
+  // context, so the payload base leaves these absent.
+  project?: UploadMessage['project'];
+  conversation?: UploadMessage['conversation'];
   messages: UploadMessage[];
 }
 
@@ -138,29 +226,6 @@ interface UploadReceipt {
   statusUrl?: string;
   detailUrl?: string;
   errors?: unknown;
-}
-
-interface UploadResult {
-  ok?: boolean;
-  uploadId?: string;
-  receiptId?: string;
-  status?: string;
-  mode?: UploadMode;
-  received?: number;
-  accepted?: number;
-  inserted?: number;
-  duplicated?: number;
-  rejected?: number;
-  failed?: number;
-  totalTokens?: number;
-  cursorCommitted?: boolean;
-  errors?: unknown;
-  items?: Array<{
-    eventId?: string;
-    status?: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-  }>;
 }
 
 interface ServerCursorFileState {
@@ -361,12 +426,6 @@ function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
   return url;
 }
 
-function absoluteStatusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
-  const url = statusUrl(baseUrl, receipt);
-  if (!url) return null;
-  return url.startsWith('http://') || url.startsWith('https://') ? url : apiUrl(baseUrl, url);
-}
-
 function sha(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -384,7 +443,10 @@ function fileKey(filePath: string): string {
 }
 
 function hermitHome(): string {
-  return process.env.HERMIT_HOME || path.join(process.env.HOME || '', '.hermit');
+  // os.homedir() (not process.env.HOME) — HOME is undefined on native Windows,
+  // which collapsed this to a relative `.hermit` and broke auth/data resolution
+  // for the spawned worker. Matches the other ~12 home-resolution sites.
+  return process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
 }
 
 function textFromContent(content: unknown): string {
@@ -672,7 +734,7 @@ function claudeUploadMessage(
       parentRef: parentMessageRef(obj.parentUuid ?? obj.parentMessageId),
       role,
       occurredAt,
-      model: typeof msg.model === 'string' ? msg.model : undefined,
+      modelName: typeof msg.model === 'string' ? msg.model : undefined,
       content: reportedContent,
       contentFormat: 'text',
       usage,
@@ -690,6 +752,15 @@ async function collectClaudeCodeMessages(
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
+  // IM attribution: a Claude session is IM-origin iff hermit-bridge recorded it
+  // as the agent_session_id it drove (the jsonl filename). Loaded once per call;
+  // the hermit-bridge session store is a handful of small JSON files.
+  const imEnvelopes = await loadImOriginEnvelopes(hermitHome());
+  // IM-only routing context: the team that owns the agent's workspace (resolved
+  // from the session cwd) and the logged-in tenant. Loaded only for the IM
+  // channel — plain never needs them.
+  const teamAttributor = mode === 'im' ? await ImTeamAttributor.load(hermitHome()) : null;
+  const tenantKey = mode === 'im' ? await readTenantKey(hermitHome()) : undefined;
 
   for await (const filePath of walkJsonl(getProjectsBasePath())) {
     if (maxMessages > 0 && messages.length >= maxMessages) break;
@@ -712,6 +783,7 @@ async function collectClaudeCodeMessages(
       continue;
     }
 
+    const imEnvelope = imEnvelopes.get(path.basename(filePath, '.jsonl'));
     let consumedOffset = fromOffset;
     let startedAt: string | undefined;
     const stream = createReadStream(filePath, {
@@ -733,11 +805,20 @@ async function collectClaudeCodeMessages(
       startedAt ||= occurredAt;
       const baseMessage = claudeUploadMessage(filePath, obj, generatedAt, startedAt);
       if (!baseMessage) continue;
-      const im = obj.im && typeof obj.im === 'object' ? (obj.im as Record<string, unknown>) : null;
-      if (mode === 'im') {
-        if (!im) continue;
-        messages.push({ ...baseMessage, kind: 'im_conversation_message', im });
-      } else if (!im) {
+      // Route by session origin: an IM-origin session goes to the IM channel, a
+      // plain session goes to the plain channel — never both, never crossed.
+      if (imEnvelope) {
+        if (mode === 'im') {
+          const cwd = typeof obj.cwd === 'string' ? obj.cwd : path.dirname(filePath);
+          const team = teamAttributor?.resolveByCwd(cwd) ?? null;
+          messages.push({
+            ...baseMessage,
+            kind: 'im_conversation_message',
+            im: buildImBlock(imEnvelope, tenantKey),
+            routing: buildRoutingBlock(imEnvelope, team),
+          });
+        }
+      } else if (mode === 'plain') {
         messages.push(baseMessage);
       }
     }
@@ -763,7 +844,8 @@ async function collectClaudeCodeMessages(
 }
 
 function codexHome(): string {
-  return process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex');
+  // See hermitHome(): os.homedir() for Windows parity.
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
 function codexTokenUsageFromRecord(
@@ -909,7 +991,7 @@ async function collectCodexMessages(
             parentRef: null,
             role: 'assistant',
             occurredAt,
-            model:
+            modelName:
               typeof record.model === 'string'
                 ? record.model
                 : typeof obj.model === 'string'
@@ -956,27 +1038,6 @@ async function collectMessagesForPlatform(
     : collectClaudeCodeMessages(mode, serverCursor, limit, generatedAt);
 }
 
-function endpointForMode(mode: UploadMode): string {
-  return mode === 'im'
-    ? '/api/v1/hermit/im-conversation-messages'
-    : '/api/v1/hermit/conversation-messages';
-}
-
-function countsCoverAttempt(status: ConversationUploadStatus): boolean {
-  return status.accepted + status.duplicated === status.attempted;
-}
-
-function shouldCountAsUploaded(status: ConversationUploadStatus): boolean {
-  if (status.attempted <= 0) return false;
-  // Cursor-authoritative: a server-confirmed success means the cursor committed,
-  // even when accepted + duplicated != attempted. Counts can lag in a multi-server
-  // backend (items in-flight on another node), so the count equality is only a
-  // fallback signal — the batch status (success => cursor committed) is the truth.
-  if (status.lastUploadStatus === 'success') return true;
-  if (status.rejected > 0 || (status.failed ?? 0) > 0 || status.lastError) return false;
-  return countsCoverAttempt(status);
-}
-
 function sanitizeDiagnosticText(value: unknown): string {
   return String(value ?? '')
     .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s"']+/gi, '$1[hidden]')
@@ -1012,69 +1073,37 @@ function parseJsonObject(text: string): Record<string, unknown> {
 
 function uploadStatusFromResult(
   receipt: UploadReceipt,
-  result: UploadResult | null,
   attempted: number,
   baseUrl: string
 ): ConversationUploadStatus {
   const received = typeof receipt.received === 'number' ? receipt.received : attempted;
   const rejectedAtReceive =
     typeof receipt.rejectedAtReceive === 'number' ? receipt.rejectedAtReceive : 0;
-  const queued =
+  const accepted =
     typeof receipt.acceptedForProcessing === 'number'
       ? receipt.acceptedForProcessing
       : Math.max(0, received - rejectedAtReceive);
-  const baseStatus: ConversationUploadStatus = {
+  const status: ConversationUploadStatus = {
     enabled: true,
     endpointConfigured: true,
     attempted,
-    accepted: 0,
+    accepted,
     duplicated: typeof receipt.duplicatedAtReceive === 'number' ? receipt.duplicatedAtReceive : 0,
     rejected: rejectedAtReceive,
-    queued,
+    queued: accepted,
     uploadIds: receipt.uploadId ? [receipt.uploadId] : [],
     lastReceiptId: receipt.receiptId,
     lastStatusUrl: statusUrl(baseUrl, receipt) || undefined,
     lastUploadStatus: receipt.status,
   };
-
+  // Only an intake-level rejection is a real, actionable failure. A non-terminal
+  // receipt ('queued') is normal: the server processes asynchronously and reports
+  // authoritative counts + the committed cursor via /usage/status on the next scan.
+  // The interface is the single source of truth — no parallel local accounting.
   if (receipt.ok === false || receipt.errors || rejectedAtReceive > 0) {
-    return { ...baseStatus, lastError: '服务端接收阶段返回错误，已保留待上报状态' };
-  }
-
-  if (!result) {
-    return { ...baseStatus, lastError: '服务端批次仍在处理中，等待后续状态确认' };
-  }
-
-  const status: ConversationUploadStatus = {
-    ...baseStatus,
-    accepted: typeof result.accepted === 'number' ? result.accepted : 0,
-    inserted: typeof result.inserted === 'number' ? result.inserted : undefined,
-    duplicated: typeof result.duplicated === 'number' ? result.duplicated : baseStatus.duplicated,
-    rejected: typeof result.rejected === 'number' ? result.rejected : baseStatus.rejected,
-    failed: typeof result.failed === 'number' ? result.failed : 0,
-    lastReceiptId: result.receiptId || baseStatus.lastReceiptId,
-    lastUploadStatus: result.status || baseStatus.lastUploadStatus,
-  };
-
-  if (status.lastUploadStatus && status.lastUploadStatus !== 'success') {
-    status.lastError = `服务端批次状态为 ${status.lastUploadStatus}，未推进本地假定游标`;
-  }
-  if ((status.failed ?? 0) > 0) status.lastError = '部分消息处理失败，未推进本地假定游标';
-  if (status.rejected > 0) status.lastError = '部分消息被拒绝，未推进本地假定游标';
-  if (!status.lastError && status.lastUploadStatus !== 'success' && !countsCoverAttempt(status)) {
-    status.lastError = '服务端最终处理计数未覆盖本批发送数，等待下次按服务端 cursor 重扫';
+    status.lastError = '服务端接收阶段返回错误，已保留待上报状态';
   }
   return status;
-}
-
-function statusPollAttempts(): number {
-  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_STATUS_POLL_ATTEMPTS ?? '', 10);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 10;
-}
-
-function statusPollIntervalMs(): number {
-  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_STATUS_POLL_INTERVAL_MS ?? '', 10);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 1_500;
 }
 
 function batchDelayMs(): number {
@@ -1082,75 +1111,26 @@ function batchDelayMs(): number {
   return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
 }
 
-function statusRefreshDelayMs(): number {
-  const raw = Number.parseInt(process.env.OPENHERMIT_USAGE_STATUS_REFRESH_DELAY_MS ?? '', 10);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function queryUploadResult(
-  baseUrl: string,
-  token: string,
-  receipt: UploadReceipt
-): Promise<UploadResult | null> {
-  const url = absoluteStatusUrl(baseUrl, receipt);
-  if (!url) return null;
-  const res = await authedFetch(hermitHome(), baseUrl, url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`upload status ${await responseDiagnostic(res)}`);
-  const text = await res.text().catch(() => '');
-  if (!text) return null;
-  return parseJsonObject(text) as UploadResult;
-}
-
-async function waitForUploadResult(
-  home: string,
-  baseUrl: string,
-  token: string,
-  receipt: UploadReceipt,
-  batchContext: Record<string, unknown>
-): Promise<UploadResult | null> {
-  const attempts = statusPollAttempts();
-  for (let attempt = 0; attempt <= attempts; attempt += 1) {
-    const result = await queryUploadResult(baseUrl, token, receipt);
-    await appendUploadLog(home, 'upload-status-polled', {
-      ...batchContext,
-      uploadId: receipt.uploadId,
-      attempt,
-      status: result?.status || 'unknown',
-    });
-    if (!result?.status || TERMINAL_UPLOAD_STATUSES.has(result.status)) return result;
-    if (attempt < attempts) await wait(statusPollIntervalMs());
-  }
-  await appendUploadLog(home, 'upload-status-timeout', {
-    ...batchContext,
-    uploadId: receipt.uploadId,
-    attempts,
-  });
-  return null;
 }
 
 async function postPayload(
   home: string,
   baseUrl: string,
   endpointPath: string,
+  platform: UploadPlatform,
   token: string,
   payload: UploadPayload,
-  mode: UploadMode,
-  batchContext: Record<string, unknown>
+  mode: UploadMode
 ): Promise<ConversationUploadStatus> {
   const firstMessage = payload.messages[0];
   await appendUploadLog(home, 'upload-request', {
     endpoint: endpointPath,
     mode,
-    platform: payload.platform,
+    platform,
     schemaVersion: payload.schemaVersion,
-    source: payload.source,
+    reporter: payload.reporter,
     messageCount: payload.messages.length,
     hasClientCursor: Boolean(payload.clientCursor),
     cursorHash: payload.clientCursor?.targetCursorHash,
@@ -1176,7 +1156,7 @@ async function postPayload(
   await appendUploadLog(home, 'upload-response', {
     endpoint: endpointPath,
     mode,
-    platform: payload.platform,
+    platform,
     ok: res.ok,
     status: res.status,
     body: sanitizeDiagnosticText(text),
@@ -1187,31 +1167,13 @@ async function postPayload(
       `upload ${endpointPath} ${await responseDiagnostic(new Response(text, { status: res.status, statusText: res.statusText }))}`
     );
   }
-  const result = await waitForUploadResult(home, baseUrl, token, receipt, batchContext);
-  const status = uploadStatusFromResult(receipt, result, payload.messages.length, baseUrl);
-  if (result && TERMINAL_UPLOAD_STATUSES.has(String(result.status || ''))) {
-    await wait(statusRefreshDelayMs());
-    try {
-      const channel = await fetchUsageChannel(baseUrl, token, payload.platform, mode);
-      // The channel's aggregate status (never_reported / processing / ...) is NOT
-      // the batch outcome — do not clobber lastUploadStatus (it holds the batch
-      // result, e.g. 'success', the cursor-committed signal). Channel is only for
-      // the in-flight + cursorCommitted checks below.
-      if (channel?.lastUploadId && !status.uploadIds?.includes(channel.lastUploadId)) {
-        status.uploadIds = [...(status.uploadIds ?? []), channel.lastUploadId];
-      }
-      // in-flight batches and a not-yet-committed cursor right after a batch
-      // success are NORMAL — the server processes asynchronously, so the
-      // /usage/status read lags behind. They must NOT set lastError (that would
-      // stop the batch loop mid-run, leaving later batches unattempted). The
-      // batch's own success status is the cursor-committed signal; this channel
-      // read is display-only. (The pre-scan inFlight guard in
-      // uploadPlatformModeMessages still skips a NEW run while the server is busy.)
-    } catch (error) {
-      status.lastError = `批次已处理，但刷新 /usage/status 失败：${sanitizeUploadError(error)}`;
-    }
-  }
-  return status;
+  // Receipt-only: the 202 confirms the batch was accepted for processing. The
+  // server is cursor-authoritative + eventId-dedup — it commits the cursor on
+  // success and reports authoritative counts via /usage/status on the next scan.
+  // No per-batch terminal-status polling: that fed display counts only and froze
+  // the menu for ~an hour on a 199-batch first backfill (and made the worker hold
+  // the lock ~an hour per cycle). The interface is the single source of truth.
+  return uploadStatusFromResult(receipt, payload.messages.length, baseUrl);
 }
 
 function mergeStatuses(statuses: ConversationUploadStatus[]): ConversationUploadStatus {
@@ -1259,6 +1221,7 @@ async function postMessagesInBatches(
   home: string,
   baseUrl: string,
   endpointPath: string,
+  platform: UploadPlatform,
   mode: UploadMode,
   token: string,
   payloadBase: Omit<UploadPayload, 'messages'>,
@@ -1276,6 +1239,8 @@ async function postMessagesInBatches(
     const batchIndex = Math.floor(offset / size) + 1;
     const batchMessages = messages.slice(offset, offset + size);
     await appendUploadLog(home, 'upload-batch-start', {
+      platform,
+      mode,
       batchIndex,
       totalBatches,
       batchSize: batchMessages.length,
@@ -1286,31 +1251,32 @@ async function postMessagesInBatches(
     });
 
     try {
-      const isLastBatch = offset + size >= messages.length;
-      const { clientCursor, ...payloadWithoutCursor } = payloadBase;
+      // Attach the cursor to EVERY batch, not only the last. The cursor marks
+      // the scan position (per-file offsets) and is identical across batches;
+      // the server commits it from whichever batch it durably processes, so a
+      // mid-run crash still leaves an accurate cursor instead of none.
       const status = await postPayload(
         home,
         baseUrl,
         endpointPath,
+        platform,
         token,
         {
-          ...(isLastBatch ? payloadBase : payloadWithoutCursor),
+          ...payloadBase,
           messages: batchMessages,
         },
-        mode,
-        {
-          batchIndex,
-          totalBatches,
-          batchSize: batchMessages.length,
-          attemptedBeforeBatch: offset,
-          attemptedAfterBatch: Math.min(messages.length, offset + batchMessages.length),
-          uploadedBeforeBatch: uploadedBeforeRun + uploadedCount,
-          totalMessages: runTotalMessages,
-        }
+        mode
       );
       statuses.push(status);
-      if (shouldCountAsUploaded(status)) uploadedCount += batchMessages.length;
+      // A batch that didn't hard-fail was accepted for processing (the 202
+      // receipt). lastError is only set on intake rejection / HTTP error, so its
+      // absence means the batch is in flight server-side — count it as sent.
+      if (!status.lastError) {
+        uploadedCount += batchMessages.length;
+      }
       await appendUploadLog(home, 'upload-batch-finished', {
+        platform,
+        mode,
         batchIndex,
         totalBatches,
         attempted: status.attempted,
@@ -1320,7 +1286,7 @@ async function postMessagesInBatches(
         failed: status.failed,
         uploadIds: status.uploadIds,
         lastUploadStatus: status.lastUploadStatus,
-        serverConfirmed: shouldCountAsUploaded(status),
+        ok: !status.lastError,
         uploadedAfterBatch: uploadedBeforeRun + uploadedCount,
         totalMessages: runTotalMessages,
         lastError: status.lastError,
@@ -1330,6 +1296,8 @@ async function postMessagesInBatches(
     } catch (error) {
       const message = sanitizeUploadError(error);
       await appendUploadLog(home, 'upload-batch-failed', {
+        platform,
+        mode,
         batchIndex,
         totalBatches,
         batchSize: batchMessages.length,
@@ -1363,8 +1331,14 @@ async function uploadPlatformModeMessages(
   token: string,
   generatedAt: string
 ): Promise<ConversationUploadStatus> {
+  const fullRescan = process.env.HERMIT_USAGE_FULL_RESCAN === '1';
+  // A user-initiated scan (`usage report`, the 扫描一次 menu action, or --full)
+  // runs as a --scan-once child with HERMIT_USAGE_FOREGROUND_SCAN=1; the periodic
+  // daemon loop does NOT. Only the daemon defers to server backpressure — a
+  // foreground scan must push through so a pending backlog actually drains.
+  const foreground = process.env.HERMIT_USAGE_FOREGROUND_SCAN === '1';
   const inFlightCount = Number(channel?.inFlight?.count ?? 0);
-  if (inFlightCount > 0) {
+  if (inFlightCount > 0 && !(foreground || fullRescan)) {
     await appendUploadLog(home, 'server-channel-inflight', {
       platform,
       mode,
@@ -1373,9 +1347,25 @@ async function uploadPlatformModeMessages(
     return emptyStatus(true, true, {
       lastUploadStatus: channel?.status || 'processing',
       uploadIds: channel?.inFlight?.uploadIds ?? [],
-      lastError: '服务端仍有处理中批次，本轮按服务端实时状态跳过',
     });
   }
+  if (inFlightCount > 0) {
+    // Foreground/full scan: don't let an in-flight batch from a prior run block
+    // the drain. The server dedupes by eventId, so proceeding absorbs the
+    // overlap — without this the channel skips forever while a backlog sits,
+    // and 待上报 never drops.
+    await appendUploadLog(home, 'server-channel-inflight-foreground', {
+      platform,
+      mode,
+      uploadIds: channel?.inFlight?.uploadIds ?? [],
+    });
+  }
+  // No cursor must NOT pause the upload. A missing cursor can simply mean this
+  // is the channel's FIRST upload (nothing committed yet), or that the
+  // server-side cursor commit is not implemented yet. Either way we proceed:
+  // collectMessagesForPlatform receives the server cursor when present
+  // (incremental) or null (full rescan), and the server dedupes by eventId.
+  // Incremental resumes automatically once the server starts committing.
 
   const conversationCfg = cfg.telemetry?.conversations;
   // `usage report --full` backfill: ignore the server cursor so every file scans
@@ -1383,7 +1373,6 @@ async function uploadPlatformModeMessages(
   // already-uploaded messages become duplicates (not re-counted) and messages
   // newly included by a filter change (e.g. tool-use turns that now keep their
   // usage) get inserted. After success the server commits the full-range cursor.
-  const fullRescan = process.env.HERMIT_USAGE_FULL_RESCAN === '1';
   const { messages, clientCursor } = await collectMessagesForPlatform(
     platform,
     mode,
@@ -1418,8 +1407,9 @@ async function uploadPlatformModeMessages(
   const payloadBase: Omit<UploadPayload, 'messages'> = {
     schemaVersion: 1,
     generatedAt,
-    source: SOURCE,
-    platform,
+    reporter: SOURCE,
+    client: { tool: platform },
+    scene: mode === 'im' ? 'digital_employee' : 'coding',
     clientCursor,
   };
 
@@ -1431,10 +1421,14 @@ async function uploadPlatformModeMessages(
     baseUrl,
   });
 
+  // Unified endpoint: plain and IM both POST to /api/v1/report/messages in a
+  // single batch sequence. Each message carries its own context (project/
+  // conversation/im/routing); scene distinguishes coding vs digital_employee.
   const { status, uploadedCount } = await postMessagesInBatches(
     home,
     baseUrl,
-    endpointForMode(mode),
+    UPLOAD_ENDPOINT,
+    platform,
     mode,
     token,
     payloadBase,
@@ -1513,33 +1507,27 @@ async function uploadConversationMessagesLocked(
     return emptyStatus(true, true, { lastError: message });
   }
 
-  const statuses: ConversationUploadStatus[] = [];
-  for (const platform of providers) {
-    statuses.push(
-      await uploadPlatformModeMessages(
+  // Upload each platform×mode channel concurrently: they target independent
+  // endpoints and independent eventId-dedup namespaces, so there is no
+  // contention between them. appendUploadLog uses single-line atomic
+  // appendFile, so interleaved channel logs stay line-coherent.
+  const combos = providers.flatMap((platform) =>
+    (['plain', 'im'] as const).map((mode) => ({ platform, mode }))
+  );
+  const statuses = await Promise.all(
+    combos.map(({ platform, mode }) =>
+      uploadPlatformModeMessages(
         platform,
-        'plain',
-        channels.get(`${platform}:plain`) ?? null,
+        mode,
+        channels.get(`${platform}:${mode}`) ?? null,
         cfg,
         home,
         baseUrl,
         token,
         generatedAt
       )
-    );
-    statuses.push(
-      await uploadPlatformModeMessages(
-        platform,
-        'im',
-        channels.get(`${platform}:im`) ?? null,
-        cfg,
-        home,
-        baseUrl,
-        token,
-        generatedAt
-      )
-    );
-  }
+    )
+  );
   return mergeStatuses(statuses);
 }
 
