@@ -133,6 +133,38 @@ async function removePid(paths: UsageTelemetryWorkerPaths): Promise<void> {
   await rm(paths.pidPath, { force: true });
 }
 
+function hasLocalTelemetry(telemetry: UsageTelemetryStatus | null | undefined): boolean {
+  return Boolean(
+    telemetry &&
+    (Number(telemetry.sessions) > 0 ||
+      Number(telemetry.messages) > 0 ||
+      Number(telemetry.totalTokens) > 0 ||
+      Boolean(telemetry.lastScan))
+  );
+}
+
+async function readPersistedTelemetry(
+  paths: UsageTelemetryWorkerPaths
+): Promise<UsageTelemetryStatus | null> {
+  try {
+    const raw = await readFile(paths.statusPath, 'utf-8');
+    const parsed = JSON.parse(raw) as UsageTelemetryWorkerStatus;
+    return parsed?.telemetry && typeof parsed.telemetry === 'object' ? parsed.telemetry : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveStatusTelemetry(
+  paths: UsageTelemetryWorkerPaths,
+  telemetry: UsageTelemetryStatus | undefined
+): Promise<UsageTelemetryStatus> {
+  if (telemetry) return telemetry;
+  if (hasLocalTelemetry(lastTelemetry)) return lastTelemetry;
+  const persisted = await readPersistedTelemetry(paths);
+  return persisted ?? lastTelemetry;
+}
+
 async function writeStatus(
   paths: UsageTelemetryWorkerPaths,
   state: WorkerState,
@@ -144,7 +176,7 @@ async function writeStatus(
     startedAt?: string | null;
   } = {}
 ): Promise<UsageTelemetryWorkerStatus> {
-  const telemetry = options.telemetry ?? lastTelemetry;
+  const telemetry = await resolveStatusTelemetry(paths, options.telemetry);
   lastTelemetry = telemetry;
   lastScan = telemetry.lastScan ?? lastScan;
   const status: UsageTelemetryWorkerStatus = {
