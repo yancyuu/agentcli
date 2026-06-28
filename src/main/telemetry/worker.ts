@@ -83,6 +83,8 @@ export function emptyUsageTelemetryStatus(): UsageTelemetryStatus {
     lastScan: null,
     sessions: 0,
     messages: 0,
+    imMessages: 0,
+    imTokensTotal: 0,
     tokensIn: 0,
     tokensOut: 0,
     cacheRead: 0,

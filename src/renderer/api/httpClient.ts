@@ -154,6 +154,7 @@ import type {
 import type { ApplyReviewRequest } from '@shared/types/review';
 import type { SystemManagerAPI } from '@shared/types/systemManager';
 import type { TerminalAPI } from '@shared/types/terminal';
+import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 
 export class HttpAPIClient implements ElectronAPI {
@@ -925,6 +926,13 @@ export class HttpAPIClient implements ElectronAPI {
 
   onTodoChange = (callback: (event: FileChangeEvent) => void): (() => void) =>
     this.addEventListener('todo-change', callback);
+
+  // ---------------------------------------------------------------------------
+  // IM live workers (via SSE) — hermit-bridge session watcher push
+  // ---------------------------------------------------------------------------
+
+  onImLiveWorkers = (callback: (workers: ImLiveWorker[]) => void): (() => void) =>
+    this.addEventListener('im-live-workers', (data) => callback((data ?? []) as ImLiveWorker[]));
 
   // ---------------------------------------------------------------------------
   // Shell operations (browser fallbacks)
@@ -2425,6 +2433,21 @@ export class HttpAPIClient implements ElectronAPI {
       cwd?: string;
     }): Promise<void> => {
       await this.post('/api/terminal/open-external', options);
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Direct CLI — open a system terminal resuming a team member or IM session
+  // ---------------------------------------------------------------------------
+
+  directCli = {
+    resumeInTerminal: async (options: {
+      teamName?: string;
+      memberName?: string;
+      agentSessionId?: string;
+      cwd?: string;
+    }): Promise<void> => {
+      await this.post('/api/direct-cli/resume-in-terminal', options);
     },
   };
 

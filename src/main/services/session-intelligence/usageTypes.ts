@@ -69,6 +69,8 @@ export interface UsageTelemetryStatus {
   lastScan: string | null;
   sessions: number;
   messages: number;
+  imMessages: number;
+  imTokensTotal: number;
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;

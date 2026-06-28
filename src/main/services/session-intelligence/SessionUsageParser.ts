@@ -37,6 +37,8 @@ export interface SessionEntry {
 export interface UsageAggregate {
   sessions: number;
   messages: number;
+  imMessages: number;
+  imTotalTokens: number;
   tokens: {
     input: number;
     output: number;
@@ -166,6 +168,8 @@ interface ParsedSession {
   projectPath: string;
   isWorktree: boolean;
   messageCount: number;
+  imMessageCount: number;
+  imTotalTokens: number;
   toolCalls: Record<string, number>;
   tokens: {
     input: number;
@@ -183,6 +187,8 @@ interface ParsedSession {
 
 async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
   let messageCount = 0;
+  let imMessageCount = 0;
+  let imTotalTokens = 0;
   let title = '';
   let rawCwd = '';
   let isWorktree = false;
@@ -233,6 +239,10 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
     if (!role || !ts) continue;
 
     messageCount++;
+    // IM attribution: a record carrying an `im` object originated from the
+    // hermit-bridge IM channel (飞书 etc.). Tallied in the local scan so the
+    // plain/IM split is visible without depending on the server-gated upload.
+    if (obj.im && typeof obj.im === 'object') imMessageCount++;
 
     if (role === 'user' && !title && content) {
       title = smartTitle(extractFirstUserText(content));
@@ -254,6 +264,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
       tokens.cacheRead += cread;
       tokens.cacheCreation += ccreate;
       tokens.total += total;
+      if (obj.im && typeof obj.im === 'object') imTotalTokens += total;
 
       // Daily aggregation
       const day = ts.slice(0, 10);
@@ -307,6 +318,8 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
     projectPath: normalizeCwd(rawCwd).normalized,
     isWorktree,
     messageCount,
+    imMessageCount,
+    imTotalTokens,
     toolCalls,
     tokens,
     startTime,
@@ -444,6 +457,8 @@ export async function scanSessions(): Promise<ParseResult> {
   const aggregate: UsageAggregate = {
     sessions: 0,
     messages: 0,
+    imMessages: 0,
+    imTotalTokens: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 },
     activeDays: 0,
     daily: {},
@@ -486,6 +501,8 @@ export async function scanSessions(): Promise<ParseResult> {
 
     aggregate.sessions++;
     aggregate.messages += parsed.messageCount;
+    aggregate.imMessages += parsed.imMessageCount;
+    aggregate.imTotalTokens += parsed.imTotalTokens;
     aggregate.tokens.input += parsed.tokens.input;
     aggregate.tokens.output += parsed.tokens.output;
     aggregate.tokens.cacheRead += parsed.tokens.cacheRead;

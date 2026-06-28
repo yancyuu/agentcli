@@ -78,6 +78,8 @@ function statusFromCollection(collection: UsageCollectionResult): UsageTelemetry
     lastScan: collection.computedAt,
     sessions: aggregate.sessions,
     messages: aggregate.messages,
+    imMessages: aggregate.imMessages,
+    imTokensTotal: aggregate.imTotalTokens,
     tokensIn: aggregate.tokens.input,
     tokensOut: aggregate.tokens.output,
     cacheRead: aggregate.tokens.cacheRead,
