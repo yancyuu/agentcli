@@ -59,14 +59,15 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
     const result = await fetchRemoteUsageStatus(['claudecode']);
     expect(result.authorized).toBe(false);
     expect(result.channels).toEqual([]);
-    expect(result.lastError).toBe('等待登录');
+    expect(result.errors?.[0]?.error).toBe('等待登录');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('fetchAuthoritativeUsage returns null without calling the server', async () => {
+  it('fetchAuthoritativeUsage returns ok:false without calling the server', async () => {
     const { fetchAuthoritativeUsage } = await import('../usageRemote.mjs');
     const result = await fetchAuthoritativeUsage();
-    expect(result).toBeNull();
+    expect(result?.ok).toBe(false);
+    expect(result?.error).toBe('等待登录');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

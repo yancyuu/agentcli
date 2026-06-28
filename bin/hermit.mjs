@@ -147,6 +147,7 @@ import {
   assertWebPortAvailable,
 } from './lib/runtime.mjs';
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
+import { runAikey, runAikeyStatus } from './lib/aikey.mjs';
 import {
   USAGE_UPLOAD_PROVIDER_OPTIONS,
   fetchAuthoritativeUsage,
@@ -155,12 +156,30 @@ import {
   normalizeUploadProviders,
   uploadProviderLabel,
 } from './lib/usageRemote.mjs';
+import { formatNumber, localServerRows } from './lib/usageRows.mjs';
+import { aggregateUploadProgress, uploadProgressLabel } from './lib/usageProgress.mjs';
+import {
+  NAV_ACTIONS,
+  WEB_ENTRY_ACTIONS,
+  SERVICE_ACTIONS,
+  LOCAL_USE_ACTIONS,
+  TEAM_COLLAB_ACTIONS,
+  EMPLOYEE_ACTIONS,
+  RUNTIME_ACTIONS,
+  LOCAL_COLLECTION_ACTIONS,
+  TASK_BUS_ACTIONS,
+  ACCOUNT_ACTIONS,
+  findMenuAction,
+  menuFooterForEscape,
+} from './lib/menus.mjs';
+import { installLarkCli } from './lib/larkCli.mjs';
 import {
   readDaemonPid,
   refreshDaemonPidFromReadyServer,
   isPidRunning,
   removeDaemonPidFile,
   signalDaemon,
+  listProcessesWin,
   collectFallbackPids,
   stopFallbackProcesses,
   collectDaemonStatus,
@@ -332,7 +351,7 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
 }
 
 if (commandArgs[0] === 'update') {
-  runUpdate();
+  await runUpdate({ onUpdated: () => restartUsageWorkerIfRunning({ quiet: false, reason: 'update 后重载 worker' }) });
   process.exit(0);
 }
 
@@ -341,290 +360,18 @@ if (commandArgs[0] === 'add') {
   process.exit(0);
 }
 
-
-
-const NAV_ACTIONS = [
-  {
-    id: 'data-sync',
-    label: '用量上报',
-    description: '回车展开；消息上报会启动后台增量扫描，首次补齐历史，后续只上传新增消息',
-    recommended: true,
-    children: [
-      { id: 'toggle-message-upload', label: '消息上报', toggle: 'conversation-upload' },
-      { id: 'overview', label: '查看同步状态' },
-      { id: 'scan', label: '立即扫描并上报一次' },
-      { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
-    ],
-  },
-  {
-    id: 'web',
-    label: '本地数字员工工作台',
-    description: '回车展开；在二级项里用 ✓ 表示已开启，回车可开启或关闭',
-    children: [
-      { id: 'toggle-web', label: '本地数字员工工作台', toggle: 'web' },
-    ],
-  },
-  {
-    id: 'account',
-    label: '账号与云端',
-    description: '回车展开；登录后可启用云端授权和托管能力',
-    children: [
-      { id: 'login', label: '登录 / OAuth 授权' },
-      { id: 'status', label: '查看登录状态' },
-      { id: 'logout', label: '退出登录' },
-    ],
-  },
-  {
-    id: 'exit',
-    label: '退出',
-    description: `离开 ${BRAND.stylizedName} 终端入口`,
-  },
-];
-
-const WEB_ENTRY_ACTIONS = [
-  {
-    id: 'start-web',
-    label: '开启本地数字员工工作台',
-    description: '启动本机工作台；不影响用量上报后台进程',
-    recommended: true,
-  },
-  {
-    id: 'stop-web',
-    label: '关闭本地数字员工工作台',
-    description: '停止本机工作台；不影响用量上报后台进程',
-  },
-  {
-    id: 'back',
-    label: '取消 / 返回首页',
-    description: `不修改工作台状态，回到 ${BRAND.stylizedName} 入口`,
-  },
-];
-
-const SERVICE_ACTIONS = [
-  {
-    id: 'start-local',
-    label: '启动本地基础服务',
-    description: '启动 Web + Usage 后台采集 + 本地/自托管团队协作；无需登录，不上传',
-    recommended: true,
-  },
-  {
-    id: 'start-web',
-    label: '只启动 Web 控制台',
-    description: '启动本机 Web UI，不启动 usage worker',
-  },
-  {
-    id: 'start-usage',
-    label: '启动 Usage 后台采集',
-    description: '轻量后台进程 + 默认开机自启；不上传',
-  },
-  {
-    id: 'start-collaboration',
-    label: '启用本地团队协作',
-    description: '写入本地/自托管团队总线配置；不要求登录',
-  },
-  {
-    id: 'status',
-    label: '查看服务状态',
-    description: '查看 Web daemon、usage worker 和本地协作状态',
-  },
-  {
-    id: 'stop-usage',
-    label: '停止 Usage 采集',
-    description: '停止 usage worker 并关闭开机自启',
-  },
-  {
-    id: 'stop-web',
-    label: '停止 Web 控制台',
-    description: '停止后台 daemon/runtime',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const LOCAL_USE_ACTIONS = [
-  {
-    id: 'web',
-    label: '打开本机 Web 控制台',
-    description: `进入本机 ${BRAND.stylizedName} Web，适合本地设置和可视化管理`,
-  },
-  {
-    id: 'employees',
-    label: '数字员工',
-    description: '本机团队创建、列表和管理',
-  },
-  {
-    id: 'local-collection',
-    label: '本地数据采集',
-    description: '查看本机 Loop 使用概览；无需登录，不依赖 Redis',
-  },
-  {
-    id: 'runtime',
-    label: '本地运行时',
-    description: '后台服务状态、诊断和生命周期管理',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const TEAM_COLLAB_ACTIONS = [
-  {
-    id: 'open-web-settings',
-    label: '打开协作设置',
-    description: '进入 Web 设置 > 团队总线，管理 Redis 和协作配置',
-  },
-  {
-    id: 'task-bus',
-    label: '团队总线状态',
-    description: '查看本地/自托管 Redis 和分布式协作状态',
-  },
-  {
-    id: 'account',
-    label: '账号状态',
-    description: `查看或退出当前 ${BRAND.authAccountLabel}`,
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const EMPLOYEE_ACTIONS = [
-  {
-    id: 'create-team',
-    label: '创建数字员工团队',
-    description: '写入本地团队元数据',
-  },
-  {
-    id: 'list-teams',
-    label: '查看数字员工列表',
-    description: '列出可见团队，隐藏已删除项',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const RUNTIME_ACTIONS = [
-  {
-    id: 'status',
-    label: '服务状态',
-    description: '查看 daemon / Web URL',
-  },
-  {
-    id: 'doctor',
-    label: '本地诊断',
-    description: '只读检查配置与服务',
-  },
-  {
-    id: 'stop',
-    label: '停止后台服务',
-    description: '结束后台 daemon/runtime',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-// Upload-provider options + helpers now live in ./lib/usageRemote.mjs (imported
-// at the top), alongside the read-only server usage-status fetch.
-
-const LOCAL_COLLECTION_ACTIONS = [
-  {
-    id: 'overview',
-    label: '查看同步状态',
-    description: '显示消息上报后台和本机扫描状态',
-  },
-  {
-    id: 'scan',
-    label: '立即扫描并上报一次',
-    description: '立刻执行一次增量扫描；消息上报开启时会按游标只上传新增消息',
-  },
-  {
-    id: 'choose-upload-provider',
-    label: '开启消息上报',
-    description: '默认同时扫描 Claude Code + Codex；按批次增量上传',
-  },
-  {
-    id: 'stop-background',
-    label: '停止消息上报',
-    description: '停止消息上报 worker，并关闭开机自启',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const TASK_BUS_ACTIONS = [
-  {
-    id: 'status',
-    label: '查看团队总线状态',
-    description: '显示本地/自托管 Redis 和分布式协作状态',
-  },
-  {
-    id: 'open-web-settings',
-    label: '打开 Web 设置',
-    description: '配置入口：设置 > 团队总线',
-  },
-  {
-    id: 'doctor',
-    label: '本地诊断',
-    description: '只读检查服务和本地路径',
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-const ACCOUNT_ACTIONS = [
-  {
-    id: 'login',
-    label: '登录 / OAuth 授权',
-    description: '用于云端授权和托管服务；本地使用无需登录',
-  },
-  {
-    id: 'status',
-    label: '查看登录状态',
-    description: `查看 ${BRAND.authAccountLabel} 授权状态`,
-  },
-  {
-    id: 'logout',
-    label: '退出登录',
-    description: `退出 ${BRAND.authAccountLabel}，不影响本地 runtime 登录`,
-  },
-  {
-    id: 'back',
-    label: '返回首页',
-    description: `回到 ${BRAND.stylizedName} 导航`,
-  },
-];
-
-function findMenuAction(actions, actionId) {
-  for (const action of actions) {
-    if (action.id === actionId) return action;
-    const child = action.children?.find((item) => item.id === actionId);
-    if (child) return child;
-  }
-  return null;
+// openhermit aikey — 认领 aikey: read the key from the service (mocked locally
+// until the server endpoint ships) and write it into each harness's env via
+// ~/.hermit/aikey.env + an idempotent shell precmd hook. Mechanism ported from
+// aikey-cli. --no-hook skips the shell-rc write.
+if (commandArgs[0] === 'aikey') {
+  await runAikey({ noHook: args.includes('--no-hook') });
 }
 
-function menuFooterForEscape() {
-  return '[↑↓ move • Enter expand/confirm • ← back • Esc cancel]';
-}
+
+
+// Static menu/action data (NAV_ACTIONS … ACCOUNT_ACTIONS) + findMenuAction +
+// menuFooterForEscape live in ./lib/menus.mjs now (imported at the top).
 
 let optimisticWebRunningUntil = 0;
 
@@ -774,6 +521,9 @@ function inlineBusyMessage(action) {
       : '正在开启消息上报...';
   }
   if (action.id === 'login') return `正在连接 ${BRAND.authProviderName} 授权服务...`;
+  if (action.id === 'aikey-claim') return '正在认领 aikey...';
+  if (action.id === 'aikey-apply') return '正在申请 aikey...';
+  if (action.id === 'aikey-status') return '正在读取 aikey 状态...';
   if (action.id === 'dev-login') return '请输入开发口令以开启开发者模式...';
   if (action.id === 'upload-logs') return '正在读取消息上报调试日志...';
   return `正在处理：${action.label}，请稍候...`;
@@ -782,7 +532,7 @@ function inlineBusyMessage(action) {
 function renderBusyScreen(title, message) {
   clearTerminal();
   console.log(menuBrandTitle());
-  console.log(ui.bold(title));
+  if (title) console.log(ui.bold(title));
   console.log(colorByState(message, 'warn'));
 }
 
@@ -792,7 +542,7 @@ function renderNavMenu(title, subtitle, actions, selectedIndex, escapeAction = '
   const states = currentFeatureStates();
   console.log(menuBrandTitle());
   printStatusBar(currentMenuStatusItems(states));
-  console.log(ui.bold(title));
+  if (title) console.log(ui.bold(title));
   if (subtitle) console.log(ui.dim(subtitle));
   if (notice) console.log(colorByState(notice, 'warn'));
 
@@ -1045,13 +795,6 @@ function formatStatusToggle(value) {
   return '未知';
 }
 
-function formatNumber(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value);
-}
-
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1143,53 +886,36 @@ async function fetchBackendUsageStatus() {
 // fetchRemoteUsageStatus + fetchAuthoritativeUsage live in ./lib/usageRemote.mjs
 // (imported above). They are read-only GETs against the ai-monitor base.
 
-// Surface the server's failure response body + what we sent, so a 500 can be
-// diagnosed ("为啥被拒") instead of just showing the status code. Both events are
-// already appended to conversation-upload.log by the worker; this just reads them.
-function latestUploadResponseFailure() {
-  const events = readConversationUploadLogEvents();
-  let lastResponse = null;
-  let lastRequest = null;
-  for (const event of events) {
-    if (event.message === 'upload-response' && event.ok === false) lastResponse = event;
-    if (event.message === 'upload-request') lastRequest = event;
-  }
-  if (!lastResponse) return null;
-  const body = typeof lastResponse.body === 'string' ? lastResponse.body : '';
-  return {
-    status: lastResponse.status,
-    body: body.length > 300 ? `${body.slice(0, 300)}…` : body,
-    endpoint: lastRequest?.endpoint || '',
-    platform: lastRequest?.platform || '',
-    messageCount: Number(lastRequest?.messageCount || 0),
-    cursorHash: lastRequest?.cursorHash || '',
-    firstEventId: lastRequest?.firstEventId || '',
-  };
-}
-
 async function readUsageStatus({ scan = false, localOnly = false } = {}) {
-  await restartTelemetryWorkerIfStale();
-  if (scan) return scanUsageTelemetryOnce({ localOnly });
-  const [backend, remote, authoritative] = await Promise.all([
-    fetchBackendUsageStatus(),
-    fetchRemoteUsageStatus(currentFeatureStates().uploadProviders),
-    fetchAuthoritativeUsage(),
-  ]);
   let base;
-  if (backend) {
-    base = backend;
+  if (scan) {
+    base = await scanUsageTelemetryOnce({ localOnly });
   } else {
-    const { status, error } = readTelemetryWorkerStatusFile();
-    const autostart = await getUsageAutostartStatus();
-    base = {
-      daemon: usageDaemonPayload({ running: false, url: `http://127.0.0.1:${port}`, version: '' }),
-      worker: telemetryWorkerPayload({ status, statusError: error, autostart }),
-      telemetry: telemetryFromWorkerStatus(status),
-      source: 'claude-jsonl',
-    };
+    const backend = await fetchBackendUsageStatus();
+    if (backend) {
+      base = backend;
+    } else {
+      const { status, error } = readTelemetryWorkerStatusFile();
+      const autostart = await getUsageAutostartStatus();
+      base = {
+        daemon: usageDaemonPayload({ running: false, url: `http://127.0.0.1:${port}`, version: '' }),
+        worker: telemetryWorkerPayload({ status, statusError: error, autostart }),
+        telemetry: telemetryFromWorkerStatus(status),
+        source: 'claude-jsonl',
+      };
+    }
   }
-  base.remoteUsage = remote;
-  base.authoritativeUsage = authoritative;
+  // Server reads are DISPLAY-only — the scan/upload engine never needs /usage.
+  // Both status and report show 本地 vs 服务端 vs 待上报, so always fetch the
+  // ledger; skip only for localOnly (no auth, stays fully offline).
+  if (!localOnly) {
+    const [remote, authoritative] = await Promise.all([
+      fetchRemoteUsageStatus(currentFeatureStates().uploadProviders),
+      fetchAuthoritativeUsage(),
+    ]);
+    base.remoteUsage = remote;
+    base.authoritativeUsage = authoritative;
+  }
   return base;
 }
 
@@ -1212,54 +938,65 @@ function hasUploadScopes(auth = readOpenHermitAuthStatus()) {
   return scopes.has('upload:read') && scopes.has('upload:write');
 }
 
-function conversationUploadRows(upload = {}, auth = readOpenHermitAuthStatus(), remote = null) {
-  const statusText = upload.lastError;
-  const failed = Boolean(statusText);
-  const confirmed = Number(upload.accepted || 0) + Number(upload.duplicated || 0);
-  const failedCount = Number(upload.failed || 0);
-  const queued = Number(upload.queued || 0);
-  const requestRejected = failed && confirmed === 0 && upload.attempted > 0;
-  const unavailableReason = uploadStatusUnavailableReason(String(statusText || ''));
+function cursorStatusText(channel) {
+  if (channel.hasCursor) {
+    const parts = [`cursor ${String(channel.cursorHash || '').slice(0, 12)}`];
+    if (Number.isFinite(channel.cursorMessageCount)) parts.push(`${formatNumber(channel.cursorMessageCount)} msg`);
+    if (Number.isFinite(channel.cursorFileCount)) parts.push(`${formatNumber(channel.cursorFileCount)} files`);
+    if (channel.cursorGeneratedAt) parts.push(new Date(channel.cursorGeneratedAt).toLocaleString('zh-CN'));
+    return parts.join(' · ');
+  }
+  if (channel.status && channel.status !== 'never_reported') return '无服务端游标 · 全量上报（服务端按 eventId 去重）';
+  if (channel.attemptedCursorHash) {
+    return `attempted ${String(channel.attemptedCursorHash).slice(0, 12)}${Number.isFinite(channel.attemptedCursorMessageCount) ? ` · ${formatNumber(channel.attemptedCursorMessageCount)} msg` : ''}`;
+  }
+  return '尚未提交 cursor';
+}
+
+function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(), remote = null) {
   const missingUploadScope = auth.authorized && !hasUploadScopes(auth);
+  const rows = [];
 
-  // LIVE server status — always rendered from the read-only /usage/status fetch,
-  // so this status bar reflects the server's real cursor / in-flight even when
-  // the last upload attempt errored or was skipped. (Previously the waiting-login
-  // and last-error branches discarded `remote` and showed hardcoded placeholders.)
-  const remoteChannels = Array.isArray(remote?.channels) ? remote.channels : [];
-  const remoteRows = remoteChannels.length
-    ? remoteChannels.map((c) => [
-        `${uploadProviderLabel(c.platform)}/${c.mode}`,
-        `${c.status || '未知'} · ${c.hasCursor ? `cursor ${String(c.cursorHash).slice(0, 12)}` : '尚未上报'}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}`,
-        c.inFlight ? 'warn' : 'info',
-      ])
-    : [['服务端状态', remote?.lastError ? `读取失败：${remote.lastError}` : auth.authorized ? '等待读取 /usage/status' : '等待登录后读取 /usage/status', remote?.lastError ? 'warn' : 'info']];
-
-  const rows = [
-    ['本次增量', upload.pending === undefined ? '等待服务端 cursor' : `${formatNumber(upload.pending)} 条待上报`, upload.pending ? 'warn' : 'ok'],
-    ...remoteRows,
-  ];
-
-  // Last upload-attempt summary — only meaningful once an attempt happened.
-  if (upload.attempted || statusText) {
-    rows.push(['请求尝试', `${formatNumber(upload.attempted || 0)} 条`, upload.attempted ? (failed ? 'warn' : 'ok') : 'info']);
-    rows.push(
-      requestRejected
-        ? ['服务端确认', '请求被拒绝，未进入批次处理', 'error']
-        : ['服务端确认', `${formatNumber(confirmed)} 条（${formatNumber(upload.accepted || 0)} 接收 / ${formatNumber(upload.duplicated || 0)} 重复 / ${formatNumber(upload.rejected || 0)} 拒绝${failedCount ? ` / ${formatNumber(failedCount)} 失败` : ''}${queued ? ` / ${formatNumber(queued)} 排队` : ''}）`, upload.rejected || failedCount || failed ? 'warn' : 'info']
-    );
-    if (upload.lastUploadStatus) rows.push(['批次状态', upload.lastUploadStatus, failed ? 'error' : 'info']);
+  // Server channel state is server-authoritative — but only meaningful when we
+  // actually queried /usage/status this run. In scan/report mode `remote` is
+  // null (the endpoint is never called), so we must NOT render a fake
+  // "等待读取 /usage/status" row about a request that never happened.
+  if (remote) {
+    const remoteChannels = Array.isArray(remote.channels) ? remote.channels : [];
+    const remoteErrors = Array.isArray(remote.errors) ? remote.errors : [];
+    if (remoteChannels.length) {
+      for (const c of remoteChannels) {
+        rows.push([
+          `${uploadProviderLabel(c.platform)}/${c.mode}`,
+          `${c.status || '未知'} · ${cursorStatusText(c)}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}${c.lastUploadId ? ` · ${String(c.lastUploadId).slice(0, 12)}` : ''}`,
+          c.inFlight ? 'warn' : 'info',
+        ]);
+      }
+    } else {
+      rows.push([
+        '服务端状态',
+        remoteErrors.length ? '读取 /usage/status 失败' : auth.authorized ? '等待读取 /usage/status' : '等待登录后读取 /usage/status',
+        remoteErrors.length ? 'error' : 'info',
+      ]);
+    }
+    for (const error of remoteErrors) {
+      // Auth-level errors (e.g. 等待登录) carry no platform/mode — they are
+      // represented by the 授权 row below, not a bogus "undefined/undefined" row.
+      if (!error.platform || !error.mode) continue;
+      const detail = error.httpStatus
+        ? `HTTP ${error.httpStatus}${error.body ? ` · ${error.body}` : ''}`
+        : error.error || '请求失败';
+      rows.push([
+        `${uploadProviderLabel(error.platform)}/${error.mode}`,
+        `读取 /usage/status 失败：${detail}`,
+        'error',
+      ]);
+    }
   }
 
   if (missingUploadScope) rows.push(['授权', '缺少 upload:read/upload:write，请重新登录', 'warn']);
   else if (!auth.authorized) rows.push(['授权', '未登录，运行 openhermit auth login', 'warn']);
-  else if (unavailableReason) rows.push(['授权', unavailableReason, 'error']);
-  else if (statusText) rows.push(['错误日志', statusText, failed ? 'error' : 'info']);
 
-  const failure = latestUploadResponseFailure();
-  if (failure && failed) {
-    rows.push(['服务端返回', failure.body || `(HTTP ${failure.status}，无响应体)`, 'error']);
-  }
   return rows;
 }
 
@@ -1274,13 +1011,9 @@ async function printUsageRows(title, data, hint) {
     : '关闭';
   printCliRows(title, [
     ['消息上报', uploadText, uploadEnabled ? auth.authorized ? states.usageRunning ? 'ok' : 'warn' : 'warn' : 'off'],
-    ['最近扫描', data.telemetry.lastScan ? new Date(data.telemetry.lastScan).toLocaleString('zh-CN') : '等待首次扫描', data.telemetry.lastScan ? 'ok' : 'warn'],
-    ['会话数', formatNumber(data.telemetry.sessions), 'info'],
-    ['消息数', formatNumber(data.telemetry.messages), 'info'],
-    ['Token 总量', formatNumber(data.telemetry.totalTokens), 'info'],
-    ['来源', `${formatUploadProviders(states.uploadProviders)} 本地消息记录`, 'info'],
-    ...(uploadEnabled && upload ? conversationUploadRows(upload, auth, data.remoteUsage) : []),
-  ], hint || '消息上报会后台增量扫描：首次补齐历史消息，后续只上报新增消息。');
+    ...localServerRows(data.telemetry, data.authoritativeUsage),
+    ...(uploadEnabled ? conversationUploadRows(upload, auth, data.remoteUsage) : []),
+  ], hint || '本地 = 本机消息量；服务端 = 服务端已收；待上报 = 本地 − 服务端。');
 }
 
 async function printUsageStatus({ exitOnDone = true } = {}) {
@@ -1506,8 +1239,26 @@ async function restartTelemetryWorkerIfStale({ quiet = true } = {}) {
   return restartTelemetryWorker({ quiet, reason: '源码已更新，正在重启 worker' });
 }
 
+async function restartUsageWorkerIfRunning({ quiet = false, reason = '重载 worker' } = {}) {
+  // Reload the usage worker ONLY when one is actually running — never
+  // surprise-spawn one. Used after `openhermit update` so the live worker picks
+  // up the new code. Unconditional (not mtime-gated like restartTelemetryWorkerIfStale):
+  // the npm-global update swaps bundled JS that the src/main source-mtime watch
+  // can't see, so mtime gating would miss it.
+  const pid = readPidFile(telemetryWorkerPidPath);
+  if (!pid || !isPidRunning(pid)) return { restarted: false, reason: 'no running worker' };
+  return { restarted: true, ...(await restartTelemetryWorker({ quiet, reason })) };
+}
+
 function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
   const existingPid = readPidFile(telemetryWorkerPidPath);
+  // Reap orphan workers before deciding: only the pidfile'd worker is canonical,
+  // so any other live telemetry/worker.ts process is a leftover from a prior
+  // race. Restores the at-most-one invariant even on a plain `usage start`.
+  for (const stray of collectRunningUsageWorkerPids()) {
+    if (Number(stray) === Number(existingPid)) continue;
+    if (isPidRunning(stray)) signalDaemon(stray, 'SIGKILL');
+  }
   if (!forceRestart && existingPid && isPidRunning(existingPid)) {
     return { started: false, running: true, pid: existingPid, pidPath: telemetryWorkerPidPath, statusPath: telemetryWorkerStatusPath, logPath: telemetryWorkerLogPath };
   }
@@ -1537,6 +1288,7 @@ function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
   const child = spawn(process.execPath, telemetryWorkerChildArgs(), {
     cwd: repoRoot,
     detached: true,
+    windowsHide: true,
     env: { ...process.env, HERMIT_HOME: hermitHome },
     stdio: ['ignore', out, err],
   });
@@ -1548,18 +1300,116 @@ function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
   return { started: true, running: true, pid: child.pid, pidPath: telemetryWorkerPidPath, statusPath: telemetryWorkerStatusPath, logPath: telemetryWorkerLogPath };
 }
 
+async function waitForPidExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidRunning(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return !isPidRunning(pid);
+}
+
+function collectRunningUsageWorkerPids() {
+  // Find EVERY persistent telemetry worker, not just the pidfile'd one. Each
+  // worker writes its own pid on start, so the pidfile always holds only the
+  // youngest; orphans from prior races own no pidfile entry and are invisible to
+  // stopTelemetryWorker, so they pile up and all overwrite status.json together.
+  // Matching by command lets start/stop reap the whole herd. `--scan-once`
+  // children are transient (self-exit after one scan) and excluded so
+  // `usage report` is not killed mid-scan.
+  if (process.platform === 'win32') {
+    try {
+      return listProcessesWin()
+        .filter((p) => p.pid !== process.pid && p.command.includes('telemetry/worker.ts') && !p.command.includes('--scan-once'))
+        .map((p) => p.pid);
+    } catch {
+      return [];
+    }
+  }
+  let output = '';
+  try {
+    output = execSync('ps -axo pid=,command=', { encoding: 'utf-8' });
+  } catch {
+    return [];
+  }
+  const pids = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+([\s\S]+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pid === process.pid) continue;
+    const command = match[2];
+    if (!command.includes('telemetry/worker.ts')) continue;
+    if (command.includes('--scan-once')) continue;
+    pids.push(pid);
+  }
+  return pids;
+}
+
+function collectOrphanedDaemonChildPids() {
+  // Detached daemon children (server.ts / hermit-bridge) are spawned with
+  // detached:true and only reaped by shutdown() on SIGINT/SIGTERM. If the daemon
+  // dies via SIGKILL / crash / OOM, shutdown() never runs and those children are
+  // reparented to PID 1 — permanent orphans (the 1d19h server.ts we cleaned up).
+  // Reap ONLY PPID=1 ones at startup so a LIVE daemon's own children are never
+  // touched. Mirrors collectRunningUsageWorkerPids's ps+command-match approach.
+  if (process.platform === 'win32') {
+    // Windows has no PID-1 reparenting: an orphaned child keeps its (now-dead)
+    // parent's ppid, so "orphan" = ppid not in the live-pid set. The snapshot
+    // is one CimInstance call, so parent+child pids are mutually consistent.
+    // Same per-line pid↔command safety + try/catch as the worker reaper.
+    try {
+      const procs = listProcessesWin();
+      const live = new Set(procs.map((p) => p.pid));
+      return procs
+        .filter((p) => p.pid !== process.pid && !live.has(p.ppid) && !p.command.includes('--scan-once') && (p.command.includes('src/main/server.ts') || p.command.includes('hermit-bridge')))
+        .map((p) => p.pid);
+    } catch {
+      return [];
+    }
+  }
+  let output = '';
+  try {
+    output = execSync('ps -axo pid=,ppid=,command=', { encoding: 'utf-8' });
+  } catch {
+    return [];
+  }
+  const pids = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+([\s\S]+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const ppid = Number(match[2]);
+    const command = match[3];
+    if (pid === process.pid) continue;
+    if (ppid !== 1) continue; // only true orphans — never a live daemon's child
+    if (command.includes('--scan-once')) continue; // transient foreground scan
+    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge')) {
+      pids.push(pid);
+    }
+  }
+  return pids;
+}
+
 async function stopTelemetryWorker() {
   const pid = readPidFile(telemetryWorkerPidPath);
-  if (!pid) return { stopped: false, pid: null, running: false };
   if (pid === process.pid && process.env.OPENHERMIT_USAGE_WORKER_MODE === 'test') {
     removeTelemetryWorkerPidFile();
     return { stopped: true, pid, running: false, mode: 'test' };
   }
-  if (isPidRunning(pid)) {
-    signalDaemon(pid, 'SIGTERM');
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-    if (isPidRunning(pid)) signalDaemon(pid, 'SIGKILL');
+  // Reap the ENTIRE herd (pidfile pid ∪ all live workers), reusing the shared
+  // TERM→wait→KILL loop. Killing only the pidfile'd worker leaves orphans alive.
+  const targets = Array.from(
+    new Set([
+      ...(Number.isInteger(pid) && pid > 0 ? [pid] : []),
+      ...collectRunningUsageWorkerPids(),
+    ])
+  );
+  if (targets.length === 0) {
+    removeTelemetryWorkerPidFile();
+    return { stopped: false, pid: null, running: false };
   }
+  await stopFallbackProcesses(targets);
   removeTelemetryWorkerPidFile();
   return { stopped: true, pid, running: false };
 }
@@ -1578,6 +1428,10 @@ async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = fa
     env: {
       ...process.env,
       HERMIT_HOME: hermitHome,
+      // Marks this as a user-initiated foreground scan so the upload engine
+      // pushes through server in-flight backpressure instead of skipping (the
+      // periodic daemon loop does NOT set this). See uploadPlatformModeMessages.
+      HERMIT_USAGE_FOREGROUND_SCAN: '1',
       ...(localOnly ? { HERMIT_USAGE_FORCE_LOCAL_ONLY: '1' } : {}),
       ...(scanDisabled ? { HERMIT_USAGE_SCAN_DISABLED: '1' } : {}),
     },
@@ -1585,12 +1439,27 @@ async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = fa
   });
   let stdout = '';
   let stderr = '';
+  let interrupted = false;
+  const stopChild = () => {
+    interrupted = true;
+    if (child.pid && !child.killed) child.kill('SIGTERM');
+    setTimeout(() => {
+      if (child.pid && !child.killed) child.kill('SIGKILL');
+    }, 2_000).unref();
+  };
+  // Run before the global cancel handler so Ctrl+C/Esc cannot leave the
+  // foreground --scan-once child orphaned.
+  process.prependOnceListener('SIGINT', stopChild);
+  process.prependOnceListener('SIGTERM', stopChild);
   child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
   child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
   // Wait on 'close' (not 'exit') so stdio is fully drained + torn down before
   // proceeding — 'exit' raced the pipe close and tripped libuv's
   // UV_HANDLE_CLOSING assertion on Windows (win/async.c).
   const code = await new Promise((resolve) => child.on('close', resolve));
+  process.off('SIGINT', stopChild);
+  process.off('SIGTERM', stopChild);
+  if (interrupted) throw new Error('已取消本次扫描，子进程已停止');
   if (code !== 0) throw new Error(stderr.trim() || `telemetry worker scan exited with ${code}`);
   const parsed = JSON.parse(stdout.trim() || '{}');
   return parsed.status?.telemetry ? parsed.status.telemetry : emptyUsageTelemetryStatus();
@@ -1740,56 +1609,12 @@ function latestConversationUploadProgress(sinceMs = 0) {
   const events = readConversationUploadLogEvents().filter(
     (event) => Date.parse(event?.timestamp || '') >= sinceMs
   );
-  let latestScan = null;
-  let latestBatch = null;
-  let latestFailure = null;
-  for (const event of events) {
-    if (event.message === 'scan-collected') latestScan = event;
-    if (event.message === 'upload-batch-start' || event.message === 'upload-batch-finished' || event.message === 'upload-status-polled' || event.message === 'upload-status-timeout') latestBatch = event;
-    if (event.message === 'upload-batch-failed' || event.message === 'upload-failed' || event.message === 'upload-status-timeout') latestFailure = event;
-  }
-  return { latestScan, latestBatch, latestFailure };
+  // Aggregation (per-channel grouping + summing) lives in the pure, tested
+  // usageProgress.mjs — this reader just feeds it this run's event tail.
+  return aggregateUploadProgress(events);
 }
 
-function progressBar(percent, width = 18) {
-  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
-  const filled = Math.round((safePercent / 100) * width);
-  const empty = Math.max(0, width - filled);
-  return `${ui.accent('█'.repeat(filled))}${ui.dim('░'.repeat(empty))}`;
-}
-
-function uploadProgressLabel(sinceMs = 0) {
-  const { latestScan, latestBatch, latestFailure } = latestConversationUploadProgress(sinceMs);
-  if (!latestScan) return `${progressBar(0)} 扫描本地消息中`;
-  const total = Number(latestBatch?.totalMessages ?? latestScan.pendingPlain ?? latestScan.pending ?? 0);
-  if (!latestBatch) return `${progressBar(0)} 发现 ${formatNumber(Number(latestScan.totalDiscovered || 0))} 条，准备上报`;
-  // Progress must reflect *confirmed* uploads, not "attempted". A batch's
-  // upload-batch-start event already carries attemptedAfterBatch = full batch
-  // size, so counting it as done made the bar jump to 100% before the POST
-  // finished. Only upload-batch-finished / upload-status-polled advance `done`.
-  const confirmedAfter = Number(latestBatch.uploadedAfterBatch ?? -1);
-  const confirmedBefore = Number(latestBatch.uploadedBeforeBatch ?? 0);
-  const done = Number(
-    latestBatch.message === 'upload-batch-start'
-      ? confirmedBefore
-      : confirmedAfter >= 0
-        ? confirmedAfter
-        : confirmedBefore
-  );
-  const batchIndex = Number(latestBatch.batchIndex || 0);
-  const totalBatches = Number(latestBatch.totalBatches || 0);
-  const percent = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const failed = latestFailure && latestFailure.timestamp >= latestBatch.timestamp;
-  const polling = latestBatch.message === 'upload-status-polled';
-  const state = failed
-    ? '失败'
-    : polling
-      ? `等服务端 ${latestBatch.status || '处理中'} #${Number(latestBatch.attempt || 0) + 1}`
-      : percent >= 100
-        ? '完成'
-        : '上报中';
-  return `${progressBar(percent)} ${percent}% · 批次 ${batchIndex}/${totalBatches} · 消息 ${formatNumber(done)}/${formatNumber(total)} · ${state}`;
-}
+// progressBar + uploadProgressLabel live in ./lib/usageProgress.mjs (pure, tested).
 
 function fitProgressLine(text) {
   const columns = Math.max(40, Number(process.stdout.columns || 80));
@@ -1808,11 +1633,17 @@ async function withUploadProgress(label, task) {
   // Only consider log events from THIS run — otherwise the bar inherits the
   // previous run's last batch and shows 100% on entry before dropping to 0.
   const sinceMs = Date.now() - 1000;
-  let lastWidth = 0;
+  const frames = useUnicodeUi ? ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] : ['-', '\\', '|', '/'];
+  let frame = 0;
+  // Two-line layout: the label sits on its own line (static); the live bar +
+  // spinner render on the line BELOW it and redraw in place ("进度条放到下面").
+  // Both lines are cleared together on finish so the result box prints clean.
+  process.stdout.write(`${ui.dim(label)}\n`);
   const render = () => {
-    const text = fitProgressLine(`${label} ${uploadProgressLabel(sinceMs)}`);
-    process.stdout.write(`\r\x1b[2K${ui.dim(text)}`);
-    lastWidth = displayWidth(text);
+    const bar = uploadProgressLabel(latestConversationUploadProgress(sinceMs), { barWidth: 26 });
+    const text = fitProgressLine(`${frames[frame]} ${bar}`);
+    process.stdout.write(`\r\x1b[2K${text}`);
+    frame = (frame + 1) % frames.length;
   };
   render();
   const timer = setInterval(render, 500);
@@ -1820,7 +1651,8 @@ async function withUploadProgress(label, task) {
     return await task();
   } finally {
     clearInterval(timer);
-    process.stdout.write(`\r\x1b[2K${' '.repeat(Math.max(0, lastWidth))}\r\x1b[2K`);
+    // Clear the bar line, move up one line, clear the label line.
+    process.stdout.write('\r\x1b[2K\x1b[1A\x1b[2K');
   }
 }
 
@@ -1852,24 +1684,21 @@ async function printUsageReport({ exitOnDone = true } = {}) {
     }
 
     const fullRescan = commandArgs.includes('--full');
-    let workerWasRunning = false;
-    if (fullRescan) {
-      // Temporarily stop the background worker so its upload lock can't block
-      // the full rescan, then restart it afterwards so background scanning
-      // resumes without the user having to re-run `usage start`.
-      const workerPid = readPidFile(telemetryWorkerPidPath);
-      workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
-      if (workerWasRunning) await stopTelemetryWorker();
-      process.env.HERMIT_USAGE_FULL_RESCAN = '1';
-    }
-    const data = await withUploadProgress(
-      fullRescan
-        ? '正在全量重扫并重传（--full，服务端按 eventId 去重，可能耗时）...'
-        : '正在执行一次增量扫描并按需上报...',
-      () => readUsageStatus({ scan: true, localOnly: false })
-    );
-    if (fullRescan) {
-      delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    const workerPid = readPidFile(telemetryWorkerPidPath);
+    const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
+    if (workerWasRunning) await stopTelemetryWorker();
+    if (fullRescan) process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+
+    let data;
+    try {
+      data = await withUploadProgress(
+        fullRescan
+          ? '正在全量重扫并重传（--full，服务端按 eventId 去重，可能耗时，请勿退出）...'
+          : '正在执行一次增量扫描并按需上报，请勿退出...',
+        () => readUsageStatus({ scan: true, localOnly: false })
+      );
+    } finally {
+      if (fullRescan) delete process.env.HERMIT_USAGE_FULL_RESCAN;
       if (workerWasRunning) startTelemetryWorker({ quiet: true });
     }
     const upload = data.telemetry.conversationUpload;
@@ -1901,6 +1730,96 @@ async function printUsageReport({ exitOnDone = true } = {}) {
   }
 }
 
+// Compact result box for the "立即扫描并上报一次" menu action. Distinct from
+// `usage report` (the full dashboard): scan-once answers "this scan uploaded N,
+// server has M, X still pending" in a few rows and never dumps the full report.
+// Reuses localServerRows (tested) so 本地/服务端/待上报 stay consistent everywhere.
+async function printScanOnceResult({ exitOnDone = true } = {}) {
+  try {
+    const auth = await refreshOpenHermitAuthStatus();
+    const states = currentFeatureStates();
+    if (states.conversationUploadEnabled && !auth.authorized) {
+      const result = {
+        ok: false,
+        command: 'scan-once',
+        hermitHome,
+        auth: { authorized: false },
+        upload: { enabled: true, authorized: false },
+      };
+      if (jsonRequested) printJson(result, 1);
+      printCliRows('立即扫描并上报一次', [
+        ['消息上报', '已开启，但未登录', 'warn'],
+        ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
+        ['下一步', '先执行 openhermit auth login', 'info'],
+      ], '登录后再执行会按本地游标只上传新增消息。');
+      if (exitOnDone) process.exit(1);
+      return result;
+    }
+
+    // Pause the daemon worker so this foreground scan owns the upload lock and
+    // drains past in-flight backpressure (HERMIT_USAGE_FOREGROUND_SCAN=1 is set
+    // inside runTelemetryWorkerScanOnce). Restart it after, matching the report.
+    const workerPid = readPidFile(telemetryWorkerPidPath);
+    const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
+    if (workerWasRunning) await stopTelemetryWorker();
+
+    let data;
+    try {
+      data = await withUploadProgress(
+        '正在执行一次增量扫描并按需上报，请勿退出...',
+        () => readUsageStatus({ scan: true, localOnly: false })
+      );
+    } finally {
+      if (workerWasRunning) startTelemetryWorker({ quiet: true });
+    }
+
+    const upload = data.telemetry?.conversationUpload || {};
+    const attempted = Number(upload.attempted || 0);
+    const accepted = Number(upload.accepted || 0);
+    const after = currentFeatureStates();
+    const workerText = after.usageRunning
+      ? `后台运行中 (pid ${after.usagePid})，每 5 分钟继续增量扫描`
+      : '后台未运行';
+
+    const rows = [];
+    rows.push([
+      '本次上报',
+      accepted > 0
+        ? `${formatNumber(accepted)} 条消息已上传${attempted !== accepted ? ` · 尝试 ${formatNumber(attempted)}` : ''}`
+        : '无新增消息',
+      accepted > 0 ? 'ok' : 'info',
+    ]);
+    rows.push(...localServerRows(data.telemetry, data.authoritativeUsage));
+    // Per-channel breakdown so it's visible which provider/mode reported vs not
+    // (e.g. claudecode/im never_reported = the 422-stuck channel). remoteUsage is
+    // always fetched by readUsageStatus(!localOnly); reuse the same renderer the
+    // regular `usage status` uses so the two views stay consistent.
+    rows.push(...conversationUploadRows({}, auth, data.remoteUsage));
+    rows.push(['消息上报', workerText, after.usageRunning ? 'ok' : 'warn']);
+
+    const result = { ok: true, command: 'scan-once', hermitHome, ...data };
+    if (jsonRequested) printJson(result);
+    printCliRows(
+      '立即扫描并上报一次',
+      rows,
+      '本地/服务端/待上报 为汇总（待上报含本地按设计跳过的工具结果等非对话记录，故可能偏大）；下方按渠道：success=该渠道已上报，never_reported=该渠道尚未上报成功。',
+    );
+    if (exitOnDone) process.exit(0);
+    return result;
+  } catch (err) {
+    const result = {
+      ok: false,
+      command: 'scan-once',
+      hermitHome,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    if (jsonRequested) printJson(result, 1);
+    console.error(`${brandLogPrefix()} 扫描失败：${result.error}`);
+    if (exitOnDone) process.exit(1);
+    return result;
+  }
+}
+
 function getUploadProvidersFromFlags() {
   const values = findAnyOptionValues(['--upload-provider', '--provider', '--providers']);
   return normalizeUploadProviders(values).length ? normalizeUploadProviders(values) : ['claudecode'];
@@ -1917,6 +1836,11 @@ async function printUsageStart({ exitOnDone = true } = {}) {
     const providers = getUploadProvidersFromFlags();
     setConversationUploadEnabled(providers.length > 0, providers);
   }
+  // Self-heal: if a worker is already running but its source is stale (e.g.
+  // openhermit was updated while reporting), reload it so re-running
+  // `usage start` is enough to load the latest code. No-op when nothing is
+  // running (startTelemetryWorker below spawns a fresh one) or when current.
+  await restartTelemetryWorkerIfStale({ quiet: jsonRequested });
   const taskBus = enableLocalUsageTelemetry();
   const worker = startTelemetryWorker({ quiet: jsonRequested });
   const autostart = autostartRequested ? await enableUsageAutostart() : await getUsageAutostartStatus();
@@ -1938,12 +1862,14 @@ async function printUsageStart({ exitOnDone = true } = {}) {
   if (jsonRequested) printJson(result);
   const auth = readOpenHermitAuthStatus();
   const conversationUploadEnabled = Boolean(taskBus.telemetry?.conversationUploadEnabled);
+  const featureProviders = currentFeatureStates().uploadProviders;
+  const attributionProviders = featureProviders?.length ? featureProviders : ['claudecode'];
   printCliRows('消息上报后台已启动', [
     ['消息上报', conversationUploadEnabled ? auth.authorized ? `开启（pid ${worker.pid}）` : `等待登录（pid ${worker.pid}）` : '关闭', conversationUploadEnabled ? auth.authorized ? 'ok' : 'warn' : 'off'],
     ['日志', worker.logPath, 'info'],
     ['开机自启', autostart.enabled ? '开启' : '关闭', autostart.enabled ? 'ok' : 'off'],
     ['模式', '首次补齐全部历史，后续只上报增量', 'info'],
-    ['归因', 'Claude Code + IM 会话归因', 'info'],
+    ['归因', `${formatUploadProviders(attributionProviders)} + IM 会话归因`, 'info'],
   ], conversationUploadEnabled
     ? '消息上报会启动后台增量扫描；需要登录后用 Bearer 授权发送。'
     : '消息上报已关闭；开启后首次补齐历史消息，之后只上传新增消息。');
@@ -2320,7 +2246,7 @@ async function runLocalCollectionAction() {
     });
     if (actionId === 'back') return;
     if (actionId === 'overview') await printUsageStatus({ exitOnDone: false });
-    if (actionId === 'scan') await printUsageReport({ exitOnDone: false });
+    if (actionId === 'scan') await printScanOnceResult({ exitOnDone: false });
     if (actionId === 'choose-upload-provider') await enableConversationUploadWithProvider();
     if (actionId === 'start-background') await printUsageStart({ exitOnDone: false });
     if (actionId === 'stop-background') await printUsageStop({ exitOnDone: false });
@@ -2534,12 +2460,27 @@ async function runNavigationAction(action) {
     ]);
     return;
   }
+  if (action.id === 'web-status') {
+    await printDaemonStatus({ exitOnDone: false });
+    return;
+  }
+  if (action.id === 'install-lark-cli') {
+    const r = await installLarkCli();
+    printCliRows('快速安装 lark-cli', [
+      ['结果', r.ok ? (r.alreadyInstalled ? '已安装' : '安装成功') : '未完成', r.ok ? 'ok' : 'error'],
+      ['路径', r.binPath || '—', 'info'],
+      ['说明', r.message, 'info'],
+    ], r.ok
+      ? '团队隔离请在每队 .env 配置 LARK_CLI_PROFILE（见 scripts/build-pages.mjs）'
+      : '请确认 Node.js / npm 可用后重试');
+    return;
+  }
   if (action.id === 'overview') {
     await printUsageStatus({ exitOnDone: false });
     return;
   }
   if (action.id === 'scan') {
-    await printUsageReport({ exitOnDone: false });
+    await printScanOnceResult({ exitOnDone: false });
     return;
   }
   if (action.id === 'start-background') {
@@ -2568,6 +2509,21 @@ async function runNavigationAction(action) {
   }
   if (action.id === 'status') {
     await printAuthStatus({ exitOnDone: false });
+    return;
+  }
+  if (action.id === 'aikey-claim') {
+    await runAikey({ exitOnDone: false });
+    return;
+  }
+  if (action.id === 'aikey-apply') {
+    printCliRows('申请 aikey', [
+      ['状态', '开发中（敬请期待）', 'warn'],
+      ['说明', '在线申请流程未上线；暂时请用「认领」或联系管理员获取 key', 'info'],
+    ], '服务端支持后会在此入口直接申请。');
+    return;
+  }
+  if (action.id === 'aikey-status') {
+    await runAikeyStatus({ exitOnDone: false });
     return;
   }
   if (action.id === 'local-use') {
@@ -2617,11 +2573,11 @@ async function printNavigation() {
 
   while (true) {
     const actionId = await askMenuAction({
-      title: '选择入口',
+      title: '',
       subtitle: '↑/↓ 或 Ctrl-N/Ctrl-P 移动，Enter 执行；✓ 表示已开启，执行后停留在当前页面',
       actions: NAV_ACTIONS,
       onAction: async (action) => {
-        if (!['toggle-web', 'toggle-message-upload', 'overview', 'scan', 'upload-logs', 'login', 'logout', 'dev-login', 'status'].includes(action.id)) return false;
+        if (!['toggle-web', 'web-status', 'install-lark-cli', 'toggle-message-upload', 'overview', 'scan', 'upload-logs', 'login', 'logout', 'dev-login', 'status'].includes(action.id)) return false;
         await runNavigationAction(action);
         await waitForNavigationContinue('按 Enter 回到菜单 | Esc/Ctrl+C 退出', { keepMenuInput: true });
         return true;
@@ -2786,7 +2742,7 @@ if (commandArgs[0] === 'stop') {
   await stopDaemon();
 }
 
-if (commandArgs[0] === 'web') {
+if (commandArgs[0] === 'web' && !daemonChild) {
   await runWebCommand();
 }
 
@@ -2833,11 +2789,18 @@ if (!skipHermitBridge) {
   } else if (bridgeTokens.hasProjects) {
     try {
       ensureClaudeCodeCliIfNeeded(bridgeTokens.raw);
+      shouldStartRuntime = true;
     } catch {
+      // Claude Code CLI missing / auto-install failed. Don't kill the daemon:
+      // the web workbench (UI, teams, sessions, usage) doesn't need it — only
+      // the bridge's agent spawning does. Degrade like the no-runner case
+      // (runtimeSetupMode) so the web server still starts; install claude and
+      // restart to get the runtime back.
+      runtimeSetupMode = true;
+      console.warn(`${brandLogPrefix()} Claude Code CLI 未就绪，跳过 runtime，工作台仍会启动。`);
+      console.warn(`${brandLogPrefix()} 请手动安装：npm install -g @anthropic-ai/claude-code@latest`);
       printLogTail('Runtime', runtimeLogPath);
-      process.exit(1);
     }
-    shouldStartRuntime = true;
   } else {
     console.error(`${brandLogPrefix()} Runtime config has no projects. Please edit the config and try again.`);
     console.error(`${brandLogPrefix()} Runtime config: ${hermitBridgeConfigPath}`);
@@ -2857,6 +2820,7 @@ if (!skipHermitBridge) {
       hermitBridgeProcess = spawn(process.execPath, [hermitBridgeRunner, '-config', hermitBridgeConfigPath], {
         cwd: repoRoot,
         detached: true,
+        windowsHide: true,
         env: {
           ...process.env,
           HERMIT_BRIDGE_TOKEN: bridgeTokens.managementToken,
@@ -2943,9 +2907,19 @@ function printServerLogTail() {
   printLogTail('Server', serverLogPath);
 }
 
+// Reap detached server.ts / hermit-bridge ORPHANS (PPID=1) left by a prior
+// daemon that died before shutdown() could — before we spawn the fresh server.
+// PPID=1-only guarantees we never touch a live daemon's own children.
+const orphanedDaemonChildPids = collectOrphanedDaemonChildPids();
+if (orphanedDaemonChildPids.length) {
+  console.log(`${brandLogPrefix()} 清理 ${orphanedDaemonChildPids.length} 个遗留 daemon 子进程...`);
+  await stopFallbackProcesses(orphanedDaemonChildPids);
+}
+
 const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/server.ts'], {
   cwd: repoRoot,
   detached: true,
+  windowsHide: true,
   env: {
     ...process.env,
     PORT: port,

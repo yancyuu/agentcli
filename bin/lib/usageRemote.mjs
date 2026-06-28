@@ -55,6 +55,10 @@ function parseJsonText(text) {
   }
 }
 
+function responseBodyPreview(text) {
+  return String(text || '').replace(/(authorization\s*[:=]\s*bearer\s+)[^\s"']+/gi, '$1[hidden]').slice(0, 300);
+}
+
 /**
  * Read-only preview of /usage/status channels. `providers` lets the caller pass
  * the configured upload providers (hermit.mjs currentFeatureStates). Defaults to
@@ -64,11 +68,11 @@ function parseJsonText(text) {
 export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']) {
   const auth = await refreshOpenHermitAuthStatus();
   if (!auth.authorized) {
-    return { authorized: false, channels: [], lastError: auth.expired ? '登录已失效，请重新登录' : '等待登录' };
+    return { authorized: false, channels: [], errors: [{ error: auth.expired ? '登录已失效，请重新登录' : '等待登录' }] };
   }
   const baseUrl = resolveConversationUploadBaseUrl();
   const token = readOpenHermitAuthStore().store?.token?.accessToken;
-  if (!token) return { authorized: false, channels: [], lastError: '等待登录' };
+  if (!token) return { authorized: false, channels: [], errors: [{ error: '等待登录' }] };
   const platforms = normalizeUploadProviders(providers);
   const targets = (platforms.length ? platforms : ['claudecode']).flatMap((platform) =>
     ['plain', 'im'].map((mode) => ({ platform, mode }))
@@ -83,18 +87,33 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
         });
         const text = await res.text().catch(() => '');
         if (!res.ok) {
-          return { platform, mode, error: `usage status ${platform}/${mode} HTTP ${res.status}` };
+          return {
+            platform,
+            mode,
+            error: `usage status ${platform}/${mode} HTTP ${res.status}`,
+            httpStatus: res.status,
+            body: responseBodyPreview(text),
+          };
         }
         const body = parseJsonText(text);
         const channel = (Array.isArray(body?.channels) ? body.channels : [])
           .find((c) => c && c.platform === platform && c.mode === mode) || null;
+        const cursor = channel?.currentCursor || null;
+        const attemptedCursor = channel?.lastAttemptedCursor || null;
         return {
           platform,
           mode,
+          checkedAt: body?.checkedAt || null,
           status: channel?.status || 'unknown',
-          cursorHash: channel?.currentCursor?.targetCursorHash || null,
-          hasCursor: Boolean(channel?.currentCursor),
+          cursorHash: cursor?.targetCursorHash || null,
+          cursorMessageCount: typeof cursor?.messageCount === 'number' ? cursor.messageCount : null,
+          cursorFileCount: typeof cursor?.fileCount === 'number' ? cursor.fileCount : null,
+          cursorGeneratedAt: cursor?.generatedAt || null,
+          attemptedCursorHash: attemptedCursor?.targetCursorHash || null,
+          attemptedCursorMessageCount: typeof attemptedCursor?.messageCount === 'number' ? attemptedCursor.messageCount : null,
+          hasCursor: Boolean(cursor),
           inFlight: Number(channel?.inFlight?.count ?? 0),
+          lastUploadId: channel?.lastUploadId || null,
         };
       } catch (err) {
         return { platform, mode, error: err instanceof Error ? err.message : String(err) };
@@ -102,15 +121,15 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
     })
   );
   const channels = [];
-  let lastError = null;
+  const errors = [];
   for (const result of results) {
     if (result.error) {
-      lastError = result.error;
+      errors.push(result);
       continue;
     }
     channels.push(result);
   }
-  return { authorized: true, channels, lastError };
+  return { authorized: true, channels, errors };
 }
 
 /**
@@ -120,18 +139,26 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
  */
 export async function fetchAuthoritativeUsage() {
   const auth = await refreshOpenHermitAuthStatus();
-  if (!auth.authorized) return null;
+  if (!auth.authorized) return { ok: false, error: auth.expired ? '登录已失效，请重新登录' : '等待登录' };
   const baseUrl = resolveConversationUploadBaseUrl();
   const token = readOpenHermitAuthStore().store?.token?.accessToken;
-  if (!token) return null;
+  if (!token) return { ok: false, error: '等待登录' };
   try {
     const res = await fetch(`${baseUrl}/api/v1/hermit/usage`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(8_000),
     });
-    if (!res.ok) return null;
-    return parseJsonText(await res.text());
-  } catch {
-    return null;
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `usage HTTP ${res.status}`,
+        httpStatus: res.status,
+        body: responseBodyPreview(text),
+      };
+    }
+    return { ok: true, ...(parseJsonText(text) || {}) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

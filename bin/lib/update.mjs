@@ -9,7 +9,7 @@ import { currentVersion, repoRoot } from './env.mjs';
 import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { migrateLegacyHermitBridgeConfigIfNeeded } from './runtime.mjs';
 
-async function runUpdate() {
+async function runUpdate({ onUpdated } = {}) {
   const isGitRepo = existsSync(path.join(repoRoot, '.git'));
 
   if (isGitRepo) {
@@ -44,6 +44,9 @@ async function runUpdate() {
       console.log(`${brandLogPrefix()} Building frontend...`);
       execSync('npm run build:web', { cwd: repoRoot, stdio: 'inherit' });
       migrateLegacyHermitBridgeConfigIfNeeded();
+      // Files just changed (checkout + install + build): reload the live usage
+      // worker so it picks up the new code without waiting for a manual restart.
+      await onUpdated?.();
       console.log(`\n${brandLogPrefix()} Updated to ${latestVersion}. Restart with: ${brandCommand()}\n`);
     } catch (err) {
       console.error(`${brandLogPrefix()} Update failed:`, err instanceof Error ? err.message : String(err));
@@ -55,6 +58,9 @@ async function runUpdate() {
     try {
       execSync(`npm install -g ${BRAND.npmPackage}@latest`, { stdio: 'inherit' });
       migrateLegacyHermitBridgeConfigIfNeeded();
+      // Files just changed (global reinstall): reload the live usage worker so
+      // it picks up the new code without waiting for a manual restart.
+      await onUpdated?.();
       console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand()}\n`);
     } catch (err) {
       console.error(`${brandLogPrefix()} npm update failed. Try: sudo npm install -g ${BRAND.npmPackage}@latest`);

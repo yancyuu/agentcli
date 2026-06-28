@@ -293,6 +293,7 @@ async function openExternalUrl(url) {
     };
     const child = spawn(command, commandArgsForPlatform, {
       detached: true,
+      windowsHide: true,
       stdio: 'ignore',
       env: process.env,
     });
@@ -630,7 +631,11 @@ function normalizeHermitAuthIdentity(identity) {
   if (!identity || typeof identity !== 'object') return null;
   return {
     id: identity.id || identity.union_id || identity.open_id || identity.user_id || null,
-    tenantKey: identity.tenant_key || identity.tenantKey || null,
+    email: identity.email || identity.mail || null,
+    tenantKey: identity.tenant_key || identity.tenantKey || identity.tenant?.key || null,
+    tenantName: identity.tenant_name || identity.tenantName || identity.tenant?.name || null,
+    department: identity.department || identity.department_name || identity.departmentName || identity.dept || identity.dept_name || null,
+    departmentPath: identity.department_path || identity.departmentPath || null,
     openId: identity.open_id || identity.openId || null,
     unionId: identity.union_id || identity.unionId || null,
     userId: identity.user_id || identity.userId || null,
@@ -762,7 +767,13 @@ async function refreshExpiredOpenHermitToken(store) {
     if (!res.ok) return store;
     const tokenPatch = normalizeAccessTokenPayload(payload);
     if (!tokenPatch) return store;
-    const account = normalizeHermitAuthIdentity(payload?.identity) || normalizeHermitAuthIdentity(payload?.account) || payload?.account || store.account || null;
+    const account =
+      normalizeHermitAuthIdentity(payload?.identity) ||
+      normalizeHermitAuthIdentity(payload?.account) ||
+      normalizeHermitAuthIdentity(payload?.user) ||
+      payload?.account ||
+      store.account ||
+      null;
     const refreshedStore = {
       ...store,
       clientId: store.clientId || config.clientId,
@@ -792,7 +803,13 @@ async function refreshOpenHermitAuthStatus() {
     });
     let payload = await res.json().catch(() => null);
 
-    if (res.ok && payload?.access_expired === true && store?.token?.refreshToken) {
+    // Any signal that the access token is bad — HTTP 401/403, or a 200 body
+    // flagging expiry — refreshes once and retries /me. This is the "本地 token
+    // 一定要及时刷新" contract: a server rejection must not leave the local store
+    // showing 已登录. 5xx / network errors are transient and keep the local token.
+    const accessRejected = res.status === 401 || res.status === 403;
+    const bodyFlaggedExpiry = res.ok && payload?.access_expired === true;
+    if ((accessRejected || bodyFlaggedExpiry) && store?.token?.refreshToken) {
       store = await refreshExpiredOpenHermitToken({
         ...store,
         token: { ...store.token, expiresAt: '2000-01-01T00:00:00.000Z' },
@@ -807,6 +824,19 @@ async function refreshOpenHermitAuthStatus() {
       }
     }
 
+    // Persistent rejection after a refresh attempt = the token is truly dead
+    // (revoked / refresh token expired). Expire it locally so `auth status` stops
+    // reporting 已登录 after a server-side logout. Transient 5xx / network errors
+    // fall through to the local-status return below unchanged.
+    if (res.status === 401 || res.status === 403) {
+      writeOpenHermitAuthStore({
+        ...store,
+        token: { ...store.token, expiresAt: '2000-01-01T00:00:00.000Z' },
+        updatedAt: new Date().toISOString(),
+        lastMeStatus: payload?.status || 'unauthenticated',
+      });
+      return readOpenHermitAuthStatus();
+    }
     if (!res.ok) return readOpenHermitAuthStatus();
     const responseScopes = normalizeScopes(payload);
     if (payload?.authenticated === false || payload?.refresh_expired === true || payload?.revoked_at) {
@@ -821,7 +851,13 @@ async function refreshOpenHermitAuthStatus() {
       });
       return readOpenHermitAuthStatus();
     }
-    const account = normalizeHermitAuthIdentity(payload?.identity) || normalizeHermitAuthIdentity(payload?.account) || payload?.account || store.account || null;
+    const account =
+      normalizeHermitAuthIdentity(payload?.identity) ||
+      normalizeHermitAuthIdentity(payload?.account) ||
+      normalizeHermitAuthIdentity(payload?.user) ||
+      payload?.account ||
+      store.account ||
+      null;
     const nextExpiresAt = normalizeExpiry(payload?.access_expires_in ?? payload?.expires_in ?? payload?.expiresIn, payload?.access_expires_at || payload?.expires_at || payload?.expiresAt);
     writeOpenHermitAuthStore({
       ...store,
@@ -984,12 +1020,20 @@ async function printAuthStatus({ exitOnDone = true } = {}) {
   const result = authStatusPayload();
   if (jsonRequested) printJson(result);
   if (result.auth.authorized) {
-    const account = result.auth.account?.email || result.auth.account?.name || result.auth.account?.id || `${BRAND.authProviderName} account`;
-    printCliRows(BRAND.authAccountLabel, [
+    const accountInfo = result.auth.account || {};
+    const account = accountInfo.email || accountInfo.name || accountInfo.id || `${BRAND.authProviderName} account`;
+    const rows = [
       ['状态', '已登录'],
       ['账号', account],
-      ['授权', `${BRAND.authProviderName} 飞书授权已确认，云端授权和托管服务可用`],
-    ], `退出登录可运行：${brandCommand('auth logout')}`);
+    ];
+    if (accountInfo.department || accountInfo.departmentPath) rows.push(['部门', accountInfo.departmentPath || accountInfo.department]);
+    if (accountInfo.tenantName || accountInfo.tenantKey) rows.push(['租户', accountInfo.tenantName || accountInfo.tenantKey]);
+    if (accountInfo.email && accountInfo.email !== account) rows.push(['邮箱', accountInfo.email]);
+    if (accountInfo.userId) rows.push(['User ID', accountInfo.userId]);
+    if (accountInfo.openId) rows.push(['Open ID', accountInfo.openId]);
+    if (accountInfo.unionId) rows.push(['Union ID', accountInfo.unionId]);
+    rows.push(['授权', `${BRAND.authProviderName} 飞书授权已确认，云端授权和托管服务可用`]);
+    printCliRows(BRAND.authAccountLabel, rows, `退出登录可运行：${brandCommand('auth logout')}`);
   } else {
     printCliRows(BRAND.authAccountLabel, [
       ['状态', '未登录'],

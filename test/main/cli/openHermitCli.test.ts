@@ -394,13 +394,14 @@ describe('openHermit CLI read-only workspace commands', () => {
       expect(parsed.command).toBe('navigate');
       expect(parsed.defaultAction).toBe('services');
       expect(parsed.actions.map((action: { id: string }) => action.id)).toEqual([
-        'web',
         'data-sync',
+        'web',
         'account',
+        'aikey',
         'exit',
       ]);
-      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'web')?.label).toBe('本地数字员工工作台');
-      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('用量上报');
+      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'web')?.label).toBe('工作台 Workspace');
+      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('用量 Usage Sync');
       expect(parsed.actions.find((action: { id: string; description: string }) => action.id === 'data-sync')?.description).toContain('消息上报');
       expect(parsed.message).toContain('本地使用');
       expect(parsed.message).toContain('本地/自托管团队协作无需登录');

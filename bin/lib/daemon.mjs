@@ -1,7 +1,7 @@
 // daemon.mjs — background-daemon process management: pidfile helpers, signal
 // forwarding, fallback-process cleanup, daemon status, and start/stop/ready-wait.
 
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execSync, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 
@@ -78,7 +78,70 @@ function signalDaemon(pid, signal) {
   }
 }
 
+// Windows process snapshot via PowerShell (wmic is removed on Win11 24H2+).
+// pid+ppid+command are emitted on the SAME output line, so a parse glitch can
+// only DROP a process (false negative → callers degrade to today's no-op),
+// never mismatch pid↔command (no wrong kills). Callers wrap in try/catch, so a
+// PowerShell failure also → []. ASCII pid/ppid + ASCII match-substrings mean a
+// non-UTF8 command portion (e.g. GBK on zh-CN Windows) doesn't affect matching.
+function listProcessesWin() {
+  const out = execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }',
+    ],
+    { encoding: 'utf-8', windowsHide: true },
+  );
+  const procs = [];
+  for (const line of out.split(/\r?\n/)) {
+    const parts = line.split('\t');
+    const pid = Number(parts[0]);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    procs.push({ pid, ppid: Number(parts[1]) || 0, command: parts.slice(2).join('\t') });
+  }
+  return procs;
+}
+
+// Windows fallback pid collection (no lsof/pgrep): pid-by-listening-port via
+// netstat + pid-by-command-pattern via listProcessesWin. Mirrors the Unix
+// collectFallbackPids intent; each step isolated so a missing tool only drops
+// that step's contribution.
+function collectFallbackPidsWin() {
+  const pids = new Set();
+  const watchPorts = new Set([port, 9810, 9820]);
+  try {
+    const netstat = execFileSync('netstat', ['-ano', '-p', 'TCP'], {
+      encoding: 'utf-8',
+      windowsHide: true,
+    });
+    for (const line of netstat.split(/\r?\n/)) {
+      const cols = line.trim().split(/\s+/);
+      if (!cols.includes('LISTENING') || cols.length < 4) continue;
+      const localPort = Number(cols[1].split(':').pop());
+      const pid = Number(cols[cols.length - 1]);
+      if (watchPorts.has(localPort) && Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+        pids.add(pid);
+      }
+    }
+  } catch {
+    // netstat unavailable — fall through to command match.
+  }
+  try {
+    const pattern = /openhermit|hermit\.mjs|server\.ts|hermit-bridge/u;
+    for (const p of listProcessesWin()) {
+      if (p.pid !== process.pid && pattern.test(p.command)) pids.add(p.pid);
+    }
+  } catch {
+    // PowerShell unavailable — keep whatever netstat found.
+  }
+  return [...pids];
+}
+
 function collectFallbackPids() {
+  if (process.platform === 'win32') return collectFallbackPidsWin();
   const pids = new Set();
   const commands = [
     `lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true`,
@@ -104,8 +167,7 @@ function collectFallbackPids() {
   return [...pids];
 }
 
-async function stopFallbackProcesses() {
-  const pids = collectFallbackPids();
+async function stopFallbackProcesses(pids = collectFallbackPids()) {
   if (pids.length === 0) return false;
 
   for (const pid of pids) {
@@ -259,6 +321,7 @@ function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {
   const child = spawn(process.execPath, [hermitEntry, ...daemonChildArgs], {
     cwd: repoRoot,
     detached: true,
+    windowsHide: true,
     env: {
       ...process.env,
       HERMIT_DAEMON_CHILD: '1',
@@ -287,6 +350,7 @@ refreshDaemonPidFromReadyServer,
 isPidRunning,
 removeDaemonPidFile,
 signalDaemon,
+listProcessesWin,
 collectFallbackPids,
 stopFallbackProcesses,
 collectDaemonStatus,
