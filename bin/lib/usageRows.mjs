@@ -4,8 +4,8 @@
 //
 // The display answers one question: 我发了多少 / 别人收了多少 / 还差多少。
 //   本地    — local jsonl volume (sessions / messages / tokens) from the daemon.
-//   服务端  — server `/report/usage` ledger (messages / tokens the server received).
-//   待上报  — 本地 − 服务端, clamped ≥ 0 (the gap still to upload).
+//   服务端  — server `/report/usage` ledger (sessions / messages / tokens received).
+//   待上报  — 本地 − 服务端 by the same dimensions, clamped ≥ 0.
 //
 // Contract for `authoritative`:
 //   undefined       =>  /report/usage not read this run (localOnly) → no 服务端 row, no 待上报.
@@ -44,14 +44,17 @@ export function localServerRows(telemetry, authoritative) {
   if (localParts.length) rows.push(['本地', localParts.join(' · '), 'info']);
 
   // 服务端 — what the server received. Omit entirely when /report/usage wasn't read.
+  let srvSess = NaN;
   let srvMsg = NaN;
   let srvTok = NaN;
   if (authoritative && typeof authoritative === 'object') {
     if (authoritative.ok) {
       const totals = authoritative.totals && typeof authoritative.totals === 'object' ? authoritative.totals : {};
+      srvSess = Number(totals.sessions ?? authoritative.sessions);
       srvMsg = Number(totals.messages ?? authoritative.messages);
       srvTok = Number(totals.totalTokens ?? totals.tokens ?? authoritative.totalTokens ?? authoritative.tokensTotal);
       const srvParts = [];
+      if (Number.isFinite(srvSess) && srvSess > 0) srvParts.push(`会话 ${formatNumber(srvSess)}`);
       if (Number.isFinite(srvMsg) && srvMsg > 0) srvParts.push(`消息 ${formatNumber(srvMsg)}`);
       if (Number.isFinite(srvTok) && srvTok > 0) srvParts.push(`Token ${formatNumber(srvTok)}`);
       if (srvParts.length) rows.push(['服务端', srvParts.join(' · '), 'info']);
@@ -66,9 +69,11 @@ export function localServerRows(telemetry, authoritative) {
   }
 
   // 待上报 — the gap. Only rendered when something is actually outstanding.
+  const pendingSess = Number.isFinite(locSess) && Number.isFinite(srvSess) ? Math.max(0, locSess - srvSess) : NaN;
   const pendingMsg = Number.isFinite(locMsg) && Number.isFinite(srvMsg) ? Math.max(0, locMsg - srvMsg) : NaN;
   const pendingTok = Number.isFinite(locTok) && Number.isFinite(srvTok) ? Math.max(0, locTok - srvTok) : NaN;
   const pendingParts = [];
+  if (Number.isFinite(pendingSess) && pendingSess > 0) pendingParts.push(`会话 ${formatNumber(pendingSess)}`);
   if (Number.isFinite(pendingMsg) && pendingMsg > 0) pendingParts.push(`消息 ${formatNumber(pendingMsg)}`);
   if (Number.isFinite(pendingTok) && pendingTok > 0) pendingParts.push(`Token ${formatNumber(pendingTok)}`);
   if (pendingParts.length) rows.push(['待上报', pendingParts.join(' · '), 'warn']);
