@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "openHermit: Loop Engineering workbench for local AI agent runtimes.",
   "license": "AGPL-3.0",
   "publishConfig": {
