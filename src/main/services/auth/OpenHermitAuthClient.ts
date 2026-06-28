@@ -8,7 +8,7 @@
  *
  * Semantics deliberately mirror bin/lib/auth.mjs so the on-disk store stays
  * compatible across both writers:
- *   - refresh POSTs { refresh_token } to <store.issuer>/api/v1/auth/hermit/refresh
+ *   - refresh POSTs { refresh_token } to <store.issuer>/api/v1/auth/refresh
  *     (the auth broker; falls back to the upload base when issuer is absent).
  *   - token patch/merge/expiry normalization match normalizeAccessTokenPayload /
  *     mergeAuthToken / normalizeExpiry / isAuthTokenExpired in auth.mjs.
@@ -141,7 +141,7 @@ export function isTokenExpired(store: AuthStore | null): boolean {
 function refreshUrlFor(store: AuthStore | null, fallbackBase: string): string | null {
   const base = (store?.issuer && String(store.issuer)) || fallbackBase;
   if (!base) return null;
-  return `${base.replace(/\/+$/, '')}/api/v1/auth/hermit/refresh`;
+  return `${base.replace(/\/+$/, '')}/api/v1/auth/refresh`;
 }
 
 /**
@@ -199,9 +199,9 @@ export interface ProbeAuthResult {
   scopes: string[];
 }
 
-/** GET /api/v1/auth/hermit/me on the upload base; verify auth + upload scopes. */
+/** GET /api/v1/auth/me on the upload base; verify auth + upload scopes. */
 export async function probeAuth(baseUrl: string, token: string): Promise<ProbeAuthResult> {
-  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/v1/auth/hermit/me`, {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/v1/auth/me`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });

@@ -6,8 +6,8 @@
 // cursor. Token refresh is delegated to auth.mjs (refreshOpenHermitAuthStatus).
 //
 // Endpoints (all under <base>/api/v1):
-//   GET  /hermit/usage/status?platform=&mode=  — per-channel cursor / in-flight
-//   GET  /hermit/usage                         — authoritative ledger totals
+//   GET  /report/usage/status?client=&scene=  — per-channel cursor / in-flight
+//   GET  /report/usage                         — authoritative ledger totals
 import { BRAND } from '../branding.mjs';
 import {
   readOpenHermitAuthStore,
@@ -60,7 +60,7 @@ function responseBodyPreview(text) {
 }
 
 /**
- * Read-only preview of /usage/status channels. `providers` lets the caller pass
+ * Read-only preview of /report/usage/status channels. `providers` lets the caller pass
  * the configured upload providers (hermit.mjs currentFeatureStates). Defaults to
  * both. Parallelized across platform x mode so one slow channel doesn't block
  * the others (was 4 sequential fetches).
@@ -79,7 +79,8 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
   );
   const results = await Promise.all(
     targets.map(async ({ platform, mode }) => {
-      const url = `${baseUrl}/api/v1/hermit/usage/status?platform=${encodeURIComponent(platform)}&mode=${encodeURIComponent(mode)}`;
+      const scene = mode === 'im' ? 'digital_employee' : 'coding';
+      const url = `${baseUrl}/api/v1/report/usage/status?client=${encodeURIComponent(platform)}&scene=${encodeURIComponent(scene)}`;
       try {
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
@@ -97,7 +98,7 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
         }
         const body = parseJsonText(text);
         const channel = (Array.isArray(body?.channels) ? body.channels : [])
-          .find((c) => c && c.platform === platform && c.mode === mode) || null;
+          .find((c) => c && (c.client === platform || c.platform === platform) && (c.scene === scene || c.mode === mode)) || null;
         const cursor = channel?.currentCursor || null;
         const attemptedCursor = channel?.lastAttemptedCursor || null;
         return {
@@ -133,7 +134,7 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
 }
 
 /**
- * GET /api/v1/hermit/usage — server-side authoritative ledger (tokens / messages
+ * GET /api/v1/report/usage — server-side authoritative ledger (tokens / messages
  * / batches / dedup). Best-effort: returns null when unauthorized or on any
  * failure so the CLI degrades instead of crashing.
  */
@@ -144,7 +145,7 @@ export async function fetchAuthoritativeUsage() {
   const token = readOpenHermitAuthStore().store?.token?.accessToken;
   if (!token) return { ok: false, error: '等待登录' };
   try {
-    const res = await fetch(`${baseUrl}/api/v1/hermit/usage`, {
+    const res = await fetch(`${baseUrl}/api/v1/report/usage`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(8_000),
     });

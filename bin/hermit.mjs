@@ -923,7 +923,7 @@ function uploadStatusUnavailableReason(errorText = '') {
   if (!errorText) return '';
   if (/insufficient_scope|upload:read/u.test(errorText)) return '缺少 upload:read 授权，请重新登录';
   if (/usage status HTTP 401/u.test(errorText)) return '登录已失效，请重新登录';
-  if (/usage status HTTP 403/u.test(errorText)) return '服务端拒绝读取 /usage/status';
+  if (/usage status HTTP 403/u.test(errorText)) return '服务端拒绝读取 /report/usage/status';
   if (/usage status .*HTTP \d+/u.test(errorText)) return errorText;
   return '';
 }
@@ -958,9 +958,9 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
   const rows = [];
 
   // Server channel state is server-authoritative — but only meaningful when we
-  // actually queried /usage/status this run. In scan/report mode `remote` is
+  // actually queried /report/usage/status this run. In scan/report mode `remote` is
   // null (the endpoint is never called), so we must NOT render a fake
-  // "等待读取 /usage/status" row about a request that never happened.
+  // "等待读取 /report/usage/status" row about a request that never happened.
   if (remote) {
     const remoteChannels = Array.isArray(remote.channels) ? remote.channels : [];
     const remoteErrors = Array.isArray(remote.errors) ? remote.errors : [];
@@ -975,7 +975,7 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
     } else {
       rows.push([
         '服务端状态',
-        remoteErrors.length ? '读取 /usage/status 失败' : auth.authorized ? '等待读取 /usage/status' : '等待登录后读取 /usage/status',
+        remoteErrors.length ? '读取 /report/usage/status 失败' : auth.authorized ? '等待读取 /report/usage/status' : '等待登录后读取 /report/usage/status',
         remoteErrors.length ? 'error' : 'info',
       ]);
     }
@@ -988,7 +988,7 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
         : error.error || '请求失败';
       rows.push([
         `${uploadProviderLabel(error.platform)}/${error.mode}`,
-        `读取 /usage/status 失败：${detail}`,
+        `读取 /report/usage/status 失败：${detail}`,
         'error',
       ]);
     }
@@ -1782,12 +1782,15 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
       : '后台未运行';
 
     const rows = [];
+    const uploadError = typeof upload.lastError === 'string' && upload.lastError ? upload.lastError : '';
     rows.push([
       '本次上报',
       accepted > 0
         ? `${formatNumber(accepted)} 条消息已上传${attempted !== accepted ? ` · 尝试 ${formatNumber(attempted)}` : ''}`
-        : '无新增消息',
-      accepted > 0 ? 'ok' : 'info',
+        : uploadError
+          ? `上报失败：${uploadError}`
+          : '无新增消息',
+      accepted > 0 ? 'ok' : uploadError ? 'error' : 'info',
     ]);
     rows.push(...localServerRows(data.telemetry, data.authoritativeUsage));
     // Per-channel breakdown so it's visible which provider/mode reported vs not
@@ -2426,7 +2429,7 @@ async function runNavigationAction(action) {
       ['worker', worker.stopped ? `已停止 pid ${worker.pid}` : '未运行', 'info'],
       ['来源', formatUploadProviders(states.uploadProviders), 'info'],
       ['说明', '关闭消息上报会停止 worker 并清理上报锁', 'info'],
-    ], '再次开启会重新启动 worker，并从服务端 /usage/status 读取 cursor。');
+    ], '再次开启会重新启动 worker，并从服务端 /report/usage/status 读取 cursor。');
     return;
   }
   if (action.id === 'start-web') {

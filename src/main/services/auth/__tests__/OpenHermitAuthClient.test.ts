@@ -53,7 +53,7 @@ describe('OpenHermitAuthClient', () => {
       issuer: 'http://broker.test',
     });
     fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).endsWith('/api/v1/auth/hermit/refresh')) {
+      if (String(url).endsWith('/api/v1/auth/refresh')) {
         return jsonResponse({
           access_token: 'new',
           access_expires_in: 3600,
@@ -78,7 +78,7 @@ describe('OpenHermitAuthClient', () => {
     });
     let postedBody: unknown = null;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (String(url) === 'http://broker.test/api/v1/auth/hermit/refresh') {
+      if (String(url) === 'http://broker.test/api/v1/auth/refresh') {
         postedBody = JSON.parse(String(init?.body));
         return jsonResponse({ access_token: 'new', refresh_token: 'rt2', access_expires_in: 7200 });
       }
@@ -148,7 +148,7 @@ describe('OpenHermitAuthClient', () => {
     });
     let dataCalls = 0;
     fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).endsWith('/api/v1/auth/hermit/refresh')) {
+      if (String(url).endsWith('/api/v1/auth/refresh')) {
         return jsonResponse({ access_token: 'tok2', access_expires_in: 3600 });
       }
       dataCalls += 1;
@@ -168,7 +168,7 @@ describe('OpenHermitAuthClient', () => {
       issuer: 'http://broker.test',
     });
     fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).endsWith('/api/v1/auth/hermit/refresh')) {
+      if (String(url).endsWith('/api/v1/auth/refresh')) {
         return jsonResponse({ access_token: 'tok2', access_expires_in: 3600 });
       }
       return jsonResponse({}, 401);
@@ -188,7 +188,7 @@ describe('OpenHermitAuthClient', () => {
       issuer: 'http://broker.test',
     });
     fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).endsWith('/api/v1/auth/hermit/refresh')) {
+      if (String(url).endsWith('/api/v1/auth/refresh')) {
         return jsonResponse({ error: 'invalid_grant' }, 401);
       }
       return jsonResponse({}, 401);

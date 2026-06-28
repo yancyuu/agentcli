@@ -196,8 +196,8 @@ function normalizeControlUrl(value, optionName = '--control-url') {
 
 const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
 // Per the AI Monitor contract there is a SINGLE base URL (https://<ai-monitor-host>/api/v1):
-// the auth endpoints (/auth/hermit/*) and the hermit endpoints (/hermit/*) live on the
-// SAME host. The legacy separate :3001 auth broker is dropped — no backward compat.
+// auth (/auth/*) and report (/report/*) endpoints live on the SAME host. The legacy
+// separate :3001 auth broker is dropped — no backward compat.
 // Both default to the ai-monitor (:8088); override either via env only if you truly
 // split them (not recommended — the contract assumes one host).
 const OPENHERMIT_AUTH_BROKER_URL = process.env.OPENHERMIT_AUTH_BASE_URL || process.env.OPENHERMIT_CLOUD_AUTH_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
@@ -220,11 +220,11 @@ function getDeviceAuthConfig({ controlUrl = null } = {}) {
   const baseUrl = normalizeControlUrl(controlUrl || process.env.OPENHERMIT_AUTH_BASE_URL || process.env.OPENHERMIT_USAGE_AUTH_BASE_URL || getDefaultDeviceAuthBaseUrl(), 'OPENHERMIT_AUTH_BASE_URL');
   return {
     baseUrl,
-    startUrl: process.env.OPENHERMIT_AUTH_START_URL || `${baseUrl}/api/v1/auth/hermit/start`,
-    pollUrl: process.env.OPENHERMIT_AUTH_POLL_URL || `${baseUrl}/api/v1/auth/hermit/poll`,
-    refreshUrl: process.env.OPENHERMIT_AUTH_REFRESH_URL || `${baseUrl}/api/v1/auth/hermit/refresh`,
-    meUrl: process.env.OPENHERMIT_AUTH_ME_URL || `${baseUrl}/api/v1/auth/hermit/me`,
-    logoutUrl: process.env.OPENHERMIT_AUTH_LOGOUT_URL || `${baseUrl}/api/v1/auth/hermit/logout`,
+    startUrl: process.env.OPENHERMIT_AUTH_START_URL || `${baseUrl}/api/v1/auth/start`,
+    pollUrl: process.env.OPENHERMIT_AUTH_POLL_URL || `${baseUrl}/api/v1/auth/poll`,
+    refreshUrl: process.env.OPENHERMIT_AUTH_REFRESH_URL || `${baseUrl}/api/v1/auth/refresh`,
+    meUrl: process.env.OPENHERMIT_AUTH_ME_URL || `${baseUrl}/api/v1/auth/me`,
+    logoutUrl: process.env.OPENHERMIT_AUTH_LOGOUT_URL || `${baseUrl}/api/v1/auth/logout`,
     clientId: process.env.OPENHERMIT_OAUTH_CLIENT_ID || process.env.OPENHERMIT_AUTH_CLIENT_ID || 'openhermit-cli',
     scope: process.env.OPENHERMIT_OAUTH_SCOPE || process.env.OPENHERMIT_AUTH_SCOPE || 'auth:user.id:read upload:read upload:write',
     timeoutMs: Number.parseInt(process.env.OPENHERMIT_AUTH_TIMEOUT_MS || process.env.OPENHERMIT_OAUTH_TIMEOUT_MS || '600000', 10),
@@ -1088,7 +1088,7 @@ async function runAuthLogin({ exitOnDone = true, interactiveMenu = false, quiet 
     printCliRows('登录失败', [
       ['原因', message],
       ['默认', `通过 ${BRAND.authProviderName} 打开飞书授权，可用 --control-url 指定控制台地址`],
-      ['协议', '/api/v1/auth/hermit/start + poll'],
+      ['协议', '/api/v1/auth/start + poll'],
       ['安全', 'CLI 不保存飞书 app secret、飞书 token 或 Claude Code 凭证，也不会打印 token'],
     ], '请确认授权服务已按最新 Hermit API 返回 flow_id / poll_secret / authorization_url。');
     if (exitOnDone && !interactiveMenu) process.exit(1);

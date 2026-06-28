@@ -10,7 +10,7 @@
  *
  * NOTE on /events/check: implemented for protocol completeness and tests, but
  * intentionally NOT wired into the upload flow — the server-authoritative cursor
- * (read from /usage/status) already scopes each scan to new messages, and the
+ * (read from /report/usage/status) already scopes each scan to new messages, and the
  * server dedups by eventId, so a pre-check round-trip adds cost without benefit.
  */
 import { authedFetch, getValidBearerToken } from '@main/services/auth/OpenHermitAuthClient';
@@ -81,7 +81,7 @@ async function parseJsonObject(res: Response): Promise<Record<string, unknown> |
   }
 }
 
-/** GET /api/v1/hermit/usage — server-side authoritative token/message/batch ledger. */
+/** GET /api/v1/report/usage — server-side authoritative token/message/batch ledger. */
 export async function fetchAuthoritativeUsage(
   home: string,
   baseUrl: string
@@ -89,14 +89,14 @@ export async function fetchAuthoritativeUsage(
   const res = await authedFetch(
     home,
     baseUrl,
-    apiUrl(baseUrl, '/api/v1/hermit/usage'),
+    apiUrl(baseUrl, '/api/v1/report/usage'),
     await authedInit(home, baseUrl, {})
   );
   if (!res.ok) return null;
   return (await parseJsonObject(res)) as AuthoritativeUsage | null;
 }
 
-/** POST /api/v1/hermit/uploads/status — batch query by uploadIds (no item detail). */
+/** POST /api/v1/report/uploads/status — batch query by uploadIds (no item detail). */
 export async function fetchUploadsStatus(
   home: string,
   baseUrl: string,
@@ -106,7 +106,7 @@ export async function fetchUploadsStatus(
   const res = await authedFetch(
     home,
     baseUrl,
-    apiUrl(baseUrl, '/api/v1/hermit/uploads/status'),
+    apiUrl(baseUrl, '/api/v1/report/uploads/status'),
     await authedInit(home, baseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -118,7 +118,7 @@ export async function fetchUploadsStatus(
   return Array.isArray(body?.items) ? (body.items as UploadStatusItem[]) : [];
 }
 
-/** GET /api/v1/hermit/uploads/summary — current Bearer session upload aggregate. */
+/** GET /api/v1/report/uploads/summary — current Bearer session upload aggregate. */
 export async function fetchUploadsSummary(
   home: string,
   baseUrl: string
@@ -126,7 +126,7 @@ export async function fetchUploadsSummary(
   const res = await authedFetch(
     home,
     baseUrl,
-    apiUrl(baseUrl, '/api/v1/hermit/uploads/summary'),
+    apiUrl(baseUrl, '/api/v1/report/uploads/summary'),
     await authedInit(home, baseUrl, {})
   );
   if (!res.ok) return null;
@@ -134,7 +134,7 @@ export async function fetchUploadsSummary(
 }
 
 /**
- * POST /api/v1/hermit/events/check — report which eventIds the server already
+ * POST /api/v1/report/events/check — report which eventIds the server already
  * knows. Implemented + tested for protocol completeness; NOT used by the upload
  * flow (cursor-based scoping + server dedup make it redundant).
  */
@@ -147,7 +147,7 @@ export async function checkEvents(
   const res = await authedFetch(
     home,
     baseUrl,
-    apiUrl(baseUrl, '/api/v1/hermit/events/check'),
+    apiUrl(baseUrl, '/api/v1/report/events/check'),
     await authedInit(home, baseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

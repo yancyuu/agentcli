@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -46,6 +46,7 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
 
   afterAll(async () => {
     delete process.env.HERMIT_HOME;
+    delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
     await rm(tmpHome, { recursive: true, force: true });
   });
 
@@ -69,5 +70,56 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
     expect(result?.ok).toBe(false);
     expect(result?.error).toBe('等待登录');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fetchRemoteUsageStatus reads /report/usage/status with client+scene filters', async () => {
+    await mkdir(path.join(tmpHome, 'auth'), { recursive: true });
+    await writeFile(
+      path.join(tmpHome, 'auth', 'openhermit.json'),
+      JSON.stringify({ token: { accessToken: 'tok', expiresAt: '2999-01-01T00:00:00.000Z' } })
+    );
+    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL = 'http://monitor.test';
+    vi.resetModules();
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.endsWith('/api/v1/auth/me')) {
+        return Response.json({ authenticated: true, status: 'ok', feishu_authorized: true });
+      }
+      if (u.includes('/api/v1/report/usage/status')) {
+        const parsed = new URL(u);
+        const client = parsed.searchParams.get('client');
+        const scene = parsed.searchParams.get('scene');
+        return Response.json({
+          checkedAt: '2026-06-28T00:00:00.000Z',
+          channels: [
+            {
+              reporter: 'openhermit',
+              client,
+              scene,
+              status: 'success',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: { targetCursorHash: `${client}-${scene}`, messageCount: 3, fileCount: 1 },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    const { fetchRemoteUsageStatus } = await import('../usageRemote.mjs');
+    const result = await fetchRemoteUsageStatus(['claudecode']);
+
+    expect(result.errors).toEqual([]);
+    expect(result.channels).toHaveLength(2);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      'http://monitor.test/api/v1/report/usage/status?client=claudecode&scene=coding'
+    );
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      'http://monitor.test/api/v1/report/usage/status?client=claudecode&scene=digital_employee'
+    );
+    expect(result.channels.map((c) => c.cursorHash)).toEqual([
+      'claudecode-coding',
+      'claudecode-digital_employee',
+    ]);
   });
 });

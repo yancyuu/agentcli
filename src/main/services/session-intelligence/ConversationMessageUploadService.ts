@@ -250,6 +250,9 @@ interface ServerCursor {
 }
 
 interface UsageStatusChannel {
+  reporter?: string;
+  client?: string;
+  scene?: string;
   source?: string;
   platform?: UploadPlatform;
   mode?: UploadMode;
@@ -421,7 +424,7 @@ function statusUrl(baseUrl: string, receipt: UploadReceipt): string | null {
   const url = receipt.statusUrl || receipt.detailUrl;
   if (!url)
     return receipt.uploadId
-      ? `/api/v1/hermit/uploads/${encodeURIComponent(receipt.uploadId)}`
+      ? `/api/v1/report/uploads/${encodeURIComponent(receipt.uploadId)}`
       : null;
   return url;
 }
@@ -504,7 +507,7 @@ async function probeAuthOnce(
   token: string,
   home: string
 ): Promise<{ reason: string | null; accessExpired: boolean }> {
-  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, '/api/v1/auth/hermit/me'), {
+  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, '/api/v1/auth/me'), {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
@@ -562,12 +565,15 @@ async function fetchUsageChannel(
   mode: UploadMode,
   home?: string
 ): Promise<UsageStatusChannel | null> {
-  const url = apiUrl(baseUrl, `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`);
+  const scene = mode === 'im' ? 'digital_employee' : 'coding';
+  const path = `/api/v1/report/usage/status?client=${encodeURIComponent(platform)}&scene=${encodeURIComponent(scene)}`;
+  const url = apiUrl(baseUrl, path);
   await (home
     ? appendUploadLog(home, 'usage-status-request', {
         platform,
         mode,
-        url: `/api/v1/hermit/usage/status?platform=${platform}&mode=${mode}`,
+        scene,
+        url: path,
       })
     : Promise.resolve());
   const res = await authedFetch(home ?? hermitHome(), baseUrl, url, {
@@ -591,7 +597,10 @@ async function fetchUsageChannel(
   const body = parseJsonObject(text) as UsageStatusResponse;
   const channel =
     body.channels?.find(
-      (item) => item.source === SOURCE && item.platform === platform && item.mode === mode
+      (item) =>
+        (item.reporter === SOURCE || item.source === SOURCE) &&
+        (item.client === platform || item.platform === platform) &&
+        (item.scene === scene || item.mode === mode)
     ) ??
     body.channels?.[0] ??
     null;
@@ -1098,7 +1107,7 @@ function uploadStatusFromResult(
   };
   // Only an intake-level rejection is a real, actionable failure. A non-terminal
   // receipt ('queued') is normal: the server processes asynchronously and reports
-  // authoritative counts + the committed cursor via /usage/status on the next scan.
+  // authoritative counts + the committed cursor via /report/usage/status on the next scan.
   // The interface is the single source of truth — no parallel local accounting.
   if (receipt.ok === false || receipt.errors || rejectedAtReceive > 0) {
     status.lastError = '服务端接收阶段返回错误，已保留待上报状态';
@@ -1169,7 +1178,7 @@ async function postPayload(
   }
   // Receipt-only: the 202 confirms the batch was accepted for processing. The
   // server is cursor-authoritative + eventId-dedup — it commits the cursor on
-  // success and reports authoritative counts via /usage/status on the next scan.
+  // success and reports authoritative counts via /report/usage/status on the next scan.
   // No per-batch terminal-status polling: that fed display counts only and froze
   // the menu for ~an hour on a 199-batch first backfill (and made the worker hold
   // the lock ~an hour per cycle). The interface is the single source of truth.
@@ -1502,7 +1511,7 @@ async function uploadConversationMessagesLocked(
       }
     }
   } catch (error) {
-    const message = `服务端 /usage/status 不可用，未扫描未上报：${sanitizeUploadError(error)}`;
+    const message = `服务端 /report/usage/status 不可用，未扫描未上报：${sanitizeUploadError(error)}`;
     await appendUploadLog(home, 'server-cursor-unavailable', { providers, lastError: message });
     return emptyStatus(true, true, { lastError: message });
   }

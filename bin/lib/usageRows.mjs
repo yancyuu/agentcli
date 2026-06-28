@@ -4,11 +4,11 @@
 //
 // The display answers one question: 我发了多少 / 别人收了多少 / 还差多少。
 //   本地    — local jsonl volume (sessions / messages / tokens) from the daemon.
-//   服务端  — server `/usage` ledger (messages / tokens the server received).
+//   服务端  — server `/report/usage` ledger (messages / tokens the server received).
 //   待上报  — 本地 − 服务端, clamped ≥ 0 (the gap still to upload).
 //
 // Contract for `authoritative`:
-//   undefined       =>  /usage not read this run (localOnly) → no 服务端 row, no 待上报.
+//   undefined       =>  /report/usage not read this run (localOnly) → no 服务端 row, no 待上报.
 //   { ok: false }   =>  fetch ran and really failed → 服务端 error row.
 //   { ok: true }    =>  render 服务端 + compute 待上报.
 
@@ -43,7 +43,7 @@ export function localServerRows(telemetry, authoritative) {
   if (Number.isFinite(locTok)) localParts.push(`Token ${formatNumber(locTok)}`);
   if (localParts.length) rows.push(['本地', localParts.join(' · '), 'info']);
 
-  // 服务端 — what the server received. Omit entirely when /usage wasn't read.
+  // 服务端 — what the server received. Omit entirely when /report/usage wasn't read.
   let srvMsg = NaN;
   let srvTok = NaN;
   if (authoritative && typeof authoritative === 'object') {
@@ -61,7 +61,7 @@ export function localServerRows(telemetry, authoritative) {
       const suffix = authoritative.httpStatus
         ? `HTTP ${authoritative.httpStatus}${authoritative.body ? ` · ${authoritative.body}` : ''}`
         : authoritative.error || '无响应';
-      rows.push(['服务端', `读取 /usage 失败：${suffix}`, 'error']);
+      rows.push(['服务端', `读取 /report/usage 失败：${suffix}`, 'error']);
     }
   }
 

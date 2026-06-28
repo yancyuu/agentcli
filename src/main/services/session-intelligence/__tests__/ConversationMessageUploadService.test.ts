@@ -56,7 +56,7 @@ describe('ConversationMessageUploadService', () => {
     );
 
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
@@ -64,13 +64,13 @@ describe('ConversationMessageUploadService', () => {
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: url.includes('platform=codex') ? 'codex' : 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: url.includes('client=codex') ? 'codex' : 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -108,7 +108,7 @@ describe('ConversationMessageUploadService', () => {
             received: 1,
             acceptedForProcessing: 1,
             rejectedAtReceive: 0,
-            detailUrl: '/api/v1/hermit/uploads/upl_server_generated',
+            detailUrl: '/api/v1/report/uploads/upl_server_generated',
           },
           { status: 202 }
         );
@@ -202,7 +202,7 @@ describe('ConversationMessageUploadService', () => {
       im: [] as Array<Record<string, any>>,
     };
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
@@ -210,13 +210,13 @@ describe('ConversationMessageUploadService', () => {
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -322,20 +322,20 @@ describe('ConversationMessageUploadService', () => {
 
   it('skips uploading when server reports in-flight batches for the channel', async () => {
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: url.includes('platform=codex') ? 'codex' : 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: url.includes('client=codex') ? 'codex' : 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'processing',
               inFlight: { count: 1, uploadIds: ['upl_inflight'] },
               currentCursor: null,
@@ -384,20 +384,20 @@ describe('ConversationMessageUploadService', () => {
     );
 
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: url.includes('platform=codex') ? 'codex' : 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: url.includes('client=codex') ? 'codex' : 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'processing',
               inFlight: { count: 1, uploadIds: ['upl_inflight'] },
               currentCursor: null,
@@ -462,24 +462,26 @@ describe('ConversationMessageUploadService', () => {
     );
 
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
-              status: url.includes('mode=im') ? 'never_reported' : 'success',
+              reporter: 'openhermit',
+              client: 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              status: url.includes('scene=digital_employee') ? 'never_reported' : 'success',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
-              lastUploadId: url.includes('mode=im') ? null : 'upl_prior_without_cursor',
+              lastUploadId: url.includes('scene=digital_employee')
+                ? null
+                : 'upl_prior_without_cursor',
             },
           ],
         });
@@ -555,7 +557,7 @@ describe('ConversationMessageUploadService', () => {
 
     let refreshed = false;
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/api/v1/auth/hermit/refresh')) {
+      if (url.endsWith('/api/v1/auth/refresh')) {
         refreshed = true;
         return Response.json({
           access_token: 'fresh',
@@ -563,20 +565,20 @@ describe('ConversationMessageUploadService', () => {
           scope: 'upload:read upload:write',
         });
       }
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -593,7 +595,7 @@ describe('ConversationMessageUploadService', () => {
             received: 1,
             acceptedForProcessing: 1,
             rejectedAtReceive: 0,
-            detailUrl: '/api/v1/hermit/uploads/upl_refresh',
+            detailUrl: '/api/v1/report/uploads/upl_refresh',
           },
           { status: 202 }
         );
@@ -623,7 +625,7 @@ describe('ConversationMessageUploadService', () => {
     // terminal-status poll (up to 10 x 1.5s = ~15s/batch) made a 199-batch first
     // backfill take an hour and froze the interactive menu. Upload must POST every
     // batch off the receipt alone and NEVER hit the /uploads/:id status endpoint —
-    // /usage/status is the server-authoritative fact source for committed cursor
+    // /report/usage/status is the server-authoritative fact source for committed cursor
     // and aggregate counts.
     process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE = '2'; // 3 messages => 2 batches
     const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
@@ -643,20 +645,20 @@ describe('ConversationMessageUploadService', () => {
     let uploadPosts = 0;
     let statusPolls = 0;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/v1/auth/hermit/me')) {
+      if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
           authenticated: true,
           status: 'ok',
           scopes: ['upload:read', 'upload:write'],
         });
       }
-      if (url.includes('/api/v1/hermit/usage/status')) {
+      if (url.includes('/api/v1/report/usage/status')) {
         return Response.json({
           channels: [
             {
-              source: 'openhermit',
-              platform: 'claudecode',
-              mode: url.includes('mode=im') ? 'im' : 'plain',
+              reporter: 'openhermit',
+              client: 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -677,12 +679,12 @@ describe('ConversationMessageUploadService', () => {
             received: count,
             acceptedForProcessing: count,
             rejectedAtReceive: 0,
-            detailUrl: `/api/v1/hermit/uploads/upl_fast_${uploadPosts}`,
+            detailUrl: `/api/v1/report/uploads/upl_fast_${uploadPosts}`,
           },
           { status: 202 }
         );
       }
-      if (url.includes('/api/v1/hermit/uploads/')) {
+      if (url.includes('/api/v1/report/uploads/')) {
         statusPolls += 1;
         return Response.json({ ok: true, status: 'success', accepted: 2, cursorCommitted: true });
       }

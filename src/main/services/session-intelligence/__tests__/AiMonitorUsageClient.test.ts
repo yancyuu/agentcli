@@ -46,19 +46,19 @@ describe('AiMonitorUsageClient', () => {
     return calls;
   }
 
-  it('fetchAuthoritativeUsage GETs /hermit/usage with a Bearer header', async () => {
+  it('fetchAuthoritativeUsage GETs /report/usage with a Bearer header', async () => {
     const calls = captures(() =>
       Response.json({ totals: { tokens: 1000, messages: 20, batches: 4 } })
     );
     const usage = await fetchAuthoritativeUsage(home, baseUrl);
     expect(usage?.totals?.tokens).toBe(1000);
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/hermit/usage');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/usage');
     expect(calls[0].init.method).toBeUndefined(); // GET
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer tok');
   });
 
-  it('fetchUploadsStatus POSTs { uploadIds } to /hermit/uploads/status', async () => {
+  it('fetchUploadsStatus POSTs { uploadIds } to /report/uploads/status', async () => {
     const calls = captures(() =>
       Response.json({ items: [{ ok: true, uploadId: 'upl_1', status: 'success' }] })
     );
@@ -66,7 +66,7 @@ describe('AiMonitorUsageClient', () => {
     expect(items).toHaveLength(1);
     expect(items[0].uploadId).toBe('upl_1');
     expect(calls[0].init.method).toBe('POST');
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/hermit/uploads/status');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/uploads/status');
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ uploadIds: ['upl_1', 'upl_2'] });
   });
 
@@ -76,22 +76,22 @@ describe('AiMonitorUsageClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('fetchUploadsSummary GETs /hermit/uploads/summary', async () => {
+  it('fetchUploadsSummary GETs /report/uploads/summary', async () => {
     const calls = captures(() => Response.json({ batches: 4, accepted: 3900, duplicated: 900 }));
     const summary = await fetchUploadsSummary(home, baseUrl);
     expect(summary?.batches).toBe(4);
     expect(summary?.accepted).toBe(3900);
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/hermit/uploads/summary');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/uploads/summary');
   });
 
-  it('checkEvents POSTs { eventIds } to /hermit/events/check', async () => {
+  it('checkEvents POSTs { eventIds } to /report/events/check', async () => {
     const calls = captures(() =>
       Response.json({ items: [{ eventId: 'e1', known: true, status: 'processed' }] })
     );
     const items = await checkEvents(home, baseUrl, ['e1']);
     expect(items[0].known).toBe(true);
     expect(calls[0].init.method).toBe('POST');
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/hermit/events/check');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/events/check');
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ eventIds: ['e1'] });
   });
 
