@@ -284,8 +284,6 @@ const html = `<!DOCTYPE html>
     </div>
     <nav class="header-nav">
       <a href="guide.html">使用指南</a>
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
     </nav>
   </header>
 
@@ -372,8 +370,6 @@ const html = `<!DOCTYPE html>
   <footer class="footer">
     <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
       <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
     </div>
   </footer>
@@ -578,14 +574,12 @@ const guideHtml = `<!DOCTYPE html>
     </a>
     <nav class="header-nav">
       <a href="./">首页</a>
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
     </nav>
   </header>
 
   <div class="container">
     <h1>AgentCli 使用指南</h1>
-    <p class="subtitle">安装、命令参考、用量上报、常见问题 — 发给同事就能上手</p>
+    <p class="subtitle">安装、命令参考、用量上报、常见问题</p>
 
     <div class="toc">
       <h3>目录</h3>
@@ -763,8 +757,6 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
     <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
       <a href="./">首页</a>
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
       <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
     </div>
   </footer>
