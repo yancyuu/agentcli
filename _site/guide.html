@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>openHermit CLI 使用指南</title>
-  <meta name="description" content="openHermit CLI 完整使用指南：安装、命令参考、用量上报、常见问题排查。" />
+  <title>AgentCli 使用指南</title>
+  <meta name="description" content="AgentCli 完整使用指南：安装、命令参考、用量上报、常见问题排查。" />
   <link rel="icon" href="icon.png" />
   <style>
     :root {
@@ -179,8 +179,8 @@
 <body>
   <header class="header">
     <a class="header-logo" href="./">
-      <img src="icon.png" alt="openHermit" />
-      openHermit
+      <img src="icon.png" alt="AgentCli" />
+      AgentCli
     </a>
     <nav class="header-nav">
       <a href="./">首页</a>
@@ -190,7 +190,7 @@
   </header>
 
   <div class="container">
-    <h1>openHermit CLI 使用指南</h1>
+    <h1>AgentCli 使用指南</h1>
     <p class="subtitle">安装、命令参考、用量上报、常见问题 — 发给同事就能上手</p>
 
     <div class="toc">
@@ -310,7 +310,7 @@ openhermit</code></pre>
     <p>Codex 本地 JSONL 中 <code>input_tokens</code> 和 <code>cached_input_tokens</code> 经常为 0，因此无法精确计算上下文窗口占比。<code>output_tokens</code> 上报正常，不影响整体用量统计。</p>
 
     <h3>启用上报</h3>
-    <p>运行 <code>openhermit</code> 进入导航器，选择「用量上报」相关选项，可多选启用 Claude Code 和 Codex 的数据上报。需要配置目标服务端（Hermit Bus）地址。</p>
+    <p>运行 <code>openhermit</code> 进入导航器，选择「用量上报」相关选项，可多选启用 Claude Code 和 Codex 的数据上报。需要配置目标服务端（AgentBus）地址。</p>
 
     <h2 id="faq">5. 常见问题</h2>
 
@@ -353,12 +353,12 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
     </ul>
 
     <h3>Q: 本地用量里为什么有 IM 用量？</h3>
-    <p>IM 触发的 Agent 执行最终仍落到本地 Claude Code session。Hermit 统一读取本地 JSONL，再根据 bridge 元数据归因为 <code>source=feishu</code> 或 <code>source=wechat</code>。</p>
+    <p>IM 触发的 Agent 执行最终仍落到本地 Claude Code session。AgentCli 统一读取本地 JSONL，再根据 bridge 元数据归因为 <code>source=feishu</code> 或 <code>source=wechat</code>。</p>
 
     <h3>Q: worktree 是安全沙箱吗？</h3>
     <p>不是。worktree 是 Git 工作区隔离，用来降低并行编辑冲突；不等于容器隔离或权限沙箱。</p>
 
-    <h3>Q: Hermit 会上传代码或消息内容吗？</h3>
+    <h3>Q: AgentCli 会上传代码或消息内容吗？</h3>
     <p>默认 metadata-only：不上传消息正文、助手回复、工具输入输出、cron prompt 或 MCP 密钥。具体上报范围取决于管理员在 Settings 中的 Task Bus / Redis 配置。</p>
 
     <h3>Q: Codex 上报数据不完整？</h3>
@@ -366,7 +366,7 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
   </div>
 
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 openHermit. AGPL-3.0 License.</div>
+    <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
       <a href="./">首页</a>
       <a href="https://github.com/yancyuu/Hermit">GitHub</a>

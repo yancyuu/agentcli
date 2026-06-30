@@ -24,9 +24,9 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>openHermit — AI 工程协作平台</title>
-  <meta name="description" content="本地优先的 AI 编程工具用量采集与团队协作平台。自动监控 Claude Code、Codex、Cursor 等工具消耗，上报至 Hermit Bus。" />
-  <meta property="og:title" content="openHermit" />
+  <title>AgentCli — AI 工程协作平台</title>
+  <meta name="description" content="本地优先的 AI 编程工具用量采集与团队协作平台。自动监控 Claude Code、Codex、Cursor 等工具消耗，上报至 AgentBus。" />
+  <meta property="og:title" content="AgentCli" />
   <meta property="og:description" content="本地优先的 AI 工程协作平台。采集 → 上报 → 协作。" />
   <meta property="og:type" content="website" />
   <link rel="icon" href="icon.png" />
@@ -279,8 +279,8 @@ const html = `<!DOCTYPE html>
 <body>
   <header class="header">
     <div class="header-logo">
-      <img src="icon.png" alt="openHermit" />
-      openHermit
+      <img src="icon.png" alt="AgentCli" />
+      AgentCli
     </div>
     <nav class="header-nav">
       <a href="guide.html">使用指南</a>
@@ -291,8 +291,8 @@ const html = `<!DOCTYPE html>
 
   <section class="hero">
     <span class="hero-badge">Local-first &middot; Open Source</span>
-    <h1>openHermit</h1>
-    <p>本地优先的 AI 工程协作平台。自动采集 AI 编程工具用量，上报至 Hermit Bus，面向企业提供用量看板与团队协作能力。</p>
+    <h1>AgentCli</h1>
+    <p>本地优先的 AI 工程协作平台。自动采集 AI 编程工具用量，上报至 AgentBus，面向企业提供用量看板与团队协作能力。</p>
 
     <div class="install-box">
       <div class="install-tabs">
@@ -318,9 +318,9 @@ const html = `<!DOCTYPE html>
       <span class="dim">开发者本地</span><br/>
       <span class="highlight">Claude Code / Codex / Cursor / Gemini / OpenCode ...</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 会话日志 &amp; token 用量<br/>
-      <span class="highlight">openHermit</span> <span class="dim">(本地采集 &amp; Web 工作台)</span><br/>
+      <span class="highlight">AgentCli</span> <span class="dim">(本地采集 &amp; Web 工作台)</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 统一上报<br/>
-      <span class="highlight">Hermit Bus</span> <span class="dim">(中心化服务端 &middot; 数据总线)</span><br/>
+      <span class="highlight">AgentBus</span> <span class="dim">(中心化服务端 &middot; 数据总线)</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 看板 &amp; 协作<br/>
       <span class="dim">企业管理者 / 团队成员</span>
     </div>
@@ -340,7 +340,7 @@ const html = `<!DOCTYPE html>
       <div class="feature-card">
         <div class="feature-icon">&#8644;</div>
         <h3>统一上报</h3>
-        <p>多运行时、多场景通过同一个接口汇总至 Hermit Bus。支持断点续传、幂等去重、背压控制。</p>
+        <p>多运行时、多场景通过同一个接口汇总至 AgentBus。支持断点续传、幂等去重、背压控制。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128202;</div>
@@ -370,7 +370,7 @@ const html = `<!DOCTYPE html>
   </section>
 
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 openHermit. AGPL-3.0 License.</div>
+    <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
       <a href="https://github.com/yancyuu/Hermit">GitHub</a>
       <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
@@ -397,8 +397,8 @@ const guideHtml = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>openHermit CLI 使用指南</title>
-  <meta name="description" content="openHermit CLI 完整使用指南：安装、命令参考、用量上报、常见问题排查。" />
+  <title>AgentCli 使用指南</title>
+  <meta name="description" content="AgentCli 完整使用指南：安装、命令参考、用量上报、常见问题排查。" />
   <link rel="icon" href="icon.png" />
   <style>
     :root {
@@ -573,8 +573,8 @@ const guideHtml = `<!DOCTYPE html>
 <body>
   <header class="header">
     <a class="header-logo" href="./">
-      <img src="icon.png" alt="openHermit" />
-      openHermit
+      <img src="icon.png" alt="AgentCli" />
+      AgentCli
     </a>
     <nav class="header-nav">
       <a href="./">首页</a>
@@ -584,7 +584,7 @@ const guideHtml = `<!DOCTYPE html>
   </header>
 
   <div class="container">
-    <h1>openHermit CLI 使用指南</h1>
+    <h1>AgentCli 使用指南</h1>
     <p class="subtitle">安装、命令参考、用量上报、常见问题 — 发给同事就能上手</p>
 
     <div class="toc">
@@ -704,7 +704,7 @@ openhermit</code></pre>
     <p>Codex 本地 JSONL 中 <code>input_tokens</code> 和 <code>cached_input_tokens</code> 经常为 0，因此无法精确计算上下文窗口占比。<code>output_tokens</code> 上报正常，不影响整体用量统计。</p>
 
     <h3>启用上报</h3>
-    <p>运行 <code>openhermit</code> 进入导航器，选择「用量上报」相关选项，可多选启用 Claude Code 和 Codex 的数据上报。需要配置目标服务端（Hermit Bus）地址。</p>
+    <p>运行 <code>openhermit</code> 进入导航器，选择「用量上报」相关选项，可多选启用 Claude Code 和 Codex 的数据上报。需要配置目标服务端（AgentBus）地址。</p>
 
     <h2 id="faq">5. 常见问题</h2>
 
@@ -747,12 +747,12 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
     </ul>
 
     <h3>Q: 本地用量里为什么有 IM 用量？</h3>
-    <p>IM 触发的 Agent 执行最终仍落到本地 Claude Code session。Hermit 统一读取本地 JSONL，再根据 bridge 元数据归因为 <code>source=feishu</code> 或 <code>source=wechat</code>。</p>
+    <p>IM 触发的 Agent 执行最终仍落到本地 Claude Code session。AgentCli 统一读取本地 JSONL，再根据 bridge 元数据归因为 <code>source=feishu</code> 或 <code>source=wechat</code>。</p>
 
     <h3>Q: worktree 是安全沙箱吗？</h3>
     <p>不是。worktree 是 Git 工作区隔离，用来降低并行编辑冲突；不等于容器隔离或权限沙箱。</p>
 
-    <h3>Q: Hermit 会上传代码或消息内容吗？</h3>
+    <h3>Q: AgentCli 会上传代码或消息内容吗？</h3>
     <p>默认 metadata-only：不上传消息正文、助手回复、工具输入输出、cron prompt 或 MCP 密钥。具体上报范围取决于管理员在 Settings 中的 Task Bus / Redis 配置。</p>
 
     <h3>Q: Codex 上报数据不完整？</h3>
@@ -760,7 +760,7 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
   </div>
 
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 openHermit. AGPL-3.0 License.</div>
+    <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
       <a href="./">首页</a>
       <a href="https://github.com/yancyuu/Hermit">GitHub</a>
