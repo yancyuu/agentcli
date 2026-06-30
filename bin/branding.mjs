@@ -10,14 +10,14 @@ const brandingPath = path.join(packageRoot, 'branding.json');
 // intentionally not committed) and as the seed values for that generator. Keep
 // these in sync with the `||` chains in BRAND below.
 export const DEFAULT_BRAND = Object.freeze({
-  productName: 'Hermit',
-  productNameShort: 'Hermit',
-  stylizedName: 'openHermit',
+  productName: 'AgentCli',
+  productNameShort: 'AgentCli',
+  stylizedName: 'AgentCli',
   cliCommand: 'openhermit',
   npmPackage: '@yancyyu/openhermit',
   runtimeBridgeName: 'hermit-bridge',
-  authAccountLabel: 'openHermit 账号',
-  authProviderName: 'openHermit',
+  authAccountLabel: 'AgentCli 账号',
+  authProviderName: 'AgentCli',
   defaultLocalHomeName: '.hermit',
   githubRepo: 'yancyuu/Hermit',
   publicDocsUrl: 'https://yancyuu.github.io/Hermit/',
