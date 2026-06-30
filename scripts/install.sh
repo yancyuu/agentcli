@@ -24,17 +24,52 @@ detect_os() {
   esac
 }
 
+install_node() {
+  info "未找到 Node.js，正在自动安装 Node.js ${MIN_NODE_VERSION} ..."
+
+  if [ "$OS" = "macOS" ]; then
+    if command -v brew &>/dev/null; then
+      brew install node@${MIN_NODE_VERSION}
+      brew link --overwrite node@${MIN_NODE_VERSION} 2>/dev/null || true
+    else
+      info "未找到 Homebrew，先安装 Homebrew ..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
+      brew install node@${MIN_NODE_VERSION}
+      brew link --overwrite node@${MIN_NODE_VERSION} 2>/dev/null || true
+    fi
+  else
+    if command -v apt-get &>/dev/null; then
+      curl -fsSL https://deb.nodesource.com/setup_${MIN_NODE_VERSION}.x | sudo -E bash -
+      sudo apt-get install -y nodejs
+    elif command -v dnf &>/dev/null; then
+      curl -fsSL https://rpm.nodesource.com/setup_${MIN_NODE_VERSION}.x | sudo bash -
+      sudo dnf install -y nodejs
+    elif command -v yum &>/dev/null; then
+      curl -fsSL https://rpm.nodesource.com/setup_${MIN_NODE_VERSION}.x | sudo bash -
+      sudo yum install -y nodejs
+    else
+      error "无法自动安装 Node.js，请手动安装 Node.js >= ${MIN_NODE_VERSION} 后重试。"
+    fi
+  fi
+
+  if ! command -v node &>/dev/null; then
+    error "Node.js 安装失败，请手动安装后重试。"
+  fi
+  success "Node.js $(node -v) 安装成功"
+}
+
 check_node() {
   if ! command -v node &>/dev/null; then
-    error "未找到 Node.js。请先安装 Node.js >= ${MIN_NODE_VERSION}:
-  macOS:  brew install node
-  Linux:  curl -fsSL https://deb.nodesource.com/setup_${MIN_NODE_VERSION}.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    install_node
+    return
   fi
 
   local ver
   ver=$(node -v | sed 's/^v//' | cut -d. -f1)
   if [ "$ver" -lt "$MIN_NODE_VERSION" ]; then
-    error "Node.js 版本过低 (v${ver})，需要 >= ${MIN_NODE_VERSION}。请升级后重试。"
+    warn "Node.js 版本过低 (v${ver})，需要 >= ${MIN_NODE_VERSION}，正在升级 ..."
+    install_node
   fi
 }
 
