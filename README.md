@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="resources/icons/png/1024x1024.png" alt="Hermit" width="96" />
+  <img src="resources/icons/png/1024x1024.png" alt="AgentCli" width="96" />
 </p>
 
-<h1 align="center">Hermit</h1>
+<h1 align="center">AgentCli</h1>
 
 <p align="center">
-  <strong>AI Workforce Panel for local agent teams.</strong><br/>
-  Manage digital employees, tasks, messages, runtimes, IM routing, usage, capability assets, and audit trails — local-first.<br/>
-  <strong>本地优先的 AI 数字员工团队面板：</strong>管理数字员工、任务、消息、运行时、IM 路由、用量、能力资产和审计轨迹。
+  <strong>AI 编程工具用量采集 & 团队协作平台</strong><br/>
+  自动监控 Claude Code、Codex、Cursor、Gemini 等工具的 token 消耗，上报至 AgentBus，提供团队看板与 IM 协作。<br/>
+  <sub>Local-first usage tracking & team collaboration for AI coding tools.</sub>
 </p>
 
 <p align="center">
@@ -16,325 +16,109 @@
   <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/v/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/dm/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-brightgreen?style=flat-square" alt="AGPL-3.0 license" /></a>
-  <a href="https://yancyuu.github.io/Hermit/"><img src="https://img.shields.io/badge/docs-public_guide-brightgreen?style=flat-square" alt="Public guide" /></a>
-  <img src="https://img.shields.io/badge/local--first-~%2F.hermit-brightgreen?style=flat-square" alt="Local first" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/openhermit/team-detail.png" alt="openHermit team workspace showing tasks, messages, members, and runtime controls" width="100%" />
-</p>
-
-<p align="center">
-  <a href="README-CN.md"><strong>简体中文</strong></a> ·
-  <a href="#try-it-in-30-seconds"><strong>Try it</strong></a> ·
-  <a href="#why-openhermit"><strong>Why</strong></a> ·
-  <a href="#screenshots"><strong>Screenshots</strong></a> ·
-  <a href="#supported-agent-runtimes"><strong>Runtimes</strong></a> ·
-  <a href="https://yancyuu.github.io/Hermit/agent-manual.md"><strong>Agent manual</strong></a>
+  <img src="docs/screenshots/openhermit/team-detail.png" alt="AgentCli team workspace" width="100%" />
 </p>
 
 ---
 
-## Try it in 30 seconds
+## 这是什么
+
+你的团队每天在用 Claude Code、Codex、Cursor、Gemini……**花了多少 token？谁在用？用在哪？**
+
+AgentCli 帮你回答这些问题：
+
+- **自动采集** — 无侵入扫描本地 AI Agent 会话日志，零配置识别 token 消耗
+- **统一上报** — 采集数据汇总至 AgentBus，企业管理者在看板一目了然
+- **团队协作** — IM 消息路由（飞书/微信/Discord/Slack）、任务派发、多 Agent 编排
+
+---
+
+## 30 秒快速体验
 
 ```bash
 npx @yancyyu/openhermit@latest
 ```
 
-Open [http://127.0.0.1:5680/teams](http://127.0.0.1:5680/teams), create your first team, choose a local runtime, and start assigning work.
-
-Hermit itself is a local workbench. To run real agents you still need the corresponding local CLI/account/API credentials for Claude Code, Codex, Gemini, Cursor, OpenCode, or your bridge runtime.
-
----
-
-## Why openHermit?
-
-Most AI coding tools are great at one conversation. Real work needs a loop:
-
-1. discover or receive work,
-2. split it into tasks,
-3. assign the right agent/runtime,
-4. observe progress and messages,
-5. review the result,
-6. repeat without losing context.
-
-openHermit is the control plane around that loop.
-
-| Instead of... | openHermit adds... |
-|:---|:---|
-| One-off chat windows | Team workspaces with members, roles, tasks, messages, and runtime config |
-| Running CLIs by hand | A visible `/teams` workbench for Claude Code, Codex, Gemini, Cursor, OpenCode, and bridge adapters |
-| Hidden automation scripts | Auditable local state under `~/.hermit/`: teams, tasks, messages, events, and configuration |
-| Ad-hoc status updates | Kanban-style task state, comments, delivery records, and review checkpoints |
-| Platform-specific bots | Team routing, channel allowlists, and hermit-bridge powered bridge events |
-| Fragile multi-agent edits | Optional worktree isolation for parallel agent workspaces |
-
-### Built for
-
-- **Solo developers** running several AI coding agents without losing track of who changed what.
-- **Team leads / PMs** turning product requests into visible agent tasks and reviewable outcomes.
-- **Loop engineers** building repeatable scan → dispatch → execute → verify → report workflows.
-- **Local-first operators** who want runtime control and audit trails without a hosted control plane.
-
----
-
-## Screenshots
-
-<table>
-  <tr>
-    <td align="center"><b>Create and manage agent teams</b></td>
-    <td align="center"><b>Operate a team workspace</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/openhermit/team-list.png" alt="Team list and workspace overview" width="480" /></td>
-    <td><img src="docs/screenshots/openhermit/team-detail.png" alt="Team detail page with members, tasks, messages, and runtime controls" width="480" /></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Track work across teams</b></td>
-    <td align="center"><b>Configure local runtimes and channels</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/openhermit/tasks.png" alt="Global task board and task state" width="480" /></td>
-    <td><img src="docs/screenshots/openhermit/settings.png" alt="Settings for local runtimes, bridge, and channels" width="480" /></td>
-  </tr>
-</table>
-
-<details>
-<summary><strong>More screenshots: Loop usage, Feishu/Lark focused flows, and admin surfaces</strong></summary>
-
-<table>
-  <tr>
-    <td align="center"><b>Admin Loop</b></td>
-    <td align="center"><b>Usage overview</b></td>
-    <td align="center"><b>Loop workflows</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/05-admin-loop-current.png" alt="Admin Loop workspace" width="320" /></td>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/06-team-list-usage-current.png" alt="Team usage overview" width="320" /></td>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/08-admin-loop-workflows-current.png" alt="Loop workflow settings" width="320" /></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Agent gated tasks</b></td>
-    <td align="center"><b>Channel-aware team detail</b></td>
-    <td align="center"><b>General settings</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/09-tasks-agent-gated-current.png" alt="Agent gated task board" width="320" /></td>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/02-team-detail-current.png" alt="Channel-aware team detail" width="320" /></td>
-    <td><img src="docs/screenshots/openhermit/feishu-focused/04-settings-general-current.png" alt="General settings" width="320" /></td>
-  </tr>
-</table>
-
-</details>
-
-> Prefer video? See [`resources/demo.mp4`](resources/demo.mp4) in this repository.
-
----
-
-## What openHermit does
-
-### Agent teams, not isolated chats
-
-Create teams with members, project directories, runtime choices, and optional worktree isolation. Each team gets its own workspace for tasks, messages, configuration, and audit trails.
-
-### Task board for AI work
-
-Use Hermit as the place where agent work becomes visible: create tasks, comment on them, track status, preserve delivery context, and review outcomes before accepting them.
-
-### Local-first runtime control
-
-Hermit stores state locally by default in `~/.hermit/`. It does not provide models, host your repositories, or replace your local CLIs. It coordinates the runtimes you already install and authorize.
-
-### Bridge external channels into team workflows
-
-Use hermit-bridge to connect team messages and events to Feishu/Lark, WeChat, Telegram, Discord, Slack, or other channel adapters. Hermit handles team routing, allowlists, and audit boundaries; platform Bot capabilities depend on your hermit-bridge setup.
-
-### Repeatable Loop Engineering
-
-Turn manual agent operations into loops: scan for work, dispatch to a team, observe execution, verify results, and report what changed. The goal is not “more agents”; it is repeatable, inspectable progress.
-
----
-
-## How it works
-
-```mermaid
-flowchart LR
-  UI[Browser / Vite UI<br/>/teams workbench]
-  API[Fastify API]
-  Store[(~/.hermit<br/>teams · tasks · messages · audit)]
-  Bridge[hermit-bridge<br/>Management API · WebSocket events]
-  Runtimes[Local runtimes<br/>Claude Code · Codex · Gemini · Cursor · OpenCode]
-  Channels[External channels<br/>Feishu/Lark · WeChat · Telegram · Discord · Slack]
-
-  UI --> API
-  API --> Store
-  API --> Bridge
-  Bridge --> Runtimes
-  Bridge --> Channels
-```
-
-Current product shape:
-
-- **Frontend**: Vite + React 19 + TypeScript
-- **Backend**: Fastify 5 + Node.js
-- **Default route**: `/teams`
-- **Default state directory**: `~/.hermit/`
-- **Distribution**: npm CLI package `@yancyyu/openhermit`
-- **Current boundary**: no Electron desktop package and no embedded PTY terminal in this package
-
----
-
-## Supported Agent runtimes
-
-openHermit can coordinate the runtimes you have installed and authenticated locally. Adapter depth depends on the runtime and your hermit-bridge configuration.
-
-| Support level | Runtime identifiers |
-|:---|:---|
-| **First-class adapters** | `claudecode`, `codex`, `gemini`, `opencode`, `cursor` |
-| **Registered / compatible identifiers** | `devin`, `qoder`, `pi`, `iflow`, `acp`, `kimi`, `tmux` |
-
-First-class adapters usually expose richer install status, credentials, MCP, Skills, or environment management. Compatible identifiers are available for team configuration, bridging, or experimental integration; exact behavior depends on your local environment.
-
----
-
-## Installation and operations
-
-### Run without installing
+打开 [http://127.0.0.1:5680](http://127.0.0.1:5680)，即可看到本地 Web 工作台。
 
 ```bash
-npx @yancyyu/openhermit@latest
-```
-
-### Install globally
-
-```bash
-npm install -g @yancyyu/openhermit@latest --prefer-online
+# 或全局安装
+npm install -g @yancyyu/openhermit@latest
 openhermit
 ```
 
-### Useful commands
+---
+
+## 核心能力
+
+| | 能力 | 说明 |
+|:---:|:---|:---|
+| 1 | **自动采集** | 扫描 `~/.claude/`、`~/.codex/` 等本地会话，自动识别 token 用量、会话数、消息量 |
+| 2 | **统一上报** | 通过 AgentBus 数据总线上报，支持断点续传、幂等去重 |
+| 3 | **企业看板** | 按团队 / 成员 / 工具 / 时段维度展示用量，管理者实时掌握 AI 投入 |
+| 4 | **IM 协作** | 飞书 / 微信 / Discord / Slack 消息路由，数字员工直接在群聊中执行任务 |
+| 5 | **Web 工作台** | 本地 Web UI 管理团队、任务、消息、运行时配置，`openhermit web` 一键打开 |
+| 6 | **多运行时** | 统一协调 Claude Code / Codex / Gemini / Cursor / OpenCode 等本地 Agent |
+
+---
+
+## 支持的 AI 编程工具
+
+| 一等适配 | 兼容注册 |
+|:---|:---|
+| Claude Code, Codex, Gemini CLI, Cursor, OpenCode | Devin, Qoder, Kimi, iFlow, ACP, tmux |
+
+---
+
+## 常用命令
 
 ```bash
-openhermit                # open the terminal navigator (local use, teams, account)
-openhermit web            # start + open the local workbench (Web UI) in the browser
-openhermit --daemon       # run the workbench in the background
-openhermit status         # inspect daemon status
-openhermit stop           # stop the daemon
-openhermit --port 8080    # choose a port
-openhermit --version      # print version
-openhermit update         # self-update
+openhermit              # 终端导航器（交互菜单）
+openhermit web          # 打开浏览器工作台
+openhermit --daemon     # 后台运行
+openhermit status       # 查看状态
+openhermit stop         # 停止后台
+openhermit update       # 自更新
 ```
 
-> `openhermit` with no arguments opens the **terminal navigator** (the control-plane
-> menu). To jump straight into the browser-based workbench, run `openhermit web`.
+---
 
-### Let an agent install it
-
-Give your local AI agent the public runbook:
-
-```text
-Read https://yancyuu.github.io/Hermit/agent-manual.md and follow the installation and operations guide to deploy openHermit on this machine.
-```
-
-Agent-readable docs are also published at:
-
-- [Public guide](https://yancyuu.github.io/Hermit/)
-- [Agent manual](https://yancyuu.github.io/Hermit/agent-manual.md)
-- [LLM index](https://yancyuu.github.io/Hermit/llms.txt)
-
-### Troubleshooting
+## 截图
 
 <details>
-<summary><strong>EACCES: permission denied</strong> — <code>worker.pid</code> or npm global 目录权限错误</summary>
+<summary>展开查看更多截图</summary>
 
-如果运行 `openhermit` 或 `openhermit update` 时出现类似错误：
-
-```
-Error: EACCES: permission denied, open '/Users/<you>/.hermit/telemetry/worker.pid'
-```
-
-或 npm 报 `EACCES syscall rename` 错误，通常是因为之前曾以 `sudo` 运行过 hermit，导致部分文件被 root 占有。
-
-**修复方法：**
-
-```bash
-# 修复 telemetry 文件权限
-sudo chown $(whoami) ~/.hermit/telemetry/worker.pid
-
-# 如果 npm global 目录也报权限错误
-sudo chown -R $(whoami) ~/.npm-global
-```
-
-修复后重新运行 `openhermit update` 即可。
+<table>
+  <tr>
+    <td align="center"><b>团队列表</b></td>
+    <td align="center"><b>团队工作区</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/openhermit/team-list.png" alt="Team list" width="480" /></td>
+    <td><img src="docs/screenshots/openhermit/team-detail.png" alt="Team detail" width="480" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>任务看板</b></td>
+    <td align="center"><b>运行时设置</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/openhermit/tasks.png" alt="Task board" width="480" /></td>
+    <td><img src="docs/screenshots/openhermit/settings.png" alt="Settings" width="480" /></td>
+  </tr>
+</table>
 
 </details>
 
 ---
 
-## Create your first team
+## 文档
 
-1. Open `/teams`.
-2. Click **创建数字员工**.
-3. Fill in a team name and slug.
-4. Choose a harness/runtime, for example `claudecode`.
-5. Select a project directory; enable worktree isolation when parallel edits should stay separated.
-6. Configure channel bindings and allowlists if the team should receive external messages.
-7. Save, open the team detail page, create a task, and start the agent loop.
-
----
-
-## Current capabilities and boundaries
-
-| Area | Current status |
-|:---|:---|
-| **Teams** | Team config, members, project workspace, runtime settings, optional worktree isolation |
-| **Tasks** | Team kanban, comments, external dispatch projection, delivery/review state |
-| **Messages** | Team messages, cross-team messages, channel messages, Bridge events |
-| **Channels** | Hermit handles routing, allowlists, and audit; hermit-bridge carries platform adapters |
-| **Cross-team collaboration** | Redis-backed dispatch supports receive/start/progress/complete/approve/revision style flows; the full offer/bid/lease/event Task Bus is the target model |
-| **Local-first storage** | Config, teams, tasks, messages, and audit data default to `~/.hermit/` |
-| **Not included here** | Hosted models, hosted repositories, Electron desktop packaging, embedded PTY terminal |
-
----
-
-## Documentation
-
-- [Docs index](docs/README.md)
-- [Team Management Architecture](docs/team-management/README.md)
-- [Cross-Team Collaboration Workflow](docs/team-management/cross-team-collaboration.md)
-- [Feature Architecture Standard](docs/FEATURE_ARCHITECTURE_STANDARD.md)
-- [Release Guide](docs/RELEASE.md)
+- [使用指南](https://yancyuu.github.io/Hermit/guide.html)
+- [Issues / 反馈](https://github.com/yancyuu/Hermit/issues)
 - [Changelog](docs/CHANGELOG.md)
-
----
-
-## Development
-
-```bash
-pnpm install
-pnpm dev
-pnpm typecheck
-pnpm test
-pnpm build:web
-```
-
-For local development that needs external channels (Feishu/Lark, WeChat, Telegram, Discord, Slack, etc.), start `hermit-bridge` before or alongside `pnpm dev`:
-
-```bash
-node node_modules/hermit-bridge/run.js --force -config ~/.hermit/hermit-bridge/config.toml
-```
-
-
-Use pnpm for this repository. Please do not describe Electron packaging, embedded PTY, hosted model serving, or the full target Task Bus as current shipped capability unless the implementation and docs have landed.
-
----
-
-## Community and support
-
-If openHermit helps you run agent work more reliably, please star the repo — it helps more people discover the project.
-
-- Issues: [github.com/yancyuu/Hermit/issues](https://github.com/yancyuu/Hermit/issues)
-- Releases: [github.com/yancyuu/Hermit/releases](https://github.com/yancyuu/Hermit/releases)
 
 ---
 
