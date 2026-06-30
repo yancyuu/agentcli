@@ -673,6 +673,35 @@ openhermit</code></pre>
 
     <h2 id="usage-report">4. 用量上报</h2>
 
+    <h3>快速开始</h3>
+    <ol>
+      <li>运行 <code>openhermit</code> 进入终端导航器</li>
+      <li>选择「用量 Usage Sync」，回车展开</li>
+      <li>选择要启用的运行时（Claude Code / Codex），回车开启</li>
+      <li>首次启用后，系统自动扫描本地历史会话并补齐数据；后续增量扫描</li>
+    </ol>
+
+    <h3>Web 工作台查看用量</h3>
+    <ol>
+      <li>运行 <code>openhermit web</code> 或在终端导航器选择「工作台 Workspace」</li>
+      <li>浏览器打开 <code>http://127.0.0.1:5680</code></li>
+      <li>进入任意团队页面，顶部 Tab 切换到「用量」查看 token 消耗趋势、会话数、消息量</li>
+      <li>支持按成员、运行时、时间段筛选</li>
+    </ol>
+
+    <div class="callout success">
+      <div class="callout-title">提示</div>
+      <p>Web 工作台在后台持续运行时（<code>openhermit --daemon</code>）会自动定时采集，无需手动触发。打开浏览器即可查看最新数据。</p>
+    </div>
+
+    <h3>配置上报目标（AgentBus）</h3>
+    <ol>
+      <li>运行 <code>openhermit</code> 进入导航器</li>
+      <li>选择「账号 Account」→ 登录 AgentBus 账号</li>
+      <li>登录成功后，用量数据会自动上报到 AgentBus 服务端</li>
+      <li>企业管理者可在 AgentBus 看板查看全团队汇总数据</li>
+    </ol>
+
     <h3>支持的数据源</h3>
     <table>
       <thead>
