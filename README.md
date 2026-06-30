@@ -5,9 +5,9 @@
 <h1 align="center">AgentCli</h1>
 
 <p align="center">
-  <strong>AI 编程工具用量采集 & 团队协作平台</strong><br/>
-  自动监控 Claude Code、Codex、Cursor、Gemini 等工具的 token 消耗，上报至 AgentBus，提供团队看板与 IM 协作。<br/>
-  <sub>Local-first usage tracking & team collaboration for AI coding tools.</sub>
+  <strong>本地优先的 AI 数字员工团队管理平台</strong><br/>
+  创建数字员工团队，分配任务，协调多种 AI Agent 运行时，对接 IM 平台，统一管理工作流程和执行审计。<br/>
+  <sub>Local-first AI workforce management — teams, tasks, runtimes, IM routing, and audit trails.</sub>
 </p>
 
 <p align="center">
@@ -26,13 +26,14 @@
 
 ## 这是什么
 
-你的团队每天在用 Claude Code、Codex、Cursor、Gemini……**花了多少 token？谁在用？用在哪？**
+AgentCli 是一个本地优先的 **AI 数字员工团队管理平台**。它让你像管理真实团队一样管理 AI Agent：组建团队、分配任务、追踪进度、审核交付——同时打通 IM 协作和多运行时协调。
 
-AgentCli 帮你回答这些问题：
+### 解决的问题
 
-- **自动采集** — 无侵入扫描本地 AI Agent 会话日志，零配置识别 token 消耗
-- **统一上报** — 采集数据汇总至 AgentBus，企业管理者在看板一目了然
-- **团队协作** — IM 消息路由（飞书/微信/Discord/Slack）、任务派发、多 Agent 编排
+- AI Agent 越来越多，但**谁在做什么、进展如何**没有统一视图
+- 多种运行时（Claude Code、Codex、Cursor…）各自独立，**无法协调管理**
+- IM 中的 Bot 只能聊天，**无法形成可追踪的任务闭环**
+- 团队 AI 使用缺乏**可见性和审计能力**
 
 ---
 
@@ -42,7 +43,7 @@ AgentCli 帮你回答这些问题：
 npx @yancyyu/openhermit@latest
 ```
 
-打开 [http://127.0.0.1:5680](http://127.0.0.1:5680)，即可看到本地 Web 工作台。
+打开 [http://127.0.0.1:5680](http://127.0.0.1:5680)，创建你的第一个数字员工团队。
 
 ```bash
 # 或全局安装
@@ -54,18 +55,33 @@ openhermit
 
 ## 核心能力
 
-| | 能力 | 说明 |
-|:---:|:---|:---|
-| 1 | **自动采集** | 扫描 `~/.claude/`、`~/.codex/` 等本地会话，自动识别 token 用量、会话数、消息量 |
-| 2 | **统一上报** | 通过 AgentBus 数据总线上报，支持断点续传、幂等去重 |
-| 3 | **企业看板** | 按团队 / 成员 / 工具 / 时段维度展示用量，管理者实时掌握 AI 投入 |
-| 4 | **IM 协作** | 飞书 / 微信 / Discord / Slack 消息路由，数字员工直接在群聊中执行任务 |
-| 5 | **Web 工作台** | 本地 Web UI 管理团队、任务、消息、运行时配置，`openhermit web` 一键打开 |
-| 6 | **多运行时** | 统一协调 Claude Code / Codex / Gemini / Cursor / OpenCode 等本地 Agent |
+### 数字员工团队管理
+
+创建数字员工团队，配置成员、角色、项目目录和运行时。每个团队拥有独立的工作区，包含任务、消息、配置和审计轨迹。
+
+### 任务看板与工作流
+
+看板式任务管理：创建任务、分配 Agent、追踪状态、评论协作、审核交付。支持跨团队任务派发和结构化的交付/审核流程。
+
+### 多运行时协调
+
+统一管理本地安装的多种 AI Agent 运行时。无需切换工具，在一个面板中启动、监控、配置所有 Agent。
+
+### IM 平台对接
+
+通过 hermit-bridge 将飞书、微信、Telegram、Discord、Slack 等 IM 消息路由到数字员工团队。支持群聊触发任务、thread 隔离会话、@ 机器人交互。
+
+### 用量采集与上报
+
+自动扫描本地 AI Agent 会话日志，识别 token 消耗、会话数、消息量。数据可上报至 AgentBus，按团队/成员/工具维度展示企业级用量看板。
+
+### 本地优先架构
+
+所有数据默认存储在本地 `~/.hermit/`。不依赖云端即可完整运行；需要团队协同时可选择接入 AgentBus。
 
 ---
 
-## 支持的 AI 编程工具
+## 支持的 AI 运行时
 
 | 一等适配 | 兼容注册 |
 |:---|:---|
