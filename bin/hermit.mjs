@@ -1265,7 +1265,10 @@ function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
 
   if (process.env.OPENHERMIT_USAGE_WORKER_MODE === 'test') {
     mkdirSync(telemetryDir, { recursive: true, mode: 0o700 });
-    writeFileSync(telemetryWorkerPidPath, String(process.pid), { encoding: 'utf-8', mode: 0o600 });
+    try {
+      try { unlinkSync(telemetryWorkerPidPath); } catch {}
+      writeFileSync(telemetryWorkerPidPath, String(process.pid), { encoding: 'utf-8', mode: 0o600 });
+    } catch {}
     writeFileSync(telemetryWorkerStatusPath, `${JSON.stringify({
       schemaVersion: 1,
       state: 'idle',
@@ -1295,7 +1298,12 @@ function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
   child.unref();
   closeSync(out);
   closeSync(err);
-  writeFileSync(telemetryWorkerPidPath, String(child.pid), { encoding: 'utf-8', mode: 0o600 });
+  try {
+    try { unlinkSync(telemetryWorkerPidPath); } catch {}
+    writeFileSync(telemetryWorkerPidPath, String(child.pid), { encoding: 'utf-8', mode: 0o600 });
+  } catch (e) {
+    if (!quiet) console.error(`${brandLogPrefix()} 警告: 无法写入 ${telemetryWorkerPidPath}: ${e.message}`);
+  }
   if (!quiet) console.error(`${brandLogPrefix()} usage telemetry worker started: pid ${child.pid}`);
   return { started: true, running: true, pid: child.pid, pidPath: telemetryWorkerPidPath, statusPath: telemetryWorkerStatusPath, logPath: telemetryWorkerLogPath };
 }

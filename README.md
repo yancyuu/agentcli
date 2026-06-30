@@ -242,6 +242,33 @@ Agent-readable docs are also published at:
 - [Agent manual](https://yancyuu.github.io/Hermit/agent-manual.md)
 - [LLM index](https://yancyuu.github.io/Hermit/llms.txt)
 
+### Troubleshooting
+
+<details>
+<summary><strong>EACCES: permission denied</strong> — <code>worker.pid</code> or npm global 目录权限错误</summary>
+
+如果运行 `openhermit` 或 `openhermit update` 时出现类似错误：
+
+```
+Error: EACCES: permission denied, open '/Users/<you>/.hermit/telemetry/worker.pid'
+```
+
+或 npm 报 `EACCES syscall rename` 错误，通常是因为之前曾以 `sudo` 运行过 hermit，导致部分文件被 root 占有。
+
+**修复方法：**
+
+```bash
+# 修复 telemetry 文件权限
+sudo chown $(whoami) ~/.hermit/telemetry/worker.pid
+
+# 如果 npm global 目录也报权限错误
+sudo chown -R $(whoami) ~/.npm-global
+```
+
+修复后重新运行 `openhermit update` 即可。
+
+</details>
+
 ---
 
 ## Create your first team
