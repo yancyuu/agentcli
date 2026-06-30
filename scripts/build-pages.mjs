@@ -24,10 +24,10 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>openHermit CLI - 终端原生智能工作台</title>
-  <meta name="description" content="在终端中与 AI 协作，将想法直接变为可交付软件。" />
-  <meta property="og:title" content="openHermit CLI" />
-  <meta property="og:description" content="终端原生智能工作台，驱动数字员工高效协作。" />
+  <title>openHermit — AI 工程协作平台</title>
+  <meta name="description" content="本地优先的 AI 编程工具用量采集与团队协作平台。自动监控 Claude Code、Codex、Cursor 等工具消耗，上报至 Hermit Bus。" />
+  <meta property="og:title" content="openHermit" />
+  <meta property="og:description" content="本地优先的 AI 工程协作平台。采集 → 上报 → 协作。" />
   <meta property="og:type" content="website" />
   <link rel="icon" href="icon.png" />
   <style>
@@ -54,7 +54,6 @@ const html = `<!DOCTYPE html>
     a { color: var(--accent-light); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* Header */
     .header {
       border-bottom: 1px solid var(--border);
       padding: 16px 24px;
@@ -77,7 +76,6 @@ const html = `<!DOCTYPE html>
     .header-nav a { color: var(--text-muted); font-size: 14px; }
     .header-nav a:hover { color: var(--text); text-decoration: none; }
 
-    /* Hero */
     .hero {
       text-align: center;
       padding: 80px 24px 60px;
@@ -107,11 +105,10 @@ const html = `<!DOCTYPE html>
     .hero p {
       font-size: 18px;
       color: var(--text-muted);
-      max-width: 600px;
+      max-width: 640px;
       margin: 0 auto 32px;
     }
 
-    /* Install tabs */
     .install-box {
       max-width: 640px;
       margin: 0 auto;
@@ -151,35 +148,32 @@ const html = `<!DOCTYPE html>
     }
     .install-cmd .comment { color: var(--text-dim); }
 
-    /* Stats */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 24px;
-      max-width: 1000px;
+    .arch-section {
+      max-width: 800px;
       margin: 0 auto;
       padding: 60px 24px;
-    }
-    .stat-card {
       text-align: center;
-      padding: 32px 16px;
+    }
+    .arch-section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 32px;
+    }
+    .arch-diagram {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
-    }
-    .stat-number {
-      font-size: 48px;
-      font-weight: 800;
-      color: var(--accent-light);
-      line-height: 1;
-      margin-bottom: 8px;
-    }
-    .stat-label {
+      padding: 32px 24px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 14px;
+      line-height: 2;
       color: var(--text-muted);
+      text-align: left;
+      overflow-x: auto;
     }
+    .arch-diagram .highlight { color: var(--accent-light); }
+    .arch-diagram .dim { color: var(--text-dim); }
 
-    /* Features */
     .features-section {
       max-width: 1200px;
       margin: 0 auto;
@@ -233,35 +227,32 @@ const html = `<!DOCTYPE html>
       line-height: 1.5;
     }
 
-    /* SDK section */
-    .sdk-section {
+    .runtimes-section {
       max-width: 800px;
       margin: 0 auto;
-      padding: 60px 24px;
+      padding: 40px 24px 60px;
       text-align: center;
     }
-    .sdk-section h2 {
-      font-size: 28px;
+    .runtimes-section h2 {
+      font-size: 24px;
       font-weight: 700;
-      margin-bottom: 12px;
+      margin-bottom: 20px;
     }
-    .sdk-section > p {
-      color: var(--text-muted);
-      font-size: 16px;
-      margin-bottom: 28px;
+    .runtime-tags {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
     }
-    .sdk-install {
+    .runtime-tag {
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px 24px;
-      text-align: left;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 14px;
-      color: var(--green);
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
     }
 
-    /* Footer */
     .footer {
       border-top: 1px solid var(--border);
       padding: 40px 24px;
@@ -280,14 +271,12 @@ const html = `<!DOCTYPE html>
     @media (max-width: 640px) {
       .header { flex-direction: column; gap: 12px; }
       .hero { padding: 48px 16px 40px; }
-      .stats { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: 1fr; }
       .footer { flex-direction: column; text-align: center; }
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
   <header class="header">
     <div class="header-logo">
       <img src="icon.png" alt="openHermit" />
@@ -300,11 +289,10 @@ const html = `<!DOCTYPE html>
     </nav>
   </header>
 
-  <!-- Hero -->
   <section class="hero">
-    <span class="hero-badge">Terminal Native, AI Powered</span>
-    <h1>openHermit CLI</h1>
-    <p>在终端中与 AI 协作，围绕真实代码工作。将想法直接变为可交付软件——从开发调试到部署运维。</p>
+    <span class="hero-badge">Local-first &middot; Open Source</span>
+    <h1>openHermit</h1>
+    <p>本地优先的 AI 工程协作平台。自动采集 AI 编程工具用量，上报至 Hermit Bus，面向企业提供用量看板与团队协作能力。</p>
 
     <div class="install-box">
       <div class="install-tabs">
@@ -324,64 +312,65 @@ const html = `<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- Stats -->
-  <section class="stats">
-    <div class="stat-card">
-      <div class="stat-number">60%</div>
-      <div class="stat-label">日常工作流手动步骤减少</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-number">2x</div>
-      <div class="stat-label">修复与重构交付速度提升</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-number">70%</div>
-      <div class="stat-label">重复性修复自动化处理</div>
+  <section class="arch-section">
+    <h2>架构</h2>
+    <div class="arch-diagram">
+      <span class="dim">开发者本地</span><br/>
+      <span class="highlight">Claude Code / Codex / Cursor / Gemini / OpenCode ...</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 会话日志 &amp; token 用量<br/>
+      <span class="highlight">openHermit</span> <span class="dim">(本地采集 &amp; Web 工作台)</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 统一上报<br/>
+      <span class="highlight">Hermit Bus</span> <span class="dim">(中心化服务端 &middot; 数据总线)</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 看板 &amp; 协作<br/>
+      <span class="dim">企业管理者 / 团队成员</span>
     </div>
   </section>
 
-  <!-- Features -->
   <section class="features-section">
     <div class="features-header">
-      <h2>终端里的工程智能</h2>
-      <p>轻量、快速、无处不在</p>
+      <h2>核心能力</h2>
+      <p>从用量可见到团队协作</p>
     </div>
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">&gt;_</div>
-        <h3>轻量即用，随时介入</h3>
-        <p>启动 &lt;70ms，无需 IDE。在任何终端中执行即时修复、快速代码审查和自动化任务。</p>
-      </div>
-      <div class="feature-card">
         <div class="feature-icon">&#9881;</div>
-        <h3>自动化研发流程编排</h3>
-        <p>深度集成 CI/CD 管线，自动 Code Review、测试生成和问题修复。支持 Agent 调度和编排。</p>
+        <h3>自动采集</h3>
+        <p>无侵入式扫描本地 AI Agent 会话日志，自动识别 token 消耗、会话数、消息量，零配置开箱即用。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128279;</div>
-        <h3>深度融入工具链</h3>
-        <p>在脚本中调用 Agent，通过 ACP 协议管道化，扩展到 Neovim、Emacs 等编辑器和任意自动化场景。</p>
+        <div class="feature-icon">&#8644;</div>
+        <h3>统一上报</h3>
+        <p>多运行时、多场景通过同一个接口汇总至 Hermit Bus。支持断点续传、幂等去重、背压控制。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128269;</div>
-        <h3>上下文感知 Code Review</h3>
-        <p>理解仓库上下文，通过评论触发审查与修复，支持多轮 Q&amp;A 和自动修改建议。</p>
+        <div class="feature-icon">&#128202;</div>
+        <h3>企业看板</h3>
+        <p>按团队、成员、工具、场景维度展示 token 用量和会话活跃度。企业管理者一目了然。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128101;</div>
+        <h3>团队协作</h3>
+        <p>数字员工 IM 消息路由、跨团队任务派发、多 Agent 编排。让 AI 编程从单兵走向团队化。</p>
       </div>
     </div>
   </section>
 
-  <!-- SDK -->
-  <section class="sdk-section">
-    <h2>被集成能力</h2>
-    <p>使用 openHermit 构建自定义 AI 编码工作流——流式响应、工具权限控制、MCP 连接，将代码理解和编辑能力嵌入你自己的应用。</p>
-    <div class="sdk-install">
-      npm install -g @yancyyu/openhermit
+  <section class="runtimes-section">
+    <h2>支持的 AI 编程工具</h2>
+    <div class="runtime-tags">
+      <span class="runtime-tag">Claude Code</span>
+      <span class="runtime-tag">Codex</span>
+      <span class="runtime-tag">Cursor</span>
+      <span class="runtime-tag">Gemini CLI</span>
+      <span class="runtime-tag">OpenCode</span>
+      <span class="runtime-tag">Kimi</span>
+      <span class="runtime-tag">Devin</span>
+      <span class="runtime-tag">Qoder</span>
     </div>
   </section>
 
-  <!-- Footer -->
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 openHermit. All rights reserved.</div>
+    <div class="footer-left">&copy; 2026 openHermit. AGPL-3.0 License.</div>
     <div class="footer-links">
       <a href="https://github.com/yancyuu/Hermit">GitHub</a>
       <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
