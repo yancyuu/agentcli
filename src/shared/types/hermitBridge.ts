@@ -95,6 +95,8 @@ export interface HermitBridgeProjectSettingsUpdate {
   platform_allow_from?: Record<string, string>;
   /** 群聊允许的 chat ID，* 表示所有群聊 */
   platform_allow_chat?: Record<string, string>;
+  /** 会话空闲自动轮转（分钟），0 = 不轮转。TOML-only，不通过 PATCH API。 */
+  reset_on_idle_mins?: number;
 }
 
 export interface HermitBridgeAddPlatformRequest {

@@ -1462,6 +1462,12 @@ function readHermitBridgeConfig(): Record<string, unknown> {
   const idleTimeoutMatch = raw.match(/^idle_timeout_mins\s*=\s*(\d+)/m);
   if (idleTimeoutMatch) result.idle_timeout_mins = Number(idleTimeoutMatch[1]);
 
+  const maxTurnTimeMatch = raw.match(/^max_turn_time_mins\s*=\s*(\d+)/m);
+  if (maxTurnTimeMatch) result.max_turn_time_mins = Number(maxTurnTimeMatch[1]);
+
+  const wsIdleTimeoutMatch = raw.match(/^workspace_idle_timeout_mins\s*=\s*(\d+)/m);
+  if (wsIdleTimeoutMatch) result.workspace_idle_timeout_mins = Number(wsIdleTimeoutMatch[1]);
+
   // [management] section
   const mgmtSection = raw.match(/\[management\]([^\[]*)/s);
   if (mgmtSection) {
@@ -1516,6 +1522,29 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   }
   if (updates.idle_timeout_mins !== undefined) {
     raw = raw.replace(/^(idle_timeout_mins\s*=\s*)\d+/m, `$1${updates.idle_timeout_mins}`);
+  }
+  if (updates.max_turn_time_mins !== undefined) {
+    if (raw.match(/^max_turn_time_mins\s*=/m)) {
+      raw = raw.replace(/^(max_turn_time_mins\s*=\s*)\d+/m, `$1${updates.max_turn_time_mins}`);
+    } else {
+      raw = raw.replace(
+        /^(idle_timeout_mins\s*=\s*\d+)/m,
+        `$1\nmax_turn_time_mins = ${updates.max_turn_time_mins}`
+      );
+    }
+  }
+  if (updates.workspace_idle_timeout_mins !== undefined) {
+    if (raw.match(/^workspace_idle_timeout_mins\s*=/m)) {
+      raw = raw.replace(
+        /^(workspace_idle_timeout_mins\s*=\s*)\d+/m,
+        `$1${updates.workspace_idle_timeout_mins}`
+      );
+    } else {
+      raw = raw.replace(
+        /^(idle_timeout_mins\s*=\s*\d+)/m,
+        `$1\nworkspace_idle_timeout_mins = ${updates.workspace_idle_timeout_mins}`
+      );
+    }
   }
 
   // Update [management] section
@@ -5311,6 +5340,16 @@ async function applyTeamConfigUpdate(
   const providerRefs = Array.isArray(body.providerRefs)
     ? normalizeStringArray(body.providerRefs)
     : undefined;
+  const resetOnIdleMins =
+    typeof body.resetOnIdleMins === 'number'
+      ? Math.max(0, Math.round(body.resetOnIdleMins))
+      : undefined;
+  const platformOptionsUpdate =
+    body.platformOptions &&
+    typeof body.platformOptions === 'object' &&
+    !Array.isArray(body.platformOptions)
+      ? (body.platformOptions as Record<string, Record<string, string>>)
+      : undefined;
   const platformAllowFrom = normalizePlatformAllowUpdate(body.platformAllowFrom);
   const platformAllowChat = normalizePlatformAllowUpdate(body.platformAllowChat);
 
@@ -5412,6 +5451,89 @@ async function applyTeamConfigUpdate(
     } catch (err) {
       if (!isCcProjectNotFoundError(err)) {
         ccSyncError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+
+  if (resetOnIdleMins !== undefined) {
+    try {
+      const { content: tomlRaw } = readHermitBridgeConfigTomlRaw();
+      const projectPattern = new RegExp(
+        `(\\[\\[projects\\]\\]\\s*\\n(?:[^\\[]*?)?name\\s*=\\s*"${bindProject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^\\[]*?)(?=\\[\\[|$)`,
+        's'
+      );
+      const projectMatch = tomlRaw.match(projectPattern);
+      if (projectMatch) {
+        let section = projectMatch[1];
+        if (section.match(/^reset_on_idle_mins\s*=/m)) {
+          section = section.replace(/^(reset_on_idle_mins\s*=\s*)\d+/m, `$1${resetOnIdleMins}`);
+        } else {
+          section = section.replace(
+            /(\[\[projects\]\]\s*\n)/,
+            `$1reset_on_idle_mins = ${resetOnIdleMins}\n`
+          );
+        }
+        const updatedToml = tomlRaw.replace(projectPattern, section);
+        writeHermitBridgeConfigRaw(updatedToml);
+        try {
+          await cc.reload();
+        } catch {
+          /* best effort */
+        }
+      }
+    } catch (err) {
+      if (!ccSyncError) {
+        ccSyncError = `reset_on_idle_mins: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+  }
+
+  if (platformOptionsUpdate && Object.keys(platformOptionsUpdate).length > 0) {
+    try {
+      const { content: tomlRaw } = readHermitBridgeConfigTomlRaw();
+      let updatedToml = tomlRaw;
+      for (const [pType, opts] of Object.entries(platformOptionsUpdate)) {
+        for (const [key, value] of Object.entries(opts)) {
+          const platformSection = updatedToml.match(
+            new RegExp(
+              `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n)([^\\[]*)`,
+              's'
+            )
+          );
+          if (platformSection) {
+            const optContent = platformSection[2];
+            const tomlValue = value === 'true' || value === 'false' ? value : `"${value}"`;
+            if (optContent.match(new RegExp(`^${key}\\s*=`, 'm'))) {
+              updatedToml = updatedToml.replace(
+                new RegExp(
+                  `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n[^\\[]*?)^(${key}\\s*=\\s*).*$`,
+                  'ms'
+                ),
+                `$1$2${tomlValue}`
+              );
+            } else {
+              updatedToml = updatedToml.replace(
+                new RegExp(
+                  `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n)`,
+                  's'
+                ),
+                `$1${key} = ${tomlValue}\n`
+              );
+            }
+          }
+        }
+      }
+      if (updatedToml !== tomlRaw) {
+        writeHermitBridgeConfigRaw(updatedToml);
+        try {
+          await cc.reload();
+        } catch {
+          /* best effort */
+        }
+      }
+    } catch (err) {
+      if (!ccSyncError) {
+        ccSyncError = `platformOptions: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
   }
@@ -5520,6 +5642,47 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       cc.getProviderRefs(bindProject).catch(() => []),
       cc.listProviders().catch(() => []),
     ]);
+    let resetOnIdleMins: number | undefined;
+    let platformOptions: Record<string, Record<string, string>> = {};
+    try {
+      const { content: tomlRaw } = readHermitBridgeConfigTomlRaw();
+      const projectPattern = new RegExp(
+        `\\[\\[projects\\]\\]\\s*\\n(?:[^\\[]*?)?name\\s*=\\s*"${bindProject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^\\[]*?(?=\\[\\[projects\\]\\]|$)`,
+        's'
+      );
+      const projectSection = tomlRaw.match(projectPattern);
+      if (projectSection) {
+        const section = projectSection[0];
+        const idleMatch = section.match(/^reset_on_idle_mins\s*=\s*(\d+)/m);
+        if (idleMatch) resetOnIdleMins = Number(idleMatch[1]);
+
+        const platformBlocks = section.matchAll(
+          /\[\[projects\.platforms\]\]\s*\n([^\[]*?)(?=\[\[|$)/gs
+        );
+        for (const block of platformBlocks) {
+          const content = block[1];
+          const typeMatch = content.match(/^type\s*=\s*"([^"]*)"/m);
+          if (!typeMatch) continue;
+          const pType = typeMatch[1];
+          const opts: Record<string, string> = {};
+          const optSection = content.match(
+            /\[projects\.platforms\.options\]\s*\n([^\[]*?)(?=\[|$)/s
+          );
+          if (optSection) {
+            const optLines = optSection[1];
+            for (const line of optLines.split('\n')) {
+              const kv = line.match(/^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\w+))/);
+              if (kv) opts[kv[1]] = kv[2] ?? kv[3];
+            }
+          }
+          if (Object.keys(opts).length > 0) {
+            platformOptions[pType] = { ...platformOptions[pType], ...opts };
+          }
+        }
+      }
+    } catch {
+      /* TOML read may fail if file missing */
+    }
     return {
       name,
       color,
@@ -5538,6 +5701,8 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       platformAllowChat: resolvedPlatformAllowChat,
       providerRefs,
       globalProviders,
+      resetOnIdleMins,
+      platformOptions,
       settings: {
         ...projectSettings,
         language: resolvedLanguage,

@@ -194,12 +194,15 @@ export function RuntimeConfigDialog({
       injectSender:
         cfg?.injectSender ??
         (typeof rawSettings.inject_sender === 'boolean' ? rawSettings.inject_sender : false),
+      resetOnIdleMins: typeof d?.resetOnIdleMins === 'number' ? d.resetOnIdleMins : 0,
       platformAllowFrom:
         cfg?.platformAllowFrom ?? readStringRecord(rawSettings.platform_allow_from),
       platformAllowChat:
         cfg?.platformAllowChat ?? readStringRecord(rawSettings.platform_allow_chat),
       providerRefs: data?.providerRefs ?? [],
       globalProviders: data?.globalProviders ?? [],
+      platformOptions:
+        (d?.platformOptions as Record<string, Record<string, string>> | undefined) ?? {},
       bindProject: (d?.bindProject as string | undefined) ?? teamName,
     };
   }, [data, teamName]);
@@ -219,6 +222,8 @@ export function RuntimeConfigDialog({
   const [showContextIndicator, setShowContextIndicator] = useState(defaults.showContextIndicator);
   const [replyFooter, setReplyFooter] = useState(defaults.replyFooter);
   const [injectSender, setInjectSender] = useState(defaults.injectSender);
+  const [resetOnIdleMins, setResetOnIdleMins] = useState(defaults.resetOnIdleMins);
+  const [platformOpts, setPlatformOpts] = useState(defaults.platformOptions);
   const [savePhase, setSavePhase] = useState<'idle' | 'saving' | 'restarting' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
   const saving = savePhase === 'saving' || savePhase === 'restarting';
@@ -253,6 +258,8 @@ export function RuntimeConfigDialog({
     setShowContextIndicator(d.showContextIndicator);
     setReplyFooter(d.replyFooter);
     setInjectSender(d.injectSender);
+    setResetOnIdleMins(d.resetOnIdleMins);
+    setPlatformOpts(d.platformOptions);
   }, [open]);
 
   // ── Computed ─────────────────────────────────────────────────
@@ -322,6 +329,8 @@ export function RuntimeConfigDialog({
       replyFooter,
       injectSender,
       providerRefs: providerRef ? [providerRef] : [],
+      resetOnIdleMins,
+      platformOptions: platformOpts,
     };
   };
 
@@ -506,42 +515,173 @@ export function RuntimeConfigDialog({
               <BoundPlatformList platforms={boundPlatforms} />
               {platformTypes.length > 0 ? (
                 <div className="space-y-2">
-                  {platformTypes.map((platformType) => (
-                    <details
-                      key={platformType}
-                      className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2"
-                    >
-                      <summary className="cursor-pointer text-xs font-medium text-[var(--color-text)]">
-                        {getPlatformLabel(platformType)} 入口权限
-                      </summary>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div>
-                          <label className={labelCls}>允许用户</label>
-                          <input
-                            type="text"
-                            value={getPlatformAllowValue(platformAllowFrom, platformType)}
-                            onChange={(event) =>
-                              updatePlatformAllowValue('from', platformType, event.target.value)
-                            }
-                            className={`${inputCls} font-mono`}
-                            placeholder={getPlatformAllowPlaceholder(platformType, 'from')}
-                          />
+                  {platformTypes.map((platformType) => {
+                    const meta = platformMeta[canonicalPlatformType(platformType)];
+                    const sessionFields =
+                      meta?.fields.filter(
+                        (f) =>
+                          f.group === 'advanced' &&
+                          f.key !== 'allow_from' &&
+                          f.key !== 'allow_chat' &&
+                          !f.required
+                      ) ?? [];
+                    return (
+                      <details
+                        key={platformType}
+                        className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2"
+                      >
+                        <summary className="cursor-pointer text-xs font-medium text-[var(--color-text)]">
+                          {getPlatformLabel(platformType)} 入口权限 & 会话绑定
+                        </summary>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className={labelCls}>允许用户</label>
+                            <input
+                              type="text"
+                              value={getPlatformAllowValue(platformAllowFrom, platformType)}
+                              onChange={(event) =>
+                                updatePlatformAllowValue('from', platformType, event.target.value)
+                              }
+                              className={`${inputCls} font-mono`}
+                              placeholder={getPlatformAllowPlaceholder(platformType, 'from')}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelCls}>允许群聊/频道</label>
+                            <input
+                              type="text"
+                              value={getPlatformAllowValue(platformAllowChat, platformType)}
+                              onChange={(event) =>
+                                updatePlatformAllowValue('chat', platformType, event.target.value)
+                              }
+                              className={`${inputCls} font-mono`}
+                              placeholder={getPlatformAllowPlaceholder(platformType, 'chat')}
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <label className={labelCls}>允许群聊/频道</label>
-                          <input
-                            type="text"
-                            value={getPlatformAllowValue(platformAllowChat, platformType)}
-                            onChange={(event) =>
-                              updatePlatformAllowValue('chat', platformType, event.target.value)
-                            }
-                            className={`${inputCls} font-mono`}
-                            placeholder={getPlatformAllowPlaceholder(platformType, 'chat')}
-                          />
-                        </div>
-                      </div>
-                    </details>
-                  ))}
+                        {sessionFields.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            <p className="text-[11px] font-medium text-[var(--color-text-secondary)]">
+                              会话绑定
+                            </p>
+                            <div className="space-y-1">
+                              {(() => {
+                                const canonical = canonicalPlatformType(platformType);
+                                const currentOpts = platformOpts[canonical] ?? {};
+                                const exclusiveKeys = [
+                                  'thread_isolation',
+                                  'share_session_in_channel',
+                                ];
+                                const modeFields = sessionFields.filter(
+                                  (f) => exclusiveKeys.includes(f.key) && f.type === 'boolean'
+                                );
+                                const independentBoolFields = sessionFields.filter(
+                                  (f) => !exclusiveKeys.includes(f.key) && f.type === 'boolean'
+                                );
+                                const textFields = sessionFields.filter(
+                                  (f) => f.type !== 'boolean'
+                                );
+
+                                return (
+                                  <>
+                                    {modeFields.map((field) => (
+                                      <div key={field.key}>
+                                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]">
+                                          <input
+                                            type="checkbox"
+                                            checked={currentOpts[field.key] === 'true'}
+                                            onChange={(e) => {
+                                              markRuntimeEdited();
+                                              setPlatformOpts((prev) => {
+                                                const updated = { ...prev[canonical] };
+                                                if (e.target.checked) {
+                                                  for (const k of exclusiveKeys)
+                                                    updated[k] = 'false';
+                                                  updated[field.key] = 'true';
+                                                } else {
+                                                  updated[field.key] = 'false';
+                                                }
+                                                return { ...prev, [canonical]: updated };
+                                              });
+                                            }}
+                                            className="size-3.5"
+                                          />
+                                          {field.label}
+                                        </label>
+                                        {field.hint && (
+                                          <p className="mt-0.5 pl-6 text-[10px] text-[var(--color-text-muted)]">
+                                            {field.hint}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {modeFields.length > 0 && (
+                                      <p className="pl-1 text-[10px] text-[var(--color-text-muted)]">
+                                        Thread 隔离与共享群会话互斥，勾选一项会自动取消另一项。
+                                      </p>
+                                    )}
+                                    {independentBoolFields.map((field) => (
+                                      <div key={field.key}>
+                                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]">
+                                          <input
+                                            type="checkbox"
+                                            checked={currentOpts[field.key] === 'true'}
+                                            onChange={(e) => {
+                                              markRuntimeEdited();
+                                              setPlatformOpts((prev) => ({
+                                                ...prev,
+                                                [canonical]: {
+                                                  ...prev[canonical],
+                                                  [field.key]: e.target.checked ? 'true' : 'false',
+                                                },
+                                              }));
+                                            }}
+                                            className="size-3.5"
+                                          />
+                                          {field.label}
+                                        </label>
+                                        {field.hint && (
+                                          <p className="mt-0.5 pl-6 text-[10px] text-[var(--color-text-muted)]">
+                                            {field.hint}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {textFields.map((field) => (
+                                      <div key={field.key}>
+                                        <label className={labelCls}>{field.label}</label>
+                                        <input
+                                          type="text"
+                                          value={currentOpts[field.key] ?? ''}
+                                          onChange={(e) => {
+                                            markRuntimeEdited();
+                                            setPlatformOpts((prev) => ({
+                                              ...prev,
+                                              [canonical]: {
+                                                ...prev[canonical],
+                                                [field.key]: e.target.value,
+                                              },
+                                            }));
+                                          }}
+                                          className={inputCls}
+                                          placeholder={field.placeholder ?? ''}
+                                        />
+                                        {field.hint && (
+                                          <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                                            {field.hint}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </details>
+                    );
+                  })}
                 </div>
               ) : null}
               <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
@@ -634,6 +774,28 @@ export function RuntimeConfigDialog({
                   />
                   注入发送者
                 </label>
+              </div>
+            </FormSection>
+
+            {/* 会话管理 */}
+            <FormSection title="会话管理" description="控制会话生命周期和自动轮转行为。">
+              <div>
+                <label className={labelCls}>空闲自动轮转（分钟）</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={resetOnIdleMins}
+                  onChange={(e) => {
+                    markRuntimeEdited();
+                    setResetOnIdleMins(Math.max(0, Number(e.target.value) || 0));
+                  }}
+                  className={inputCls}
+                  placeholder="0 = 不自动轮转"
+                />
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  会话空闲超过此时间后自动切换到新会话，旧会话保留可通过 /list 查看。设为 0
+                  表示不自动轮转。
+                </p>
               </div>
             </FormSection>
 

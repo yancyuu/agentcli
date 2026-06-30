@@ -88,6 +88,10 @@ export interface TeamUpdateConfigRequest {
   leadEffort?: EffortLevel;
   leadWorkflow?: string;
   providerRefs?: string[];
+  /** 会话空闲自动轮转（分钟），0 = 不轮转 */
+  resetOnIdleMins?: number;
+  /** 各平台的会话绑定选项（thread_isolation, session_scope 等） */
+  platformOptions?: Record<string, Record<string, string>>;
 }
 
 export interface TeamSummaryMember {
