@@ -132,6 +132,8 @@ import type {
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
 import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
+import { ImLiveWatcher, defaultImSessionsDir } from './services/session-intelligence/ImLiveWatcher';
+import { ClaudeBinaryResolver } from './services/team/ClaudeBinaryResolver';
 import {
   filterHiddenTeamSessions,
   mergeLocalAndCcSessions,
@@ -901,6 +903,13 @@ bridge.start();
 // bridge reply handler), so the existing renderer refresh Just Works.
 // ---------------------------------------------------------------------------
 const directCliManager = new DirectCliSessionManager();
+// IM live workers: re-scan hermit-bridge session files on change (+ 5s watchdog)
+// and push detected workers to the renderer via the 'im-live-workers' SSE event,
+// mirroring the team-change push model.
+const imLiveWatcher = new ImLiveWatcher({
+  sessionsDir: defaultImSessionsDir(),
+  emit: (workers) => broadcastSse('im-live-workers', workers),
+});
 const hermitCcSettings = new HermitCcSettingsService(HERMIT_SETTINGS_FILE);
 
 async function readEffectiveCcSettings(): Promise<Record<string, unknown>> {
@@ -1919,6 +1928,57 @@ app.post<{ Body: { command: string; args?: string[]; cwd?: string } }>(
     }
   }
 );
+
+// POST /api/direct-cli/resume-in-terminal — open a system terminal resuming a
+// team member's or an IM agent's Claude session. For a team member it resolves
+// the session id from the DirectCliSessionStore (same key member DMs use) and
+// the workDir from the team manifest; for an IM agent the watcher already sent
+// the agent_session_id (and a best-effort cwd). Reuses openCommandInSystemTerminal.
+app.post<{
+  Body: {
+    teamName?: string;
+    memberName?: string;
+    resumeSessionId?: string;
+    /** Backward-compatible alias for older IM callers. Prefer resumeSessionId. */
+    agentSessionId?: string;
+    cwd?: string;
+  };
+}>('/api/direct-cli/resume-in-terminal', async (request, reply) => {
+  try {
+    assertTrustedBrowserOrigin(request);
+    const { teamName, memberName, resumeSessionId, agentSessionId, cwd } = request.body ?? {};
+
+    let sessionId: string | undefined;
+    let workDir = '';
+    const directResumeSessionId = resumeSessionId?.trim() || agentSessionId?.trim() || '';
+    if (directResumeSessionId) {
+      sessionId = directResumeSessionId;
+      workDir = cwd?.trim() || '';
+    } else if (teamName) {
+      const member = memberName?.trim() || 'lead';
+      const sessionKey = `${teamName}:member:${member}`;
+      sessionId = directCliManager.getSessionId(sessionKey);
+      workDir = cwd?.trim() || (await resolveDirectCliWorkDir(teamName).catch(() => ''));
+      if (!sessionId) {
+        return reply.code(404).send({ error: `No Claude session found for ${sessionKey}` });
+      }
+    } else {
+      return reply.code(400).send({ error: 'teamName or resumeSessionId is required' });
+    }
+
+    const binary = (await ClaudeBinaryResolver.resolve().catch(() => null)) || 'claude';
+    const args = ['--resume', sessionId];
+    const cmd = [binary, ...args].map(shellQuote).join(' ');
+    const shellLine = workDir ? `cd ${shellQuote(workDir)} && ${cmd}` : cmd;
+    const windowsCmd = [binary, ...args].map(cmdQuote).join(' ');
+    const windowsShellLine = workDir ? `cd /d ${cmdQuote(workDir)} && ${windowsCmd}` : windowsCmd;
+    await openCommandInSystemTerminal(shellLine, windowsShellLine);
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return reply.code(message.startsWith('Forbidden origin:') ? 403 : 500).send({ error: message });
+  }
+});
 
 // Worker Society REST 路由（/api/society/*）—— worker 自治社会的 HTTP 接口（workers/needs/social/feed）。
 registerSocietyRoutes(app, workerSociety);
@@ -7378,6 +7438,7 @@ await bridgeLauncher
   .catch((err) => app.log.warn({ err }, 'hermit-bridge auto-launch skipped'));
 // 启动 hermit-bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
+imLiveWatcher.start();
 await initializeTaskBusFromSettings();
 await ensureGlobalWorkflows();
 
@@ -7398,6 +7459,7 @@ try {
 // graceful shutdown
 const shutdown = async () => {
   try {
+    imLiveWatcher.stop();
     directCliManager.shutdown();
     bridgeLauncher.stop();
     bridge.dispose?.();

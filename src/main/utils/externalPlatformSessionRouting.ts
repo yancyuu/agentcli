@@ -1,10 +1,21 @@
-import type { TeamManifest } from '@main/services/team-management/TeamWorkspaceService';
 import {
   isExternalPlatformSessionKey as isParsedExternalPlatformSessionKey,
   parseExternalPlatformSessionKey as parsePlatformSessionKey,
 } from '@main/utils/externalPlatformSessionKey';
 
+import type { TeamManifest } from '@main/services/team-management/TeamWorkspaceService';
+
 const FEISHU_LARK_KEYS = new Set(['feishu', 'lark']);
+
+function routingUserIdFromSessionKey(
+  sessionKey: string,
+  platform: string,
+  parsedUserId: string | undefined
+): string | undefined {
+  if (parsedUserId || !FEISHU_LARK_KEYS.has(platform)) return parsedUserId;
+  const [, ...ids] = sessionKey.split(':').filter(Boolean);
+  return ids.find((id) => /^ou_/i.test(id));
+}
 
 export interface ExternalPlatformSessionKey {
   platform: string;
@@ -92,9 +103,13 @@ export function resolveExternalPlatformSessionTeamSlug(
 ): string | null {
   const parsed = parseExternalPlatformSessionKey(sessionKey);
   if (!parsed) return null;
+  const routableParsed = {
+    ...parsed,
+    userId: routingUserIdFromSessionKey(sessionKey, parsed.platform, parsed.userId),
+  };
 
   const ranked = manifests
-    .map((manifest) => ({ manifest, score: scoreManifestForSession(manifest, parsed) }))
+    .map((manifest) => ({ manifest, score: scoreManifestForSession(manifest, routableParsed) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 

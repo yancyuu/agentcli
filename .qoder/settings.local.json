@@ -324,7 +324,17 @@
       "Bash(grep -n \"hermit\\\\|session_key\\\\|prefix\\\\|platform.*key\" ~/code/cc-connect/platform/bridge/*.go 2>/dev/null | head -20)",
       "Bash(ls ~/code/cc-connect/platform/bridge/ 2>/dev/null || find ~/code/cc-connect -name \"*.go\" | xargs grep -l \"bridge\" 2>/dev/null | head -5)",
       "Bash(grep -n \"hermit\\\\|session_key\\\\|prefix\\\\|SessionKey\\\\|sessionKey\" ~/code/cc-connect/core/bridge.go | head -20)",
-      "Bash(grep -n \"groupSessionKey\\\\|hermit:\" /Users/yancy/code/hermit/src/main/ -r | head -20)"
+      "Bash(grep -n \"groupSessionKey\\\\|hermit:\" /Users/yancy/code/hermit/src/main/ -r | head -20)",
+      "Bash(ls -la /Users/yancyyu/code/hermit/_site 2>/dev/null; echo \"---\"; ls -la /Users/yancyyu/code/hermit/bin/ 2>/dev/null)",
+      "Bash(ls -la /Users/yancyyu/code/hermit/landing 2>&1; echo \"===\"; ls -la /Users/yancyyu/code/hermit/resources 2>&1; echo \"===\"; ls /Users/yancyyu/code/hermit/docs/screenshots/ 2>&1; echo \"===\"; ls /Users/yancyyu/code/hermit/docs/screenshots/openhermit 2>&1; echo \"===\"; ls -la /Users/yancyyu/code/hermit/.github 2>&1)",
+      "Bash(ls -la /Users/yancyyu/code/hermit/resources/icons/ 2>&1; echo \"===\"; ls -la /Users/yancyyu/code/hermit/.github/workflows/ 2>&1; echo \"===\"; ls -la /Users/yancyyu/code/hermit/.github/ISSUE_TEMPLATE/ 2>&1)",
+      "Bash(ls /Users/yancyyu/code/hermit/dist-renderer/ 2>&1 | head -20)",
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(cd /Users/yancyyu/code/hermit && node scripts/build-pages.mjs)",
+      "Bash(cd /Users/yancyyu/code/hermit && test -s _site/index.html && echo \"index.html OK\" && test -s _site/install.sh && echo \"install.sh OK\" && grep -q \"openHermit CLI\" _site/index.html && echo \"title grep OK\" && grep -q \"curl\" _site/install.sh && echo \"curl grep OK\" && echo \"All checks passed\")",
+      "Bash(cd /Users/yancyyu/code/hermit && git diff main -- src/renderer/components/layout/TabbedLayout.tsx 2>/dev/null | head -80)",
+      "Bash(cd /Users/yancyyu/code/hermit && git --no-pager log --oneline -5 -- src/renderer/components/layout/TabbedLayout.tsx)"
     ]
   }
 }

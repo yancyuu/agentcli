@@ -98,17 +98,23 @@ function normalizeScopes(payload) {
 
 function normalizeAccessTokenPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
-  const accessToken = payload.access_token;
+  const accessToken = payload.access_token || payload.accessToken;
   if (typeof accessToken !== 'string' || !accessToken) return null;
   const scopes = normalizeScopes(payload);
   return {
     accessToken,
-    refreshToken: payload.refresh_token || null,
-    tokenType: payload.token_type || 'Bearer',
+    refreshToken: payload.refresh_token || payload.refreshToken || null,
+    tokenType: payload.token_type || payload.tokenType || 'Bearer',
     scope: typeof payload.scope === 'string' ? payload.scope : scopes?.join(' '),
     scopes,
-    expiresAt: normalizeExpiry(payload.access_expires_in, payload.access_expires_at),
-    refreshExpiresAt: normalizeExpiry(payload.refresh_expires_in, payload.refresh_expires_at),
+    expiresAt: normalizeExpiry(
+      payload.access_expires_in ?? payload.accessExpiresIn ?? payload.expires_in ?? payload.expiresIn,
+      payload.access_expires_at || payload.accessExpiresAt || payload.expires_at || payload.expiresAt
+    ),
+    refreshExpiresAt: normalizeExpiry(
+      payload.refresh_expires_in ?? payload.refreshExpiresIn,
+      payload.refresh_expires_at || payload.refreshExpiresAt
+    ),
   };
 }
 
@@ -221,6 +227,7 @@ function getDeviceAuthConfig({ controlUrl = null } = {}) {
   return {
     baseUrl,
     startUrl: process.env.OPENHERMIT_AUTH_START_URL || `${baseUrl}/api/v1/auth/start`,
+    startFallbackUrl: process.env.OPENHERMIT_AUTH_START_FALLBACK_URL || `${baseUrl}/api/cli-auth/start`,
     pollUrl: process.env.OPENHERMIT_AUTH_POLL_URL || `${baseUrl}/api/v1/auth/poll`,
     refreshUrl: process.env.OPENHERMIT_AUTH_REFRESH_URL || `${baseUrl}/api/v1/auth/refresh`,
     meUrl: process.env.OPENHERMIT_AUTH_ME_URL || `${baseUrl}/api/v1/auth/me`,
@@ -604,25 +611,39 @@ async function performRawOAuthLogin({ quiet = false } = {}) {
 }
 
 async function startDeviceAuthSession(config) {
-  const res = await fetch(config.startUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  const payload = await res.json().catch(() => null);
-  if (!res.ok || !payload) {
-    throw new Error(`CLI auth start failed (HTTP ${res.status})`);
+  const startUrls = [config.startUrl, config.startFallbackUrl].filter(Boolean);
+  let lastStatus = 0;
+  let payload = null;
+  for (const startUrl of startUrls) {
+    const res = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    lastStatus = res.status;
+    payload = await res.json().catch(() => null);
+    if (res.ok && payload) break;
+    if (res.status !== 404 || startUrl === startUrls[startUrls.length - 1]) {
+      throw new Error(`CLI auth start failed (HTTP ${res.status})`);
+    }
   }
 
-  if (!payload.flow_id || !payload.poll_secret || !payload.authorization_url) {
-    throw new Error(`Hermit auth start returned an unsupported response (HTTP ${res.status})`);
+  if (!payload) {
+    throw new Error(`CLI auth start failed (HTTP ${lastStatus || 0})`);
+  }
+
+  const flowId = payload.flow_id || payload.deviceCode;
+  const pollSecret = payload.poll_secret || payload.pollSecret || flowId;
+  const authorizationUrl = payload.authorization_url || payload.verificationUriComplete;
+  if (!flowId || !pollSecret || !authorizationUrl) {
+    throw new Error(`Hermit auth start returned an unsupported response (HTTP ${lastStatus})`);
   }
 
   return {
-    flowId: payload.flow_id,
-    pollSecret: payload.poll_secret,
-    authorizationUrl: payload.authorization_url,
-    expiresIn: Number(payload.expires_in || 600),
+    flowId,
+    pollSecret,
+    authorizationUrl,
+    expiresIn: Number(payload.expires_in ?? payload.expiresIn ?? 600),
     interval: Math.max(1, Number(payload.interval || 2)),
   };
 }
@@ -663,12 +684,20 @@ async function pollDeviceAuthToken(config, session, { signal = null } = {}) {
   while (Date.now() < timeoutAt) {
     if (signal?.aborted) throw signal.reason || new Error('CLI auth cancelled');
     const fetchSignal = AbortSignal.timeout(30_000);
-    const res = await fetch(`${config.pollUrl}?flow_id=${encodeURIComponent(session.flowId)}&poll_secret=${encodeURIComponent(session.pollSecret)}`, {
-      headers: { Accept: 'application/json' },
-      signal: fetchSignal,
-    });
+    const isLegacyCliAuthToken = new URL(config.pollUrl).pathname === '/api/cli-auth/token';
+    const res = isLegacyCliAuthToken
+      ? await fetch(config.pollUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ deviceCode: session.flowId, pollSecret: session.pollSecret }),
+          signal: fetchSignal,
+        })
+      : await fetch(`${config.pollUrl}?flow_id=${encodeURIComponent(session.flowId)}&poll_secret=${encodeURIComponent(session.pollSecret)}`, {
+          headers: { Accept: 'application/json' },
+          signal: fetchSignal,
+        });
     const payload = await res.json().catch(() => null);
-    if (res.ok && payload?.status === 'authorized' && payload?.access_token) return payload;
+    if (res.ok && normalizeAccessTokenPayload(payload)) return payload;
     const status = payload?.status || '';
     const error = payload?.error || status;
     if (error === 'authorization_pending') {
@@ -749,6 +778,7 @@ async function performDeviceAuthLogin({ quiet = false, controlUrl = null } = {})
 }
 
 async function performOpenHermitLogin(options = {}) {
+  if (!options.controlUrl && hasRawOAuthConfig()) return performRawOAuthLogin(options);
   return performDeviceAuthLogin(options);
 }
 

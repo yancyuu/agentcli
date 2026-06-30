@@ -156,7 +156,7 @@ import {
   normalizeUploadProviders,
   uploadProviderLabel,
 } from './lib/usageRemote.mjs';
-import { formatNumber, localServerRows } from './lib/usageRows.mjs';
+import { cursorPendingRows, formatNumber, localServerRows } from './lib/usageRows.mjs';
 import { aggregateUploadProgress, uploadProgressLabel } from './lib/usageProgress.mjs';
 import {
   NAV_ACTIONS,
@@ -942,7 +942,6 @@ function cursorStatusText(channel) {
   if (channel.hasCursor) {
     const parts = [`cursor ${String(channel.cursorHash || '').slice(0, 12)}`];
     if (Number.isFinite(channel.cursorMessageCount)) parts.push(`${formatNumber(channel.cursorMessageCount)} msg`);
-    if (Number.isFinite(channel.cursorFileCount)) parts.push(`${formatNumber(channel.cursorFileCount)} files`);
     if (channel.cursorGeneratedAt) parts.push(new Date(channel.cursorGeneratedAt).toLocaleString('zh-CN'));
     return parts.join(' · ');
   }
@@ -1012,8 +1011,9 @@ async function printUsageRows(title, data, hint) {
   printCliRows(title, [
     ['消息上报', uploadText, uploadEnabled ? auth.authorized ? states.usageRunning ? 'ok' : 'warn' : 'warn' : 'off'],
     ...localServerRows(data.telemetry, data.authoritativeUsage),
+    ...cursorPendingRows(upload),
     ...(uploadEnabled ? conversationUploadRows(upload, auth, data.remoteUsage) : []),
-  ], hint || '本地 = 本机消息量；服务端 = 服务端已收；待上报 = 本地 − 服务端。');
+  ], hint || '待上报来自服务端 cursor 扫描结果；本地/服务端总账只作诊断对比。');
 }
 
 async function printUsageStatus({ exitOnDone = true } = {}) {
@@ -1678,7 +1678,7 @@ async function printUsageReport({ exitOnDone = true } = {}) {
         ['消息上报', '已开启，但未登录', 'warn'],
         ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
         ['下一步', '先执行 openhermit auth login', 'info'],
-      ], '立即扫描并上报需要 Bearer 登录授权；登录后再执行会按本地游标只上传新增消息。');
+      ], '立即扫描并上报需要 Bearer 登录授权；登录后再执行会按服务端 cursor 只扫描新增消息。');
       if (exitOnDone) process.exit(1);
       return result;
     }
@@ -1718,7 +1718,7 @@ async function printUsageReport({ exitOnDone = true } = {}) {
       ...data,
     };
     if (jsonRequested) printJson(result);
-    await printUsageRows('用量上报报告', data, '已执行一次增量扫描；消息上报开启时会按本地游标只上传新增消息。');
+    await printUsageRows('用量上报报告', data, '已执行一次增量扫描；消息上报开启时会按服务端 cursor 只扫描新增消息。');
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
@@ -1751,7 +1751,7 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
         ['消息上报', '已开启，但未登录', 'warn'],
         ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
         ['下一步', '先执行 openhermit auth login', 'info'],
-      ], '登录后再执行会按本地游标只上传新增消息。');
+      ], '登录后再执行会按服务端 cursor 只扫描新增消息。');
       if (exitOnDone) process.exit(1);
       return result;
     }
@@ -1793,6 +1793,7 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
       accepted > 0 ? 'ok' : uploadError ? 'error' : 'info',
     ]);
     rows.push(...localServerRows(data.telemetry, data.authoritativeUsage));
+    rows.push(...cursorPendingRows(upload));
     // Per-channel breakdown so it's visible which provider/mode reported vs not
     // (e.g. claudecode/im never_reported = the 422-stuck channel). remoteUsage is
     // always fetched by readUsageStatus(!localOnly); reuse the same renderer the
@@ -1805,7 +1806,7 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
     printCliRows(
       '立即扫描并上报一次',
       rows,
-      '本地/服务端/待上报 为汇总（待上报含本地按设计跳过的工具结果等非对话记录，故可能偏大）；下方按渠道：success=该渠道已上报，never_reported=该渠道尚未上报成功。',
+      '待上报来自本次按服务端 cursor 扫描后尚未成功提交的消息数；本地/服务端总账只作诊断对比，不用于相减。下方按渠道：success=该渠道已提交 cursor，never_reported=该渠道尚未提交 cursor。',
     );
     if (exitOnDone) process.exit(0);
     return result;

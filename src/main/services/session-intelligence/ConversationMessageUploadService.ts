@@ -1348,12 +1348,23 @@ async function uploadPlatformModeMessages(
   const foreground = process.env.HERMIT_USAGE_FOREGROUND_SCAN === '1';
   const inFlightCount = Number(channel?.inFlight?.count ?? 0);
   if (inFlightCount > 0 && !(foreground || fullRescan)) {
+    const conversationCfgEarly = cfg.telemetry?.conversations;
+    const { messages: pendingMessages } = await collectMessagesForPlatform(
+      platform,
+      mode,
+      channel?.currentCursor,
+      conversationCfgEarly?.batchSize ?? 0,
+      generatedAt
+    );
     await appendUploadLog(home, 'server-channel-inflight', {
       platform,
       mode,
+      pending: pendingMessages.length,
       uploadIds: channel?.inFlight?.uploadIds ?? [],
     });
     return emptyStatus(true, true, {
+      pending: pendingMessages.length,
+      totalDiscovered: pendingMessages.length,
       lastUploadStatus: channel?.status || 'processing',
       uploadIds: channel?.inFlight?.uploadIds ?? [],
     });

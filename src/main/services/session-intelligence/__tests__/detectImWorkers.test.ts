@@ -5,6 +5,7 @@ import type {
   ParsedHermitBridgeStore,
   ParsedHermitBridgeSession,
 } from '../hermitBridgeSessionStore';
+import type { HermitBridgeSessionMessage } from '@shared/types/hermitBridge';
 
 const NOW = Date.parse('2026-06-21T13:00:00+08:00');
 
@@ -18,7 +19,7 @@ function session(
   } = {}
 ): ParsedHermitBridgeSession {
   const role = opts.lastRole ?? 'user';
-  const history =
+  const history: HermitBridgeSessionMessage[] =
     opts.lastHistoryAt === undefined
       ? []
       : [

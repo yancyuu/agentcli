@@ -128,6 +128,9 @@ export function uploadProgressLabel(snapshot = {}, { barWidth = 18 } = {}) {
       : discovered > 0
         ? '扫描中'
         : '等待扫描';
+  if (!hasBatch && discovered <= 0) {
+    return `${progressBar(0, barWidth)} · ${state}`;
+  }
   const batchPart = hasBatch
     ? ` · 批次 ${formatNumber(Number(snapshot.batchIndex ?? 0))}/${formatNumber(Number(snapshot.totalBatches ?? 0))}`
     : '';
