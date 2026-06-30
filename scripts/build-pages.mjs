@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,377 +11,405 @@ function writeText(relativePath, content) {
   writeFileSync(target, content.trimStart(), 'utf8');
 }
 
-function copyIfExists(fromRelative, toRelative = fromRelative) {
+function copyFile(fromRelative, toRelative = fromRelative) {
   const source = join(ROOT, fromRelative);
   if (!existsSync(source)) return;
   const target = join(OUT_DIR, toRelative);
   mkdirSync(dirname(target), { recursive: true });
-  cpSync(source, target, { recursive: true });
+  copyFileSync(source, target);
 }
-
-function escapeHtml(value) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
-
-const manual = `# openHermit Agent Runbook
-
-This page is for AI agents and operators. It is an operational manual, not a marketing page.
-
-If you are an agent reading this page, your job is to understand what openHermit is, where team state lives, how a digital employee workspace should be structured, what workflow to follow, and how to diagnose Lark/Feishu CLI isolation problems without leaking secrets.
-
-## 1. Project identity
-
-- Product: openHermit.
-- Package: \`@yancyyu/openhermit\`.
-- Shape: Fastify API + Vite Web UI.
-- Default route: \`/teams\`.
-- Default local state: \`~/.hermit/\`.
-- Runtime bridge: cc-connect Bridge / Management API.
-- Purpose: operate many local digital employees / department agents from one control plane.
-- Not current capabilities: Electron desktop packaging, embedded PTY terminal.
-
-openHermit treats each department agent as a manageable digital employee / Loop workspace. The UI is used to create teams, observe liveness, inspect sessions/messages/tasks, configure channels, launch loops, schedule recurring work, and diagnose failures.
-
-## 2. Mental model
-
-\`\`\`text
-Browser / Vite UI
-  -> Fastify API
-  -> ~/.hermit team/task/message workspace
-  -> cc-connect Bridge / Management API
-  -> local agent runtimes and external channels
-\`\`\`
-
-Core objects:
-
-- Team: a named digital employee workspace with runtime config, members, project path, optional worktree isolation, and channel allow-lists.
-- Task: a board item or dispatch projection with status, comments, delivery, and review state.
-- Message: team chat, cross-team message, external channel message, or bridge event.
-- Channel: Feishu/Lark, Weixin, Slack, Telegram, Discord, and other platform adapters are carried by cc-connect; Hermit controls routing, allow-lists, and audit.
-- Task Bus: current implementation is Redis-backed dispatch; offer/bid/lease/event Task Bus is the target model.
-
-## 3. openHermit local data structure
-
-Default Hermit state:
-
-\`\`\`text
-~/.hermit/
-  teams/
-    <team-slug>/
-      team.json
-      messages/
-        group.jsonl
-      tasks/
-        board.json
-  cc-connect/
-    config.toml
-  logs/
-\`\`\`
-
-Important rules:
-
-- Do not invent team directories from unmapped external session keys.
-- If an external session cannot route to a known team, reject or surface the routing problem.
-- Do not store secrets in docs, messages, reports, or memory files.
-- Treat \`~/.hermit/cc-connect/config.toml\`, app secrets, access tokens, cookies, and profile auth state as sensitive.
-
-## 4. Recommended digital employee workspace structure
-
-For department teams, use a predictable directory structure. The examples below use \`/Users/distill/teams\` because the reference deployment uses that root. On another machine, replace it with the actual team root.
-
-\`\`\`text
-/Users/distill/teams/
-  .memory/
-    rules/
-    data-sources/
-    decisions/
-    needs-review/
-      proposals/
-  .claude/
-    skills/
-    workflows/
-  .templates/
-    team-workspace-template/
-  <team-folder>/
-    .env
-    CLAUDE.md
-    00_index/
-      conflict-review.md
-      cleanup-candidates.md
-    01_business-docs/
-    03_data/
-    07_memory/
-    99_temp/
-    .claude/
-      skills/
-\`\`\`
-
-What goes where:
-
-| Location | Use | Do not put |
-| --- | --- | --- |
-| \`<team>/07_memory/\` | Team business facts, stable rules, source pointers, owner, last-confirmed date | secrets, raw exports, transient tool output |
-| \`.memory/\` | Cross-team rules approved by workspace/admin owner | unapproved team-specific facts |
-| \`.memory/needs-review/\` | Proposals, conflicts, uncertain observations | canonical facts |
-| \`.claude/skills/\` at workspace root | shared governance or reusable operational skills | per-team business secrets |
-| \`<team>/.claude/skills/\` | team-specific repeatable operations | global governance duplicated into every team |
-| \`.claude/workflows/\` | stable multi-step scripts/workflows | long-term business facts |
-| \`99_temp/\` | temporary notes and raw material awaiting review | durable policy |
-
-Memory rule: memory stores stable facts and pointers. Repeatable actions become skills, workflows, or cron jobs. Do not hide automation rules only in memory because memory may not always load.
-
-## 5. Recommended agent workflow
-
-When asked to operate or debug a digital employee:
-
-1. Identify the team slug, display name, project path, runtime provider, and channel source.
-2. Open or query openHermit team data from \`/teams\` or the API.
-3. Read the team \`CLAUDE.md\` and relevant \`07_memory/\` entries before acting on business rules.
-4. Check whether the task is a normal message, local team task, Redis dispatch, scheduled Loop, or external channel event.
-5. If making code changes, prefer worktree isolation for parallel agents.
-6. If using Feishu/Lark, verify the active \`lark-cli\` profile before reading or writing any resource.
-7. Execute the smallest safe action, capture evidence, and update task/message status.
-8. For repeated manual actions, propose or create a skill/workflow/cron rather than adding more prose to memory.
-9. For stable facts, write a short memory entry with source, owner, last-confirmed date, scope, and sensitivity status.
-10. If facts conflict, stop and route to \`00_index/conflict-review.md\` or \`.memory/needs-review/\`.
-
-## 6. Recommended operational loops
-
-Use these loops as defaults:
-
-### Team health loop
-
-- List teams.
-- Check liveness and recent activity.
-- Check failed sessions and stuck tasks.
-- Check channel binding and allow-list drift.
-- Produce a short report with team, symptom, evidence, recommended next action.
-
-### Task dispatch loop
-
-- Confirm source team and target team.
-- Determine if this is a lightweight cross-team message or formal Redis-backed dispatch.
-- For formal dispatch, ensure Redis task bus is configured.
-- Create or inspect target TODO projection.
-- Do not send runtime execution message until the target team/task is explicitly started.
-- Track received -> in_progress -> completed/approved.
-
-### Memory governance loop
-
-- Classify content: team fact, workspace rule, personal preference, workflow/SOP, cron, or temporary note.
-- Team fact -> \`<team>/07_memory/\`.
-- Cross-team rule -> \`.memory/proposals\` or \`.memory/needs-review\` until approved.
-- Repeatable operation -> skill/workflow/cron.
-- Raw export -> data/report path with pointer only in memory.
-- Secrets -> never write to memory or docs.
-
-### Scheduled Loop loop
-
-- Define owner, frequency, input scope, output location, failure notification, and stop condition.
-- Store cron/task config in an enumerable place.
-- Keep raw outputs out of canonical memory.
-- Promote only reviewed summaries into memory.
-
-## 7. Feishu/Lark CLI team isolation
-
-Each team must use its own \`lark-cli\` profile. Put this wrapper at \`~/.local/bin/lark-cli\`, make sure \`~/.local/bin\` is before the real CLI in \`PATH\`, and keep the real CLI at \`~/.npm-global/bin/lark-cli\` or set \`LARK_CLI_REAL\`.
-
-The wrapper chooses the profile by walking upward from the current directory to the nearest \`.env\` and reading \`LARK_CLI_PROFILE\`:
-
-\`\`\`bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-REAL="\${LARK_CLI_REAL:-$HOME/.npm-global/bin/lark-cli}"
-if [[ ! -x "$REAL" ]]; then
-  echo "lark-cli wrapper: real CLI not executable: $REAL" >&2
-  exit 127
-fi
-
-find_team_env() {
-  local dir
-  dir="$(pwd -P)"
-  while true; do
-    if [[ -f "$dir/.env" ]]; then
-      printf '%s\\n' "$dir/.env"
-      return 0
-    fi
-    [[ "$dir" == "/" ]] && return 1
-    dir="$(dirname "$dir")"
-  done
-}
-
-read_env_value() {
-  local file="$1"
-  local key="$2"
-  awk -F= -v key="$key" '
-    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
-      value=$0
-      sub(/^[^=]*=/, "", value)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      gsub(/^['\''\"]|['\''\"]$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
-
-ENV_FILE="$(find_team_env || true)"
-PROFILE=""
-
-if [[ -n "$ENV_FILE" ]]; then
-  PROFILE="$(read_env_value "$ENV_FILE" LARK_CLI_PROFILE || true)"
-fi
-
-if [[ -z "$PROFILE" ]]; then
-  echo "lark-cli wrapper: no LARK_CLI_PROFILE found in nearest .env from $(pwd -P)" >&2
-  echo "Add LARK_CLI_PROFILE=<team-profile> to the team .env, or call the real CLI with --profile explicitly." >&2
-  exit 2
-fi
-
-exec "$REAL" --profile "$PROFILE" "$@"
-\`\`\`
-
-Team \`.env\` template:
-
-\`\`\`bash
-LARK_CLI_PROFILE=<team-folder-name>
-LARK_CLI_BRAND=feishu
-
-LARK_APP_ID=<app_id>
-LARK_APP_SECRET=<app_secret>
-
-# Alternative variable names if the team standard uses Feishu naming:
-# FEISHU_APP_ID=<app_id>
-# FEISHU_APP_SECRET=<app_secret>
-
-# Optional override for real CLI path:
-# LARK_CLI_REAL=/Users/distill/.npm-global/bin/lark-cli
-\`\`\`
-
-Security:
-
-- \`LARK_CLI_PROFILE\` can be printed.
-- App id follows internal policy.
-- App secret must never be printed, committed, logged, pasted into docs, or stored in memory.
-
-Before any Feishu/Lark operation inside a team directory, run:
-
-\`\`\`bash
-pwd
-command -v lark-cli
-lark-cli config show
-lark-cli profile list
-\`\`\`
-
-Expected:
-
-- \`command -v lark-cli\` should point to \`~/.local/bin/lark-cli\`.
-- \`lark-cli config show\` should show the current team profile.
-- User auth pages should show the current team app name.
-
-If a script intentionally bypasses the wrapper by calling the real binary, it must pass \`--profile <team-profile>\` explicitly.
-
-`;
-
-const llmsTxt = `# openHermit
-
-openHermit is a local-first Loop Engineering workbench for operating digital employees / department agents.
-
-Primary agent-readable manual: /agent-manual.md
-Human HTML mirror: /index.html
-Repository: https://github.com/yancyuu/Hermit
-
-Key facts:
-- Package: @yancyyu/openhermit
-- Default route: /teams
-- Default state: ~/.hermit/
-- Runtime bridge: cc-connect
-- Team state: ~/.hermit/teams/<team-slug>/team.json, messages/group.jsonl, tasks/board.json
-- Current cross-team implementation: Redis-backed dispatch
-- Target Task Bus model: offer / bid / lease / event
-- Feishu/Lark isolation: PATH-level lark-cli wrapper reads nearest team .env and injects LARK_CLI_PROFILE
-`;
 
 const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>openHermit Agent Runbook</title>
-  <meta name="description" content="Agent-readable openHermit operations and troubleshooting manual." />
-  <meta property="og:title" content="openHermit Agent Runbook" />
-  <meta property="og:description" content="A runbook for agents operating openHermit digital employee teams." />
-  <meta property="og:image" content="docs/screenshots/openhermit/team-list.png" />
+  <title>openHermit CLI - 终端原生智能工作台</title>
+  <meta name="description" content="在终端中与 AI 协作，将想法直接变为可交付软件。" />
+  <meta property="og:title" content="openHermit CLI" />
+  <meta property="og:description" content="终端原生智能工作台，驱动数字员工高效协作。" />
   <meta property="og:type" content="website" />
-  <link rel="icon" href="resources/icons/png/1024x1024.png" />
+  <link rel="icon" href="icon.png" />
   <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
+    :root {
+      --bg: #090A0B;
+      --bg-card: #111113;
+      --border: #27272a;
+      --text: #e4e4e7;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --accent: #8B5CF6;
+      --accent-light: #a78bfa;
+      --green: #22c55e;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      margin: 0;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-      background: #09090b;
-      color: #e4e4e7;
-      line-height: 1.65;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
     }
-    header, main, footer { max-width: 1120px; margin: 0 auto; padding: 24px; }
-    header { border-bottom: 1px solid #27272a; }
-    .eyebrow { color: #22c55e; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-    h1 { margin: 8px 0 12px; font-size: clamp(28px, 5vw, 54px); line-height: 1.05; }
-    .lead { max-width: 860px; color: #a1a1aa; font-size: 16px; }
-    .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-    a { color: #7dd3fc; }
-    .links a { border: 1px solid #3f3f46; border-radius: 999px; padding: 8px 12px; text-decoration: none; color: #e4e4e7; }
-    .shot { width: 100%; border: 1px solid #27272a; border-radius: 14px; margin: 22px 0; }
-    pre.manual {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      background: #111113;
-      border: 1px solid #27272a;
-      border-radius: 14px;
-      padding: 22px;
+    a { color: var(--accent-light); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Header */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .header-logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header-logo img { width: 28px; height: 28px; border-radius: 6px; }
+    .header-nav { display: flex; gap: 24px; align-items: center; }
+    .header-nav a { color: var(--text-muted); font-size: 14px; }
+    .header-nav a:hover { color: var(--text); text-decoration: none; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 24px 60px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      border-radius: 999px;
+      padding: 4px 14px;
+      font-size: 13px;
+      color: var(--accent-light);
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(36px, 6vw, 64px);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, var(--text) 0%, var(--accent-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 32px;
+    }
+
+    /* Install tabs */
+    .install-box {
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .install-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .install-tab {
+      flex: 1;
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      background: none;
+      transition: color 0.2s, background 0.2s;
+    }
+    .install-tab.active {
+      color: var(--accent-light);
+      background: rgba(139, 92, 246, 0.05);
+      border-bottom: 2px solid var(--accent);
+    }
+    .install-content { display: none; padding: 20px 24px; }
+    .install-content.active { display: block; }
+    .install-cmd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 14px;
+      color: var(--green);
+      word-break: break-all;
+      user-select: all;
     }
-    footer { color: #71717a; border-top: 1px solid #27272a; }
+    .install-cmd .comment { color: var(--text-dim); }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 24px;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    .stat-card {
+      text-align: center;
+      padding: 32px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .stat-number {
+      font-size: 48px;
+      font-weight: 800;
+      color: var(--accent-light);
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Features */
+    .features-section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    .features-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .features-header h2 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .features-header p {
+      color: var(--text-muted);
+      font-size: 16px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 24px;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: var(--accent); }
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      background: rgba(139, 92, 246, 0.1);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      font-size: 20px;
+    }
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* SDK section */
+    .sdk-section {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 60px 24px;
+      text-align: center;
+    }
+    .sdk-section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .sdk-section > p {
+      color: var(--text-muted);
+      font-size: 16px;
+      margin-bottom: 28px;
+    }
+    .sdk-install {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      text-align: left;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      color: var(--green);
+    }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    .footer-left { color: var(--text-dim); font-size: 13px; }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a { color: var(--text-muted); font-size: 13px; }
+
+    @media (max-width: 640px) {
+      .header { flex-direction: column; gap: 12px; }
+      .hero { padding: 48px 16px 40px; }
+      .stats { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; text-align: center; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div class="eyebrow">Agent-readable operations manual</div>
-    <h1>openHermit Agent Runbook</h1>
-    <p class="lead">This page is written for AI agents and operators. It explains what openHermit is, how digital employee workspaces are structured, which workflow to follow, and how to isolate Feishu/Lark CLI profiles per team.</p>
-    <nav class="links" aria-label="Artifacts">
-      <a href="agent-manual.md">Raw Markdown</a>
-      <a href="llms.txt">llms.txt</a>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <img src="icon.png" alt="openHermit" />
+      openHermit
+    </div>
+    <nav class="header-nav">
       <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://github.com/yancyuu/Hermit/actions/workflows/pages.yml">Pages CI</a>
+      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
+      <a href="https://github.com/yancyuu/Hermit#readme">文档</a>
     </nav>
-    <img class="shot" src="docs/screenshots/openhermit/team-list.png" alt="openHermit teams workspace" />
   </header>
-  <main>
-    <pre class="manual">${escapeHtml(manual)}</pre>
-  </main>
-  <footer>
-    Generated by scripts/build-pages.mjs. The Markdown file is the canonical agent-readable artifact.
+
+  <!-- Hero -->
+  <section class="hero">
+    <span class="hero-badge">Terminal Native, AI Powered</span>
+    <h1>openHermit CLI</h1>
+    <p>在终端中与 AI 协作，围绕真实代码工作。将想法直接变为可交付软件——从开发调试到部署运维。</p>
+
+    <div class="install-box">
+      <div class="install-tabs">
+        <button class="install-tab active" data-target="tab-curl">macOS / Linux</button>
+        <button class="install-tab" data-target="tab-npm">npm</button>
+        <button class="install-tab" data-target="tab-npx">npx (免安装)</button>
+      </div>
+      <div class="install-content active" id="tab-curl">
+        <div class="install-cmd">curl -fsSL https://yancyuu.github.io/Hermit/install.sh | bash</div>
+      </div>
+      <div class="install-content" id="tab-npm">
+        <div class="install-cmd">npm install -g @yancyyu/openhermit</div>
+      </div>
+      <div class="install-content" id="tab-npx">
+        <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/openhermit</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <section class="stats">
+    <div class="stat-card">
+      <div class="stat-number">60%</div>
+      <div class="stat-label">日常工作流手动步骤减少</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">2x</div>
+      <div class="stat-label">修复与重构交付速度提升</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">70%</div>
+      <div class="stat-label">重复性修复自动化处理</div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features-section">
+    <div class="features-header">
+      <h2>终端里的工程智能</h2>
+      <p>轻量、快速、无处不在</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">&gt;_</div>
+        <h3>轻量即用，随时介入</h3>
+        <p>启动 &lt;70ms，无需 IDE。在任何终端中执行即时修复、快速代码审查和自动化任务。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#9881;</div>
+        <h3>自动化研发流程编排</h3>
+        <p>深度集成 CI/CD 管线，自动 Code Review、测试生成和问题修复。支持 Agent 调度和编排。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128279;</div>
+        <h3>深度融入工具链</h3>
+        <p>在脚本中调用 Agent，通过 ACP 协议管道化，扩展到 Neovim、Emacs 等编辑器和任意自动化场景。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128269;</div>
+        <h3>上下文感知 Code Review</h3>
+        <p>理解仓库上下文，通过评论触发审查与修复，支持多轮 Q&amp;A 和自动修改建议。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SDK -->
+  <section class="sdk-section">
+    <h2>被集成能力</h2>
+    <p>使用 openHermit 构建自定义 AI 编码工作流——流式响应、工具权限控制、MCP 连接，将代码理解和编辑能力嵌入你自己的应用。</p>
+    <div class="sdk-install">
+      npm install -g @yancyyu/openhermit
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-left">&copy; 2026 openHermit. All rights reserved.</div>
+    <div class="footer-links">
+      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
+      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
+      <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
+    </div>
   </footer>
+
+  <script>
+    document.querySelectorAll('.install-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.install-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.target).classList.add('active');
+      });
+    });
+  </script>
 </body>
 </html>
 `;
 
 rmSync(OUT_DIR, { recursive: true, force: true });
 mkdirSync(OUT_DIR, { recursive: true });
-writeText('agent-manual.md', manual);
-writeText('llms.txt', llmsTxt);
 writeText('index.html', html);
-copyIfExists('docs/screenshots/openhermit');
-copyIfExists('resources/icons');
+copyFile('scripts/install.sh', 'install.sh');
+copyFile('public/icon.png', 'icon.png');
 
 console.log(`Built GitHub Pages site at ${OUT_DIR}`);
 console.log('- index.html');
-console.log('- agent-manual.md');
-console.log('- llms.txt');
+console.log('- install.sh');
+console.log('- icon.png');
