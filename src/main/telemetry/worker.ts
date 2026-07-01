@@ -11,7 +11,7 @@ import { sweepStaleUploadLock } from '@main/services/session-intelligence/Conver
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
 
 const STATUS_SCHEMA_VERSION = 1;
-const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_SCAN_INTERVAL_MS = 10 * 60 * 1000;
 
 type WorkerState = 'starting' | 'scanning' | 'idle' | 'disabled' | 'stopped' | 'error';
 

@@ -169,7 +169,7 @@ export async function startTelemetry(cfg: TaskBusConfig): Promise<void> {
     async () => {
       await doScan(cfg);
     },
-    5 * 60 * 1000
+    10 * 60 * 1000
   );
 }
 

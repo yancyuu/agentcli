@@ -11,7 +11,14 @@ import {
   readAuthStore,
   refreshAccessToken,
 } from '@main/services/auth/OpenHermitAuthClient';
+import {
+  CapabilityPackLoaderService,
+  buildTeamCapabilityTelemetrySnapshots,
+  type LocalTeamEntry,
+} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
+import { HermitBridgeClient } from '@main/services/hermitBridge/HermitBridgeClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
+import type { TeamCapabilityTelemetryAsset } from '@shared/types/extensions';
 import { loadImOriginEnvelopes, type ImEnvelope } from './ImOriginSessionReader';
 import { ImTeamAttributor, type TeamIdentity } from './ImTeamAttributor';
 type ConversationUploadTelemetryConfig = {
@@ -57,12 +64,16 @@ function buildImBlock(envelope: ImEnvelope, tenantKey?: string): NonNullable<Upl
   };
   if (tenantKey) block.tenantKey = tenantKey;
   if (envelope.chatId) {
+    block.chatId = envelope.chatId;
     const chat: { id: string; type?: string; name?: string } = { id: envelope.chatId };
     if (envelope.chatType) chat.type = envelope.chatType;
     if (envelope.chatName) chat.name = envelope.chatName;
     block.chat = chat;
   }
   if (envelope.senderId) {
+    // Server schema (ReportUploadIm) keys sender identity by `senderId` +
+    // `sender.id` — there is no `userId` field, so we must not emit one.
+    block.senderId = envelope.senderId;
     const sender: { id: string; idType?: string; name?: string } = { id: envelope.senderId };
     // Feishu open_id carries the ou_ prefix; record it so the server can resolve identity.
     if (envelope.senderId.startsWith('ou_')) sender.idType = 'open_id';
@@ -70,6 +81,9 @@ function buildImBlock(envelope: ImEnvelope, tenantKey?: string): NonNullable<Upl
     block.sender = sender;
   }
   if (envelope.messageId) {
+    // Server schema names this `imMessageId` (ReportUploadIm) — `messageId` is
+    // rejected as extra_forbidden. `message.id` is the structured ref.
+    block.imMessageId = envelope.messageId;
     block.message = { id: envelope.messageId };
   }
   return block;
@@ -110,12 +124,93 @@ async function readTenantKey(home: string): Promise<string | undefined> {
   return typeof account?.tenantKey === 'string' ? account.tenantKey : undefined;
 }
 
+function toReportCapabilityAsset(asset: TeamCapabilityTelemetryAsset): ReportCapabilityAsset {
+  return {
+    id: asset.id,
+    name: asset.name,
+    description: asset.description,
+    enabled: asset.enabled,
+    scope: asset.scope,
+    transport: asset.transport,
+    source: asset.source,
+    packId: asset.packId,
+  };
+}
+
+function buildReportCapabilities(
+  assets: TeamCapabilityTelemetryAsset[],
+  fingerprint?: string,
+  reportedAt?: string
+): ReportCapabilities | undefined {
+  const byKind = (kind: TeamCapabilityTelemetryAsset['kind']) =>
+    assets.filter((asset) => asset.kind === kind).map(toReportCapabilityAsset);
+  const mcp = byKind('mcp');
+  const skills = byKind('skill');
+  const cron = byKind('cron');
+  const workflows = byKind('workflow');
+  if (!mcp.length && !skills.length && !cron.length && !workflows.length) return undefined;
+  return {
+    mcp,
+    skills,
+    cron,
+    workflow: workflows,
+    workflows,
+    counts: {
+      mcp: mcp.length,
+      skills: skills.length,
+      cron: cron.length,
+      workflows: workflows.length,
+    },
+    fingerprint,
+    reportedAt,
+  };
+}
+
+async function loadTeamCapabilityBlocks(
+  home: string,
+  reportedAt: string,
+  teams: LocalTeamEntry[]
+): Promise<Map<string, ReportCapabilities>> {
+  const loader = new CapabilityPackLoaderService(undefined, undefined, undefined, {
+    projectPath: process.cwd(),
+    listCronJobs: () => new HermitBridgeClient().listCronJobs(),
+    listTeams: async () => teams,
+  });
+  const { packs } = await loader.list();
+  const snapshots = buildTeamCapabilityTelemetrySnapshots(packs, { reportedAt });
+  const byTeam = new Map<string, ReportCapabilities>();
+  for (const snapshot of snapshots) {
+    const capabilities = buildReportCapabilities(
+      snapshot.assets,
+      snapshot.fingerprint,
+      snapshot.reportedAt
+    );
+    if (!capabilities) continue;
+    for (const key of [snapshot.teamSlug, snapshot.teamName, snapshot.teamDisplayName]) {
+      const normalized = key?.trim();
+      if (normalized) byTeam.set(normalized, capabilities);
+    }
+  }
+  return byTeam;
+}
+
+function buildTeamBlock(team: TeamIdentity, capabilities?: ReportCapabilities): ReportTeamBlock {
+  // Server schema (ReportUploadTeam) accepts teamId/teamSlug/teamName/department/
+  // capabilities — no `displayName`, so emit teamName only.
+  return {
+    teamSlug: team.teamSlug,
+    teamName: team.teamName,
+    ...(capabilities ? { capabilities } : {}),
+  };
+}
+
 export interface ConversationUploadStatus {
   enabled: boolean;
   endpointConfigured: boolean;
   totalDiscovered?: number;
   skippedAlreadyUploaded?: number;
   pending?: number;
+  pendingTokens?: number;
   attempted: number;
   accepted: number;
   duplicated: number;
@@ -133,6 +228,40 @@ export interface ConversationUploadStatus {
 type UploadPlatform = 'claudecode' | 'codex';
 type UploadMode = 'plain' | 'im';
 type MessageKind = 'conversation_message' | 'im_conversation_message';
+
+type ReportCapabilityAsset = {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  scope?: string;
+  transport?: string;
+  source?: string;
+  packId: string;
+};
+
+type ReportCapabilities = {
+  mcp?: ReportCapabilityAsset[];
+  skills?: ReportCapabilityAsset[];
+  cron?: ReportCapabilityAsset[];
+  workflow?: ReportCapabilityAsset[];
+  workflows?: ReportCapabilityAsset[];
+  counts?: {
+    mcp: number;
+    skills: number;
+    cron: number;
+    workflows: number;
+  };
+  fingerprint?: string;
+  reportedAt?: string;
+};
+
+type ReportTeamBlock = {
+  teamSlug?: string;
+  teamName: string;
+  projectName?: string;
+  capabilities?: ReportCapabilities;
+};
 
 interface UploadMessage {
   kind: MessageKind;
@@ -155,6 +284,12 @@ interface UploadMessage {
   };
   // IM-only routing fact (trigger/target team). Plain messages never carry this.
   routing?: Record<string, unknown>;
+  // IM-only owning team + the capabilities that team exposes (mcp/skills/cron/
+  // workflows). Built once per scan from CapabilityPackLoaderService snapshots so
+  // the digital-employee service desk sees what each employee can do alongside
+  // its message traffic. Plain (coding) messages never carry this.
+  team?: ReportTeamBlock;
+  capabilities?: ReportCapabilities;
   message: {
     messageRef: string;
     parentRef: string | null;
@@ -289,6 +424,7 @@ function emptyStatus(
     totalDiscovered: 0,
     skippedAlreadyUploaded: 0,
     pending: 0,
+    pendingTokens: 0,
     attempted: 0,
     accepted: 0,
     duplicated: 0,
@@ -770,6 +906,18 @@ async function collectClaudeCodeMessages(
   // channel — plain never needs them.
   const teamAttributor = mode === 'im' ? await ImTeamAttributor.load(hermitHome()) : null;
   const tenantKey = mode === 'im' ? await readTenantKey(hermitHome()) : undefined;
+  // IM-only capability snapshot (mcp/skills/cron/workflows) keyed by team name,
+  // built once per scan from CapabilityPackLoaderService. Reuses the team list
+  // the attributor already loaded from team.json (no second read). Failures never
+  // block uploads — a missing capability block is preferable to a dropped message.
+  const capabilityByTeam =
+    mode === 'im' && teamAttributor
+      ? await loadTeamCapabilityBlocks(
+          hermitHome(),
+          generatedAt,
+          teamAttributor.toLocalTeams()
+        ).catch(() => new Map<string, ReportCapabilities>())
+      : new Map<string, ReportCapabilities>();
 
   for await (const filePath of walkJsonl(getProjectsBasePath())) {
     if (maxMessages > 0 && messages.length >= maxMessages) break;
@@ -820,11 +968,16 @@ async function collectClaudeCodeMessages(
         if (mode === 'im') {
           const cwd = typeof obj.cwd === 'string' ? obj.cwd : path.dirname(filePath);
           const team = teamAttributor?.resolveByCwd(cwd) ?? null;
+          const capabilities = team
+            ? (capabilityByTeam.get(team.teamName) ?? capabilityByTeam.get(team.teamSlug))
+            : undefined;
           messages.push({
             ...baseMessage,
             kind: 'im_conversation_message',
             im: buildImBlock(imEnvelope, tenantKey),
             routing: buildRoutingBlock(imEnvelope, team),
+            ...(team ? { team: buildTeamBlock(team, capabilities) } : {}),
+            ...(capabilities ? { capabilities } : {}),
           });
         }
       } else if (mode === 'plain') {
@@ -1185,6 +1338,19 @@ async function postPayload(
   return uploadStatusFromResult(receipt, payload.messages.length, baseUrl);
 }
 
+// Sum totalTokens across a slice of collected messages. Used to express the
+// upload backlog in tokens (its real cost) instead of just a message count —
+// pendingTokens mirrors pending (discovered − uploaded) so 待上报 can read in
+// tokens. Messages without usage contribute 0.
+function sumMessageTokens(messages: UploadMessage[]): number {
+  let total = 0;
+  for (const msg of messages) {
+    const t = Number(msg?.message?.usage?.totalTokens);
+    if (Number.isFinite(t) && t > 0) total += t;
+  }
+  return total;
+}
+
 function mergeStatuses(statuses: ConversationUploadStatus[]): ConversationUploadStatus {
   return statuses.reduce<ConversationUploadStatus>(
     (acc, item) => ({
@@ -1194,6 +1360,7 @@ function mergeStatuses(statuses: ConversationUploadStatus[]): ConversationUpload
       skippedAlreadyUploaded:
         (acc.skippedAlreadyUploaded ?? 0) + (item.skippedAlreadyUploaded ?? 0),
       pending: (acc.pending ?? 0) + (item.pending ?? 0),
+      pendingTokens: (acc.pendingTokens ?? 0) + (item.pendingTokens ?? 0),
       attempted: acc.attempted + item.attempted,
       accepted: acc.accepted + item.accepted,
       duplicated: acc.duplicated + item.duplicated,
@@ -1238,9 +1405,10 @@ async function postMessagesInBatches(
   batchSize: number,
   runTotalMessages: number,
   uploadedBeforeRun: number
-): Promise<{ status: ConversationUploadStatus; uploadedCount: number }> {
+): Promise<{ status: ConversationUploadStatus; uploadedCount: number; uploadedTokens: number }> {
   const statuses: ConversationUploadStatus[] = [];
   let uploadedCount = 0;
+  let uploadedTokens = 0;
   const size = Math.max(1, batchSize);
   const totalBatches = Math.ceil(messages.length / size);
 
@@ -1282,6 +1450,7 @@ async function postMessagesInBatches(
       // absence means the batch is in flight server-side — count it as sent.
       if (!status.lastError) {
         uploadedCount += batchMessages.length;
+        uploadedTokens += sumMessageTokens(batchMessages);
       }
       await appendUploadLog(home, 'upload-batch-finished', {
         platform,
@@ -1300,7 +1469,8 @@ async function postMessagesInBatches(
         totalMessages: runTotalMessages,
         lastError: status.lastError,
       });
-      if (status.lastError) return { status: mergeStatuses(statuses), uploadedCount };
+      if (status.lastError)
+        return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
       if (batchIndex < totalBatches) await wait(batchDelayMs());
     } catch (error) {
       const message = sanitizeUploadError(error);
@@ -1323,11 +1493,11 @@ async function postMessagesInBatches(
           lastError: message,
         })
       );
-      return { status: mergeStatuses(statuses), uploadedCount };
+      return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
     }
   }
 
-  return { status: mergeStatuses(statuses), uploadedCount };
+  return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
 }
 
 async function uploadPlatformModeMessages(
@@ -1364,6 +1534,7 @@ async function uploadPlatformModeMessages(
     });
     return emptyStatus(true, true, {
       pending: pendingMessages.length,
+      pendingTokens: sumMessageTokens(pendingMessages),
       totalDiscovered: pendingMessages.length,
       lastUploadStatus: channel?.status || 'processing',
       uploadIds: channel?.inFlight?.uploadIds ?? [],
@@ -1400,10 +1571,12 @@ async function uploadPlatformModeMessages(
     conversationCfg?.batchSize ?? 0,
     generatedAt
   );
+  const discoveredTokens = sumMessageTokens(messages);
   const baseStatus = {
     totalDiscovered: messages.length,
     skippedAlreadyUploaded: 0,
     pending: messages.length,
+    pendingTokens: discoveredTokens,
   };
   await appendUploadLog(home, 'scan-collected', {
     platform,
@@ -1444,7 +1617,7 @@ async function uploadPlatformModeMessages(
   // Unified endpoint: plain and IM both POST to /api/v1/report/messages in a
   // single batch sequence. Each message carries its own context (project/
   // conversation/im/routing); scene distinguishes coding vs digital_employee.
-  const { status, uploadedCount } = await postMessagesInBatches(
+  const { status, uploadedCount, uploadedTokens } = await postMessagesInBatches(
     home,
     baseUrl,
     UPLOAD_ENDPOINT,
@@ -1458,11 +1631,14 @@ async function uploadPlatformModeMessages(
     0
   );
   // pending = discovered − uploaded (remaining), not the raw discovered count —
-  // otherwise it shows "N 待上报" even after a fully-successful upload.
+  // otherwise it shows "N 待上报" even after a fully-successful upload. The same
+  // rule applies to pendingTokens (discovered − uploaded tokens) so 待上报 reads
+  // in tokens — the local backlog's real cost — and drops to 0 on success.
   const result = {
     ...status,
     ...baseStatus,
     pending: Math.max(0, messages.length - uploadedCount),
+    pendingTokens: Math.max(0, discoveredTokens - uploadedTokens),
   };
   await appendUploadLog(home, 'upload-finished', {
     platform,

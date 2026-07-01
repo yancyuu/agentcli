@@ -5,7 +5,7 @@
   "cliCommand": "openhermit",
   "npmPackage": "@yancyyu/openhermit",
   "runtimeBridgeName": "hermit-bridge",
-  "authAccountLabel": "AgentCli 账号",
+  "authAccountLabel": "AgentCli 用户",
   "authProviderName": "AgentCli",
   "defaultLocalHomeName": ".hermit",
   "githubRepo": "yancyuu/Hermit",

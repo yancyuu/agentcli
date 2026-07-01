@@ -268,11 +268,68 @@ const html = `<!DOCTYPE html>
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { color: var(--text-muted); font-size: 13px; }
 
+    .commands-section {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 24px 60px;
+    }
+    .commands-section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .commands-section > p {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      font-size: 16px;
+    }
+    .commands-list {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .command-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .command-row:last-child { border-bottom: none; }
+    .command-row .cmd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      color: var(--green);
+      background: rgba(34, 197, 94, 0.08);
+      border: 1px solid rgba(34, 197, 94, 0.2);
+      border-radius: 6px;
+      padding: 4px 10px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 220px;
+      user-select: all;
+    }
+    .command-row .cmd-desc {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .commands-more {
+      display: block;
+      text-align: center;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+
     @media (max-width: 640px) {
       .header { flex-direction: column; gap: 12px; }
       .hero { padding: 48px 16px 40px; }
       .features-grid { grid-template-columns: 1fr; }
       .footer { flex-direction: column; text-align: center; }
+      .command-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+      .command-row .cmd { min-width: 0; }
     }
   </style>
 </head>
@@ -308,6 +365,50 @@ const html = `<!DOCTYPE html>
         <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/openhermit</div>
       </div>
     </div>
+  </section>
+
+  <section class="commands-section">
+    <h2>常用命令</h2>
+    <p>装好之后，从这几条开始。<code>openhermit</code> 与 <code>hermit</code> 是同一程序别名。</p>
+    <div class="commands-list">
+      <div class="command-row">
+        <code class="cmd">openhermit</code>
+        <span class="cmd-desc">打开终端导航（控制面菜单）：用量同步、本地工作台、用户、token 池</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit web</code>
+        <span class="cmd-desc">直接启动 Web 工作台（默认 http://127.0.0.1:5680），加 <code>--daemon</code> 后台运行</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit auth login</code>
+        <span class="cmd-desc">飞书授权登录 AgentBus —— 登录后用量才有上报目标</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage status</code>
+        <span class="cmd-desc">查看后台 worker 是否运行、消息上报是否开启</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage start</code>
+        <span class="cmd-desc">开启轻量后台用量采集，默认配置开机自启</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage report</code>
+        <span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 补报历史</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage today</code>
+        <span class="cmd-desc">查看今日本地用量摘要（不上传）</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit status · doctor</code>
+        <span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit update</code>
+        <span class="cmd-desc">检查并自更新到最新版本</span>
+      </div>
+    </div>
+    <a class="commands-more" href="guide.html#cli-ref">完整命令参考 →</a>
   </section>
 
   <section class="arch-section">
@@ -616,25 +717,70 @@ openhermit</code></pre>
 
     <h2 id="cli-ref">2. CLI 命令参考</h2>
 
+    <p>所有命令都支持 <code>--json</code> 返回机器可读结果（适合脚本和 Claude Code 调用）。不带参数运行 <code>openhermit</code> 进入终端导航。<code>openhermit</code> 与 <code>hermit</code> 是同一程序的别名。</p>
+
+    <h3>启动与状态</h3>
     <table>
-      <thead>
-        <tr><th>命令</th><th>说明</th></tr>
-      </thead>
+      <thead><tr><th>命令</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td><code>openhermit</code></td><td>启动终端导航器（交互式菜单）— 本地使用、团队管理、账户设置</td></tr>
-        <tr><td><code>openhermit web</code></td><td>启动并直接在浏览器打开 Web 工作台</td></tr>
-        <tr><td><code>openhermit --daemon</code></td><td>后台运行工作台（不阻塞终端）</td></tr>
-        <tr><td><code>openhermit status</code></td><td>查看后台 daemon 运行状态</td></tr>
+        <tr><td><code>openhermit</code></td><td>打开终端导航（控制面菜单）：用量同步、本地工作台、用户、token 池</td></tr>
+        <tr><td><code>openhermit web</code></td><td>直接启动并打开 Web 工作台，跳过终端导航；可加 <code>--daemon</code> 后台运行</td></tr>
+        <tr><td><code>openhermit --daemon --port 8080</code></td><td>后台运行 Web 工作台并指定端口（默认 5680）</td></tr>
+        <tr><td><code>openhermit status</code></td><td>查看后台 daemon / Web 运行状态</td></tr>
+        <tr><td><code>openhermit doctor</code></td><td>只读本地诊断：配置、服务、路径</td></tr>
         <tr><td><code>openhermit stop</code></td><td>停止后台 daemon</td></tr>
-        <tr><td><code>openhermit --port 8080</code></td><td>指定 Web UI 监听端口（默认 5680）</td></tr>
-        <tr><td><code>openhermit --version</code></td><td>打印当前版本号</td></tr>
-        <tr><td><code>openhermit update</code></td><td>自更新到最新版本</td></tr>
+        <tr><td><code>openhermit services</code></td><td>终端服务菜单，按项启动/停止 <code>web</code> / <code>usage</code> / <code>collaboration</code></td></tr>
+        <tr><td><code>openhermit --version</code> · <code>--help</code></td><td>查看版本 / 完整命令帮助</td></tr>
+      </tbody>
+    </table>
+
+    <h3>用量采集与上报（核心）</h3>
+    <table>
+      <thead><tr><th>命令</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>openhermit usage status</code></td><td>查看后台 worker 是否运行、消息上报是否开启、上报运行时</td></tr>
+        <tr><td><code>openhermit usage today</code></td><td>查看今日本地 usage 摘要（不上传）</td></tr>
+        <tr><td><code>openhermit usage start</code></td><td>开启轻量后台 usage 采集，默认配置开机自启；仅扫描本机 JSONL</td></tr>
+        <tr><td><code>openhermit usage stop</code></td><td>停止后台采集；默认关闭开机自启（<code>--keep-autostart</code> 保留）</td></tr>
+        <tr><td><code>openhermit usage report</code></td><td>立即扫描并按服务端游标增量上报新增消息；<code>--full</code> 忽略游标全量重扫，用于补报历史</td></tr>
+        <tr><td><code>openhermit usage autostart status|enable|disable</code></td><td>管理开机自启（macOS launchd）</td></tr>
+      </tbody>
+    </table>
+
+    <h3>用户授权（上报目标）</h3>
+    <table>
+      <thead><tr><th>命令</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>openhermit auth status</code></td><td>查看 AgentBus 用户授权状态</td></tr>
+        <tr><td><code>openhermit auth login</code></td><td>通过飞书授权登录 AgentBus；登录后用量才有上报目标</td></tr>
+        <tr><td><code>openhermit auth logout</code></td><td>退出 AgentBus 用户（不影响本地 runtime 登录）</td></tr>
+      </tbody>
+    </table>
+
+    <h3>团队与任务</h3>
+    <table>
+      <thead><tr><th>命令</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>openhermit teams list</code></td><td>列出本地团队（不启动 Web）</td></tr>
+        <tr><td><code>openhermit teams create</code></td><td>创建本地团队元数据；支持 <code>--name</code> / <code>--harness</code> / <code>--bind-project</code> / <code>--work-dir</code></td></tr>
+        <tr><td><code>openhermit tasks list --team &lt;team&gt;</code></td><td>查看某个团队的活跃任务</td></tr>
+        <tr><td><code>openhermit collaboration start</code></td><td>启用本地/自托管团队协作配置</td></tr>
+      </tbody>
+    </table>
+
+    <h3>维护与插件</h3>
+    <table>
+      <thead><tr><th>命令</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>openhermit update</code></td><td>检查并自更新到最新版本</td></tr>
+        <tr><td><code>openhermit add &lt;plugin&gt;</code></td><td>安装能力插件到 MCP library（例：<code>add worker-society</code>）</td></tr>
+        <tr><td><code>openhermit aikey</code></td><td>认领 token 池密钥（功能开发中，暂未开放）</td></tr>
       </tbody>
     </table>
 
     <div class="callout">
       <div class="callout-title">提示</div>
-      <p><code>openhermit</code> 不带参数会进入终端导航器（控制面菜单）。如果只想打开浏览器工作台，直接用 <code>openhermit web</code>。</p>
+      <p><code>openhermit</code> 不带参数进入终端导航（控制面菜单）。只想打开浏览器工作台用 <code>openhermit web</code>。任何命令加 <code>--help</code> 看完整说明，加 <code>--json</code> 输出机器可读结果。</p>
     </div>
 
     <h3>默认路径和端口</h3>
@@ -673,17 +819,24 @@ openhermit</code></pre>
 
     <h2 id="usage-report">4. 用量上报</h2>
 
-    <h3>快速开始</h3>
+    <h3>配置自动上报（完整步骤）</h3>
+    <p>自动上报需要三个条件同时满足：<strong>① 已登录 AgentBus</strong> + <strong>② 消息上报已开启</strong> + <strong>③ 后台采集 worker 运行中</strong>。缺任何一个都不会上报。</p>
     <ol>
-      <li>运行 <code>openhermit</code> 进入终端导航器</li>
-      <li>选择「用量 Usage Sync」，回车展开</li>
-      <li>选择要启用的运行时（Claude Code / Codex），回车开启</li>
-      <li>首次启用后，系统自动扫描本地历史会话并补齐数据；后续增量扫描</li>
+      <li><strong>登录上报目标</strong> — 运行 <code>openhermit auth login</code>（飞书授权绑定 AgentBus 用户），用 <code>openhermit auth status</code> 确认已登录。未登录则上报没有目标服务端。</li>
+      <li><strong>启用消息上报</strong> — 运行 <code>openhermit</code> →「用量同步」→ 回车展开 →「消息上报」→ 回车开启，首次选择上报运行时（Claude Code / Codex）。<em>启用上报的开关目前只在终端导航里，没有单独的子命令。</em></li>
+      <li><strong>启动后台采集</strong> — 运行 <code>openhermit usage start</code>，开启轻量后台 worker 并默认配置开机自启，持续扫描本地 JSONL。</li>
+      <li><strong>立即补报一次</strong> — 运行 <code>openhermit usage report</code>，按服务端游标增量上报新增消息；<code>--full</code> 忽略游标全量重扫，用于补报历史漏掉的消息。</li>
+      <li><strong>查看状态</strong> — <code>openhermit usage status</code>（worker 是否运行 / 上报是否开启）、<code>openhermit usage today</code>（今日摘要），或 Web 工作台「用量」Tab。</li>
     </ol>
+
+    <div class="callout success">
+      <div class="callout-title">上报不工作？三要素自检</div>
+      <p>按顺序排查：<code>openhermit auth status</code>（已登录?）→ <code>openhermit usage status</code>（worker running 且 消息上报 enabled?）→ <code>openhermit usage report</code>（手动触发一次，看输出 / 报错）。补报历史用 <code>usage report --full</code>；开机不自启用 <code>usage autostart enable</code>。</p>
+    </div>
 
     <h3>Web 工作台查看用量</h3>
     <ol>
-      <li>运行 <code>openhermit web</code> 或在终端导航器选择「工作台 Workspace」</li>
+      <li>运行 <code>openhermit web</code> 或在终端导航器选择「本地工作台」</li>
       <li>浏览器打开 <code>http://127.0.0.1:5680</code></li>
       <li>进入任意团队页面，顶部 Tab 切换到「用量」查看 token 消耗趋势、会话数、消息量</li>
       <li>支持按成员、运行时、时间段筛选</li>
@@ -694,13 +847,8 @@ openhermit</code></pre>
       <p>Web 工作台在后台持续运行时（<code>openhermit --daemon</code>）会自动定时采集，无需手动触发。打开浏览器即可查看最新数据。</p>
     </div>
 
-    <h3>配置上报目标（AgentBus）</h3>
-    <ol>
-      <li>运行 <code>openhermit</code> 进入导航器</li>
-      <li>选择「账号 Account」→ 登录 AgentBus 账号</li>
-      <li>登录成功后，用量数据会自动上报到 AgentBus 服务端</li>
-      <li>企业管理者可在 AgentBus 看板查看全团队汇总数据</li>
-    </ol>
+    <h3>上报目标与看板</h3>
+    <p>用量统一上报到 <strong>AgentBus</strong>（中心化服务端 / 数据总线）。完成 <code>openhermit auth login</code> 后，后台 worker 会自动把增量数据上报到 AgentBus；企业管理者可在 AgentBus 看板查看全团队、按成员 / 运行时 / 时间段汇总的用量。</p>
 
     <h3>支持的数据源</h3>
     <table>
@@ -726,8 +874,8 @@ openhermit</code></pre>
     <h3>Codex 已知限制</h3>
     <p>Codex 本地 JSONL 中 <code>input_tokens</code> 和 <code>cached_input_tokens</code> 经常为 0，因此无法精确计算上下文窗口占比。<code>output_tokens</code> 上报正常，不影响整体用量统计。</p>
 
-    <h3>启用上报</h3>
-    <p>运行 <code>openhermit</code> 进入导航器，选择「用量上报」相关选项，可多选启用 Claude Code 和 Codex 的数据上报。需要配置目标服务端（AgentBus）地址。</p>
+    <h3>停止上报</h3>
+    <p>关闭消息上报：运行 <code>openhermit</code> →「用量同步」→「消息上报」关闭；停止后台采集用 <code>openhermit usage stop</code>。两者相互独立——关掉 worker 不影响「消息上报」开关状态，反之亦然。</p>
 
     <h2 id="faq">5. 常见问题</h2>
 

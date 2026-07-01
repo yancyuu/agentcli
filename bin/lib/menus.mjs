@@ -10,7 +10,7 @@ import { BRAND } from '../branding.mjs';
 export const NAV_ACTIONS = [
   {
     id: 'data-sync',
-    label: '用量 Usage Sync',
+    label: '用量同步',
     description: '回车展开；消息上报会启动后台增量扫描，首次补齐历史，后续只上传新增消息',
     recommended: true,
     children: [
@@ -22,17 +22,17 @@ export const NAV_ACTIONS = [
   },
   {
     id: 'web',
-    label: '工作台 Workspace',
+    label: '本地工作台',
     description: '回车展开；开启/关闭、查看状态、安装 lark-cli',
     children: [
       { id: 'toggle-web', label: '是否激活', toggle: 'web' },
-      { id: 'web-status', label: '查看工作台状态' },
+      { id: 'web-status', label: '查看本地工作台状态' },
       { id: 'install-lark-cli', label: '快速安装 lark-cli' },
     ],
   },
   {
     id: 'account',
-    label: '账号 Account',
+    label: '用户',
     description: '回车展开；登录、查看登录状态、退出登录',
     children: [
       { id: 'login', label: '登录 / OAuth 授权' },
@@ -42,8 +42,12 @@ export const NAV_ACTIONS = [
   },
   {
     id: 'aikey',
-    label: 'aikey',
-    description: '回车展开；认领 / 申请 / 查看 aikey 状态',
+    label: 'token 池',
+    description: '功能开发中，暂未开放',
+    // comingSoon hides the children below and shows a notice on Enter instead of
+    // expanding — the 认领/申请/状态 sub-actions aren't wired to a finished
+    // backend yet. Remove the flag to re-expose them once token 池 ships.
+    comingSoon: 'token 池仍在开发中，暂未开放，敬请期待。',
     children: [
       { id: 'aikey-claim', label: '认领 Claim' },
       { id: 'aikey-apply', label: '申请 Apply' },
@@ -52,7 +56,7 @@ export const NAV_ACTIONS = [
   },
   {
     id: 'exit',
-    label: '退出 Quit',
+    label: '退出',
     description: `离开 ${BRAND.stylizedName} 终端入口`,
   },
 ];
@@ -161,7 +165,7 @@ export const TEAM_COLLAB_ACTIONS = [
   },
   {
     id: 'account',
-    label: '账号状态',
+    label: '用户状态',
     description: `查看或退出当前 ${BRAND.authAccountLabel}`,
   },
   {
@@ -296,5 +300,5 @@ export function findMenuAction(actions, actionId) {
 }
 
 export function menuFooterForEscape() {
-  return '[↑↓ move • Enter expand/confirm • ← back • Esc cancel]';
+  return '[↑↓/Ctrl-N/P 选择 · Enter 展开/确认 · ← 返回 · Esc 退出]';
 }

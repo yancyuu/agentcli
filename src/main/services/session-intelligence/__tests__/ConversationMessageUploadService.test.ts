@@ -318,6 +318,172 @@ describe('ConversationMessageUploadService', () => {
     expect(imMessage.message).not.toHaveProperty('model');
     // Regression guard: the legacy `via` placeholder is gone (server 422s it).
     expect(imMessage.im).not.toHaveProperty('via');
+    // Schema-aligned IM identifiers (ReportUploadIm): sender identity is senderId
+    // (+ sender.id) — there is no userId field; the triggering message id is
+    // imMessageId (+ message.id) — messageId is rejected as extra_forbidden.
+    expect(imMessage.im).toMatchObject({
+      chatId: 'oc_testchat',
+      senderId: 'ou_testsender',
+      imMessageId: 'on_testmsgid',
+    });
+    expect(imMessage.im).not.toHaveProperty('userId');
+    expect(imMessage.im).not.toHaveProperty('messageId');
+    // The owning team rides on the IM message so the service desk can attribute
+    // traffic to a digital employee even before capabilities resolve.
+    expect(imMessage.team).toMatchObject({
+      teamSlug: 'test-team',
+      teamName: '测试团队',
+    });
+    expect(imMessage.team).not.toHaveProperty('displayName');
+  });
+
+  it('attaches mcp/skills/cron/workflow capabilities to IM messages for the owning team', async () => {
+    // hermit-bridge indexes the IM conversation by sender + triggering message.
+    const bridgeSessionsDir = path.join(hermitHome, 'hermit-bridge', 'data', 'sessions');
+    await mkdir(bridgeSessionsDir, { recursive: true });
+    await writeFile(
+      path.join(bridgeSessionsDir, 'team-cap.json'),
+      JSON.stringify({
+        user_sessions: { 'feishu:oc_capchat:ou_capsender': ['im-cap-1'] },
+        active_session: { 'feishu:oc_capchat:ou_capsender': 'im-cap-1' },
+        user_meta: {
+          'feishu:oc_capchat:ou_capsender': { chat_name: '能力群', user_name: '提问人' },
+        },
+      })
+    );
+
+    // Owning team — capability lookup keys off teamName.
+    const teamDir = path.join(hermitHome, 'teams', 'cap-team');
+    await mkdir(teamDir, { recursive: true });
+    await writeFile(
+      path.join(teamDir, 'team.json'),
+      JSON.stringify({ slug: 'cap-team', displayName: '能力团队', workDir: '/tmp/cap-project' })
+    );
+
+    // Install a capability pack for 能力团队 carrying one of each capability kind.
+    const packDir = path.join(hermitHome, 'capability-packs', 'cap-pack');
+    await mkdir(packDir, { recursive: true });
+    await writeFile(
+      path.join(packDir, 'pack.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        id: 'cap-pack',
+        name: '能力团队 能力',
+        namespace: 'cap',
+        version: '1.0.0',
+        teamName: '能力团队',
+        capabilities: {
+          skills: [{ id: 'review', name: 'review', path: 'skills/review/SKILL.md' }],
+          workflows: [{ id: 'loop-design', name: 'loop-design', path: 'workflows/loop.md' }],
+          cron: [
+            {
+              id: 'weekday-report',
+              name: '周报',
+              cronExpression: '17 9 * * 1-5',
+              prompt: 'run report',
+              enabled: true,
+            },
+          ],
+          mcpServers: [{ id: 'context7', name: 'context7', scope: 'user', transport: 'stdio' }],
+        },
+      })
+    );
+
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-cap-project');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'im-cap-1.jsonl'),
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'im-cap-1',
+        uuid: 'cap-msg-1',
+        cwd: '/tmp/cap-project',
+        timestamp: '2026-06-30T08:00:00.000Z',
+        message: { role: 'user', content: 'from feishu', model: 'claude-im-model' },
+      })}\n`
+    );
+
+    const posted = { im: [] as Array<Record<string, any>> };
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'openhermit',
+              client: 'claudecode',
+              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        if (body.scene === 'digital_employee') {
+          posted.im.push(body);
+          return Response.json(
+            {
+              ok: true,
+              uploadId: 'upl-cap',
+              status: 'queued',
+              received: 1,
+              acceptedForProcessing: 1,
+            },
+            { status: 202 }
+          );
+        }
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl-plain',
+            status: 'queued',
+            received: 0,
+            acceptedForProcessing: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(result.lastError).toBeUndefined();
+    expect(posted.im).toHaveLength(1);
+    const imMessage = posted.im[0].messages[0];
+    // Capabilities ride both on the message and on the team block, covering the
+    // server's ReportUploadCapabilities shapes (mcp/skills/cron/workflow/workflows).
+    expect(imMessage.capabilities).toMatchObject({
+      mcp: [{ id: 'context7', name: 'context7', transport: 'stdio' }],
+      skills: [{ id: 'review', name: 'review' }],
+      cron: [{ id: 'weekday-report', name: '周报', scope: '17 9 * * 1-5', enabled: true }],
+      workflow: [{ id: 'loop-design', name: 'loop-design' }],
+      workflows: [{ id: 'loop-design', name: 'loop-design' }],
+      counts: { mcp: 1, skills: 1, cron: 1, workflows: 1 },
+    });
+    expect(imMessage.team).toMatchObject({
+      teamName: '能力团队',
+      capabilities: { counts: { mcp: 1, skills: 1, cron: 1, workflows: 1 } },
+    });
+    // No prompt/secret payloads leak through capability telemetry.
+    const serialized = JSON.stringify(posted.im[0]);
+    expect(serialized).not.toContain('run report');
   });
 
   it('skips uploading when server reports in-flight batches for the channel', async () => {
@@ -705,6 +871,7 @@ describe('ConversationMessageUploadService', () => {
     expect(result.attempted).toBe(3);
     expect(result.lastError).toBeUndefined(); // non-terminal receipt must NOT abort the run
     expect(result.pending).toBe(0); // batches count as sent; no misleading "N 待上报"
+    expect(result.pendingTokens).toBe(0); // token backlog drains to 0 on a fully-successful upload too
     delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE;
   });
 

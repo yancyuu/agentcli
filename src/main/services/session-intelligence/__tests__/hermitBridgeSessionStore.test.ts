@@ -117,6 +117,31 @@ describe('parseHermitBridgeSessions', () => {
     expect([...composite.agentSessionIds].sort()).toEqual(['claude-old', 'claude-uuid-1']);
   });
 
+  it('resolves bridge internal ids in composites to their agent_session_id (current + past)', () => {
+    // Real hermit-bridge files key `sessions` by internal ids like "s12" and store
+    // the Claude agent_session_id (the .jsonl filename) as a field. The composite
+    // maps reference the internal id, so the parser must resolve through it —
+    // otherwise composite envelopes are keyed by "s12" and never match a Claude
+    // session (the bug that emptied the IM upload payload in production).
+    const raw = sampleRaw({
+      sessions: {
+        s12: {
+          id: 's12',
+          agent_session_id: 'claude-cur',
+          past_agent_session_ids: ['claude-past'],
+        },
+      },
+      active_session: { 'feishu:oc_CHAT:on_MSG': 's12' },
+      user_sessions: { 'feishu:oc_CHAT:ou_SENDER': ['s12'] },
+      user_meta: {},
+    });
+    const store = parseHermitBridgeSessions(raw, 'p_abc.json')!;
+    const sender = store.composites.get('feishu:oc_CHAT:ou_SENDER')!;
+    expect([...sender.agentSessionIds].sort()).toEqual(['claude-cur', 'claude-past']);
+    const msg = store.composites.get('feishu:oc_CHAT:on_MSG')!;
+    expect([...msg.agentSessionIds].sort()).toEqual(['claude-cur', 'claude-past']);
+  });
+
   it('preserves past_agent_session_ids on the session record for legacy attribution', () => {
     const raw = sampleRaw({
       sessions: {

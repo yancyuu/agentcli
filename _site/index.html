@@ -247,11 +247,68 @@
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { color: var(--text-muted); font-size: 13px; }
 
+    .commands-section {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 24px 60px;
+    }
+    .commands-section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .commands-section > p {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      font-size: 16px;
+    }
+    .commands-list {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .command-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .command-row:last-child { border-bottom: none; }
+    .command-row .cmd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      color: var(--green);
+      background: rgba(34, 197, 94, 0.08);
+      border: 1px solid rgba(34, 197, 94, 0.2);
+      border-radius: 6px;
+      padding: 4px 10px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 220px;
+      user-select: all;
+    }
+    .command-row .cmd-desc {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .commands-more {
+      display: block;
+      text-align: center;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+
     @media (max-width: 640px) {
       .header { flex-direction: column; gap: 12px; }
       .hero { padding: 48px 16px 40px; }
       .features-grid { grid-template-columns: 1fr; }
       .footer { flex-direction: column; text-align: center; }
+      .command-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+      .command-row .cmd { min-width: 0; }
     }
   </style>
 </head>
@@ -263,8 +320,6 @@
     </div>
     <nav class="header-nav">
       <a href="guide.html">使用指南</a>
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
     </nav>
   </header>
 
@@ -289,6 +344,50 @@
         <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/openhermit</div>
       </div>
     </div>
+  </section>
+
+  <section class="commands-section">
+    <h2>常用命令</h2>
+    <p>装好之后，从这几条开始。<code>openhermit</code> 与 <code>hermit</code> 是同一程序别名。</p>
+    <div class="commands-list">
+      <div class="command-row">
+        <code class="cmd">openhermit</code>
+        <span class="cmd-desc">打开终端导航（控制面菜单）：用量同步、本地工作台、用户、token 池</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit web</code>
+        <span class="cmd-desc">直接启动 Web 工作台（默认 http://127.0.0.1:5680），加 <code>--daemon</code> 后台运行</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit auth login</code>
+        <span class="cmd-desc">飞书授权登录 AgentBus —— 登录后用量才有上报目标</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage status</code>
+        <span class="cmd-desc">查看后台 worker 是否运行、消息上报是否开启</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage start</code>
+        <span class="cmd-desc">开启轻量后台用量采集，默认配置开机自启</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage report</code>
+        <span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 补报历史</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit usage today</code>
+        <span class="cmd-desc">查看今日本地用量摘要（不上传）</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit status · doctor</code>
+        <span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span>
+      </div>
+      <div class="command-row">
+        <code class="cmd">openhermit update</code>
+        <span class="cmd-desc">检查并自更新到最新版本</span>
+      </div>
+    </div>
+    <a class="commands-more" href="guide.html#cli-ref">完整命令参考 →</a>
   </section>
 
   <section class="arch-section">
@@ -351,8 +450,6 @@
   <footer class="footer">
     <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
     <div class="footer-links">
-      <a href="https://github.com/yancyuu/Hermit">GitHub</a>
-      <a href="https://www.npmjs.com/package/@yancyyu/openhermit">npm</a>
       <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
     </div>
   </footer>

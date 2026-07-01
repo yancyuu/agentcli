@@ -2,9 +2,9 @@
 // generic table/logo/welcome rendering, JSON output, and the cancel-on-SIGINT
 // handler bound to the readline prompt interface. Pure leaf (env + branding).
 //
-// Visual language follows Claude Code's editorial style: warm-terra-cotta accent
-// (#da7756) over 24-bit truecolor with graceful 8-color fallback, rounded panels
-// (╭╮╰╯), muted secondary text, and a minimal 🦀 wordmark. Capability (truecolor
+// Visual language follows Claude Code's editorial style: a sky-blue accent
+// (#4FC3F7) over 24-bit truecolor with graceful 8-color fallback, rounded panels
+// (╭╮╰╯), muted secondary text, and a minimal wordmark. Capability (truecolor
 // + Unicode box drawing) is DETECTED, not assumed by platform — modern Windows
 // Terminal renders UTF-8 fine, only legacy conhost/dumb terminals degrade.
 
@@ -61,12 +61,12 @@ const useTruecolor = useAnsi && detectTruecolor();
 const useUnicodeUi = detectUnicode();
 
 const glyphs = useUnicodeUi
-  ? { h: '─', v: '│', tl: '╭', tr: '╮', ml: '├', mr: '┤', bl: '╰', br: '╯', dot: '●', pointer: '❯', checked: '✓', unchecked: ' ', caretOpen: '▾', caretClosed: '▸' }
-  : { h: '-', v: '|', tl: '+', tr: '+', ml: '+', mr: '+', bl: '+', br: '+', dot: '*', pointer: '>', checked: 'x', unchecked: ' ', caretOpen: 'v', caretClosed: '>' };
+  ? { h: '─', v: '│', tl: '╭', tr: '╮', ml: '├', mr: '┤', bl: '╰', br: '╯', dot: '●', hollow: '○', diamond: '◆', warnMark: '▲', cross: '✕', pointer: '❯', checked: '✓', unchecked: ' ', caretOpen: '▾', caretClosed: '▸' }
+  : { h: '-', v: '|', tl: '+', tr: '+', ml: '+', mr: '+', bl: '+', br: '+', dot: '*', hollow: 'o', diamond: '+', warnMark: '!', cross: 'x', pointer: '>', checked: 'x', unchecked: ' ', caretOpen: 'v', caretClosed: '>' };
 
 // 24-bit palette (R;G;B) with basic 8-color SGR fallbacks for terminals without
-// truecolor. Accent is blue (the previous CLI accent color); status colors stay
-// muted (olive/sand/terracotta) so they read clearly against the blue accent.
+// truecolor. Accent is blue (the CLI's established accent color); status colors
+// stay muted (olive/sand/terracotta) so they read clearly against the blue accent.
 const TRUECOLOR = {
   accent: '79;195;247', // #4FC3F7 sky blue (menu pointer / title / brand)
   success: '120;140;93', // #788c5d muted olive
@@ -187,12 +187,21 @@ function truncateDisplay(value, width) {
 }
 
 function statusDot(state) {
-  const dot = glyphs.dot;
-  if (state === 'ok') return ui.success(dot);
-  if (state === 'warn') return ui.warn(dot);
-  if (state === 'error') return ui.danger(dot);
-  if (state === 'off') return ui.dim(dot);
-  return ui.accent(dot);
+  if (state === 'ok') return ui.success(glyphs.checked); // ✓
+  if (state === 'warn') return ui.warn(glyphs.warnMark); // ▲
+  if (state === 'error') return ui.danger(glyphs.cross); // ✕
+  if (state === 'off') return ui.dim(glyphs.hollow); // ○
+  return ui.accent(glyphs.dot); // ● neutral / info
+}
+
+// Menu-row chip indicator: filled ● for any active state, hollow ○ for inactive.
+// Deliberately distinct from statusDot (✓/▲/✕/○/●) — the nav menu reads cleaner
+// with a binary on/off dot beside each chip than the full status alphabet, which
+// made the menu look like a debug status table ("全是字") rather than a clean UI.
+function rowStatusDot(state) {
+  if (state === 'off' || state === 'error') return ui.dim(glyphs.hollow); // ○ inactive
+  if (state === 'warn') return ui.warn(glyphs.dot); // ● enabled-but-not-running
+  return ui.success(glyphs.dot); // ● ok / info
 }
 
 function formatStatusPill(label, state = 'info') {
@@ -216,10 +225,20 @@ function rowStateFromValue(value, fallback = 'info') {
   return fallback;
 }
 
-function printStatusBar(items = []) {
+// Justifies the pills across `width` so the nav-menu status bar reads as one
+// balanced line (✓ 已登录 … ○ Web 未启动 … ○ 上报未开启) instead of a `·`-joined
+// run clumped at the left. Single pill prints left-aligned.
+function printStatusBar(items = [], width = panelWidth()) {
   const visible = items.filter(Boolean);
   if (visible.length === 0) return;
-  console.log(visible.map((item) => `${statusDot(item.state)} ${colorByState(item.label, item.state)}`).join(ui.dim('  ·  ')));
+  const cells = visible.map((item) => `${statusDot(item.state)} ${colorByState(item.label, item.state)}`);
+  if (visible.length === 1) {
+    console.log(cells[0]);
+    return;
+  }
+  const total = cells.reduce((sum, cell) => sum + displayWidth(cell), 0);
+  const gap = Math.max(2, Math.floor((width - total) / (visible.length - 1)));
+  console.log(cells.join(' '.repeat(gap)));
 }
 
 function boxLine(left, fill = glyphs.h, right = left) {
@@ -242,12 +261,13 @@ function boxColumnsLine(left = '', right = '') {
   return `${ui.dim(glyphs.v)} ${leftVisible}${gap}${rightVisible}${ui.dim(glyphs.v)}`;
 }
 
-function menuColumnsLine(left = '', right = '') {
-  const rightVisible = truncateDisplay(right, 18);
-  const leftWidth = Math.max(1, CLI_MENU_WIDTH - displayWidth(rightVisible) - 2);
-  const leftVisible = truncateDisplay(left, leftWidth);
-  const gap = ' '.repeat(Math.max(2, CLI_MENU_WIDTH - displayWidth(leftVisible) - displayWidth(rightVisible)));
-  return `${leftVisible}${gap}${rightVisible}`;
+// Pad `left` out to `anchor` display columns, then append the state chip. Left
+// is never truncated — the caller passes an anchor just past the widest label so
+// chips from every row align tightly instead of floating at the screen edge.
+function menuColumnsLine(left = '', right = '', anchor = CLI_MENU_WIDTH) {
+  if (!right) return left;
+  const pad = ' '.repeat(Math.max(1, anchor - displayWidth(left)));
+  return `${left}${pad}${right}`;
 }
 
 // Adaptive panel width for the rounded status panels (printCliRows). Falls back
@@ -315,7 +335,18 @@ function printCliRows(title, rows = [], hint = '', options = {}) {
 }
 
 function menuBrandTitle() {
-  return `${ui.accent('🦀')} ${ui.accent(ui.bold(BRAND.stylizedName))} ${ui.dim(`v${currentVersion}`)}`;
+  return `${ui.accent(ui.bold(BRAND.stylizedName))} ${ui.dim(`v${currentVersion}`)}`;
+}
+
+// Nav-menu header rule: brand diamond + name on the left, version pinned to the
+// right edge of `width`. This is the one place the ◆ wordmark appears —
+// menuBrandTitle (the bare `Brand v1.x` wordmark) stays bare for the busy
+// overlay and status panels, so the diamond marks the top-level nav only.
+function navHeaderLine(width = panelWidth()) {
+  const left = `${glyphs.diamond}  ${BRAND.stylizedName}`;
+  const right = `v${currentVersion}`;
+  const gap = ' '.repeat(Math.max(2, width - displayWidth(left) - displayWidth(right)));
+  return `${ui.accent(glyphs.diamond)}  ${ui.accent(ui.bold(BRAND.stylizedName))}${gap}${ui.dim(right)}`;
 }
 
 function logoBorderLine() {
@@ -366,6 +397,7 @@ export {
   fitDisplay,
   truncateDisplay,
   statusDot,
+  rowStatusDot,
   formatStatusPill,
   colorByState,
   rowStateFromValue,
@@ -378,6 +410,7 @@ export {
   renderRowsPanel,
   printCliRows,
   menuBrandTitle,
+  navHeaderLine,
   logoBorderLine,
   welcomeLogoLines,
   printWelcomeLogo,

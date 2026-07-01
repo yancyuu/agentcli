@@ -16,7 +16,7 @@ export const DEFAULT_BRAND = Object.freeze({
   cliCommand: 'openhermit',
   npmPackage: '@yancyyu/openhermit',
   runtimeBridgeName: 'hermit-bridge',
-  authAccountLabel: 'AgentCli 账号',
+  authAccountLabel: 'AgentCli 用户',
   authProviderName: 'AgentCli',
   defaultLocalHomeName: '.hermit',
   githubRepo: 'yancyuu/Hermit',
@@ -46,7 +46,7 @@ export const BRAND = Object.freeze({
   runtimeBridgeName: rawBrand.runtimeBridgeName || DEFAULT_BRAND.runtimeBridgeName,
   authAccountLabel:
     rawBrand.authAccountLabel ||
-    `${rawBrand.stylizedName || DEFAULT_BRAND.stylizedName} 账号`,
+    `${rawBrand.stylizedName || DEFAULT_BRAND.stylizedName} 用户`,
   authProviderName:
     rawBrand.authProviderName || rawBrand.stylizedName || DEFAULT_BRAND.authProviderName,
   defaultLocalHomeName: rawBrand.defaultLocalHomeName || DEFAULT_BRAND.defaultLocalHomeName,

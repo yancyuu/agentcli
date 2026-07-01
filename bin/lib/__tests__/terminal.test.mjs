@@ -10,6 +10,11 @@ import {
   detectUnicode,
   panelWidth,
   renderRowsPanel,
+  menuColumnsLine,
+  navHeaderLine,
+  rowStatusDot,
+  glyphs,
+  displayWidth,
 } from '../terminal.mjs';
 
 const SAVED = {};
@@ -73,6 +78,21 @@ describe('terminal capability detection', () => {
   });
 });
 
+describe('menuColumnsLine', () => {
+  it('aligns the chip at the anchor column regardless of left width', () => {
+    const anchor = 14;
+    const wide = menuColumnsLine('❯ ▸ 用量同步', '运行中', anchor);
+    const narrow = menuColumnsLine('  ▸ 账号', '已登录', anchor);
+    const chipStart = (line, chip) => displayWidth(line.slice(0, line.indexOf(chip)));
+    expect(chipStart(wide, '运行中')).toBe(anchor);
+    expect(chipStart(narrow, '已登录')).toBe(anchor);
+  });
+
+  it('leaves left untouched when there is no chip', () => {
+    expect(menuColumnsLine('  ▸ AI 密钥', '', 14)).toBe('  ▸ AI 密钥');
+  });
+});
+
 describe('renderRowsPanel', () => {
   it('clamps panel width to a readable range', () => {
     const narrow = panelWidth.call(null); // current columns
@@ -93,5 +113,28 @@ describe('renderRowsPanel', () => {
     expect(joined).toContain('用量上报状态');
     expect(joined).toContain('会话数');
     expect(joined).toContain('Token 总量');
+  });
+});
+
+describe('navHeaderLine', () => {
+  it('justifies the diamond brand on the left and the version pinned to width', () => {
+    const width = 60;
+    const line = navHeaderLine(width);
+    // The header fills exactly `width` display columns (brand left, version right).
+    expect(displayWidth(line)).toBe(width);
+    expect(line.startsWith(glyphs.diamond)).toBe(true);
+    expect(line).toContain('v'); // version marker on the right
+  });
+});
+
+describe('rowStatusDot', () => {
+  it('is a hollow dot for inactive states and a filled dot for active ones', () => {
+    // Binary on/off indicator — distinct from statusDot's ✓/▲/✕ alphabet.
+    expect(rowStatusDot('off')).toBe(glyphs.hollow);
+    expect(rowStatusDot('error')).toBe(glyphs.hollow);
+    expect(rowStatusDot('warn')).toBe(glyphs.dot); // enabled-but-not-running
+    expect(rowStatusDot('ok')).toBe(glyphs.dot);
+    expect(rowStatusDot('info')).toBe(glyphs.dot);
+    expect(rowStatusDot('unknown')).toBe(glyphs.dot); // default neutral
   });
 });

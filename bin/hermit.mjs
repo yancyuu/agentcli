@@ -87,7 +87,6 @@ import {
   ui,
   glyphs,
   useUnicodeUi,
-  CLI_MENU_WIDTH,
   isInteractiveCli,
   createPromptInterface,
   askText,
@@ -99,6 +98,7 @@ import {
   fitDisplay,
   truncateDisplay,
   statusDot,
+  rowStatusDot,
   formatStatusPill,
   colorByState,
   rowStateFromValue,
@@ -107,8 +107,10 @@ import {
   boxContentLine,
   boxColumnsLine,
   menuColumnsLine,
+  panelWidth,
   printCliRows,
   menuBrandTitle,
+  navHeaderLine,
   printWelcomeLogo,
   clearTerminal,
 } from './lib/terminal.mjs';
@@ -147,7 +149,7 @@ import {
   assertWebPortAvailable,
 } from './lib/runtime.mjs';
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
-import { runAikey, runAikeyStatus } from './lib/aikey.mjs';
+import { runAikey, runAikeyStatus, parseActiveEnv } from './lib/aikey.mjs';
 import {
   USAGE_UPLOAD_PROVIDER_OPTIONS,
   fetchAuthoritativeUsage,
@@ -295,7 +297,7 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
   --help             显示帮助
 
 命令:
-  ${BRAND.cliCommand}         打开终端导航，选择本地使用、团队协作或账号授权
+  ${BRAND.cliCommand}         打开终端导航，选择本地使用、团队协作或用户授权
   web [--json]       直接启动并打开本地数字员工工作台（Web），跳过终端导航
   status [--json]    查看后台服务状态
   doctor [--json]    运行只读本地诊断
@@ -405,6 +407,7 @@ function currentFeatureStates() {
     ? settings.taskBus.telemetry
     : {};
   const uploadProviders = normalizeUploadProviders(telemetry.uploadProviders || telemetry.platform || 'claudecode');
+  const aikeyClaimed = readAikeyClaimed();
   return {
     auth,
     webPid,
@@ -414,7 +417,21 @@ function currentFeatureStates() {
     remoteUploadEnabled: Boolean(telemetry.uploadEnabled || telemetry.conversationUploadEnabled),
     conversationUploadEnabled: Boolean(telemetry.conversationUploadEnabled),
     uploadProviders,
+    aikeyClaimed,
   };
+}
+
+// Pure-ish leaf: aikey is "claimed" when ~/.hermit/aikey.env parses to a label.
+// Read on every menu repaint (cheap; same pattern as the pid files above) so the
+// AI 密钥 row reflects the real 认领 state instead of a hardcoded label.
+function readAikeyClaimed() {
+  try {
+    const content = readFileSync(path.join(hermitHome, 'aikey.env'), 'utf-8');
+    const { label, vars } = parseActiveEnv(content);
+    return Boolean(label) || Object.keys(vars).some((name) => name.endsWith('_API_KEY'));
+  } catch {
+    return false;
+  }
 }
 
 async function refreshWebRunningState(expectedPid = null) {
@@ -435,9 +452,9 @@ async function refreshWebRunningState(expectedPid = null) {
 
 function currentMenuStatusItems(states = currentFeatureStates()) {
   return [
-    { label: states.auth.authorized ? `登录 ${states.auth.account?.name || BRAND.authProviderName}` : '未登录', state: states.auth.authorized ? 'ok' : 'off' },
-    { label: states.webRunning ? `Web ${port}` : 'Web 关闭', state: states.webRunning ? 'ok' : 'off' },
-    { label: states.conversationUploadEnabled ? '消息上报' : '消息上报关闭', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'off' },
+    { label: states.auth.authorized ? `已登录 ${states.auth.account?.name || BRAND.authProviderName}` : '未登录', state: states.auth.authorized ? 'ok' : 'off' },
+    { label: states.webRunning ? 'Web 运行中' : 'Web 未启动', state: states.webRunning ? 'ok' : 'off' },
+    { label: states.conversationUploadEnabled ? (states.usageRunning ? '上报运行中' : '上报已开启') : '上报未开启', state: states.conversationUploadEnabled ? (states.usageRunning ? 'ok' : 'warn') : 'off' },
   ];
 }
 
@@ -471,16 +488,17 @@ function parseMenuKeys(input) {
 }
 
 function actionStateLabel(action, states) {
-  if (['web', 'toggle-web', 'start-web'].includes(action.id)) return { text: states.webRunning ? 'running' : 'stopped', state: states.webRunning ? 'ok' : 'error' };
-  if (action.toggle === 'conversation-upload' || action.id === 'toggle-message-upload') return { text: states.conversationUploadEnabled ? states.usageRunning ? formatUploadProviders(states.uploadProviders) : 'enabled' : 'stopped', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
+  if (['web', 'toggle-web', 'start-web'].includes(action.id)) return { text: states.webRunning ? '运行中' : '未启动', state: states.webRunning ? 'ok' : 'error' };
+  if (action.toggle === 'conversation-upload' || action.id === 'toggle-message-upload') return { text: states.conversationUploadEnabled ? states.usageRunning ? formatUploadProviders(states.uploadProviders) : '已开启' : '未开启', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
   if (action.id === 'choose-upload-provider') return { text: formatUploadProviders(states.uploadProviders), state: states.uploadProviders.length ? 'info' : 'warn' };
-  if (['toggle-background', 'start-usage', 'start-background'].includes(action.id)) return { text: states.usageRunning ? 'running' : 'stopped', state: states.usageRunning ? 'ok' : 'error' };
-  if (['data-sync', 'local-collection'].includes(action.id)) return { text: states.conversationUploadEnabled ? states.usageRunning ? 'running' : 'enabled' : 'stopped', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
-  if (action.id === 'stop-web' || action.id === 'stop-usage' || action.id === 'stop-background') return { text: 'stop', state: 'warn' };
-  if (['account', 'login', 'status'].includes(action.id)) return { text: states.auth.authorized ? 'signed in' : 'signed out', state: states.auth.authorized ? 'ok' : 'off' };
-  if (action.id === 'back') return { text: 'back', state: 'off' };
-  if (action.id === 'exit') return { text: 'exit', state: 'off' };
-  if (action.recommended) return { text: 'recommended', state: 'ok' };
+  if (['toggle-background', 'start-usage', 'start-background'].includes(action.id)) return { text: states.usageRunning ? '运行中' : '未启动', state: states.usageRunning ? 'ok' : 'error' };
+  if (['data-sync', 'local-collection'].includes(action.id)) return { text: states.conversationUploadEnabled ? states.usageRunning ? '运行中' : '已开启' : '未开启', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
+  if (action.id === 'aikey' || action.id === 'aikey-status') return { text: states.aikeyClaimed ? '已认领' : '未认领', state: states.aikeyClaimed ? 'ok' : 'off' };
+  if (action.id === 'stop-web' || action.id === 'stop-usage' || action.id === 'stop-background') return { text: '停止', state: 'warn' };
+  if (['account', 'login', 'status'].includes(action.id)) return { text: states.auth.authorized ? '已登录' : '未登录', state: states.auth.authorized ? 'ok' : 'off' };
+  if (action.id === 'back') return { text: '返回', state: 'off' };
+  if (action.id === 'exit') return { text: '', state: 'off' };
+  if (action.recommended) return { text: '推荐', state: 'ok' };
   return { text: '', state: 'info' };
 }
 
@@ -541,33 +559,68 @@ function renderNavMenu(title, subtitle, actions, selectedIndex, escapeAction = '
   clearTerminal();
   printWelcomeLogo();
   const states = currentFeatureStates();
-  console.log(menuBrandTitle());
-  printStatusBar(currentMenuStatusItems(states));
+  // Cap the nav card at ~60 cols so the label↔chip spacing stays proportional on
+  // wide terminals (panelWidth alone would stretch to ~78 and push chips to the
+  // far edge). Narrow terminals still adapt down via panelWidth's floor.
+  const width = Math.min(panelWidth(), 60);
+  console.log(navHeaderLine(width));
+  console.log();
+  printStatusBar(currentMenuStatusItems(states), width);
+  console.log(ui.dim(glyphs.h.repeat(width)));
   if (title) console.log(ui.bold(title));
   if (subtitle) console.log(ui.dim(subtitle));
   if (notice) console.log(colorByState(notice, 'warn'));
 
   const rows = visibleMenuRows(actions, expandedActionIds);
-  for (const [index, row] of rows.entries()) {
+
+  // Build each row's left half once so the state chip can be aligned just past
+  // the widest label instead of floating at the far screen edge — the old fixed
+  // 72-col anchor left a wide gap and made the menu read as sparse / debug text.
+  const parts = rows.map((row, index) => {
     const { action, depth } = row;
     const focused = index === selectedIndex;
     const expanded = expandedActionIds.has(action.id);
     const pointer = focused ? ui.accent(glyphs.pointer) : ' ';
-    const hasChildren = Boolean(action.children?.length);
+    const hasChildren = Boolean(action.children?.length) && !action.comingSoon;
     const caret = hasChildren ? (expanded ? glyphs.caretOpen : glyphs.caretClosed) : ' ';
     const state = actionStateLabel(action, states);
     const selected = action.toggle && state.state === 'ok';
     const marker = selected ? ui.success(glyphs.checked) : ' ';
     const label = selected ? ui.success(action.label) : focused ? ui.accent(action.label) : action.label;
-    const right = depth === 0 && state.text ? colorByState(state.text, state.state) : '';
     const left = depth === 0
       ? `${pointer} ${caret} ${label}`
       : `${pointer}   ${marker} ${label}`;
-    console.log(menuColumnsLine(left, right));
-    if (focused && action.description) console.log(`    ${ui.dim(action.description)}`);
-  }
+    // Chip = binary on/off dot + state-colored text. Empty text ⇒ no chip, which
+    // is how the exit row stays bare instead of echoing a redundant 「退出」 tag.
+    // comingSoon rows (token 池) hide the chip — a 开发中 feature shouldn't show
+    // a state it can't actually be acted on.
+    const right = depth === 0 && state.text && !action.comingSoon
+      ? `${rowStatusDot(state.state)} ${colorByState(state.text, state.state)}`
+      : '';
+    return { left, right };
+  });
 
-  console.log(ui.dim(`${menuFooterForEscape(escapeAction)}  [1-${rows.length} quick]`));
+  // Chips sit at the right edge of the panel (right-aligned to `width`) with a
+  // minimum 6-col breath after the longest label, so the label and the status
+  // chip never read as one cramped run.
+  const maxLeft = parts.reduce((max, { left }) => Math.max(max, displayWidth(left)), 0);
+  const maxRight = parts.reduce((max, { right }) => Math.max(max, displayWidth(right)), 0);
+  const chipCol = Math.max(maxLeft + 6, width - maxRight);
+
+  rows.forEach((row, index) => {
+    const { left, right } = parts[index];
+    // Separator before the escape action (退出 / 返回) detaches it from the
+    // feature rows above, matching the target nav layout.
+    if (row.action.id === escapeAction && index > 0) {
+      console.log(ui.dim(glyphs.h.repeat(width)));
+    }
+    console.log(menuColumnsLine(left, right, chipCol));
+    if (index === selectedIndex && row.action.description) {
+      console.log(`    ${ui.dim(row.action.description)}`);
+    }
+  });
+
+  console.log(ui.dim(`${menuFooterForEscape(escapeAction)}  [1-${rows.length} 快捷]`));
 }
 
 async function askMenuAction({ title, subtitle, actions, escapeAction = 'exit', onAction = null }) {
@@ -620,6 +673,11 @@ async function askMenuAction({ title, subtitle, actions, escapeAction = 'exit', 
       const rows = visibleRows();
       const row = rows[selectedIndex];
       if (!row) return;
+      if (row.action.comingSoon) {
+        const msg = typeof row.action.comingSoon === 'string' ? row.action.comingSoon : '该功能开发中，敬请期待';
+        repaint(msg);
+        return;
+      }
       if (row.depth === 0 && row.action.children?.length) {
         const wasExpanded = expandedActionIds.has(row.action.id);
         expandedActionIds.clear();
@@ -995,7 +1053,7 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
   }
 
   if (missingUploadScope) rows.push(['授权', '缺少 upload:read/upload:write，请重新登录', 'warn']);
-  else if (!auth.authorized) rows.push(['授权', '未登录，运行 openhermit auth login', 'warn']);
+  else if (!auth.authorized) rows.push(['授权', '未登录，请在「用户」中登录', 'warn']);
 
   return rows;
 }
@@ -1686,8 +1744,8 @@ async function printUsageReport({ exitOnDone = true } = {}) {
       printCliRows('用量上报报告', [
         ['消息上报', '已开启，但未登录', 'warn'],
         ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
-        ['下一步', '先执行 openhermit auth login', 'info'],
-      ], '立即扫描并上报需要 Bearer 登录授权；登录后再执行会按服务端 cursor 只扫描新增消息。');
+        ['下一步', '进入「用户」登录（命令行：openhermit auth login）', 'info'],
+      ], '在「用户」中登录后再扫描上报，会按服务端 cursor 只扫描新增消息。');
       if (exitOnDone) process.exit(1);
       return result;
     }
@@ -1759,8 +1817,8 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
       printCliRows('立即扫描并上报一次', [
         ['消息上报', '已开启，但未登录', 'warn'],
         ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
-        ['下一步', '先执行 openhermit auth login', 'info'],
-      ], '登录后再执行会按服务端 cursor 只扫描新增消息。');
+        ['下一步', '进入「用户」登录（命令行：openhermit auth login）', 'info'],
+      ], '在「用户」中登录后再执行，会按服务端 cursor 只扫描新增消息。');
       if (exitOnDone) process.exit(1);
       return result;
     }
@@ -1997,7 +2055,7 @@ function printServicesRows(title, status, hint = '') {
     ['用量统计', status.usage.enabled ? '本地扫描开启' : '关闭'],
     ['团队协作', status.collaboration.enabled ? '开启' : '关闭'],
     ['Redis', `${status.collaboration.redis.host}:${status.collaboration.redis.port}`],
-    ['账号', status.auth.authorized ? '已登录' : '未登录'],
+    ['用户', status.auth.authorized ? '已登录' : '未登录'],
   ], hint);
 }
 
@@ -2116,7 +2174,7 @@ async function runServicesMenu() {
       const status = await collectServicesStatus();
       printServicesRows('服务已更新', status);
     } catch (err) {
-      printCliRows('服务操作失败', [['原因', err instanceof Error ? err.message : String(err)]], '上传/托管能力需要先运行 openhermit auth login。');
+      printCliRows('服务操作失败', [['原因', err instanceof Error ? err.message : String(err)]], '上传/托管能力需要先在「用户」中登录。');
     }
     await waitForNavigationContinue('按 Enter/← 返回服务菜单 | Esc/Ctrl+C 退出');
   }
@@ -2336,7 +2394,7 @@ async function printCollaborationStart({ exitOnDone = true } = {}) {
   };
   if (jsonRequested) printJson(result);
   printCliRows('团队协作已准备好', [
-    ['账号', auth.authorized ? `已登录 ${BRAND.authProviderName}` : '未登录（本地/自托管协作可用）'],
+    ['用户', auth.authorized ? `已登录 ${BRAND.authProviderName}` : '未登录（本地/自托管协作可用）'],
     ['Redis', `${taskBus.redis.host}:${taskBus.redis.port}`],
     ['配置入口', 'Web 设置 > 团队总线'],
   ], 'Redis 仅用于本地/自托管团队协作；Usage 统计不会上传。');
@@ -2587,7 +2645,6 @@ async function printNavigation() {
   while (true) {
     const actionId = await askMenuAction({
       title: '',
-      subtitle: '↑/↓ 或 Ctrl-N/Ctrl-P 移动，Enter 执行；✓ 表示已开启，执行后停留在当前页面',
       actions: NAV_ACTIONS,
       onAction: async (action) => {
         if (!['toggle-web', 'web-status', 'install-lark-cli', 'toggle-message-upload', 'overview', 'scan', 'upload-logs', 'login', 'logout', 'dev-login', 'status'].includes(action.id)) return false;

@@ -74,5 +74,30 @@ export async function loadImOriginEnvelopes(hermitHome: string): Promise<Map<str
     }
   }
 
+  // Chat-scoped sender enrichment. When a conversation's Claude session rolls
+  // over, hermit-bridge indexes the new (current) session only under the message
+  // composite, not the sender composite — so its envelope reaches us with
+  // chatId + messageId but no senderId, even though the chat's sender is known
+  // from the chat's sender composite. When a chat has exactly one distinct
+  // sender we can attribute it unambiguously; multi-sender group chats stay
+  // unresolved rather than be mis-attributed.
+  const chatSenders = new Map<string, Map<string, string | undefined>>();
+  for (const env of envelopes.values()) {
+    if (!env.chatId || !env.senderId) continue;
+    const senders = chatSenders.get(env.chatId) ?? new Map<string, string | undefined>();
+    if (!senders.has(env.senderId)) senders.set(env.senderId, env.senderName);
+    chatSenders.set(env.chatId, senders);
+  }
+  if (chatSenders.size) {
+    for (const env of envelopes.values()) {
+      if (!env.chatId || env.senderId) continue;
+      const senders = chatSenders.get(env.chatId);
+      if (!senders || senders.size !== 1) continue;
+      const [senderId, senderName] = [...senders.entries()][0];
+      env.senderId = senderId;
+      if (senderName) env.senderName ??= senderName;
+    }
+  }
+
   return envelopes;
 }

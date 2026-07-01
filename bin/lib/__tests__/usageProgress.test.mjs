@@ -100,20 +100,32 @@ describe('aggregateUploadProgress', () => {
     expect(snap.uploaded).toBe(300);
   });
 
-  it('marks failed only when the most recent event is a failure', () => {
-    const events = [
+  it('marks failed only when nothing was uploaded — a late failure must not cry wolf', () => {
+    // Total failure: a failure with zero uploaded ⇒ failed.
+    const totalFail = [
       scan(0, 'claudecode', 'plain', 10),
       failure(1, 'claudecode', 'plain', 'boom'),
     ];
-    expect(aggregateUploadProgress(events).failed).toBe(true);
-    expect(aggregateUploadProgress(events).failureMessage).toBe('boom');
+    expect(aggregateUploadProgress(totalFail).failed).toBe(true);
+    expect(aggregateUploadProgress(totalFail).failureMessage).toBe('boom');
 
-    // A later batch event clears the failed state.
+    // Recovery: a later successful batch clears failed (uploaded > 0).
     const recovered = [
       failure(0, 'claudecode', 'plain', 'boom'),
       batch(1, 'claudecode', 'plain', { totalMessages: 10, uploadedAfterBatch: 10 }),
     ];
     expect(aggregateUploadProgress(recovered).failed).toBe(false);
+
+    // False-failure regression: plain channel delivered 28, then the im channel
+    // failed (or a status-timeout fired) as the LATEST event. The global bar must
+    // NOT read 失败 — messages were accepted. The old "failureTs >= latestEventTs"
+    // logic flipped this to 失败 even though the upload succeeded.
+    const falseFail = [
+      batch(0, 'claudecode', 'plain', { totalMessages: 28, uploadedAfterBatch: 28 }),
+      failure(1, 'claudecode', 'im', 'timeout'),
+    ];
+    expect(aggregateUploadProgress(falseFail).uploaded).toBe(28);
+    expect(aggregateUploadProgress(falseFail).failed).toBe(false);
   });
 });
 

@@ -50,11 +50,7 @@ function channelKey(event) {
 export function aggregateUploadProgress(events = []) {
   const channels = new Map();
   let latestFailure = null;
-  let latestEventTs = -Infinity;
   for (const event of events) {
-    if (!event?.timestamp) continue;
-    const ts = Date.parse(event.timestamp);
-    if (Number.isFinite(ts) && ts > latestEventTs) latestEventTs = ts;
     if (FAILURE_EVENT_MESSAGES.has(event.message)) latestFailure = event;
     const key = channelKey(event);
     if (!key) continue;
@@ -89,10 +85,13 @@ export function aggregateUploadProgress(events = []) {
     }
   }
 
-  const failureTs = Number.isFinite(Date.parse(latestFailure?.timestamp || ''))
-    ? Date.parse(latestFailure.timestamp)
-    : -Infinity;
-  const failed = Boolean(latestFailure) && failureTs >= latestEventTs;
+  // A run is "failed" only if it delivered nothing. A transient batch failure,
+  // a single failing channel, or a post-upload status-timeout that follows
+  // successful 202s must NOT flip the bar to 失败 ("显示失败但其实已上报成功了") —
+  // if any messages were accepted, the run partially or fully succeeded.
+  // Per-channel misses stay visible in the channel breakdown and the 待上报
+  // backlog; the global label reserves 失败 for a true total failure.
+  const failed = Boolean(latestFailure) && uploaded === 0;
   return {
     discovered,
     uploaded,

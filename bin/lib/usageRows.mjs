@@ -42,6 +42,14 @@ export function cursorPendingRows(upload) {
   }
   if (!hasPending || !Number.isFinite(pending)) return [];
   if (pending <= 0) return [['待上报', '无', 'info']];
+  // Express the backlog in tokens — its real cost — when the scan reported
+  // per-message usage. Falls back to a message count for channels / legacy
+  // data that carry no usage, so the row never goes empty.
+  const hasTok = hasField(upload, 'pendingTokens') && upload.pendingTokens !== undefined && upload.pendingTokens !== null;
+  const pendingTokens = hasTok ? Number(upload.pendingTokens) : NaN;
+  if (Number.isFinite(pendingTokens) && pendingTokens > 0) {
+    return [['待上报', `Token ${formatNumber(pendingTokens)}`, 'warn']];
+  }
   return [['待上报', `消息 ${formatNumber(pending)}`, 'warn']];
 }
 

@@ -1,6 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
+import type { LocalTeamEntry } from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
+
 /**
  * Resolves which Hermit team owns an IM-origin Claude session, by matching the
  * session's working directory against each team's `workDir` in
@@ -86,5 +88,16 @@ export class ImTeamAttributor {
       }
     }
     return null;
+  }
+
+  // The same team records (read once from team.json) exposed in the shape
+  // CapabilityPackLoaderService consumes, so the IM upload path can build
+  // capability snapshots without re-reading team.json a second time.
+  toLocalTeams(): LocalTeamEntry[] {
+    return this.ranked.map((team) => ({
+      slug: team.teamSlug,
+      displayName: team.teamName,
+      workDir: team.workDir,
+    }));
   }
 }

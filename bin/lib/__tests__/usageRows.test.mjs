@@ -31,6 +31,17 @@ describe('usageRows', () => {
     expect(cursorPendingRows(undefined)).toEqual([]);
   });
 
+  it('prefers pendingTokens (the backlog’s real cost) over a raw message count', () => {
+    // Token figure wins when the scan reported per-message usage.
+    expect(cursorPendingRows({ pending: 12, pendingTokens: 34000 })).toEqual([
+      ['待上报', 'Token 34.0K', 'warn'],
+    ]);
+    // Messages with no usage (pendingTokens 0) fall back to the message count.
+    expect(cursorPendingRows({ pending: 12, pendingTokens: 0 })).toEqual([
+      ['待上报', '消息 12', 'warn'],
+    ]);
+  });
+
   it('renders pending from upload.pending only and never from local/server token deltas', () => {
     const local = { sessions: 1810, messages: 196107, totalTokens: 9836330316 };
     const server = {

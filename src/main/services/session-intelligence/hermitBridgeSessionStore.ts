@@ -139,10 +139,35 @@ export function parseHermitBridgeSessions(
   const composites = new Map<string, ParsedHermitBridgeComposite>();
   const sessions = new Map<string, ParsedHermitBridgeSession>();
 
-  const addSessionId = (set: Set<string>, value: unknown): void => {
-    if (typeof value === 'string' && value) set.add(value);
-    else if (Array.isArray(value))
-      for (const v of value) if (typeof v === 'string' && v) set.add(v);
+  // Map bridge internal ids (the top-level keys of `sessions`, e.g. "s12") to the
+  // Claude agent session ids they drove (current + past). The composite maps
+  // (`user_sessions` / `active_session`) index conversations by these internal
+  // ids, but IM-origin attribution and live-worker detection look sessions up by
+  // `agent_session_id` (the Claude .jsonl filename). Without this resolution the
+  // two keys never match and every composite envelope is silently dropped.
+  const agentIdsByBridgeId = new Map<string, Set<string>>();
+  for (const [bridgeId, entry] of Object.entries(root.sessions ?? {})) {
+    if (!entry || typeof entry !== 'object') continue;
+    const s = entry as { agent_session_id?: unknown; past_agent_session_ids?: unknown };
+    const ids = agentIdsByBridgeId.get(bridgeId) ?? new Set<string>();
+    if (typeof s.agent_session_id === 'string' && s.agent_session_id) ids.add(s.agent_session_id);
+    if (Array.isArray(s.past_agent_session_ids))
+      for (const v of s.past_agent_session_ids) if (typeof v === 'string' && v) ids.add(v);
+    if (ids.size) agentIdsByBridgeId.set(bridgeId, ids);
+  }
+
+  // Resolve a composite map value (string or array of bridge internal ids) to the
+  // underlying Claude agent session ids. Legacy builds that already stored
+  // `agent_session_id` directly (not internal ids) pass through unchanged.
+  const resolveAgentIds = (value: unknown, into: Set<string>): void => {
+    const visit = (v: unknown): void => {
+      if (typeof v !== 'string' || !v) return;
+      const resolved = agentIdsByBridgeId.get(v);
+      if (resolved) for (const id of resolved) into.add(id);
+      else into.add(v);
+    };
+    if (Array.isArray(value)) for (const v of value) visit(v);
+    else visit(value);
   };
 
   const ensureComposite = (key: string): ParsedHermitBridgeComposite => {
@@ -156,11 +181,11 @@ export function parseHermitBridgeSessions(
 
   for (const [composite, value] of Object.entries(root.user_sessions ?? {})) {
     if (!parseComposite(composite)) continue;
-    addSessionId(ensureComposite(composite).agentSessionIds, value);
+    resolveAgentIds(value, ensureComposite(composite).agentSessionIds);
   }
   for (const [composite, value] of Object.entries(root.active_session ?? {})) {
     if (!parseComposite(composite)) continue;
-    addSessionId(ensureComposite(composite).agentSessionIds, value);
+    resolveAgentIds(value, ensureComposite(composite).agentSessionIds);
   }
 
   for (const entry of Object.values(root.sessions ?? {})) {
