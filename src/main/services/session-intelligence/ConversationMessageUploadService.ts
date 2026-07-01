@@ -125,16 +125,15 @@ async function readTenantKey(home: string): Promise<string | undefined> {
 }
 
 function toReportCapabilityAsset(asset: TeamCapabilityTelemetryAsset): ReportCapabilityAsset {
-  return {
-    id: asset.id,
-    name: asset.name,
-    description: asset.description,
-    enabled: asset.enabled,
-    scope: asset.scope,
-    transport: asset.transport,
-    source: asset.source,
-    packId: asset.packId,
-  };
+  // Server capability items (ReportUpload{Skill,Mcp,Cron,Workflow}Capability) are
+  // additionalProperties:false — only their declared fields pass validation. The
+  // telemetry asset carries description/scope/packId which the server rejects, and
+  // `transport` is a valid field ONLY on the mcp kind. Emit the schema-safe subset.
+  const item: ReportCapabilityAsset = { id: asset.id, name: asset.name, kind: asset.kind };
+  if (asset.source) item.source = asset.source;
+  if (asset.enabled !== undefined) item.enabled = asset.enabled;
+  if (asset.kind === 'mcp' && asset.transport) item.transport = asset.transport;
+  return item;
 }
 
 function buildReportCapabilities(

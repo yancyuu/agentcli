@@ -63,7 +63,16 @@ async function runUpdate({ onUpdated } = {}) {
       await onUpdated?.();
       console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand()}\n`);
     } catch (err) {
-      console.error(`${brandLogPrefix()} npm update failed. Try: sudo npm install -g ${BRAND.npmPackage}@latest`);
+      // Platform-aware fallback. `sudo` does not exist on Windows, and the
+      // common failure there is EBUSY — a lingering openhermit process holds
+      // the package files (not a permissions issue) — so steer Windows users to
+      // release the lock. macOS/Linux may genuinely need sudo for a root-owned
+      // global prefix.
+      const hint =
+        process.platform === 'win32'
+          ? `先关闭所有运行中的 openhermit 进程（或重启电脑）再重试：npm install -g ${BRAND.npmPackage}@latest --prefer-online`
+          : `Try: sudo npm install -g ${BRAND.npmPackage}@latest`;
+      console.error(`${brandLogPrefix()} npm update failed. ${hint}`);
       process.exit(1);
     }
   }

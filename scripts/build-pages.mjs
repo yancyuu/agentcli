@@ -910,6 +910,29 @@ export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
     <p>如果 <code>openhermit update</code> 失败，可以直接用 npm 重新安装：</p>
     <pre><code>npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
 
+    <h3>Q: Windows 安装/更新报 EBUSY: resource busy or locked</h3>
+    <div class="callout error">
+      <div class="callout-title">典型报错</div>
+      <pre><code>npm error code EBUSY
+npm error syscall rename
+npm error path D:\...\node_modules\@yancyyu\openhermit
+npm error errno -4082
+npm error EBUSY: resource busy or locked, rename '...' -&gt; '...'</code></pre>
+    </div>
+    <p><strong>原因：</strong>这不是权限问题（EBUSY ≠ EACCES），所以 <code>sudo</code> 或"以管理员身份运行"都无效（Windows 也没有 <code>sudo</code>）。是之前运行过的 openhermit 后台进程（daemon / usage worker / 反复重启的子进程）还占着包里的文件，npm 无法替换。</p>
+    <p><strong>解决：</strong>先释放占用，再安装。PowerShell 执行：</p>
+    <pre><code># 杀掉所有跑 openhermit / hermit 的 node 进程（不碰 VS Code 等）
+Get-CimInstance Win32_Process -Filter "name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'openhermit|hermit' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force
+
+npm install -g @yancyyu/openhermit@latest --prefer-online
+openhermit --version</code></pre>
+    <div class="callout warn">
+      <div class="callout-title">最稳的办法</div>
+      <p>如果上面命令不会用或仍报错：<strong>重启电脑 → 直接 <code>npm install -g @yancyyu/openhermit@latest --prefer-online</code></strong>。重启后没有任何进程占用，必成。</p>
+    </div>
+
     <h3>Q: Web UI 打不开</h3>
     <ul>
       <li>确认 daemon 正在运行：<code>openhermit status</code></li>
