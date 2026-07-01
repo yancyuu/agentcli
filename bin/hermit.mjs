@@ -150,6 +150,7 @@ import {
 } from './lib/runtime.mjs';
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
 import { runAikey, runAikeyStatus, parseActiveEnv } from './lib/aikey.mjs';
+import { describeUploadToggle, resolveConversationUploadEnabled } from './lib/uploadState.mjs';
 import {
   USAGE_UPLOAD_PROVIDER_OPTIONS,
   fetchAuthoritativeUsage,
@@ -414,8 +415,7 @@ function currentFeatureStates() {
     usagePid,
     webRunning: Boolean((webPid && isPidRunning(webPid)) || Date.now() < optimisticWebRunningUntil),
     usageRunning: Boolean(usagePid && isPidRunning(usagePid)),
-    remoteUploadEnabled: Boolean(telemetry.uploadEnabled || telemetry.conversationUploadEnabled),
-    conversationUploadEnabled: Boolean(telemetry.conversationUploadEnabled),
+    conversationUploadEnabled: resolveConversationUploadEnabled(telemetry),
     uploadProviders,
     aikeyClaimed,
   };
@@ -451,10 +451,11 @@ async function refreshWebRunningState(expectedPid = null) {
 }
 
 function currentMenuStatusItems(states = currentFeatureStates()) {
+  const upload = describeUploadToggle({ enabled: states.conversationUploadEnabled, running: states.usageRunning });
   return [
     { label: states.auth.authorized ? `已登录 ${states.auth.account?.name || BRAND.authProviderName}` : '未登录', state: states.auth.authorized ? 'ok' : 'off' },
     { label: states.webRunning ? 'Web 运行中' : 'Web 未启动', state: states.webRunning ? 'ok' : 'off' },
-    { label: states.conversationUploadEnabled ? (states.usageRunning ? '上报运行中' : '上报已开启') : '上报未开启', state: states.conversationUploadEnabled ? (states.usageRunning ? 'ok' : 'warn') : 'off' },
+    { label: upload.rowLabel, state: upload.rowState },
   ];
 }
 
@@ -489,10 +490,16 @@ function parseMenuKeys(input) {
 
 function actionStateLabel(action, states) {
   if (['web', 'toggle-web', 'start-web'].includes(action.id)) return { text: states.webRunning ? '运行中' : '未启动', state: states.webRunning ? 'ok' : 'error' };
-  if (action.toggle === 'conversation-upload' || action.id === 'toggle-message-upload') return { text: states.conversationUploadEnabled ? states.usageRunning ? formatUploadProviders(states.uploadProviders) : '已开启' : '未开启', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
+  if (action.toggle === 'conversation-upload' || action.id === 'toggle-message-upload') {
+    const upload = describeUploadToggle({ enabled: states.conversationUploadEnabled, running: states.usageRunning });
+    return { text: states.usageRunning ? formatUploadProviders(states.uploadProviders) : upload.badge, state: upload.badgeState };
+  }
   if (action.id === 'choose-upload-provider') return { text: formatUploadProviders(states.uploadProviders), state: states.uploadProviders.length ? 'info' : 'warn' };
   if (['toggle-background', 'start-usage', 'start-background'].includes(action.id)) return { text: states.usageRunning ? '运行中' : '未启动', state: states.usageRunning ? 'ok' : 'error' };
-  if (['data-sync', 'local-collection'].includes(action.id)) return { text: states.conversationUploadEnabled ? states.usageRunning ? '运行中' : '已开启' : '未开启', state: states.conversationUploadEnabled ? states.usageRunning ? 'ok' : 'warn' : 'error' };
+  if (['data-sync', 'local-collection'].includes(action.id)) {
+    const upload = describeUploadToggle({ enabled: states.conversationUploadEnabled, running: states.usageRunning });
+    return { text: upload.badge, state: upload.badgeState };
+  }
   if (action.id === 'aikey' || action.id === 'aikey-status') return { text: states.aikeyClaimed ? '已认领' : '未认领', state: states.aikeyClaimed ? 'ok' : 'off' };
   if (action.id === 'stop-web' || action.id === 'stop-usage' || action.id === 'stop-background') return { text: '停止', state: 'warn' };
   if (['account', 'login', 'status'].includes(action.id)) return { text: states.auth.authorized ? '已登录' : '未登录', state: states.auth.authorized ? 'ok' : 'off' };
@@ -1172,6 +1179,11 @@ function buildLocalUsageTaskBusConfig(current = {}) {
     ? existing.redis
     : { host: '127.0.0.1', port: 6379 };
   const existingTelemetry = existing.telemetry && typeof existing.telemetry === 'object' ? existing.telemetry : {};
+  // `uploadEnabled` is a legacy dead key (written by old paths, never read for
+  // upload behavior — the worker gates on conversationUploadEnabled || conversations.uploadEnabled).
+  // Strip it when re-writing so it is purged from settings.json instead of carried forever.
+  const { uploadEnabled: _legacyUploadEnabled, ...telemetryWithoutLegacy } = existingTelemetry;
+  void _legacyUploadEnabled;
   const uploadProviders = normalizeUploadProviders(existingTelemetry.uploadProviders || ['claudecode']);
   return {
     ...existing,
@@ -1183,9 +1195,8 @@ function buildLocalUsageTaskBusConfig(current = {}) {
       ...(redis.db !== undefined ? { db: redis.db } : {}),
     },
     telemetry: {
-      ...existingTelemetry,
+      ...telemetryWithoutLegacy,
       enabled: true,
-      uploadEnabled: Boolean(existingTelemetry.uploadEnabled),
       conversationUploadEnabled: Boolean(existingTelemetry.conversationUploadEnabled),
       uploadProviders,
       platform: uploadProviders[0] || existingTelemetry.platform || 'claudecode',
@@ -1723,6 +1734,30 @@ async function withUploadProgress(label, task) {
   }
 }
 
+// The shared "foreground scan" sequence used by both `usage report` and the
+// menu scan action. Does exactly one thing in one place (no duplicated copies):
+//   1. Pause the daemon worker if it is running, so this foreground scan owns
+//      the upload lock and drains past in-flight backpressure.
+//   2. When fullRescan, set HERMIT_USAGE_FULL_RESCAN=1 so the worker ignores
+//      cursors and re-uploads ALL history (the server dedups by eventId, so a
+//      full re-upload is the safe backfill path when the cursor missed things).
+//   3. Run one scan+upload under the progress bar.
+//   4. Always clear the env flag and restart the worker — even on throw — so a
+//      full rescan can never leak the flag into a later incremental scan, and
+//      the background worker always comes back if it was running.
+async function runForegroundScan({ fullRescan = false, progressText }) {
+  const workerPid = readPidFile(telemetryWorkerPidPath);
+  const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
+  if (workerWasRunning) await stopTelemetryWorker();
+  if (fullRescan) process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+  try {
+    return await withUploadProgress(progressText, () => readUsageStatus({ scan: true, localOnly: false }));
+  } finally {
+    if (fullRescan) delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    if (workerWasRunning) startTelemetryWorker({ quiet: true });
+  }
+}
+
 async function printUsageReport({ exitOnDone = true } = {}) {
   try {
     // Refresh the bearer (hits /me, auto-refreshes expired tokens) BEFORE the
@@ -1751,23 +1786,12 @@ async function printUsageReport({ exitOnDone = true } = {}) {
     }
 
     const fullRescan = commandArgs.includes('--full');
-    const workerPid = readPidFile(telemetryWorkerPidPath);
-    const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
-    if (workerWasRunning) await stopTelemetryWorker();
-    if (fullRescan) process.env.HERMIT_USAGE_FULL_RESCAN = '1';
-
-    let data;
-    try {
-      data = await withUploadProgress(
-        fullRescan
-          ? '正在全量重扫并重传（--full，服务端按 eventId 去重，可能耗时，请勿退出）...'
-          : '正在执行一次增量扫描并按需上报，请勿退出...',
-        () => readUsageStatus({ scan: true, localOnly: false })
-      );
-    } finally {
-      if (fullRescan) delete process.env.HERMIT_USAGE_FULL_RESCAN;
-      if (workerWasRunning) startTelemetryWorker({ quiet: true });
-    }
+    const data = await runForegroundScan({
+      fullRescan,
+      progressText: fullRescan
+        ? '正在全量重扫并重传（--full，服务端按 eventId 去重，可能耗时，请勿退出）...'
+        : '正在执行一次增量扫描并按需上报，请勿退出...',
+    });
     const upload = data.telemetry.conversationUpload;
     const result = {
       ok: true,
@@ -1797,11 +1821,17 @@ async function printUsageReport({ exitOnDone = true } = {}) {
   }
 }
 
-// Compact result box for the "立即扫描并上报一次" menu action. Distinct from
-// `usage report` (the full dashboard): scan-once answers "this scan uploaded N,
-// server has M, X still pending" in a few rows and never dumps the full report.
-// Reuses localServerRows (tested) so 本地/服务端/待上报 stay consistent everywhere.
-async function printScanOnceResult({ exitOnDone = true } = {}) {
+// Compact result box for the menu scan action. Distinct from `usage report`
+// (the full dashboard): it answers "this scan uploaded N, server has M, X still
+// pending" in a few rows and never dumps the full report. Reuses localServerRows
+// (tested) so 本地/服务端/待上报 stay consistent everywhere.
+//
+// The menu wires this as a FULL re-upload (fullRescan=true): the background
+// worker is paused, history is re-scanned ignoring cursors and re-uploaded
+// (server dedups by eventId — safe backfill), then the worker is restored.
+// Incremental mode (fullRescan=false) is retained for `usage scan-once` callers.
+async function printScanOnceResult({ exitOnDone = true, fullRescan = false } = {}) {
+  const title = fullRescan ? '立即全量上报' : '立即扫描并上报一次';
   try {
     const auth = await refreshOpenHermitAuthStatus();
     const states = currentFeatureStates();
@@ -1814,7 +1844,7 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
         upload: { enabled: true, authorized: false },
       };
       if (jsonRequested) printJson(result, 1);
-      printCliRows('立即扫描并上报一次', [
+      printCliRows(title, [
         ['消息上报', '已开启，但未登录', 'warn'],
         ['本次扫描', '已取消，避免扫描后无法上报', 'warn'],
         ['下一步', '进入「用户」登录（命令行：openhermit auth login）', 'info'],
@@ -1823,22 +1853,12 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
       return result;
     }
 
-    // Pause the daemon worker so this foreground scan owns the upload lock and
-    // drains past in-flight backpressure (HERMIT_USAGE_FOREGROUND_SCAN=1 is set
-    // inside runTelemetryWorkerScanOnce). Restart it after, matching the report.
-    const workerPid = readPidFile(telemetryWorkerPidPath);
-    const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
-    if (workerWasRunning) await stopTelemetryWorker();
-
-    let data;
-    try {
-      data = await withUploadProgress(
-        '正在执行一次增量扫描并按需上报，请勿退出...',
-        () => readUsageStatus({ scan: true, localOnly: false })
-      );
-    } finally {
-      if (workerWasRunning) startTelemetryWorker({ quiet: true });
-    }
+    const data = await runForegroundScan({
+      fullRescan,
+      progressText: fullRescan
+        ? '正在全量重扫并重传（服务端按 eventId 去重，可能耗时，请勿退出）...'
+        : '正在执行一次增量扫描并按需上报，请勿退出...',
+    });
 
     const upload = data.telemetry?.conversationUpload || {};
     const attempted = Number(upload.attempted || 0);
@@ -1856,7 +1876,9 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
         ? `${formatNumber(accepted)} 条消息已上传${attempted !== accepted ? ` · 尝试 ${formatNumber(attempted)}` : ''}`
         : uploadError
           ? `上报失败：${uploadError}`
-          : '无新增消息',
+          : fullRescan
+            ? '无消息可上报（服务端已全部入库）'
+            : '无新增消息',
       accepted > 0 ? 'ok' : uploadError ? 'error' : 'info',
     ]);
     rows.push(...localServerRows(data.telemetry, data.authoritativeUsage));
@@ -1871,9 +1893,11 @@ async function printScanOnceResult({ exitOnDone = true } = {}) {
     const result = { ok: true, command: 'scan-once', hermitHome, ...data };
     if (jsonRequested) printJson(result);
     printCliRows(
-      '立即扫描并上报一次',
+      title,
       rows,
-      '待上报来自本次按服务端 cursor 扫描后尚未成功提交的消息数；本地/服务端总账只作诊断对比，不用于相减。下方按渠道：success=该渠道已提交 cursor，never_reported=该渠道尚未提交 cursor。',
+      fullRescan
+        ? '全量上报忽略游标、重传全部历史；服务端按 eventId 去重，已入库的消息不会重复计数。下方按渠道：success=该渠道已提交 cursor，never_reported=该渠道尚未提交 cursor。'
+        : '待上报来自本次按服务端 cursor 扫描后尚未成功提交的消息数；本地/服务端总账只作诊断对比，不用于相减。下方按渠道：success=该渠道已提交 cursor，never_reported=该渠道尚未提交 cursor。',
     );
     if (exitOnDone) process.exit(0);
     return result;
@@ -2317,7 +2341,7 @@ async function runLocalCollectionAction() {
     });
     if (actionId === 'back') return;
     if (actionId === 'overview') await printUsageStatus({ exitOnDone: false });
-    if (actionId === 'scan') await printScanOnceResult({ exitOnDone: false });
+    if (actionId === 'scan') await printScanOnceResult({ exitOnDone: false, fullRescan: true });
     if (actionId === 'choose-upload-provider') await enableConversationUploadWithProvider();
     if (actionId === 'start-background') await printUsageStart({ exitOnDone: false });
     if (actionId === 'stop-background') await printUsageStop({ exitOnDone: false });
@@ -2551,7 +2575,7 @@ async function runNavigationAction(action) {
     return;
   }
   if (action.id === 'scan') {
-    await printScanOnceResult({ exitOnDone: false });
+    await printScanOnceResult({ exitOnDone: false, fullRescan: true });
     return;
   }
   if (action.id === 'start-background') {

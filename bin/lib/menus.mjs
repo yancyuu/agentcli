@@ -16,7 +16,7 @@ export const NAV_ACTIONS = [
     children: [
       { id: 'toggle-message-upload', label: '消息上报', toggle: 'conversation-upload' },
       { id: 'overview', label: '查看同步状态' },
-      { id: 'scan', label: '立即扫描并上报一次' },
+      { id: 'scan', label: '立即全量上报（慎选）', description: '若后台 worker 在运行，先暂停它；忽略游标全量重扫并重传历史（服务端按 eventId 去重，不会重复入库），完成后自动恢复 worker' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
     ],
   },
@@ -224,8 +224,8 @@ export const LOCAL_COLLECTION_ACTIONS = [
   },
   {
     id: 'scan',
-    label: '立即扫描并上报一次',
-    description: '立刻执行一次增量扫描；消息上报开启时会按游标只上传新增消息',
+    label: '立即全量上报（慎选）',
+    description: '若后台 worker 在运行，先暂停它；忽略游标全量重扫并重传历史（服务端按 eventId 去重），完成后自动恢复 worker',
   },
   {
     id: 'choose-upload-provider',
