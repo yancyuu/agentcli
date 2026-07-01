@@ -148,6 +148,35 @@ const html = `<!DOCTYPE html>
     }
     .install-cmd .comment { color: var(--text-dim); }
 
+    .install-help {
+      max-width: 640px;
+      margin: 16px auto 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 3px solid #eab308;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: left;
+      line-height: 1.6;
+    }
+    .install-help strong { color: var(--text); }
+    .install-help code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: var(--accent-light);
+    }
+    .install-help pre {
+      margin: 8px 0 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .install-help pre code { color: var(--green); background: none; border: none; padding: 0; }
+
     .arch-section {
       max-width: 800px;
       margin: 0 auto;
@@ -364,6 +393,12 @@ const html = `<!DOCTYPE html>
       <div class="install-content" id="tab-npx">
         <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/openhermit</div>
       </div>
+    </div>
+    <div class="install-help">
+      <strong>安装或更新报错？</strong> Windows 上遇到 <code>EBUSY: resource busy or locked</code>，是之前的 openhermit 进程还占着文件，不是权限问题（别用 <code>sudo</code>）。先关掉再装：
+      <pre><code>openhermit stop
+npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
+      还不行？看 <a href="guide.html#faq">完整排查步骤 →</a>
     </div>
   </section>
 

@@ -467,28 +467,36 @@ describe('ConversationMessageUploadService', () => {
     expect(result.lastError).toBeUndefined();
     expect(posted.im).toHaveLength(1);
     const imMessage = posted.im[0].messages[0];
-    // Capabilities ride ONLY under team.capabilities — ReportUploadMessage has no
-    // top-level capabilities field, and each item is a schema-valid subset
-    // (id/name/kind + source/enabled/transport where applicable).
+    // Capabilities ride ONLY under team.capabilities in the canonical IM shape:
+    // skills + cron are Collections {count, items}; mcp + workflows are arrays. Each
+    // item uses the per-kind ref field (capabilityRef/serverRef/workflowRef/cronRef),
+    // never the raw telemetry id.
     expect(imMessage.capabilities).toBeUndefined();
     expect(imMessage.team?.capabilities).toMatchObject({
-      mcp: [{ id: 'context7', name: 'context7', kind: 'mcp', transport: 'stdio' }],
-      skills: [{ id: 'review', name: 'review', kind: 'skill' }],
-      cron: [{ id: 'weekday-report', name: '周报', kind: 'cron', enabled: true }],
-      workflow: [{ id: 'loop-design', name: 'loop-design', kind: 'workflow' }],
-      workflows: [{ id: 'loop-design', name: 'loop-design', kind: 'workflow' }],
+      schemaVersion: 1,
+      source: 'agent-registry',
+      skills: {
+        count: 1,
+        items: [{ capabilityRef: 'review', name: 'review', displayName: 'review' }],
+      },
+      mcp: [{ serverRef: 'context7', server: 'context7', transport: 'stdio' }],
+      workflows: [{ workflowRef: 'loop-design', name: 'loop-design' }],
+      cron: {
+        count: 1,
+        items: [{ cronRef: 'weekday-report', name: '周报', schedule: '17 9 * * 1-5' }],
+      },
     });
-    // Forbidden fields must not leak (these caused the live 422): no counts/
-    // fingerprint at capabilities-top, no description/scope/packId on items, and no
-    // transport on non-mcp kinds.
+    // Forbidden fields/keys must not leak (the live 422 root cause): no top-level
+    // message.capabilities, no singular `workflow` key, no counts/fingerprint on the
+    // capabilities object, and no description/scope/packId/id/kind on items.
     const caps = imMessage.team?.capabilities;
+    expect(caps).not.toHaveProperty('workflow');
     expect(caps).not.toHaveProperty('counts');
     expect(caps).not.toHaveProperty('fingerprint');
     const capsJson = JSON.stringify(caps);
-    expect(capsJson).not.toContain('description');
-    expect(capsJson).not.toContain('packId');
-    expect(JSON.stringify(caps?.cron)).not.toContain('scope');
-    expect(JSON.stringify(caps?.skills)).not.toContain('transport');
+    for (const forbidden of ['description', 'packId', '"id"', '"kind"']) {
+      expect(capsJson).not.toContain(forbidden);
+    }
     expect(imMessage.team).toMatchObject({ teamName: '能力团队' });
     // No prompt/secret payloads leak through capability telemetry.
     const serialized = JSON.stringify(posted.im[0]);

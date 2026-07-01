@@ -124,34 +124,52 @@ async function readTenantKey(home: string): Promise<string | undefined> {
   return typeof account?.tenantKey === 'string' ? account.tenantKey : undefined;
 }
 
-function toReportCapabilityAsset(asset: TeamCapabilityTelemetryAsset): ReportCapabilityAsset {
-  // Server capability items (ReportUpload{Skill,Mcp,Cron,Workflow}Capability) are
-  // additionalProperties:false — only their declared fields pass validation. The
-  // telemetry asset carries description/scope/packId which the server rejects, and
-  // `transport` is a valid field ONLY on the mcp kind. Emit the schema-safe subset.
-  const item: ReportCapabilityAsset = { id: asset.id, name: asset.name, kind: asset.kind };
-  if (asset.source) item.source = asset.source;
-  if (asset.enabled !== undefined) item.enabled = asset.enabled;
-  if (asset.kind === 'mcp' && asset.transport) item.transport = asset.transport;
+// Server capability items are additionalProperties:false and each kind carries a
+// distinct field set (ReportUpload{Skill,Mcp,Cron,Workflow}Capability). Map each
+// telemetry asset kind once to its canonical item shape — never funnel all kinds
+// through one mapper, since their valid fields differ (transport is mcp-only,
+// schedule is cron-only, etc.). `command` assets have no upload home and are dropped.
+function toSkillCapability(asset: TeamCapabilityTelemetryAsset): ReportCapabilityItem {
+  return { capabilityRef: asset.id, name: asset.name, displayName: asset.name };
+}
+
+function toMcpCapability(asset: TeamCapabilityTelemetryAsset): ReportMcpCapability {
+  const item: ReportMcpCapability = { serverRef: asset.id, server: asset.name };
+  if (asset.transport) item.transport = asset.transport;
   return item;
+}
+
+function toCronCapability(asset: TeamCapabilityTelemetryAsset): ReportCronCapability {
+  const item: ReportCronCapability = { cronRef: asset.id, name: asset.name };
+  if (asset.scope) item.schedule = asset.scope; // telemetry stores the cron expression in `scope`
+  return item;
+}
+
+function toWorkflowCapability(asset: TeamCapabilityTelemetryAsset): ReportWorkflowCapability {
+  return { workflowRef: asset.id, name: asset.name };
 }
 
 function buildReportCapabilities(
   assets: TeamCapabilityTelemetryAsset[],
   generatedAt?: string
 ): ReportCapabilities | undefined {
-  // Server schema ReportUploadCapabilities (additionalProperties:false) allows only
-  // schemaVersion/generatedAt/source/skills/mcp/workflows/workflow/cron. The counts/
-  // fingerprint/reportedAt fields we used to emit are extra_forbidden and were part
-  // of the live 422 root cause alongside the forbidden item fields.
-  const byKind = (kind: TeamCapabilityTelemetryAsset['kind']) =>
-    assets.filter((asset) => asset.kind === kind).map(toReportCapabilityAsset);
-  const mcp = byKind('mcp');
-  const skills = byKind('skill');
-  const cron = byKind('cron');
-  const workflows = byKind('workflow');
-  if (!mcp.length && !skills.length && !cron.length && !workflows.length) return undefined;
-  const capabilities: ReportCapabilities = { mcp, skills, cron, workflow: workflows, workflows };
+  // Canonical IM `team.capabilities` shape (ReportUploadCapabilities): skills + cron
+  // are Collections {count, items}; mcp + workflows are arrays. Every item is a
+  // schema-valid subset — the item schemas are additionalProperties:false, which is
+  // what produced the live 422 (messages.*.team.capabilities.skills.*) before.
+  const skills = assets.filter((a) => a.kind === 'skill').map(toSkillCapability);
+  const mcp = assets.filter((a) => a.kind === 'mcp').map(toMcpCapability);
+  const cron = assets.filter((a) => a.kind === 'cron').map(toCronCapability);
+  const workflows = assets.filter((a) => a.kind === 'workflow').map(toWorkflowCapability);
+  if (!skills.length && !mcp.length && !cron.length && !workflows.length) return undefined;
+  const capabilities: ReportCapabilities = {
+    schemaVersion: 1,
+    source: 'agent-registry',
+    skills: { count: skills.length, items: skills },
+    mcp,
+    workflows,
+    cron: { count: cron.length, items: cron },
+  };
   if (generatedAt) capabilities.generatedAt = generatedAt;
   return capabilities;
 }
@@ -215,24 +233,58 @@ type UploadPlatform = 'claudecode' | 'codex';
 type UploadMode = 'plain' | 'im';
 type MessageKind = 'conversation_message' | 'im_conversation_message';
 
-type ReportCapabilityAsset = {
-  id: string;
-  name: string;
-  kind: TeamCapabilityTelemetryAsset['kind'];
+// Common capability-item fields shared by every kind (ReportUploadSkillCapability is
+// exactly this base; mcp/cron/workflow extend it). All-optional, mirrors the server.
+type ReportCapabilityItem = {
+  capabilityRef?: string;
+  id?: string;
+  name?: string;
+  displayName?: string;
   source?: string;
+  version?: string;
   enabled?: boolean;
-  transport?: string; // valid only on the mcp kind
+  status?: string;
+  kind?: string;
+};
+
+type ReportMcpCapability = ReportCapabilityItem & {
+  server?: string;
+  serverRef?: string;
+  tool?: string;
+  toolName?: string;
+  transport?: string;
+};
+
+type ReportCronCapability = ReportCapabilityItem & {
+  cronRef?: string;
+  schedule?: string;
+  timezone?: string;
+  workflowRef?: string;
+  nextRunAt?: string;
+};
+
+type ReportWorkflowCapability = ReportCapabilityItem & {
+  workflowRef?: string;
+  trigger?: string;
+  triggerSource?: string;
+};
+
+type ReportCapabilityCollection<T> = {
+  count?: number;
+  items: T[];
+  itemsTruncated?: boolean;
+  source?: string;
+  generatedAt?: string;
 };
 
 type ReportCapabilities = {
   schemaVersion?: number;
   generatedAt?: string;
   source?: string;
-  mcp?: ReportCapabilityAsset[];
-  skills?: ReportCapabilityAsset[];
-  cron?: ReportCapabilityAsset[];
-  workflow?: ReportCapabilityAsset[];
-  workflows?: ReportCapabilityAsset[];
+  skills?: ReportCapabilityCollection<ReportCapabilityItem>;
+  mcp?: ReportMcpCapability[];
+  workflows?: ReportWorkflowCapability[];
+  cron?: ReportCapabilityCollection<ReportCronCapability>;
 };
 
 type ReportTeamBlock = {
