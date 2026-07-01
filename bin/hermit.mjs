@@ -516,7 +516,8 @@ function inlineBusyMessage(action) {
       : '正在启动本地数字员工工作台...';
   }
   if (action.id === 'toggle-message-upload') {
-    return currentFeatureStates().conversationUploadEnabled
+    const s = currentFeatureStates();
+    return (s.conversationUploadEnabled && s.usageRunning)
       ? '正在关闭消息上报...'
       : '正在开启消息上报...';
   }
