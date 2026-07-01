@@ -138,9 +138,12 @@ function toReportCapabilityAsset(asset: TeamCapabilityTelemetryAsset): ReportCap
 
 function buildReportCapabilities(
   assets: TeamCapabilityTelemetryAsset[],
-  fingerprint?: string,
-  reportedAt?: string
+  generatedAt?: string
 ): ReportCapabilities | undefined {
+  // Server schema ReportUploadCapabilities (additionalProperties:false) allows only
+  // schemaVersion/generatedAt/source/skills/mcp/workflows/workflow/cron. The counts/
+  // fingerprint/reportedAt fields we used to emit are extra_forbidden and were part
+  // of the live 422 root cause alongside the forbidden item fields.
   const byKind = (kind: TeamCapabilityTelemetryAsset['kind']) =>
     assets.filter((asset) => asset.kind === kind).map(toReportCapabilityAsset);
   const mcp = byKind('mcp');
@@ -148,21 +151,9 @@ function buildReportCapabilities(
   const cron = byKind('cron');
   const workflows = byKind('workflow');
   if (!mcp.length && !skills.length && !cron.length && !workflows.length) return undefined;
-  return {
-    mcp,
-    skills,
-    cron,
-    workflow: workflows,
-    workflows,
-    counts: {
-      mcp: mcp.length,
-      skills: skills.length,
-      cron: cron.length,
-      workflows: workflows.length,
-    },
-    fingerprint,
-    reportedAt,
-  };
+  const capabilities: ReportCapabilities = { mcp, skills, cron, workflow: workflows, workflows };
+  if (generatedAt) capabilities.generatedAt = generatedAt;
+  return capabilities;
 }
 
 async function loadTeamCapabilityBlocks(
@@ -179,11 +170,7 @@ async function loadTeamCapabilityBlocks(
   const snapshots = buildTeamCapabilityTelemetrySnapshots(packs, { reportedAt });
   const byTeam = new Map<string, ReportCapabilities>();
   for (const snapshot of snapshots) {
-    const capabilities = buildReportCapabilities(
-      snapshot.assets,
-      snapshot.fingerprint,
-      snapshot.reportedAt
-    );
+    const capabilities = buildReportCapabilities(snapshot.assets, snapshot.reportedAt);
     if (!capabilities) continue;
     for (const key of [snapshot.teamSlug, snapshot.teamName, snapshot.teamDisplayName]) {
       const normalized = key?.trim();
@@ -231,28 +218,21 @@ type MessageKind = 'conversation_message' | 'im_conversation_message';
 type ReportCapabilityAsset = {
   id: string;
   name: string;
-  description?: string;
-  enabled?: boolean;
-  scope?: string;
-  transport?: string;
+  kind: TeamCapabilityTelemetryAsset['kind'];
   source?: string;
-  packId: string;
+  enabled?: boolean;
+  transport?: string; // valid only on the mcp kind
 };
 
 type ReportCapabilities = {
+  schemaVersion?: number;
+  generatedAt?: string;
+  source?: string;
   mcp?: ReportCapabilityAsset[];
   skills?: ReportCapabilityAsset[];
   cron?: ReportCapabilityAsset[];
   workflow?: ReportCapabilityAsset[];
   workflows?: ReportCapabilityAsset[];
-  counts?: {
-    mcp: number;
-    skills: number;
-    cron: number;
-    workflows: number;
-  };
-  fingerprint?: string;
-  reportedAt?: string;
 };
 
 type ReportTeamBlock = {
@@ -284,11 +264,12 @@ interface UploadMessage {
   // IM-only routing fact (trigger/target team). Plain messages never carry this.
   routing?: Record<string, unknown>;
   // IM-only owning team + the capabilities that team exposes (mcp/skills/cron/
-  // workflows). Built once per scan from CapabilityPackLoaderService snapshots so
-  // the digital-employee service desk sees what each employee can do alongside
-  // its message traffic. Plain (coding) messages never carry this.
+  // workflows), nested under `team`. Built once per scan from
+  // CapabilityPackLoaderService snapshots so the digital-employee service desk sees
+  // what each employee can do alongside its message traffic. Plain (coding)
+  // messages never carry this. Capabilities live ONLY under team.capabilities —
+  // ReportUploadMessage has no top-level capabilities field.
   team?: ReportTeamBlock;
-  capabilities?: ReportCapabilities;
   message: {
     messageRef: string;
     parentRef: string | null;
@@ -976,7 +957,6 @@ async function collectClaudeCodeMessages(
             im: buildImBlock(imEnvelope, tenantKey),
             routing: buildRoutingBlock(imEnvelope, team),
             ...(team ? { team: buildTeamBlock(team, capabilities) } : {}),
-            ...(capabilities ? { capabilities } : {}),
           });
         }
       } else if (mode === 'plain') {

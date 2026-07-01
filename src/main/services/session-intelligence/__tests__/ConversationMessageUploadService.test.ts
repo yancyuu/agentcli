@@ -467,20 +467,29 @@ describe('ConversationMessageUploadService', () => {
     expect(result.lastError).toBeUndefined();
     expect(posted.im).toHaveLength(1);
     const imMessage = posted.im[0].messages[0];
-    // Capabilities ride both on the message and on the team block, covering the
-    // server's ReportUploadCapabilities shapes (mcp/skills/cron/workflow/workflows).
-    expect(imMessage.capabilities).toMatchObject({
-      mcp: [{ id: 'context7', name: 'context7', transport: 'stdio' }],
-      skills: [{ id: 'review', name: 'review' }],
-      cron: [{ id: 'weekday-report', name: '周报', scope: '17 9 * * 1-5', enabled: true }],
-      workflow: [{ id: 'loop-design', name: 'loop-design' }],
-      workflows: [{ id: 'loop-design', name: 'loop-design' }],
-      counts: { mcp: 1, skills: 1, cron: 1, workflows: 1 },
+    // Capabilities ride ONLY under team.capabilities — ReportUploadMessage has no
+    // top-level capabilities field, and each item is a schema-valid subset
+    // (id/name/kind + source/enabled/transport where applicable).
+    expect(imMessage.capabilities).toBeUndefined();
+    expect(imMessage.team?.capabilities).toMatchObject({
+      mcp: [{ id: 'context7', name: 'context7', kind: 'mcp', transport: 'stdio' }],
+      skills: [{ id: 'review', name: 'review', kind: 'skill' }],
+      cron: [{ id: 'weekday-report', name: '周报', kind: 'cron', enabled: true }],
+      workflow: [{ id: 'loop-design', name: 'loop-design', kind: 'workflow' }],
+      workflows: [{ id: 'loop-design', name: 'loop-design', kind: 'workflow' }],
     });
-    expect(imMessage.team).toMatchObject({
-      teamName: '能力团队',
-      capabilities: { counts: { mcp: 1, skills: 1, cron: 1, workflows: 1 } },
-    });
+    // Forbidden fields must not leak (these caused the live 422): no counts/
+    // fingerprint at capabilities-top, no description/scope/packId on items, and no
+    // transport on non-mcp kinds.
+    const caps = imMessage.team?.capabilities;
+    expect(caps).not.toHaveProperty('counts');
+    expect(caps).not.toHaveProperty('fingerprint');
+    const capsJson = JSON.stringify(caps);
+    expect(capsJson).not.toContain('description');
+    expect(capsJson).not.toContain('packId');
+    expect(JSON.stringify(caps?.cron)).not.toContain('scope');
+    expect(JSON.stringify(caps?.skills)).not.toContain('transport');
+    expect(imMessage.team).toMatchObject({ teamName: '能力团队' });
     // No prompt/secret payloads leak through capability telemetry.
     const serialized = JSON.stringify(posted.im[0]);
     expect(serialized).not.toContain('run report');
