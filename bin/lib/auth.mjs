@@ -20,7 +20,7 @@ import {
 } from './env.mjs';
 import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { isInteractiveCli, printCliRows, printJson } from './terminal.mjs';
-import { chmodBestEffort, safeReadJson } from './settings.mjs';
+import { chmodBestEffort, safeReadJson, readHermitSettings } from './settings.mjs';
 
 const AUTH_CALLBACK_PATH = '/oauth/openhermit/callback';
 const AUTH_STORE_SCHEMA_VERSION = 1;
@@ -201,17 +201,75 @@ function normalizeControlUrl(value, optionName = '--control-url') {
 }
 
 const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
+const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
+
+function normalizeCloudBaseUrl(value, sourceName = 'cloud base URL') {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const withProtocol = /^https?:\/\//iu.test(raw) ? raw : `http://${raw}`;
+  let url;
+  try {
+    url = new URL(withProtocol);
+  } catch {
+    throw new Error(`${sourceName} must be a valid URL or host`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`${sourceName} must use http or https`);
+  }
+  return url.toString().replace(/\/+$/u, '');
+}
+
+function cloudBaseUrlFromHost(host) {
+  const raw = String(host || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//iu.test(raw)) return normalizeCloudBaseUrl(raw, 'OPENHERMIT_CLOUD_HOST');
+  const hasPort = /:\d+$/u.test(raw);
+  return normalizeCloudBaseUrl(`http://${raw}${hasPort ? '' : `:${DEFAULT_OPENHERMIT_CLOUD_PORT}`}`, 'OPENHERMIT_CLOUD_HOST');
+}
+
+function configuredOpenHermitCloudBaseUrl({ includeDefault = true } = {}) {
+  const settings = readHermitSettings();
+  const cloud = settings.cloud && typeof settings.cloud === 'object' ? settings.cloud : {};
+  const taskBus = settings.taskBus && typeof settings.taskBus === 'object' ? settings.taskBus : {};
+  const telemetry = taskBus.telemetry && typeof taskBus.telemetry === 'object' ? taskBus.telemetry : {};
+  const conversations = telemetry.conversations && typeof telemetry.conversations === 'object' ? telemetry.conversations : {};
+  const authStore = readOpenHermitAuthStore().store;
+  return (
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_BASE_URL, 'OPENHERMIT_CLOUD_BASE_URL') ||
+    cloudBaseUrlFromHost(process.env.OPENHERMIT_CLOUD_HOST) ||
+    normalizeCloudBaseUrl(cloud.baseUrl, 'settings.cloud.baseUrl') ||
+    cloudBaseUrlFromHost(cloud.host) ||
+    normalizeCloudBaseUrl(authStore?.baseUrl, 'auth baseUrl') ||
+    normalizeCloudBaseUrl(authStore?.issuer, 'auth issuer') ||
+    normalizeCloudBaseUrl(conversations.baseUrl, 'settings.taskBus.telemetry.conversations.baseUrl') ||
+    (includeDefault ? `http://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}` : null)
+  );
+}
+
 // Per the AI Monitor contract there is a SINGLE base URL (https://<ai-monitor-host>/api/v1):
-// auth (/auth/*) and report (/report/*) endpoints live on the SAME host. The legacy
-// separate :3001 auth broker is dropped — no backward compat.
-// Both default to the ai-monitor (:8088); override either via env only if you truly
-// split them (not recommended — the contract assumes one host).
-const OPENHERMIT_AUTH_BROKER_URL = process.env.OPENHERMIT_AUTH_BASE_URL || process.env.OPENHERMIT_CLOUD_AUTH_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
-const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL = process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL || process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL || `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
+// auth (/auth/*) and report (/report/*) endpoints live on the SAME host. Configure
+// the shared base via env (OPENHERMIT_CLOUD_BASE_URL / OPENHERMIT_CLOUD_HOST) or
+// ~/.hermit/settings.json cloud.baseUrl. Split auth/report env overrides remain
+// accepted for local debugging only.
+const OPENHERMIT_AUTH_BROKER_URL =
+  normalizeCloudBaseUrl(process.env.OPENHERMIT_AUTH_BASE_URL, 'OPENHERMIT_AUTH_BASE_URL') ||
+  normalizeCloudBaseUrl(process.env.OPENHERMIT_USAGE_AUTH_BASE_URL, 'OPENHERMIT_USAGE_AUTH_BASE_URL') ||
+  normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_AUTH_BASE_URL, 'OPENHERMIT_CLOUD_AUTH_BASE_URL') ||
+  configuredOpenHermitCloudBaseUrl();
+const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
+  normalizeCloudBaseUrl(process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL, 'OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL') ||
+  normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL, 'OPENHERMIT_CLOUD_UPLOAD_BASE_URL') ||
+  configuredOpenHermitCloudBaseUrl();
 const DEV_AUTH_UNLOCK_CODE = process.env.OPENHERMIT_DEV_UNLOCK_CODE || '';
 
 function resolveConversationUploadBaseUrl(existingBaseUrl = '') {
-  return process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL || process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL || (existingBaseUrl || OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL);
+  return (
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL, 'OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL') ||
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL, 'OPENHERMIT_CLOUD_UPLOAD_BASE_URL') ||
+    configuredOpenHermitCloudBaseUrl({ includeDefault: false }) ||
+    normalizeCloudBaseUrl(existingBaseUrl, 'existing conversation upload base URL') ||
+    OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL
+  );
 }
 
 function isSourceCheckout() {
@@ -573,6 +631,7 @@ function buildAuthStoreFromToken(config, tokenPayload, account) {
     schemaVersion: AUTH_STORE_SCHEMA_VERSION,
     provider: 'openhermit',
     issuer: config.issuer || config.baseUrl || null,
+    baseUrl: config.baseUrl || config.issuer || null,
     clientId: config.clientId,
     account: account || tokenPayload.account || null,
     token: mergeAuthToken({ scope: config.scope }, normalizedToken),

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -21,6 +21,7 @@ type ConversationUploadTelemetryConfig = {
     uploadEnabled?: boolean;
     batchSize?: number;
     uploadBatchSize?: number;
+    baseUrl?: string;
   };
 };
 
@@ -29,10 +30,7 @@ interface ConversationUploadConfig {
 }
 
 const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
-const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
-  process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL ||
-  process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL ||
-  `http://${process.env.OPENHERMIT_CLOUD_HOST || DEFAULT_OPENHERMIT_CLOUD_HOST}:8088`;
+const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
 
 const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
 const UPLOAD_LOG_FILE = 'conversation-upload.log';
@@ -204,8 +202,77 @@ interface CollectedMessages {
   clientCursor: ClientCursor;
 }
 
-function resolveConversationUploadBaseUrl(): string {
-  return OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
+function readJsonFileSync(filePath: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCloudBaseUrl(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const withProtocol = /^https?:\/\//iu.test(raw) ? raw : `http://${raw}`;
+  try {
+    const url = new URL(withProtocol);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    return url.toString().replace(/\/+$/u, '');
+  } catch {
+    return null;
+  }
+}
+
+function cloudBaseUrlFromHost(host: unknown): string | null {
+  const raw = String(host || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//iu.test(raw)) return normalizeCloudBaseUrl(raw);
+  const hasPort = /:\d+$/u.test(raw);
+  return normalizeCloudBaseUrl(
+    `http://${raw}${hasPort ? '' : `:${DEFAULT_OPENHERMIT_CLOUD_PORT}`}`
+  );
+}
+
+function configuredOpenHermitCloudBaseUrl(existingBaseUrl?: unknown): string {
+  const home = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
+  const settings = readJsonFileSync(path.join(home, 'settings.json'));
+  const cloud =
+    settings?.cloud && typeof settings.cloud === 'object'
+      ? (settings.cloud as Record<string, unknown>)
+      : {};
+  const taskBus =
+    settings?.taskBus && typeof settings.taskBus === 'object'
+      ? (settings.taskBus as Record<string, unknown>)
+      : {};
+  const telemetry =
+    taskBus.telemetry && typeof taskBus.telemetry === 'object'
+      ? (taskBus.telemetry as Record<string, unknown>)
+      : {};
+  const conversations =
+    telemetry.conversations && typeof telemetry.conversations === 'object'
+      ? (telemetry.conversations as Record<string, unknown>)
+      : {};
+  const auth = readJsonFileSync(path.join(home, 'auth', 'openhermit.json'));
+  return (
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL) ||
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL) ||
+    normalizeCloudBaseUrl(process.env.OPENHERMIT_CLOUD_BASE_URL) ||
+    cloudBaseUrlFromHost(process.env.OPENHERMIT_CLOUD_HOST) ||
+    normalizeCloudBaseUrl(cloud.baseUrl) ||
+    cloudBaseUrlFromHost(cloud.host) ||
+    normalizeCloudBaseUrl(auth?.baseUrl) ||
+    normalizeCloudBaseUrl(auth?.issuer) ||
+    normalizeCloudBaseUrl(existingBaseUrl) ||
+    normalizeCloudBaseUrl(conversations.baseUrl) ||
+    `http://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}`
+  );
+}
+
+function resolveConversationUploadBaseUrl(existingBaseUrl?: unknown): string {
+  return configuredOpenHermitCloudBaseUrl(existingBaseUrl);
 }
 
 function emptyStatus(
@@ -1423,7 +1490,7 @@ async function uploadConversationMessagesLocked(
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
   const enabled = Boolean(telemetry?.conversationUploadEnabled || conversationCfg?.uploadEnabled);
-  const baseUrl = resolveConversationUploadBaseUrl();
+  const baseUrl = resolveConversationUploadBaseUrl(conversationCfg?.baseUrl);
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
 
   const home = hermitHome();
@@ -1484,7 +1551,7 @@ export async function uploadConversationMessages(
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
   const enabled = Boolean(telemetry?.conversationUploadEnabled || conversationCfg?.uploadEnabled);
-  const baseUrl = resolveConversationUploadBaseUrl();
+  const baseUrl = resolveConversationUploadBaseUrl(conversationCfg?.baseUrl);
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
   const home = hermitHome();
   const result = await withUploadLock(home, () => uploadConversationMessagesLocked(cfg));

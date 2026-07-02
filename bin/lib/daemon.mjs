@@ -130,7 +130,7 @@ function collectFallbackPidsWin() {
     // netstat unavailable — fall through to command match.
   }
   try {
-    const pattern = /openhermit|hermit\.mjs|server\.ts|hermit-bridge/u;
+    const pattern = /openhermit|hermit\.mjs|server\.ts|hermit-bridge|cc-connect/u;
     for (const p of listProcessesWin()) {
       if (p.pid !== process.pid && pattern.test(p.command)) pids.add(p.pid);
     }
@@ -147,7 +147,7 @@ function collectFallbackPids() {
     `lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true`,
     'lsof -tiTCP:9810 -sTCP:LISTEN 2>/dev/null || true',
     'lsof -tiTCP:9820 -sTCP:LISTEN 2>/dev/null || true',
-    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|hermit-bridge' 2>/dev/null || true",
+    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|hermit-bridge|cc-connect' 2>/dev/null || true",
   ];
 
   for (const command of commands) {

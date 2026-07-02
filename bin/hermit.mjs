@@ -363,6 +363,8 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
   process.exit(0);
 }
 
+await stopRelatedProcessesBeforeCommand();
+
 if (commandArgs[0] === 'update') {
   await runUpdate({ onUpdated: () => restartUsageWorkerIfRunning({ quiet: false, reason: 'update 后重载 worker' }) });
   process.exit(0);
@@ -955,6 +957,18 @@ function readPidFile(pidPath) {
   }
 }
 
+async function stopRelatedProcessesBeforeCommand() {
+  if (process.env.OPENHERMIT_SKIP_STARTUP_CLEANUP === '1') return;
+  if (daemonChild || commandArgs[0] === '__telemetry-worker') return;
+
+  const autostart = await getUsageAutostartStatus();
+  await stopTelemetryWorker();
+  if (autostart.enabled) await keepUsageAutostartWithoutRunning();
+  await stopFeishuBridge().catch(() => null);
+  await stopDaemon({ exitOnDone: false, quiet: true });
+  await stopFallbackProcesses(collectFallbackPids());
+}
+
 function readTelemetryWorkerStatusFile() {
   if (!existsSync(telemetryWorkerStatusPath)) return { status: null, error: '' };
   const { value, error } = safeReadJson(telemetryWorkerStatusPath);
@@ -1500,7 +1514,7 @@ function collectOrphanedDaemonChildPids() {
     if (pid === process.pid) continue;
     if (ppid !== 1) continue; // only true orphans — never a live daemon's child
     if (command.includes('--scan-once')) continue; // transient foreground scan
-    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge')) {
+    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge') || command.includes('cc-connect')) {
       pids.push(pid);
     }
   }
@@ -1757,6 +1771,46 @@ function fitProgressLine(text) {
     result += char;
   }
   return `${result}…`;
+}
+
+function readLogChunkSince(filePath, offset) {
+  try {
+    const stat = statSync(filePath);
+    const safeOffset = stat.size < offset ? 0 : offset;
+    if (stat.size <= safeOffset) return { chunk: '', offset: stat.size };
+    const raw = readFileSync(filePath, 'utf-8');
+    return { chunk: raw.slice(safeOffset), offset: stat.size };
+  } catch {
+    return { chunk: '', offset };
+  }
+}
+
+function printStartupLogChunk(chunk) {
+  const lines = String(chunk || '').split(/\r?\n/).filter(Boolean).slice(-12);
+  for (const line of lines) {
+    process.stdout.write(`${ui.dim('│')} ${fitProgressLine(line)}\n`);
+  }
+}
+
+async function waitForOpenHermitServerReadyWithLogs(pid, timeoutMs = 30_000) {
+  if (jsonRequested || !process.stdout.isTTY) return waitForOpenHermitServerReady(pid, timeoutMs);
+  const startedAt = Date.now();
+  let logOffset = 0;
+  process.stdout.write(`${ui.dim('正在启动 Web 工作台，日志：')} ${daemonLogPath}\n`);
+  while (Date.now() - startedAt < timeoutMs) {
+    const log = readLogChunkSince(daemonLogPath, logOffset);
+    logOffset = log.offset;
+    if (log.chunk) printStartupLogChunk(log.chunk);
+
+    if (pid && !isPidRunning(pid)) {
+      return { ready: false, reason: '服务进程已退出，请查看日志', url: `http://127.0.0.1:${port}` };
+    }
+    const server = await checkExistingOpenHermitServer();
+    if (server.running) return { ready: true, ...server };
+    process.stdout.write(`${ui.dim('… 等待 Web 服务就绪')}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  return { ready: false, reason: '服务还没准备好，请稍后刷新或查看日志', url: `http://127.0.0.1:${port}` };
 }
 
 async function withUploadProgress(label, task) {
@@ -2597,7 +2651,7 @@ async function runNavigationAction(action) {
   }
   if (action.id === 'start-web') {
     const daemon = startDaemon({ exitOnDone: false, quiet: true });
-    const ready = await waitForOpenHermitServerReady(daemon.pid);
+    const ready = await waitForOpenHermitServerReadyWithLogs(daemon.pid);
     if (ready.ready) {
       refreshDaemonPidFromReadyServer(daemon.pid);
       markWebRunningOptimistic();
@@ -2947,8 +3001,8 @@ async function runWebCommand() {
   const url = `http://127.0.0.1:${port}`;
   const server = await checkExistingOpenHermitServer();
   if (!server.running) {
-    startDaemon({ exitOnDone: false, quiet: true });
-    const ready = await waitForOpenHermitServerReady(readDaemonPid(), 30_000);
+    const daemon = startDaemon({ exitOnDone: false, quiet: true });
+    const ready = await waitForOpenHermitServerReadyWithLogs(daemon.pid, 30_000);
     if (!ready.ready) {
       if (jsonRequested)
         printJson({ ok: false, command: 'web', url, reason: ready.reason, logPath: daemonLogPath }, 1);

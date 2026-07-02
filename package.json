@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "description": "AgentCli: AI 工程协作平台，本地优先的用量采集与团队协作工具。",
   "license": "AGPL-3.0",
   "publishConfig": {
