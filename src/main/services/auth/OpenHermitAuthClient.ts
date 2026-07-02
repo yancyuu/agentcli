@@ -232,11 +232,25 @@ export interface AuthedFetchHooks {
  * instead of crashing the worker. HTTP-level errors (401/500/…) are passed
  * through unchanged.
  */
+function fetchErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as Error & { cause?: unknown }).cause;
+    const causeMessage = cause instanceof Error ? `: ${cause.message}` : '';
+    return `${error.message}${causeMessage}`.slice(0, 500);
+  }
+  return String(error || 'fetch failed').slice(0, 500);
+}
+
 async function safeFetch(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, init);
-  } catch {
-    return new Response(null, { status: 599, statusText: 'offline' });
+  } catch (error) {
+    const message = fetchErrorMessage(error);
+    return new Response(JSON.stringify({ status: `HTTP 599 ${message}`, error: message }), {
+      status: 599,
+      statusText: message.slice(0, 80) || 'fetch failed',
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
 

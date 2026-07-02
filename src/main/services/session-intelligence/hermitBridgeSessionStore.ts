@@ -3,9 +3,9 @@
  *
  * hermit-bridge (the cc-connect fork) persists one JSON file per project at
  * `<hermitHome>/hermit-bridge/data/sessions/<project>_<hash>.json`. This module
- * is the single place that knows that raw shape; both IM-origin attribution
- * (ImOriginSessionReader) and live worker detection (detectImWorkers / the IM
- * live watcher) consume its output instead of re-parsing the files.
+ * is the single place that knows that raw shape; live worker detection
+ * (detectImWorkers / the IM live watcher) consumes its output instead of
+ * re-parsing the files.
  *
  * Top-level keys (verified against real files):
  *   sessions        — Record<internalId, SessionObject> keyed by ids like "s1"

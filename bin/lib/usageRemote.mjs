@@ -62,8 +62,7 @@ function responseBodyPreview(text) {
 /**
  * Read-only preview of /report/usage/status channels. `providers` lets the caller pass
  * the configured upload providers (hermit.mjs currentFeatureStates). Defaults to
- * both. Parallelized across platform x mode so one slow channel doesn't block
- * the others (was 4 sequential fetches).
+ * both. Parallelized across providers so one slow channel doesn't block the others.
  */
 export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']) {
   const auth = await refreshOpenHermitAuthStatus();
@@ -74,12 +73,12 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
   const token = readOpenHermitAuthStore().store?.token?.accessToken;
   if (!token) return { authorized: false, channels: [], errors: [{ error: '等待登录' }] };
   const platforms = normalizeUploadProviders(providers);
-  const targets = (platforms.length ? platforms : ['claudecode']).flatMap((platform) =>
-    ['plain', 'im'].map((mode) => ({ platform, mode }))
-  );
+  // 新协议通道维度 = reporter + client + scene；IM 归属是每条消息的 im 块，不再是独立
+  // scene/mode 维度。本机上报只写 scene=coding，故按 provider 各查一次 coding。
+  const targets = (platforms.length ? platforms : ['claudecode']).map((platform) => ({ platform }));
   const results = await Promise.all(
-    targets.map(async ({ platform, mode }) => {
-      const scene = mode === 'im' ? 'digital_employee' : 'coding';
+    targets.map(async ({ platform }) => {
+      const scene = 'coding';
       const url = `${baseUrl}/api/v1/report/usage/status?client=${encodeURIComponent(platform)}&scene=${encodeURIComponent(scene)}`;
       try {
         const res = await fetch(url, {
@@ -90,20 +89,21 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
         if (!res.ok) {
           return {
             platform,
-            mode,
-            error: `usage status ${platform}/${mode} HTTP ${res.status}`,
+            scene,
+            error: `usage status ${platform}/${scene} HTTP ${res.status}`,
             httpStatus: res.status,
             body: responseBodyPreview(text),
           };
         }
         const body = parseJsonText(text);
+        // 新协议响应通道维度为 reporter + client + scene（无 platform/mode/source）。
         const channel = (Array.isArray(body?.channels) ? body.channels : [])
-          .find((c) => c && (c.client === platform || c.platform === platform) && (c.scene === scene || c.mode === mode)) || null;
+          .find((c) => c && c.client === platform && c.scene === scene) || null;
         const cursor = channel?.currentCursor || null;
         const attemptedCursor = channel?.lastAttemptedCursor || null;
         return {
           platform,
-          mode,
+          scene,
           checkedAt: body?.checkedAt || null,
           status: channel?.status || 'unknown',
           cursorHash: cursor?.targetCursorHash || null,
@@ -117,7 +117,7 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
           lastUploadId: channel?.lastUploadId || null,
         };
       } catch (err) {
-        return { platform, mode, error: err instanceof Error ? err.message : String(err) };
+        return { platform, scene, error: err instanceof Error ? err.message : String(err) };
       }
     })
   );

@@ -11,16 +11,7 @@ import {
   readAuthStore,
   refreshAccessToken,
 } from '@main/services/auth/OpenHermitAuthClient';
-import {
-  CapabilityPackLoaderService,
-  buildTeamCapabilityTelemetrySnapshots,
-  type LocalTeamEntry,
-} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
-import { HermitBridgeClient } from '@main/services/hermitBridge/HermitBridgeClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
-import type { TeamCapabilityTelemetryAsset } from '@shared/types/extensions';
-import { loadImOriginEnvelopes, type ImEnvelope } from './ImOriginSessionReader';
-import { ImTeamAttributor, type TeamIdentity } from './ImTeamAttributor';
 type ConversationUploadTelemetryConfig = {
   enabled?: boolean;
   platform?: UploadPlatform;
@@ -45,168 +36,16 @@ const OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL =
 
 const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
 const UPLOAD_LOG_FILE = 'conversation-upload.log';
-const SOURCE = 'openhermit' as const;
+// `reporter` (channel-isolation key, sent in the body) and the matching filter
+// used to find THIS client's channel in /report/usage/status responses must stay
+// in sync — both derive from SOURCE. Value is the product name (an open string);
+// the API doc's 'report' is only a generic example. Changing it moves new data to
+// a new server-side channel, isolated from any history stored under the old value.
+const SOURCE = 'agentcli' as const;
 const API_TIMEOUT_MS = 8_000;
-// Unified upload endpoint (replaces the legacy split /conversation-messages and
-// /im-conversation-messages). scene + per-message kind/im/routing carry the
-// scene; `mode` stays an internal collection/dedup-channel switch, not an endpoint selector.
+// Unified upload endpoint for local coding (Claude Code / Codex) usage. Each
+// message carries its own project/conversation context; scene is always `coding`.
 const UPLOAD_ENDPOINT = '/api/v1/report/messages';
-
-// Builds the `im` block for an IM-attributed message from the envelope hermit-bridge
-// records per conversation (see ImOriginSessionReader): provider/chatId/chatType come
-// from the composite key that indexes user_sessions; chat/sender display names from
-// user_meta; senderId/messageId from the composite's third segment (ou_/on_/om_);
-// tenantKey from the logged-in auth account.
-function buildImBlock(envelope: ImEnvelope, tenantKey?: string): NonNullable<UploadMessage['im']> {
-  const block: NonNullable<UploadMessage['im']> = {
-    provider: envelope.provider,
-    channel: envelope.provider,
-  };
-  if (tenantKey) block.tenantKey = tenantKey;
-  if (envelope.chatId) {
-    block.chatId = envelope.chatId;
-    const chat: { id: string; type?: string; name?: string } = { id: envelope.chatId };
-    if (envelope.chatType) chat.type = envelope.chatType;
-    if (envelope.chatName) chat.name = envelope.chatName;
-    block.chat = chat;
-  }
-  if (envelope.senderId) {
-    // Server schema (ReportUploadIm) keys sender identity by `senderId` +
-    // `sender.id` — there is no `userId` field, so we must not emit one.
-    block.senderId = envelope.senderId;
-    const sender: { id: string; idType?: string; name?: string } = { id: envelope.senderId };
-    // Feishu open_id carries the ou_ prefix; record it so the server can resolve identity.
-    if (envelope.senderId.startsWith('ou_')) sender.idType = 'open_id';
-    if (envelope.senderName) sender.name = envelope.senderName;
-    block.sender = sender;
-  }
-  if (envelope.messageId) {
-    // Server schema names this `imMessageId` (ReportUploadIm) — `messageId` is
-    // rejected as extra_forbidden. `message.id` is the structured ref.
-    block.imMessageId = envelope.messageId;
-    block.message = { id: envelope.messageId };
-  }
-  return block;
-}
-
-// IM routing fact: how this conversation reached the agent. trigger/triggerSource/
-// matchedBy are constant for an IM-origin turn; target is the Hermit team that owns
-// the agent's workspace (resolved from the session cwd). When no team matches the
-// cwd, target is omitted rather than fabricated — the server then has the trigger
-// facts without an invented identity.
-function buildRoutingBlock(
-  envelope: ImEnvelope,
-  team: TeamIdentity | null
-): NonNullable<UploadMessage['routing']> {
-  const routing: NonNullable<UploadMessage['routing']> = {
-    schemaVersion: 1,
-    source: 'openhermit-router',
-    trigger: 'im_message',
-    triggerSource: envelope.provider,
-    matchedBy: 'chat_id',
-  };
-  if (team) {
-    routing.routeRef = `route-${team.teamSlug}`;
-    routing.target = {
-      type: 'team',
-      teamSlug: team.teamSlug,
-      teamName: team.teamName,
-    };
-  }
-  return routing;
-}
-
-// tenantKey for the im block: read from the auth store's account (the logged-in
-// tenant). Absent when not logged in or when the account lacks a tenant.
-async function readTenantKey(home: string): Promise<string | undefined> {
-  const store = await readAuthStore(home);
-  const account = store?.account as { tenantKey?: unknown } | undefined;
-  return typeof account?.tenantKey === 'string' ? account.tenantKey : undefined;
-}
-
-// Server capability items are additionalProperties:false and each kind carries a
-// distinct field set (ReportUpload{Skill,Mcp,Cron,Workflow}Capability). Map each
-// telemetry asset kind once to its canonical item shape — never funnel all kinds
-// through one mapper, since their valid fields differ (transport is mcp-only,
-// schedule is cron-only, etc.). `command` assets have no upload home and are dropped.
-function toSkillCapability(asset: TeamCapabilityTelemetryAsset): ReportCapabilityItem {
-  return { capabilityRef: asset.id, name: asset.name, displayName: asset.name };
-}
-
-function toMcpCapability(asset: TeamCapabilityTelemetryAsset): ReportMcpCapability {
-  const item: ReportMcpCapability = { serverRef: asset.id, server: asset.name };
-  if (asset.transport) item.transport = asset.transport;
-  return item;
-}
-
-function toCronCapability(asset: TeamCapabilityTelemetryAsset): ReportCronCapability {
-  const item: ReportCronCapability = { cronRef: asset.id, name: asset.name };
-  if (asset.scope) item.schedule = asset.scope; // telemetry stores the cron expression in `scope`
-  return item;
-}
-
-function toWorkflowCapability(asset: TeamCapabilityTelemetryAsset): ReportWorkflowCapability {
-  return { workflowRef: asset.id, name: asset.name };
-}
-
-function buildReportCapabilities(
-  assets: TeamCapabilityTelemetryAsset[],
-  generatedAt?: string
-): ReportCapabilities | undefined {
-  // Canonical IM `team.capabilities` shape (ReportUploadCapabilities): skills + cron
-  // are Collections {count, items}; mcp + workflows are arrays. Every item is a
-  // schema-valid subset — the item schemas are additionalProperties:false, which is
-  // what produced the live 422 (messages.*.team.capabilities.skills.*) before.
-  const skills = assets.filter((a) => a.kind === 'skill').map(toSkillCapability);
-  const mcp = assets.filter((a) => a.kind === 'mcp').map(toMcpCapability);
-  const cron = assets.filter((a) => a.kind === 'cron').map(toCronCapability);
-  const workflows = assets.filter((a) => a.kind === 'workflow').map(toWorkflowCapability);
-  if (!skills.length && !mcp.length && !cron.length && !workflows.length) return undefined;
-  const capabilities: ReportCapabilities = {
-    schemaVersion: 1,
-    source: 'agent-registry',
-    skills: { count: skills.length, items: skills },
-    mcp,
-    workflows,
-    cron: { count: cron.length, items: cron },
-  };
-  if (generatedAt) capabilities.generatedAt = generatedAt;
-  return capabilities;
-}
-
-async function loadTeamCapabilityBlocks(
-  home: string,
-  reportedAt: string,
-  teams: LocalTeamEntry[]
-): Promise<Map<string, ReportCapabilities>> {
-  const loader = new CapabilityPackLoaderService(undefined, undefined, undefined, {
-    projectPath: process.cwd(),
-    listCronJobs: () => new HermitBridgeClient().listCronJobs(),
-    listTeams: async () => teams,
-  });
-  const { packs } = await loader.list();
-  const snapshots = buildTeamCapabilityTelemetrySnapshots(packs, { reportedAt });
-  const byTeam = new Map<string, ReportCapabilities>();
-  for (const snapshot of snapshots) {
-    const capabilities = buildReportCapabilities(snapshot.assets, snapshot.reportedAt);
-    if (!capabilities) continue;
-    for (const key of [snapshot.teamSlug, snapshot.teamName, snapshot.teamDisplayName]) {
-      const normalized = key?.trim();
-      if (normalized) byTeam.set(normalized, capabilities);
-    }
-  }
-  return byTeam;
-}
-
-function buildTeamBlock(team: TeamIdentity, capabilities?: ReportCapabilities): ReportTeamBlock {
-  // Server schema (ReportUploadTeam) accepts teamId/teamSlug/teamName/department/
-  // capabilities — no `displayName`, so emit teamName only.
-  return {
-    teamSlug: team.teamSlug,
-    teamName: team.teamName,
-    ...(capabilities ? { capabilities } : {}),
-  };
-}
 
 export interface ConversationUploadStatus {
   enabled: boolean;
@@ -230,78 +69,14 @@ export interface ConversationUploadStatus {
 }
 
 type UploadPlatform = 'claudecode' | 'codex';
-type UploadMode = 'plain' | 'im';
-type MessageKind = 'conversation_message' | 'im_conversation_message';
-
-// Common capability-item fields shared by every kind (ReportUploadSkillCapability is
-// exactly this base; mcp/cron/workflow extend it). All-optional, mirrors the server.
-type ReportCapabilityItem = {
-  capabilityRef?: string;
-  id?: string;
-  name?: string;
-  displayName?: string;
-  source?: string;
-  version?: string;
-  enabled?: boolean;
-  status?: string;
-  kind?: string;
-};
-
-type ReportMcpCapability = ReportCapabilityItem & {
-  server?: string;
-  serverRef?: string;
-  tool?: string;
-  toolName?: string;
-  transport?: string;
-};
-
-type ReportCronCapability = ReportCapabilityItem & {
-  cronRef?: string;
-  schedule?: string;
-  timezone?: string;
-  workflowRef?: string;
-  nextRunAt?: string;
-};
-
-type ReportWorkflowCapability = ReportCapabilityItem & {
-  workflowRef?: string;
-  trigger?: string;
-  triggerSource?: string;
-};
-
-type ReportCapabilityCollection<T> = {
-  count?: number;
-  items: T[];
-  itemsTruncated?: boolean;
-  source?: string;
-  generatedAt?: string;
-};
-
-type ReportCapabilities = {
-  schemaVersion?: number;
-  generatedAt?: string;
-  source?: string;
-  skills?: ReportCapabilityCollection<ReportCapabilityItem>;
-  mcp?: ReportMcpCapability[];
-  workflows?: ReportWorkflowCapability[];
-  cron?: ReportCapabilityCollection<ReportCronCapability>;
-};
-
-type ReportTeamBlock = {
-  teamSlug?: string;
-  teamName: string;
-  projectName?: string;
-  capabilities?: ReportCapabilities;
-};
 
 interface UploadMessage {
-  kind: MessageKind;
+  kind: 'conversation_message';
   eventId: string;
   reportedAt: string;
-  // Per-message context, kept on each message as collected. Plain messages carry
-  // project/conversation; IM messages additionally carry im/routing. The unified
-  // contract allows per-message project/conversation (message-level wins over a
-  // top-level fallback), so nothing is stripped or hoisted anymore.
+  // Per-message context, kept on each message as collected. The unified contract
+  // allows per-message project/conversation (message-level wins over a top-level
+  // fallback), so nothing is stripped or hoisted.
   project?: {
     projectRef: string;
     name?: string;
@@ -310,18 +85,8 @@ interface UploadMessage {
   conversation?: {
     conversationId: string;
     sessionRef: string;
-    claudeSessionRef?: string;
     startedAt?: string;
   };
-  // IM-only routing fact (trigger/target team). Plain messages never carry this.
-  routing?: Record<string, unknown>;
-  // IM-only owning team + the capabilities that team exposes (mcp/skills/cron/
-  // workflows), nested under `team`. Built once per scan from
-  // CapabilityPackLoaderService snapshots so the digital-employee service desk sees
-  // what each employee can do alongside its message traffic. Plain (coding)
-  // messages never carry this. Capabilities live ONLY under team.capabilities —
-  // ReportUploadMessage has no top-level capabilities field.
-  team?: ReportTeamBlock;
   message: {
     messageRef: string;
     parentRef: string | null;
@@ -338,7 +103,6 @@ interface UploadMessage {
       totalTokens: number;
     };
   };
-  im?: Record<string, unknown>;
 }
 
 interface CursorFileRange {
@@ -368,10 +132,12 @@ interface UploadPayload {
   reporter: string;
   // `client.tool` declares the producing tool explicitly (claudecode/codex); the
   // server registers it as the channel key with no model→platform inference.
-  client: { tool: string; version?: string; instanceId?: string };
-  // scene drives server-side routing: coding (plain Claude/Codex turns) vs
-  // digital_employee (IM-origin turns).
-  scene: 'coding' | 'digital_employee';
+  // 新协议 ReportClient 仅允许 {tool}（additionalProperties:false）：禁止 version /
+  // instanceId 等附加字段，否则服务端返回 422。类型即契约——这里收紧后无法再
+  // 表达会触发 422 的负载。
+  client: { tool: string };
+  // scene is always `coding` — local Claude Code / Codex turns only.
+  scene: 'coding';
   clientCursor?: ClientCursor;
   // Unified contract: project/conversation/im may live per-message (message-level
   // wins) OR at top-level as a fallback. Collected messages always carry their own
@@ -420,9 +186,6 @@ interface UsageStatusChannel {
   reporter?: string;
   client?: string;
   scene?: string;
-  source?: string;
-  platform?: UploadPlatform;
-  mode?: UploadMode;
   status?: string;
   lastUploadId?: string | null;
   inFlight?: { count?: number; uploadIds?: string[] } | null;
@@ -675,7 +438,8 @@ async function probeAuthOnce(
   token: string,
   home: string
 ): Promise<{ reason: string | null; accessExpired: boolean }> {
-  const res = await authedFetch(home, baseUrl, apiUrl(baseUrl, '/api/v1/auth/me'), {
+  const url = apiUrl(baseUrl, '/api/v1/auth/me');
+  const res = await authedFetch(home, baseUrl, url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
@@ -689,9 +453,12 @@ async function probeAuthOnce(
     ? ['upload:read', 'upload:write'].filter((scope) => !scopes.includes(scope))
     : [];
   await appendUploadLog(home, 'auth-me-checked', {
+    url: '/api/v1/auth/me',
+    baseUrl,
     ok:
       res.ok && body.authenticated !== false && status === 'ok' && missingUploadScopes.length === 0,
     status,
+    error: typeof body.error === 'string' ? body.error : res.ok ? undefined : res.statusText,
     feishuAuthorized: body.feishu_authorized,
     accessExpired,
     scopes,
@@ -730,16 +497,14 @@ async function fetchUsageChannel(
   baseUrl: string,
   token: string,
   platform: UploadPlatform,
-  mode: UploadMode,
   home?: string
 ): Promise<UsageStatusChannel | null> {
-  const scene = mode === 'im' ? 'digital_employee' : 'coding';
+  const scene = 'coding';
   const path = `/api/v1/report/usage/status?client=${encodeURIComponent(platform)}&scene=${encodeURIComponent(scene)}`;
   const url = apiUrl(baseUrl, path);
   await (home
     ? appendUploadLog(home, 'usage-status-request', {
         platform,
-        mode,
         scene,
         url: path,
       })
@@ -754,28 +519,24 @@ async function fetchUsageChannel(
     await (home
       ? appendUploadLog(home, 'usage-status-response', {
           platform,
-          mode,
           ok: false,
           status: res.status,
           body: sanitizeDiagnosticText(text),
         })
       : Promise.resolve());
-    throw new Error(`usage status ${platform}/${mode} ${diagnostic}`);
+    throw new Error(`usage status ${platform} ${diagnostic}`);
   }
   const body = parseJsonObject(text) as UsageStatusResponse;
+  // 新协议响应通道维度为 reporter + client + scene（无 source/platform/mode）。
   const channel =
     body.channels?.find(
-      (item) =>
-        (item.reporter === SOURCE || item.source === SOURCE) &&
-        (item.client === platform || item.platform === platform) &&
-        (item.scene === scene || item.mode === mode)
+      (item) => item.reporter === SOURCE && item.client === platform && item.scene === scene
     ) ??
     body.channels?.[0] ??
     null;
   await (home
     ? appendUploadLog(home, 'usage-status-response', {
         platform,
-        mode,
         ok: true,
         status: res.status,
         channelStatus: channel?.status,
@@ -903,7 +664,6 @@ function claudeUploadMessage(
     conversation: {
       conversationId: sessionId,
       sessionRef: `claudecode:${sessionId}`,
-      claudeSessionRef: sessionId,
       startedAt,
     },
     message: {
@@ -920,7 +680,6 @@ function claudeUploadMessage(
 }
 
 async function collectClaudeCodeMessages(
-  mode: UploadMode,
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string
@@ -929,27 +688,6 @@ async function collectClaudeCodeMessages(
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
-  // IM attribution: a Claude session is IM-origin iff hermit-bridge recorded it
-  // as the agent_session_id it drove (the jsonl filename). Loaded once per call;
-  // the hermit-bridge session store is a handful of small JSON files.
-  const imEnvelopes = await loadImOriginEnvelopes(hermitHome());
-  // IM-only routing context: the team that owns the agent's workspace (resolved
-  // from the session cwd) and the logged-in tenant. Loaded only for the IM
-  // channel — plain never needs them.
-  const teamAttributor = mode === 'im' ? await ImTeamAttributor.load(hermitHome()) : null;
-  const tenantKey = mode === 'im' ? await readTenantKey(hermitHome()) : undefined;
-  // IM-only capability snapshot (mcp/skills/cron/workflows) keyed by team name,
-  // built once per scan from CapabilityPackLoaderService. Reuses the team list
-  // the attributor already loaded from team.json (no second read). Failures never
-  // block uploads — a missing capability block is preferable to a dropped message.
-  const capabilityByTeam =
-    mode === 'im' && teamAttributor
-      ? await loadTeamCapabilityBlocks(
-          hermitHome(),
-          generatedAt,
-          teamAttributor.toLocalTeams()
-        ).catch(() => new Map<string, ReportCapabilities>())
-      : new Map<string, ReportCapabilities>();
 
   for await (const filePath of walkJsonl(getProjectsBasePath())) {
     if (maxMessages > 0 && messages.length >= maxMessages) break;
@@ -972,7 +710,6 @@ async function collectClaudeCodeMessages(
       continue;
     }
 
-    const imEnvelope = imEnvelopes.get(path.basename(filePath, '.jsonl'));
     let consumedOffset = fromOffset;
     let startedAt: string | undefined;
     const stream = createReadStream(filePath, {
@@ -994,26 +731,7 @@ async function collectClaudeCodeMessages(
       startedAt ||= occurredAt;
       const baseMessage = claudeUploadMessage(filePath, obj, generatedAt, startedAt);
       if (!baseMessage) continue;
-      // Route by session origin: an IM-origin session goes to the IM channel, a
-      // plain session goes to the plain channel — never both, never crossed.
-      if (imEnvelope) {
-        if (mode === 'im') {
-          const cwd = typeof obj.cwd === 'string' ? obj.cwd : path.dirname(filePath);
-          const team = teamAttributor?.resolveByCwd(cwd) ?? null;
-          const capabilities = team
-            ? (capabilityByTeam.get(team.teamName) ?? capabilityByTeam.get(team.teamSlug))
-            : undefined;
-          messages.push({
-            ...baseMessage,
-            kind: 'im_conversation_message',
-            im: buildImBlock(imEnvelope, tenantKey),
-            routing: buildRoutingBlock(imEnvelope, team),
-            ...(team ? { team: buildTeamBlock(team, capabilities) } : {}),
-          });
-        }
-      } else if (mode === 'plain') {
-        messages.push(baseMessage);
-      }
+      messages.push(baseMessage);
     }
 
     const toOffset =
@@ -1041,12 +759,20 @@ function codexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function codexUsageRecordFromEvent(obj: Record<string, unknown>): Record<string, unknown> | null {
+  const payload = objectRecord(obj.payload);
+  if (!payload) return null;
+  const info = objectRecord(payload.info);
+  return objectRecord(info?.last_token_usage) ?? objectRecord(info?.total_token_usage);
+}
+
 function codexTokenUsageFromRecord(
-  record: Record<string, unknown>
+  source: Record<string, unknown>
 ): UploadMessage['message']['usage'] | undefined {
-  const source = (
-    record.usage && typeof record.usage === 'object' ? record.usage : record
-  ) as Record<string, unknown>;
   const inputTokens = Number(
     source.input_tokens ??
       source.inputTokens ??
@@ -1090,12 +816,11 @@ function codexTokenUsageFromRecord(
 }
 
 function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
-  const type = String(record.type ?? record.event ?? record.event_type ?? record.kind ?? '');
-  return type === 'token_count' || type.endsWith('.token_count') || Boolean(record.token_count);
+  const payload = objectRecord(record.payload);
+  return String(payload?.type ?? '') === 'token_count';
 }
 
 async function collectCodexMessages(
-  mode: UploadMode,
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string
@@ -1104,8 +829,6 @@ async function collectCodexMessages(
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
-  if (mode === 'im')
-    return { messages, clientCursor: buildClientCursor(serverCursor, files, 0, generatedAt) };
 
   for (const root of [
     path.join(codexHome(), 'sessions'),
@@ -1135,6 +858,8 @@ async function collectCodexMessages(
       const sessionId = path.basename(filePath, '.jsonl');
       let consumedOffset = fromOffset;
       let startedAt: string | undefined;
+      let codexProjectPath = filePath;
+      let codexModel: string | undefined;
       const stream = createReadStream(filePath, {
         encoding: 'utf-8',
         start: fromOffset,
@@ -1150,32 +875,55 @@ async function collectCodexMessages(
         } catch {
           continue;
         }
-        const record =
-          obj.token_count && typeof obj.token_count === 'object'
-            ? (obj.token_count as Record<string, unknown>)
-            : obj;
-        if (!isCodexTokenCountRecord(obj) && !isCodexTokenCountRecord(record)) continue;
+        const payload = objectRecord(obj.payload);
+        if (payload) {
+          if (typeof payload.cwd === 'string' && payload.cwd) codexProjectPath = payload.cwd;
+          if (Array.isArray(payload.workspace_roots)) {
+            const firstRoot = payload.workspace_roots.find(
+              (root) => typeof root === 'string' && root
+            );
+            if (typeof firstRoot === 'string') codexProjectPath = firstRoot;
+          }
+          if (typeof payload.model === 'string' && payload.model) codexModel = payload.model;
+          if (!codexModel && typeof payload.model_provider === 'string' && payload.model_provider) {
+            codexModel = payload.model_provider;
+          }
+          if (!startedAt && typeof payload.started_at === 'string') startedAt = payload.started_at;
+          if (!startedAt && typeof payload.timestamp === 'string') startedAt = payload.timestamp;
+        }
+        const record = codexUsageRecordFromEvent(obj);
+        if (!record || !isCodexTokenCountRecord(obj)) continue;
         const usage = codexTokenUsageFromRecord(record);
         if (!usage) continue;
 
         const occurredAt =
           typeof obj.timestamp === 'string'
             ? obj.timestamp
-            : typeof record.timestamp === 'string'
-              ? record.timestamp
-              : generatedAt;
+            : typeof payload?.timestamp === 'string'
+              ? payload.timestamp
+              : typeof record.timestamp === 'string'
+                ? record.timestamp
+                : generatedAt;
         startedAt ||= occurredAt;
         const messageId = String(
-          obj.id ?? obj.uuid ?? record.id ?? `${sessionId}:${consumedOffset}`
+          obj.id ??
+            obj.uuid ??
+            payload?.id ??
+            payload?.turn_id ??
+            record.id ??
+            `${sessionId}:${consumedOffset}`
         );
-        const projectPath = String(record.cwd ?? record.project_path ?? filePath);
+        const projectPath = String(payload?.cwd ?? codexProjectPath);
         messages.push({
           kind: 'conversation_message',
           eventId: `codex:${sessionId}:${messageId}`,
           reportedAt: generatedAt,
           project: {
             projectRef: safeRef('codex-project', projectPath),
-            name: typeof record.project === 'string' ? record.project : 'Codex',
+            name:
+              typeof payload?.project === 'string'
+                ? payload.project
+                : path.basename(projectPath) || 'Codex',
             pathHash: `sha256-${sha(projectPath)}`,
           },
           conversation: { conversationId: sessionId, sessionRef: `codex:${sessionId}`, startedAt },
@@ -1184,12 +932,7 @@ async function collectCodexMessages(
             parentRef: null,
             role: 'assistant',
             occurredAt,
-            modelName:
-              typeof record.model === 'string'
-                ? record.model
-                : typeof obj.model === 'string'
-                  ? obj.model
-                  : undefined,
+            modelName: typeof payload?.model === 'string' ? payload.model : codexModel,
             content: 'Codex token usage event',
             contentFormat: 'text',
             usage,
@@ -1221,14 +964,13 @@ async function collectCodexMessages(
 
 async function collectMessagesForPlatform(
   platform: UploadPlatform,
-  mode: UploadMode,
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string
 ): Promise<CollectedMessages> {
   return platform === 'codex'
-    ? collectCodexMessages(mode, serverCursor, limit, generatedAt)
-    : collectClaudeCodeMessages(mode, serverCursor, limit, generatedAt);
+    ? collectCodexMessages(serverCursor, limit, generatedAt)
+    : collectClaudeCodeMessages(serverCursor, limit, generatedAt);
 }
 
 function sanitizeDiagnosticText(value: unknown): string {
@@ -1314,16 +1056,23 @@ async function postPayload(
   endpointPath: string,
   platform: UploadPlatform,
   token: string,
-  payload: UploadPayload,
-  mode: UploadMode
+  payload: UploadPayload
 ): Promise<ConversationUploadStatus> {
   const firstMessage = payload.messages[0];
+  const body = JSON.stringify(payload);
+  // Idempotency-Key is the body's own fingerprint (sha256). An identical retry
+  // (same body) reuses the same key → server returns the original receipt without
+  // reprocessing. A different body always yields a different key, so the doc's
+  // same-key+different-body 409 can never fire from this client. A full re-scan
+  // gets a new generatedAt → new body → new key, so it re-uploads without false
+  // conflict (the server still dedups by eventId).
+  const idempotencyKey = sha(body);
   await appendUploadLog(home, 'upload-request', {
     endpoint: endpointPath,
-    mode,
     platform,
     schemaVersion: payload.schemaVersion,
     reporter: payload.reporter,
+    idempotencyKey,
     messageCount: payload.messages.length,
     hasClientCursor: Boolean(payload.clientCursor),
     cursorHash: payload.clientCursor?.targetCursorHash,
@@ -1341,14 +1090,14 @@ async function postPayload(
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
     },
-    body: JSON.stringify(payload),
+    body,
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   await appendUploadLog(home, 'upload-response', {
     endpoint: endpointPath,
-    mode,
     platform,
     ok: res.ok,
     status: res.status,
@@ -1414,7 +1163,9 @@ function resolveUploadProviders(
 ): UploadPlatform[] {
   const providers = telemetry?.uploadProviders?.length
     ? telemetry.uploadProviders
-    : [telemetry?.platform || 'claudecode'];
+    : telemetry?.platform
+      ? [telemetry.platform]
+      : ['claudecode', 'codex'];
   return [
     ...new Set(
       providers.filter(
@@ -1429,7 +1180,6 @@ async function postMessagesInBatches(
   baseUrl: string,
   endpointPath: string,
   platform: UploadPlatform,
-  mode: UploadMode,
   token: string,
   payloadBase: Omit<UploadPayload, 'messages'>,
   messages: UploadMessage[],
@@ -1448,7 +1198,6 @@ async function postMessagesInBatches(
     const batchMessages = messages.slice(offset, offset + size);
     await appendUploadLog(home, 'upload-batch-start', {
       platform,
-      mode,
       batchIndex,
       totalBatches,
       batchSize: batchMessages.length,
@@ -1463,18 +1212,10 @@ async function postMessagesInBatches(
       // the scan position (per-file offsets) and is identical across batches;
       // the server commits it from whichever batch it durably processes, so a
       // mid-run crash still leaves an accurate cursor instead of none.
-      const status = await postPayload(
-        home,
-        baseUrl,
-        endpointPath,
-        platform,
-        token,
-        {
-          ...payloadBase,
-          messages: batchMessages,
-        },
-        mode
-      );
+      const status = await postPayload(home, baseUrl, endpointPath, platform, token, {
+        ...payloadBase,
+        messages: batchMessages,
+      });
       statuses.push(status);
       // A batch that didn't hard-fail was accepted for processing (the 202
       // receipt). lastError is only set on intake rejection / HTTP error, so its
@@ -1485,7 +1226,6 @@ async function postMessagesInBatches(
       }
       await appendUploadLog(home, 'upload-batch-finished', {
         platform,
-        mode,
         batchIndex,
         totalBatches,
         attempted: status.attempted,
@@ -1507,7 +1247,6 @@ async function postMessagesInBatches(
       const message = sanitizeUploadError(error);
       await appendUploadLog(home, 'upload-batch-failed', {
         platform,
-        mode,
         batchIndex,
         totalBatches,
         batchSize: batchMessages.length,
@@ -1531,9 +1270,8 @@ async function postMessagesInBatches(
   return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
 }
 
-async function uploadPlatformModeMessages(
+async function uploadPlatformMessages(
   platform: UploadPlatform,
-  mode: UploadMode,
   channel: UsageStatusChannel | null,
   cfg: ConversationUploadConfig,
   home: string,
@@ -1552,14 +1290,12 @@ async function uploadPlatformModeMessages(
     const conversationCfgEarly = cfg.telemetry?.conversations;
     const { messages: pendingMessages } = await collectMessagesForPlatform(
       platform,
-      mode,
       channel?.currentCursor,
       conversationCfgEarly?.batchSize ?? 0,
       generatedAt
     );
     await appendUploadLog(home, 'server-channel-inflight', {
       platform,
-      mode,
       pending: pendingMessages.length,
       uploadIds: channel?.inFlight?.uploadIds ?? [],
     });
@@ -1578,7 +1314,6 @@ async function uploadPlatformModeMessages(
     // and 待上报 never drops.
     await appendUploadLog(home, 'server-channel-inflight-foreground', {
       platform,
-      mode,
       uploadIds: channel?.inFlight?.uploadIds ?? [],
     });
   }
@@ -1597,7 +1332,6 @@ async function uploadPlatformModeMessages(
   // usage) get inserted. After success the server commits the full-range cursor.
   const { messages, clientCursor } = await collectMessagesForPlatform(
     platform,
-    mode,
     fullRescan ? null : channel?.currentCursor,
     conversationCfg?.batchSize ?? 0,
     generatedAt
@@ -1611,7 +1345,6 @@ async function uploadPlatformModeMessages(
   };
   await appendUploadLog(home, 'scan-collected', {
     platform,
-    mode,
     ...baseStatus,
     cursorSource: 'server-usage-status-currentCursor',
     baseCursorHash: clientCursor.baseCursorHash,
@@ -1619,7 +1352,7 @@ async function uploadPlatformModeMessages(
   });
 
   if (!messages.length) {
-    await appendUploadLog(home, 'no-incremental-messages', { platform, mode, ...baseStatus });
+    await appendUploadLog(home, 'no-incremental-messages', { platform, ...baseStatus });
     return emptyStatus(true, true, baseStatus);
   }
 
@@ -1633,27 +1366,24 @@ async function uploadPlatformModeMessages(
     generatedAt,
     reporter: SOURCE,
     client: { tool: platform },
-    scene: mode === 'im' ? 'digital_employee' : 'coding',
+    scene: 'coding',
     clientCursor,
   };
 
   await appendUploadLog(home, 'upload-start', {
     platform,
-    mode,
     pending: messages.length,
     batchSize: uploadBatchSize,
     baseUrl,
   });
 
-  // Unified endpoint: plain and IM both POST to /api/v1/report/messages in a
-  // single batch sequence. Each message carries its own context (project/
-  // conversation/im/routing); scene distinguishes coding vs digital_employee.
+  // Unified endpoint: every coding turn POSTs to /api/v1/report/messages in a
+  // single batch sequence. Each message carries its own project/conversation.
   const { status, uploadedCount, uploadedTokens } = await postMessagesInBatches(
     home,
     baseUrl,
     UPLOAD_ENDPOINT,
     platform,
-    mode,
     token,
     payloadBase,
     messages,
@@ -1673,7 +1403,6 @@ async function uploadPlatformModeMessages(
   };
   await appendUploadLog(home, 'upload-finished', {
     platform,
-    mode,
     attempted: result.attempted,
     accepted: result.accepted,
     duplicated: result.duplicated,
@@ -1721,12 +1450,7 @@ async function uploadConversationMessagesLocked(
   const channels = new Map<string, UsageStatusChannel | null>();
   try {
     for (const platform of providers) {
-      for (const mode of ['plain', 'im'] as const) {
-        channels.set(
-          `${platform}:${mode}`,
-          await fetchUsageChannel(baseUrl, token, platform, mode, home)
-        );
-      }
+      channels.set(platform, await fetchUsageChannel(baseUrl, token, platform, home));
     }
   } catch (error) {
     const message = `服务端 /report/usage/status 不可用，未扫描未上报：${sanitizeUploadError(error)}`;
@@ -1734,19 +1458,15 @@ async function uploadConversationMessagesLocked(
     return emptyStatus(true, true, { lastError: message });
   }
 
-  // Upload each platform×mode channel concurrently: they target independent
-  // endpoints and independent eventId-dedup namespaces, so there is no
-  // contention between them. appendUploadLog uses single-line atomic
-  // appendFile, so interleaved channel logs stay line-coherent.
-  const combos = providers.flatMap((platform) =>
-    (['plain', 'im'] as const).map((mode) => ({ platform, mode }))
-  );
+  // Upload each platform channel concurrently: they target independent
+  // eventId-dedup namespaces, so there is no contention between them.
+  // appendUploadLog uses single-line atomic appendFile, so interleaved channel
+  // logs stay line-coherent.
   const statuses = await Promise.all(
-    combos.map(({ platform, mode }) =>
-      uploadPlatformModeMessages(
+    providers.map((platform) =>
+      uploadPlatformMessages(
         platform,
-        mode,
-        channels.get(`${platform}:${mode}`) ?? null,
+        channels.get(platform) ?? null,
         cfg,
         home,
         baseUrl,

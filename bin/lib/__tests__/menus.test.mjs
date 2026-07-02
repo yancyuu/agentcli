@@ -25,3 +25,26 @@ describe('menus — full-upload replaces incremental scan-once', () => {
     expect(scan.label).not.toMatch(/扫描并上报一次/);
   });
 });
+
+describe('menus — 本地工作台 lists the workbenches (fcb first, merged status)', () => {
+  const web = NAV_ACTIONS.find((a) => a.id === 'web');
+
+  it('merges the two status rows into a single workbench-status entry', () => {
+    const ids = web.children.map((c) => c.id);
+    expect(ids).toContain('workbench-status');
+    // The old per-workbench status rows are gone — one merged entry replaces them.
+    expect(ids).not.toContain('web-status');
+    expect(ids).not.toContain('feishu-bridge-status');
+  });
+
+  it('keeps install-lark-cli under 本地工作台', () => {
+    expect(web.children.map((c) => c.id)).toContain('install-lark-cli');
+  });
+
+  it('exposes both workbenches: 飞书 Codex 桥 first, then AgentCli 工作台', () => {
+    const ids = web.children.map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining(['toggle-feishu-bridge', 'toggle-web']));
+    // 飞书桥是推荐主入口，排在 AgentCli 工作台之前。
+    expect(ids.indexOf('toggle-feishu-bridge')).toBeLessThan(ids.indexOf('toggle-web'));
+  });
+});

@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/openhermit",
   "type": "module",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "description": "AgentCli: AI 工程协作平台，本地优先的用量采集与团队协作工具。",
   "license": "AGPL-3.0",
   "publishConfig": {
@@ -72,8 +72,8 @@
     "yaml": "^2.8.2"
   },
   "optionalDependencies": {
-    "hermit-bridge": "0.1.5",
-    "ioredis": "^5.6.1"
+    "@modelzen/feishu-codex-bridge": "0.6.4",
+    "hermit-bridge": "0.1.5"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.0",

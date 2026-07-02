@@ -177,6 +177,16 @@ import {
 } from './lib/menus.mjs';
 import { installLarkCli } from './lib/larkCli.mjs';
 import {
+  ensureFeishuCodexBridge,
+  configureFeishuBridge,
+  feishuBridgeConfigured,
+  startFeishuBridge,
+  stopFeishuBridge,
+  feishuBridgeStatus,
+  feishuBridgeState,
+  feishuBridgeWebUrl,
+} from './lib/feishuBridgeCli.mjs';
+import {
   readDaemonPid,
   refreshDaemonPidFromReadyServer,
   isPidRunning,
@@ -407,17 +417,21 @@ function currentFeatureStates() {
   const telemetry = settings.taskBus?.telemetry && typeof settings.taskBus.telemetry === 'object'
     ? settings.taskBus.telemetry
     : {};
-  const uploadProviders = normalizeUploadProviders(telemetry.uploadProviders || telemetry.platform || 'claudecode');
+  const uploadProviders = normalizeUploadProviders(telemetry.uploadProviders || telemetry.platform || ['claudecode', 'codex']);
   const aikeyClaimed = readAikeyClaimed();
   return {
     auth,
     webPid,
     usagePid,
-    webRunning: Boolean((webPid && isPidRunning(webPid)) || Date.now() < optimisticWebRunningUntil),
+    webRunning: Boolean(webPid && isPidRunning(webPid)),
     usageRunning: Boolean(usagePid && isPidRunning(usagePid)),
     conversationUploadEnabled: resolveConversationUploadEnabled(telemetry),
     uploadProviders,
     aikeyClaimed,
+    // feishu-codex-bridge is an optional connector (not bundled); state comes
+    // from its own ~/.feishu-codex-bridge/service.pid, same pid+liveness pattern
+    // as web/usage. Read on every repaint — cheap (one stat + kill -0).
+    feishuBridge: feishuBridgeState(),
   };
 }
 
@@ -439,11 +453,11 @@ async function refreshWebRunningState(expectedPid = null) {
   const server = await checkExistingOpenHermitServer();
   if (server.running) {
     refreshDaemonPidFromReadyServer(pid || expectedPid);
-    markWebRunningOptimistic();
+    clearWebRunningOptimistic();
     return true;
   }
   if (pid && isPidRunning(pid)) {
-    markWebRunningOptimistic();
+    clearWebRunningOptimistic();
     return true;
   }
   clearWebRunningOptimistic();
@@ -489,7 +503,23 @@ function parseMenuKeys(input) {
 }
 
 function actionStateLabel(action, states) {
-  if (['web', 'toggle-web', 'start-web'].includes(action.id)) return { text: states.webRunning ? '运行中' : '未启动', state: states.webRunning ? 'ok' : 'error' };
+  if (action.id === 'web') {
+    // 父组「本地工作台」下有两个工作台——状态反映「任一在跑」；LOCAL_USE 的叶子「打开本机 Web 控制台」只看 webRunning。
+    if (action.children?.length) {
+      const anyRunning = states.feishuBridge.running || states.webRunning;
+      return { text: anyRunning ? '运行中' : '未启动', state: anyRunning ? 'ok' : 'error' };
+    }
+    return { text: states.webRunning ? '运行中' : '未启动', state: states.webRunning ? 'ok' : 'error' };
+  }
+  if (action.id === 'start-web' || action.id === 'toggle-web') return { text: states.webRunning ? '运行中' : '未启动', state: states.webRunning ? 'ok' : 'error' };
+  if (['toggle-feishu-bridge', 'start-feishu-bridge', 'stop-feishu-bridge'].includes(action.id)) {
+    const fb = states.feishuBridge;
+    // 未安装时显示「推荐」引导用户开启（开启即按需安装）；装好后回到真实运行状态。
+    if (!fb.installed) return { text: '推荐', state: 'ok' };
+    // 已装但未配置（无 bots.json）→「未配置」；优先于运行态，引导用户先填飞书应用凭证。
+    if (!fb.configured) return { text: '未配置', state: 'warn' };
+    return { text: fb.running ? '运行中' : '未启动', state: fb.running ? 'ok' : 'error' };
+  }
   if (action.toggle === 'conversation-upload' || action.id === 'toggle-message-upload') {
     const upload = describeUploadToggle({ enabled: states.conversationUploadEnabled, running: states.usageRunning });
     return { text: states.usageRunning ? formatUploadProviders(states.uploadProviders) : upload.badge, state: upload.badgeState };
@@ -535,10 +565,14 @@ async function renderNavigationIntro() {
 }
 
 function inlineBusyMessage(action) {
+  if (action.id === 'toggle-feishu-bridge') {
+    const fb = currentFeatureStates().feishuBridge;
+    if (!fb.installed) return '正在按需安装 feishu-codex-bridge（首次开启，需要一点时间）...';
+    if (!fb.configured) return '即将弹出飞书应用配置向导（App ID / App Secret）...';
+    return fb.running ? '正在停止飞书 Codex 桥...' : '正在启动飞书 Codex 桥...';
+  }
   if (action.id === 'toggle-web') {
-    return currentFeatureStates().webRunning
-      ? '本地数字员工工作台已运行，正在打开/确认状态...'
-      : '正在启动本地数字员工工作台...';
+    return currentFeatureStates().webRunning ? '正在关闭 AgentCli 工作台...' : '正在启动 AgentCli 工作台...';
   }
   if (action.id === 'toggle-message-upload') {
     const s = currentFeatureStates();
@@ -1032,7 +1066,7 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
     if (remoteChannels.length) {
       for (const c of remoteChannels) {
         rows.push([
-          `${uploadProviderLabel(c.platform)}/${c.mode}`,
+          `${uploadProviderLabel(c.platform)}/${c.scene || 'coding'}`,
           `${c.status || '未知'} · ${cursorStatusText(c)}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}${c.lastUploadId ? ` · ${String(c.lastUploadId).slice(0, 12)}` : ''}`,
           c.inFlight ? 'warn' : 'info',
         ]);
@@ -1045,14 +1079,14 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
       ]);
     }
     for (const error of remoteErrors) {
-      // Auth-level errors (e.g. 等待登录) carry no platform/mode — they are
-      // represented by the 授权 row below, not a bogus "undefined/undefined" row.
-      if (!error.platform || !error.mode) continue;
+      // Auth-level errors (e.g. 等待登录) carry no platform — they are represented
+      // by the 授权 row below, not a bogus "undefined" row.
+      if (!error.platform) continue;
       const detail = error.httpStatus
         ? `HTTP ${error.httpStatus}${error.body ? ` · ${error.body}` : ''}`
         : error.error || '请求失败';
       rows.push([
-        `${uploadProviderLabel(error.platform)}/${error.mode}`,
+        `${uploadProviderLabel(error.platform)}/${error.scene || 'coding'}`,
         `读取 /report/usage/status 失败：${detail}`,
         'error',
       ]);
@@ -1153,7 +1187,7 @@ function setConversationUploadEnabled(enabled, providers = null) {
   const settings = readHermitSettings();
   const existing = settings.taskBus && typeof settings.taskBus === 'object' ? settings.taskBus : {};
   const telemetry = existing.telemetry && typeof existing.telemetry === 'object' ? existing.telemetry : {};
-  const uploadProviders = selectedProviders ?? normalizeUploadProviders(telemetry.uploadProviders || ['claudecode']);
+  const uploadProviders = selectedProviders ?? normalizeUploadProviders(telemetry.uploadProviders || ['claudecode', 'codex']);
   const taskBus = {
     ...existing,
     telemetry: {
@@ -1184,7 +1218,7 @@ function buildLocalUsageTaskBusConfig(current = {}) {
   // Strip it when re-writing so it is purged from settings.json instead of carried forever.
   const { uploadEnabled: _legacyUploadEnabled, ...telemetryWithoutLegacy } = existingTelemetry;
   void _legacyUploadEnabled;
-  const uploadProviders = normalizeUploadProviders(existingTelemetry.uploadProviders || ['claudecode']);
+  const uploadProviders = normalizeUploadProviders(existingTelemetry.uploadProviders || ['claudecode', 'codex']);
   return {
     ...existing,
     enabled: Boolean(existing.enabled),
@@ -1387,6 +1421,10 @@ async function waitForPidExit(pid, timeoutMs) {
   return !isPidRunning(pid);
 }
 
+function isUsageWorkerCommand(command) {
+  return command.includes('src/main/telemetry/worker.ts') || command.includes('telemetry/worker.ts');
+}
+
 function collectRunningUsageWorkerPids() {
   // Find EVERY persistent telemetry worker, not just the pidfile'd one. Each
   // worker writes its own pid on start, so the pidfile always holds only the
@@ -1398,7 +1436,7 @@ function collectRunningUsageWorkerPids() {
   if (process.platform === 'win32') {
     try {
       return listProcessesWin()
-        .filter((p) => p.pid !== process.pid && p.command.includes('telemetry/worker.ts') && !p.command.includes('--scan-once'))
+        .filter((p) => p.pid !== process.pid && isUsageWorkerCommand(p.command) && !p.command.includes('--scan-once'))
         .map((p) => p.pid);
     } catch {
       return [];
@@ -1417,7 +1455,7 @@ function collectRunningUsageWorkerPids() {
     const pid = Number(match[1]);
     if (pid === process.pid) continue;
     const command = match[2];
-    if (!command.includes('telemetry/worker.ts')) continue;
+    if (!isUsageWorkerCommand(command)) continue;
     if (command.includes('--scan-once')) continue;
     pids.push(pid);
   }
@@ -1648,6 +1686,21 @@ async function enableUsageAutostart() {
   return getUsageAutostartStatus();
 }
 
+async function keepUsageAutostartWithoutRunning() {
+  const label = usageLaunchdLabel();
+  const plistPath = usageLaunchdPlistPath();
+  if (process.platform !== 'darwin') return getUsageAutostartStatus();
+  mkdirSync(path.dirname(plistPath), { recursive: true });
+  mkdirSync(path.dirname(telemetryWorkerLogPath), { recursive: true, mode: 0o700 });
+  writeFileSync(plistPath, buildUsageLaunchdPlist(), 'utf-8');
+  const uid = process.getuid?.();
+  if (uid !== undefined) {
+    launchctlBestEffort(['bootout', `gui/${uid}`, plistPath]);
+    launchctlBestEffort(['enable', `gui/${uid}/${label}`]);
+  }
+  return getUsageAutostartStatus();
+}
+
 async function disableUsageAutostart() {
   const label = usageLaunchdLabel();
   const plistPath = usageLaunchdPlistPath();
@@ -1716,9 +1769,17 @@ async function withUploadProgress(label, task) {
   // Two-line layout: the label sits on its own line (static); the live bar +
   // spinner render on the line BELOW it and redraw in place ("进度条放到下面").
   // Both lines are cleared together on finish so the result box prints clean.
+  // 扫描阶段（还没有上报批次事件）日志为空，bar 会死停在「等待扫描」——fullRescan 重扫
+  // 几 GB 历史时长达数分钟，看起来像卡死。扫描/批次间隔期改显「已用时 Ns · 处理中」，
+  // 秒数跳动即可证明进程活着；进入批量上报后交回 uploadProgressLabel 显示批次/百分比。
+  const startedAt = Date.now();
   process.stdout.write(`${ui.dim(label)}\n`);
   const render = () => {
-    const bar = uploadProgressLabel(latestConversationUploadProgress(sinceMs), { barWidth: 26 });
+    const snapshot = latestConversationUploadProgress(sinceMs);
+    const idle = !snapshot.hasBatch && (Number(snapshot.discovered ?? 0) <= 0);
+    const bar = idle
+      ? `已用时 ${Math.floor((Date.now() - startedAt) / 1000)}s · 处理中`
+      : uploadProgressLabel(snapshot, { barWidth: 26 });
     const text = fitProgressLine(`${frames[frame]} ${bar}`);
     process.stdout.write(`\r\x1b[2K${text}`);
     frame = (frame + 1) % frames.length;
@@ -1747,7 +1808,13 @@ async function withUploadProgress(label, task) {
 //      the background worker always comes back if it was running.
 async function runForegroundScan({ fullRescan = false, progressText }) {
   const workerPid = readPidFile(telemetryWorkerPidPath);
-  const workerWasRunning = Boolean(workerPid && isPidRunning(workerPid));
+  // A live worker is the pidfile'd one OR a stray orphan a stale pidfile lost
+  // (dead pidfile pid while a real worker is still alive). Use the same herd view
+  // stopTelemetryWorker reaps, so usage report pauses/reaps the orphan too — a
+  // stale pidfile otherwise makes the scan coexist with a second worker.
+  const workerWasRunning =
+    (Number.isInteger(workerPid) && workerPid > 0 && isPidRunning(workerPid)) ||
+    collectRunningUsageWorkerPids().some((pid) => isPidRunning(pid));
   if (workerWasRunning) await stopTelemetryWorker();
   if (fullRescan) process.env.HERMIT_USAGE_FULL_RESCAN = '1';
   try {
@@ -1917,7 +1984,7 @@ async function printScanOnceResult({ exitOnDone = true, fullRescan = false } = {
 
 function getUploadProvidersFromFlags() {
   const values = findAnyOptionValues(['--upload-provider', '--provider', '--providers']);
-  return normalizeUploadProviders(values).length ? normalizeUploadProviders(values) : ['claudecode'];
+  return normalizeUploadProviders(values).length ? normalizeUploadProviders(values) : ['claudecode', 'codex'];
 }
 
 function getUploadProviderFromFlags() {
@@ -1958,7 +2025,7 @@ async function printUsageStart({ exitOnDone = true } = {}) {
   const auth = readOpenHermitAuthStatus();
   const conversationUploadEnabled = Boolean(taskBus.telemetry?.conversationUploadEnabled);
   const featureProviders = currentFeatureStates().uploadProviders;
-  const attributionProviders = featureProviders?.length ? featureProviders : ['claudecode'];
+  const attributionProviders = featureProviders?.length ? featureProviders : ['claudecode', 'codex'];
   printCliRows('消息上报后台已启动', [
     ['消息上报', conversationUploadEnabled ? auth.authorized ? `开启（pid ${worker.pid}）` : `等待登录（pid ${worker.pid}）` : '关闭', conversationUploadEnabled ? auth.authorized ? 'ok' : 'warn' : 'off'],
     ['日志', worker.logPath, 'info'],
@@ -1976,7 +2043,7 @@ async function printUsageStop({ exitOnDone = true } = {}) {
   const disableAutostart = !commandArgs.includes('--keep-autostart');
   const taskBus = disableLocalUsageTelemetry();
   const worker = await stopTelemetryWorker();
-  const autostart = disableAutostart ? await disableUsageAutostart() : await getUsageAutostartStatus();
+  const autostart = disableAutostart ? await disableUsageAutostart() : await keepUsageAutostartWithoutRunning();
   const result = {
     ok: true,
     command: 'usage stop',
@@ -2304,7 +2371,7 @@ async function chooseUploadProviderPrompt(defaultProviders = ['claudecode', 'cod
     defaults.includes(option.id) ? 'ok' : 'info',
   ]), '可多选：输入 1,2 同时上报 Claude Code + Codex；直接回车默认全选。');
 
-  if (!process.stdin.isTTY) return defaults.length ? defaults : ['claudecode'];
+  if (!process.stdin.isTTY) return defaults.length ? defaults : ['claudecode', 'codex'];
   const rl = createPromptInterface();
   try {
     const answer = (await rl.question('\n请选择 [1/2/1,2]，默认 1,2: ')).trim();
@@ -2500,6 +2567,10 @@ async function runNavigationAction(action) {
     await runNavigationAction({ id: currentFeatureStates().webRunning ? 'stop-web' : 'start-web' });
     return;
   }
+  if (action.id === 'toggle-feishu-bridge') {
+    await runNavigationAction({ id: currentFeatureStates().feishuBridge.running ? 'stop-feishu-bridge' : 'start-feishu-bridge' });
+    return;
+  }
   if (action.id === 'toggle-background') {
     await runNavigationAction({ id: currentFeatureStates().usageRunning ? 'stop-background' : 'start-background' });
     return;
@@ -2568,6 +2639,73 @@ async function runNavigationAction(action) {
     ], r.ok
       ? '团队隔离请在每队 .env 配置 LARK_CLI_PROFILE（见 scripts/build-pages.mjs）'
       : '请确认 Node.js / npm 可用后重试');
+    return;
+  }
+  if (action.id === 'start-feishu-bridge') {
+    // 一站式编排：确保就绪（已随 AgentCli 打包；缺失时按需补装）→ 未配置就把终端交给 fcb 的 `bot init` 填凭证 → 启动守护进程。
+    // 不复制 fcb 的凭证/校验逻辑——App ID / App Secret 由 fcb 自己弹框采集，hermit 只编排。
+    const ensured = await ensureFeishuCodexBridge();
+    if (!ensured.ok) {
+      printCliRows('飞书 Codex 桥', [
+        ['状态', '安装未完成', 'error'],
+        ['说明', ensured.message, 'info'],
+      ]);
+      return;
+    }
+
+    if (!feishuBridgeConfigured()) {
+      printCliRows('飞书 Codex 桥 · 配置向导', [
+        ['下一步', '在终端按提示填入飞书应用凭证', 'info'],
+        ['App ID', '形如 cli_xxxxxxxx（飞书开放平台 → 应用 → 凭证与基础信息）', 'info'],
+        ['App Secret', '同一页的「App Secret」', 'info'],
+      ], '按 Ctrl+C 可随时退出；配置成功后自动继续启动守护进程');
+      const cfg = await configureFeishuBridge();
+      if (!cfg.ok) {
+        printCliRows('飞书 Codex 桥', [
+          ['状态', '未配置', 'warn'],
+          ['说明', cfg.message || '尚未完成飞书应用配置，启动已跳过', 'info'],
+        ], '稍后再次开启飞书 Codex 桥即可重试配置向导');
+        return;
+      }
+      // 配置写入了新的 bot；若守护进程已在跑，先停一次让它重新加载机器人，再启动。
+      if (feishuBridgeState().running) {
+        await stopFeishuBridge();
+      }
+    }
+
+    const r = await startFeishuBridge();
+    printCliRows('飞书 Codex 桥', [
+      ['状态', r.ok ? (r.alreadyRunning ? '已在运行' : '已启动') : '启动未完成', r.ok ? 'ok' : 'error'],
+      ['pid', r.pid ? String(r.pid) : '—', 'info'],
+      ['说明', r.message, 'info'],
+    ], r.ok
+      ? '群消息 → 本地 Codex；交互入口在飞书（feishu-codex-bridge 的私聊控制台）'
+      : '可运行 /hermit:doctor 或查看上报日志排查');
+    return;
+  }
+  if (action.id === 'stop-feishu-bridge') {
+    const r = await stopFeishuBridge();
+    printCliRows('飞书 Codex 桥', [
+      ['状态', r.ok ? '已停止' : '停止未完成', r.ok ? 'off' : 'warn'],
+      ['说明', r.message, 'info'],
+    ]);
+    return;
+  }
+  if (action.id === 'workbench-status') {
+    // 两个工作台并列展示：AgentCli 工作台（OpenHermit web daemon）+ 飞书 Codex 桥（连接器）。
+    const ds = await collectDaemonStatus();
+    printCliRows('AgentCli 工作台', [
+      ['状态', ds.running ? `运行中（pid ${ds.pid || '?'})` : '未运行', ds.running ? 'ok' : 'warn'],
+      ['地址', ds.running ? `${ds.url}（token 自动携带，仅本机）` : '未运行', ds.running ? 'info' : 'off'],
+    ], '本机 AgentCli Web daemon + 可视化工作台：团队 / 看板 / 运行时 / 用量管理');
+    const fb = await feishuBridgeStatus();
+    const web = feishuBridgeWebUrl();
+    printCliRows('飞书 Codex 桥', [
+      ['已安装', fb.installed ? (fb.binPath || '是') : '否（可选依赖未就绪）', fb.installed ? 'ok' : 'off'],
+      ['运行', fb.running ? `运行中（pid ${fb.pid || '?'}）` : '未运行', fb.running ? 'ok' : 'warn'],
+      ['地址', fb.running && web ? `http://127.0.0.1:${web.port}/（token 自动携带，仅本机）` : '未运行', fb.running && web ? 'info' : 'off'],
+      ['数据目录', fb.dataDir, 'info'],
+    ]);
     return;
   }
   if (action.id === 'overview') {
@@ -2671,7 +2809,7 @@ async function printNavigation() {
       title: '',
       actions: NAV_ACTIONS,
       onAction: async (action) => {
-        if (!['toggle-web', 'web-status', 'install-lark-cli', 'toggle-message-upload', 'overview', 'scan', 'upload-logs', 'login', 'logout', 'dev-login', 'status'].includes(action.id)) return false;
+        if (!['workbench-status', 'install-lark-cli', 'toggle-feishu-bridge', 'toggle-web', 'toggle-message-upload', 'overview', 'scan', 'upload-logs', 'login', 'logout', 'dev-login', 'status'].includes(action.id)) return false;
         await runNavigationAction(action);
         await waitForNavigationContinue('按 Enter 回到菜单 | Esc/Ctrl+C 退出', { keepMenuInput: true });
         return true;

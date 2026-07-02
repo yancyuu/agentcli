@@ -9,25 +9,28 @@ import { BRAND } from '../branding.mjs';
 
 export const NAV_ACTIONS = [
   {
+    id: 'web',
+    label: '本地工作台',
+    description: '两个本地入口：AgentCli 工作台=本机 Web daemon + 可视化工作台；飞书桥=把飞书 IM 接到本机 AgentCli，适合在群里调度 agent',
+    recommended: true,
+    children: [
+      // 飞书 Codex 桥 — 推荐连接器，置顶；随 AgentCli 打包，菜单里开启即配置并启动。
+      { id: 'toggle-feishu-bridge', label: '飞书 Codex 桥', toggle: 'feishu-bridge', description: '推荐连接器；完美适配飞书生态（群消息 → 本机 Codex / Claude Code），适合在 IM 里协作驱动 agent' },
+      // AgentCli 工作台 — 启停本机 Web daemon，展示本地工作台访问地址。
+      { id: 'toggle-web', label: 'AgentCli 工作台', toggle: 'web', description: '启动/停止本机 AgentCli Web 工作台；显示本地访问地址，用于团队、看板、运行时和用量的可视化管理' },
+      { id: 'workbench-status', label: '查看本地工作台状态', description: '查看 AgentCli 工作台与飞书 Codex 桥 的运行状态' },
+      { id: 'install-lark-cli', label: '快速安装 lark-cli' },
+    ],
+  },
+  {
     id: 'data-sync',
     label: '用量同步',
     description: '回车展开；消息上报会启动后台增量扫描，首次补齐历史，后续只上传新增消息',
-    recommended: true,
     children: [
       { id: 'toggle-message-upload', label: '消息上报', toggle: 'conversation-upload' },
       { id: 'overview', label: '查看同步状态' },
       { id: 'scan', label: '立即全量上报（慎选）', description: '若后台 worker 在运行，先暂停它；忽略游标全量重扫并重传历史（服务端按 eventId 去重，不会重复入库），完成后自动恢复 worker' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
-    ],
-  },
-  {
-    id: 'web',
-    label: '本地工作台',
-    description: '回车展开；开启/关闭、查看状态、安装 lark-cli',
-    children: [
-      { id: 'toggle-web', label: '是否激活', toggle: 'web' },
-      { id: 'web-status', label: '查看本地工作台状态' },
-      { id: 'install-lark-cli', label: '快速安装 lark-cli' },
     ],
   },
   {

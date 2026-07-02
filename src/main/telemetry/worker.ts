@@ -9,6 +9,7 @@ import type { TaskBusConfig } from '@shared/types/team';
 import { scanTelemetryOnce } from '@main/services/session-intelligence/UsageTelemetryService';
 import { sweepStaleUploadLock } from '@main/services/session-intelligence/ConversationMessageUploadService';
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
+import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
 const DEFAULT_SCAN_INTERVAL_MS = 10 * 60 * 1000;
@@ -261,6 +262,10 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
   const paths = getUsageTelemetryWorkerPaths(hermitHome);
   startedAt = new Date().toISOString();
   await mkdir(path.dirname(paths.logPath), { recursive: true, mode: 0o700 });
+  // At-most-one: reap any OTHER live worker daemon (pidfile-stale orphans included)
+  // before claiming the pidfile, so a freshly booted worker — even after a reinstall
+  // or respawn with no manual `usage stop` — always becomes the sole one.
+  await reapOtherUsageWorkers();
   await writePid(paths);
   // Clear any upload lock left by a previous crash/reboot before the first scan,
   // so a stale lock never blocks the first cycle of a fresh boot.

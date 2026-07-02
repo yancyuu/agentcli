@@ -93,7 +93,7 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
           checkedAt: '2026-06-28T00:00:00.000Z',
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client,
               scene,
               status: 'success',
@@ -109,17 +109,17 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
     const { fetchRemoteUsageStatus } = await import('../usageRemote.mjs');
     const result = await fetchRemoteUsageStatus(['claudecode']);
 
+    // 新协议下 IM 归属是每条消息的 im 块，不再是独立 scene/mode 维度；本机只上报
+    // scene=coding，故每个 provider 只查一次 coding（不再查 digital_employee）。
     expect(result.errors).toEqual([]);
-    expect(result.channels).toHaveLength(2);
+    expect(result.channels).toHaveLength(1);
+    expect(result.channels.every((c) => c.mode === undefined)).toBe(true);
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
       'http://monitor.test/api/v1/report/usage/status?client=claudecode&scene=coding'
     );
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
-      'http://monitor.test/api/v1/report/usage/status?client=claudecode&scene=digital_employee'
-    );
-    expect(result.channels.map((c) => c.cursorHash)).toEqual([
-      'claudecode-coding',
-      'claudecode-digital_employee',
-    ]);
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('scene=digital_employee'))
+    ).toBe(false);
+    expect(result.channels.map((c) => c.cursorHash)).toEqual(['claudecode-coding']);
   });
 });

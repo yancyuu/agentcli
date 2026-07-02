@@ -35,6 +35,7 @@ describe('ConversationMessageUploadService', () => {
     setClaudeBasePathOverride(null);
     delete process.env.HERMIT_HOME;
     delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL;
+    delete process.env.CODEX_HOME;
     delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
     delete process.env.HERMIT_USAGE_FULL_RESCAN;
     await rm(tmpDir, { recursive: true, force: true });
@@ -68,9 +69,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: url.includes('client=codex') ? 'codex' : 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -91,7 +92,10 @@ describe('ConversationMessageUploadService', () => {
         expect(body.schemaVersion).toBe(1);
         expect(body.scene).toBe('coding');
         expect(body).not.toHaveProperty('platform');
-        expect(body).toMatchObject({ reporter: 'openhermit', client: { tool: 'claudecode' } });
+        expect(body).toMatchObject({ reporter: 'agentcli', client: { tool: 'claudecode' } });
+        // 新协议 ReportClient 仅允许 {tool}（additionalProperties:false）：锁死 wire 上
+        // client 只携带 tool，禁止 version/instanceId 等附加字段触发 422。
+        expect(Object.keys(body.client)).toEqual(['tool']);
         expect(body.messages[0]).toMatchObject({
           kind: 'conversation_message',
           eventId: 'claudecode:session-1:message-1',
@@ -99,6 +103,31 @@ describe('ConversationMessageUploadService', () => {
           message: { messageRef: 'message-1', modelName: 'claude-test-model' },
         });
         expect(body.messages[0].message).not.toHaveProperty('model');
+        // 模拟线上服务端契约：ReportUploadConversation 为 additionalProperties:false，
+        // 仅允许 conversationId / sessionRef / startedAt。出现 claudeSessionRef 等额外字段
+        // 时服务端返回 422 extra_forbidden（loc: messages[].conversation.claudeSessionRef），
+        // 上报整体失败、lastError 被置位——与 ~/.hermit/logs/conversation-upload.log 一致。
+        const allowedConversationKeys = new Set(['conversationId', 'sessionRef', 'startedAt']);
+        const forbiddenConversationKeys = body.messages.flatMap(
+          (m: { conversation?: Record<string, unknown> }) =>
+            Object.keys(m.conversation ?? {}).filter((k) => !allowedConversationKeys.has(k))
+        );
+        if (forbiddenConversationKeys.length) {
+          return Response.json(
+            {
+              detail: {
+                code: 'schema_validation_failed',
+                errorCount: forbiddenConversationKeys.length,
+                errors: forbiddenConversationKeys.map((key: string) => ({
+                  type: 'extra_forbidden',
+                  loc: ['body', 'messages', 0, 'conversation', key],
+                  msg: 'Extra inputs are not permitted',
+                })),
+              },
+            },
+            { status: 422 }
+          );
+        }
         return Response.json(
           {
             ok: true,
@@ -135,72 +164,23 @@ describe('ConversationMessageUploadService', () => {
     ).rejects.toThrow();
   });
 
-  it('attributes a Claude session to the IM channel via hermit-bridge composite + builds the IM-contract payload', async () => {
-    // hermit-bridge indexes each IM conversation by TWO composite keys sharing the
-    // same chat: one keyed by sender (ou_), one by the triggering message (on_).
-    // Merging them yields an envelope with BOTH sender id and message id. The
-    // legacy `sessions[*].agent_session_id` shape is kept too, exercising back-compat.
-    const bridgeSessionsDir = path.join(hermitHome, 'hermit-bridge', 'data', 'sessions');
-    await mkdir(bridgeSessionsDir, { recursive: true });
-    await writeFile(
-      path.join(bridgeSessionsDir, 'team-im.json'),
-      JSON.stringify({
-        user_sessions: {
-          'feishu:oc_testchat:ou_testsender': ['im-session-1'],
-          'feishu:oc_testchat:on_testmsgid': ['im-session-1'],
-        },
-        active_session: {
-          'feishu:oc_testchat:ou_testsender': 'im-session-1',
-          'feishu:oc_testchat:on_testmsgid': 'im-session-1',
-        },
-        user_meta: {
-          'feishu:oc_testchat:ou_testsender': { chat_name: '研发群', user_name: '发送人' },
-          'feishu:oc_testchat:on_testmsgid': { chat_name: '研发群' },
-        },
-        sessions: {
-          s1: { id: 's1', agent_session_id: 'im-session-1', past_agent_session_ids: [] },
-        },
-      })
-    );
-
-    // Team that owns the agent workspace — routing.target resolves from the
-    // session cwd matching this workDir.
-    const teamDir = path.join(hermitHome, 'teams', 'test-team');
-    await mkdir(teamDir, { recursive: true });
-    await writeFile(
-      path.join(teamDir, 'team.json'),
-      JSON.stringify({ slug: 'test-team', displayName: '测试团队', workDir: '/tmp/project' })
-    );
-
-    // Logged-in tenant for the im.tenantKey field.
-    await writeFile(
-      path.join(hermitHome, 'auth', 'openhermit.json'),
-      JSON.stringify({
-        token: { accessToken: 'token', expiresAt: '2999-01-01T00:00:00.000Z' },
-        account: { tenantKey: 'tenant-test' },
-      })
-    );
-
-    // Claude session jsonl whose FILENAME equals agent_session_id, carrying NO
-    // obj.im field — attribution relies entirely on the hermit-bridge intersection.
-    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+  it('sends an Idempotency-Key header equal to the sha256 of the exact request body', async () => {
+    const { createHash } = await import('node:crypto');
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-idem');
     await mkdir(projectDir, { recursive: true });
     await writeFile(
-      path.join(projectDir, 'im-session-1.jsonl'),
+      path.join(projectDir, 'session-idem.jsonl'),
       `${JSON.stringify({
         type: 'user',
-        sessionId: 'im-session-1',
-        uuid: 'msg-1',
+        sessionId: 'session-idem',
+        uuid: 'message-idem',
         cwd: '/tmp/project',
-        timestamp: '2026-06-25T08:00:00.000Z',
-        message: { role: 'user', content: 'from feishu', model: 'claude-im-model' },
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: 'idempotency check', model: 'claude-test-model' },
       })}\n`
     );
 
-    const posted = {
-      plain: [] as Array<Record<string, any>>,
-      im: [] as Array<Record<string, any>>,
-    };
+    const posted: { headers: Record<string, string>; body: string }[] = [];
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/api/v1/auth/me')) {
         return Response.json({
@@ -214,9 +194,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -225,31 +205,18 @@ describe('ConversationMessageUploadService', () => {
         });
       }
       if (url.endsWith('/api/v1/report/messages')) {
-        const body = JSON.parse(String(init?.body));
-        // One unified endpoint: scene distinguishes digital_employee (IM) from coding (plain).
-        if (body.scene === 'digital_employee') {
-          posted.im.push(body);
-          return Response.json(
-            {
-              ok: true,
-              uploadId: 'upl-im',
-              receiptId: 'r-im',
-              status: 'queued',
-              received: 1,
-              acceptedForProcessing: 1,
-              rejectedAtReceive: 0,
-            },
-            { status: 202 }
-          );
-        }
-        posted.plain.push(body);
+        posted.push({
+          headers: (init?.headers ?? {}) as Record<string, string>,
+          body: String(init?.body),
+        });
         return Response.json(
           {
             ok: true,
-            uploadId: 'upl-plain',
+            uploadId: 'upl_idem',
+            receiptId: 'r-1',
             status: 'queued',
-            received: 0,
-            acceptedForProcessing: 0,
+            received: 1,
+            acceptedForProcessing: 1,
             rejectedAtReceive: 0,
           },
           { status: 202 }
@@ -268,239 +235,13 @@ describe('ConversationMessageUploadService', () => {
     });
 
     expect(result.lastError).toBeUndefined();
-    // IM-origin session → routed to the IM endpoint; must NOT leak into plain.
-    expect(posted.im).toHaveLength(1);
-    expect(posted.plain).toHaveLength(0);
-
-    const imPayload = posted.im[0];
-    // Unified contract: scene flags digital_employee; schemaVersion is 1; the
-    // client declares client.tool explicitly and MUST NOT send platform.
-    expect(imPayload).toMatchObject({
-      schemaVersion: 1,
-      scene: 'digital_employee',
-      reporter: 'openhermit',
-      client: { tool: 'claudecode' },
-    });
-    expect(imPayload).not.toHaveProperty('platform');
-    // No top-level project/conversation: every message carries its own context now.
-    expect(imPayload).not.toHaveProperty('project');
-    expect(imPayload).not.toHaveProperty('conversation');
-    expect(imPayload.messages).toHaveLength(1);
-    const imMessage = imPayload.messages[0];
-    // Unified contract allows per-message project/conversation — IM KEEPS them.
-    expect(imMessage).toMatchObject({
-      kind: 'im_conversation_message',
-      eventId: 'claudecode:im-session-1:msg-1',
-      project: { projectRef: expect.any(String) },
-      conversation: { conversationId: 'im-session-1', sessionRef: 'claudecode:im-session-1' },
-      message: {
-        messageRef: 'msg-1',
-        modelName: 'claude-im-model',
-        role: expect.any(String),
-        content: expect.any(String),
-      },
-      im: {
-        provider: 'feishu',
-        channel: 'feishu',
-        tenantKey: 'tenant-test',
-        chat: { id: 'oc_testchat', type: 'group', name: '研发群' },
-        sender: { id: 'ou_testsender', idType: 'open_id', name: '发送人' },
-        message: { id: 'on_testmsgid' },
-      },
-      routing: {
-        trigger: 'im_message',
-        triggerSource: 'feishu',
-        matchedBy: 'chat_id',
-        routeRef: 'route-test-team',
-        target: { type: 'team', teamSlug: 'test-team', teamName: '测试团队' },
-      },
-    });
-    expect(imMessage.message).not.toHaveProperty('model');
-    // Regression guard: the legacy `via` placeholder is gone (server 422s it).
-    expect(imMessage.im).not.toHaveProperty('via');
-    // Schema-aligned IM identifiers (ReportUploadIm): sender identity is senderId
-    // (+ sender.id) — there is no userId field; the triggering message id is
-    // imMessageId (+ message.id) — messageId is rejected as extra_forbidden.
-    expect(imMessage.im).toMatchObject({
-      chatId: 'oc_testchat',
-      senderId: 'ou_testsender',
-      imMessageId: 'on_testmsgid',
-    });
-    expect(imMessage.im).not.toHaveProperty('userId');
-    expect(imMessage.im).not.toHaveProperty('messageId');
-    // The owning team rides on the IM message so the service desk can attribute
-    // traffic to a digital employee even before capabilities resolve.
-    expect(imMessage.team).toMatchObject({
-      teamSlug: 'test-team',
-      teamName: '测试团队',
-    });
-    expect(imMessage.team).not.toHaveProperty('displayName');
-  });
-
-  it('attaches mcp/skills/cron/workflow capabilities to IM messages for the owning team', async () => {
-    // hermit-bridge indexes the IM conversation by sender + triggering message.
-    const bridgeSessionsDir = path.join(hermitHome, 'hermit-bridge', 'data', 'sessions');
-    await mkdir(bridgeSessionsDir, { recursive: true });
-    await writeFile(
-      path.join(bridgeSessionsDir, 'team-cap.json'),
-      JSON.stringify({
-        user_sessions: { 'feishu:oc_capchat:ou_capsender': ['im-cap-1'] },
-        active_session: { 'feishu:oc_capchat:ou_capsender': 'im-cap-1' },
-        user_meta: {
-          'feishu:oc_capchat:ou_capsender': { chat_name: '能力群', user_name: '提问人' },
-        },
-      })
-    );
-
-    // Owning team — capability lookup keys off teamName.
-    const teamDir = path.join(hermitHome, 'teams', 'cap-team');
-    await mkdir(teamDir, { recursive: true });
-    await writeFile(
-      path.join(teamDir, 'team.json'),
-      JSON.stringify({ slug: 'cap-team', displayName: '能力团队', workDir: '/tmp/cap-project' })
-    );
-
-    // Install a capability pack for 能力团队 carrying one of each capability kind.
-    const packDir = path.join(hermitHome, 'capability-packs', 'cap-pack');
-    await mkdir(packDir, { recursive: true });
-    await writeFile(
-      path.join(packDir, 'pack.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        id: 'cap-pack',
-        name: '能力团队 能力',
-        namespace: 'cap',
-        version: '1.0.0',
-        teamName: '能力团队',
-        capabilities: {
-          skills: [{ id: 'review', name: 'review', path: 'skills/review/SKILL.md' }],
-          workflows: [{ id: 'loop-design', name: 'loop-design', path: 'workflows/loop.md' }],
-          cron: [
-            {
-              id: 'weekday-report',
-              name: '周报',
-              cronExpression: '17 9 * * 1-5',
-              prompt: 'run report',
-              enabled: true,
-            },
-          ],
-          mcpServers: [{ id: 'context7', name: 'context7', scope: 'user', transport: 'stdio' }],
-        },
-      })
-    );
-
-    const projectDir = path.join(claudeBase, 'projects', '-tmp-cap-project');
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(
-      path.join(projectDir, 'im-cap-1.jsonl'),
-      `${JSON.stringify({
-        type: 'user',
-        sessionId: 'im-cap-1',
-        uuid: 'cap-msg-1',
-        cwd: '/tmp/cap-project',
-        timestamp: '2026-06-30T08:00:00.000Z',
-        message: { role: 'user', content: 'from feishu', model: 'claude-im-model' },
-      })}\n`
-    );
-
-    const posted = { im: [] as Array<Record<string, any>> };
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/api/v1/auth/me')) {
-        return Response.json({
-          authenticated: true,
-          status: 'ok',
-          scopes: ['upload:read', 'upload:write'],
-        });
-      }
-      if (url.includes('/api/v1/report/usage/status')) {
-        return Response.json({
-          channels: [
-            {
-              reporter: 'openhermit',
-              client: 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
-              status: 'never_reported',
-              inFlight: { count: 0, uploadIds: [] },
-              currentCursor: null,
-            },
-          ],
-        });
-      }
-      if (url.endsWith('/api/v1/report/messages')) {
-        const body = JSON.parse(String(init?.body));
-        if (body.scene === 'digital_employee') {
-          posted.im.push(body);
-          return Response.json(
-            {
-              ok: true,
-              uploadId: 'upl-cap',
-              status: 'queued',
-              received: 1,
-              acceptedForProcessing: 1,
-            },
-            { status: 202 }
-          );
-        }
-        return Response.json(
-          {
-            ok: true,
-            uploadId: 'upl-plain',
-            status: 'queued',
-            received: 0,
-            acceptedForProcessing: 0,
-          },
-          { status: 202 }
-        );
-      }
-      throw new Error(`unexpected fetch ${url}`);
-    });
-
-    const result = await uploadConversationMessages({
-      telemetry: {
-        enabled: true,
-        platform: 'claudecode',
-        conversationUploadEnabled: true,
-        uploadProviders: ['claudecode'],
-      },
-    });
-
-    expect(result.lastError).toBeUndefined();
-    expect(posted.im).toHaveLength(1);
-    const imMessage = posted.im[0].messages[0];
-    // Capabilities ride ONLY under team.capabilities in the canonical IM shape:
-    // skills + cron are Collections {count, items}; mcp + workflows are arrays. Each
-    // item uses the per-kind ref field (capabilityRef/serverRef/workflowRef/cronRef),
-    // never the raw telemetry id.
-    expect(imMessage.capabilities).toBeUndefined();
-    expect(imMessage.team?.capabilities).toMatchObject({
-      schemaVersion: 1,
-      source: 'agent-registry',
-      skills: {
-        count: 1,
-        items: [{ capabilityRef: 'review', name: 'review', displayName: 'review' }],
-      },
-      mcp: [{ serverRef: 'context7', server: 'context7', transport: 'stdio' }],
-      workflows: [{ workflowRef: 'loop-design', name: 'loop-design' }],
-      cron: {
-        count: 1,
-        items: [{ cronRef: 'weekday-report', name: '周报', schedule: '17 9 * * 1-5' }],
-      },
-    });
-    // Forbidden fields/keys must not leak (the live 422 root cause): no top-level
-    // message.capabilities, no singular `workflow` key, no counts/fingerprint on the
-    // capabilities object, and no description/scope/packId/id/kind on items.
-    const caps = imMessage.team?.capabilities;
-    expect(caps).not.toHaveProperty('workflow');
-    expect(caps).not.toHaveProperty('counts');
-    expect(caps).not.toHaveProperty('fingerprint');
-    const capsJson = JSON.stringify(caps);
-    for (const forbidden of ['description', 'packId', '"id"', '"kind"']) {
-      expect(capsJson).not.toContain(forbidden);
-    }
-    expect(imMessage.team).toMatchObject({ teamName: '能力团队' });
-    // No prompt/secret payloads leak through capability telemetry.
-    const serialized = JSON.stringify(posted.im[0]);
-    expect(serialized).not.toContain('run report');
+    expect(posted).toHaveLength(1);
+    const key = posted[0].headers['Idempotency-Key'];
+    expect(typeof key).toBe('string');
+    expect(key).toHaveLength(64); // sha256 hex
+    // The key is the body's own fingerprint: identical body ⟺ identical key, so the
+    // doc's same-key+different-body 409 can never fire from this client.
+    expect(key).toBe(createHash('sha256').update(posted[0].body).digest('hex'));
   });
 
   it('skips uploading when server reports in-flight batches for the channel', async () => {
@@ -516,9 +257,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: url.includes('client=codex') ? 'codex' : 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'processing',
               inFlight: { count: 1, uploadIds: ['upl_inflight'] },
               currentCursor: null,
@@ -539,7 +280,7 @@ describe('ConversationMessageUploadService', () => {
     });
 
     expect(result.attempted).toBe(0);
-    expect(result.uploadIds).toEqual(['upl_inflight', 'upl_inflight']);
+    expect(result.uploadIds).toEqual(['upl_inflight']);
     expect(result.lastError).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/report/messages'),
@@ -578,9 +319,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: url.includes('client=codex') ? 'codex' : 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'processing',
               inFlight: { count: 1, uploadIds: ['upl_inflight'] },
               currentCursor: null,
@@ -656,15 +397,13 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
-              status: url.includes('scene=digital_employee') ? 'never_reported' : 'success',
+              scene: 'coding',
+              status: 'success',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
-              lastUploadId: url.includes('scene=digital_employee')
-                ? null
-                : 'upl_prior_without_cursor',
+              lastUploadId: 'upl_prior_without_cursor',
             },
           ],
         });
@@ -759,9 +498,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -839,9 +578,9 @@ describe('ConversationMessageUploadService', () => {
         return Response.json({
           channels: [
             {
-              reporter: 'openhermit',
+              reporter: 'agentcli',
               client: 'claudecode',
-              scene: url.includes('scene=digital_employee') ? 'digital_employee' : 'coding',
+              scene: 'coding',
               status: 'never_reported',
               inFlight: { count: 0, uploadIds: [] },
               currentCursor: null,
@@ -890,6 +629,130 @@ describe('ConversationMessageUploadService', () => {
     expect(result.pending).toBe(0); // batches count as sent; no misleading "N 待上报"
     expect(result.pendingTokens).toBe(0); // token backlog drains to 0 on a fully-successful upload too
     delete process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE;
+  });
+
+  it('uploads Codex token_count records from new payload.info usage shape', async () => {
+    const codexHome = path.join(tmpDir, '.codex');
+    process.env.CODEX_HOME = codexHome;
+    const sessionDir = path.join(codexHome, 'sessions', '2026', '07', '02');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'rollout-session-1.jsonl'),
+      `${JSON.stringify({
+        timestamp: '2026-07-02T00:16:00.000Z',
+        type: 'session_meta',
+        payload: {
+          type: 'session_meta',
+          session_id: 'rollout-session-1',
+          cwd: '/tmp/codex-project',
+          model_provider: 'glm',
+        },
+      })}\n${JSON.stringify({
+        timestamp: '2026-07-02T00:16:30.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          turn_id: 'turn-1',
+          cwd: '/tmp/codex-project',
+          model: 'glm-5.2',
+          info: {
+            total_token_usage: {
+              input_tokens: 20,
+              cached_input_tokens: 5,
+              output_tokens: 7,
+              reasoning_output_tokens: 3,
+              total_tokens: 35,
+            },
+            last_token_usage: {
+              input_tokens: 11,
+              cached_input_tokens: 2,
+              output_tokens: 4,
+              reasoning_output_tokens: 1,
+              total_tokens: 18,
+            },
+          },
+        },
+      })}\n`
+    );
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        expect(url).toContain('client=codex');
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'codex',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body).toMatchObject({
+          reporter: 'agentcli',
+          client: { tool: 'codex' },
+          scene: 'coding',
+        });
+        expect(body.messages).toHaveLength(1);
+        expect(body.messages[0]).toMatchObject({
+          eventId: 'codex:rollout-session-1:turn-1',
+          project: { name: 'codex-project' },
+          conversation: {
+            conversationId: 'rollout-session-1',
+            sessionRef: 'codex:rollout-session-1',
+          },
+          message: {
+            messageRef: 'turn-1',
+            modelName: 'glm-5.2',
+            usage: {
+              inputTokens: 11,
+              cacheReadTokens: 2,
+              outputTokens: 5,
+              cacheCreationTokens: 0,
+              totalTokens: 18,
+            },
+          },
+        });
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_codex',
+            receiptId: 'r-codex',
+            status: 'queued',
+            received: 1,
+            acceptedForProcessing: 1,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'codex',
+        conversationUploadEnabled: true,
+        uploadProviders: ['codex'],
+      },
+    });
+
+    expect(result.lastError).toBeUndefined();
+    expect(result.attempted).toBe(1);
+    expect(result.accepted).toBe(1);
   });
 
   it('withUploadLock releases the lock when the locked function throws', async () => {
