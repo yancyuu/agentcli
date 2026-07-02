@@ -21,6 +21,7 @@ type ConversationUploadTelemetryConfig = {
     uploadEnabled?: boolean;
     batchSize?: number;
     uploadBatchSize?: number;
+    uploadBatchDelayMs?: number;
     baseUrl?: string;
   };
 };
@@ -1108,8 +1109,8 @@ function uploadStatusFromResult(
   return status;
 }
 
-function batchDelayMs(): number {
-  const raw = Number.parseInt(process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS ?? '', 10);
+function batchDelayMs(configured?: number): number {
+  const raw = Number(configured ?? process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS ?? 1_000);
   return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
 }
 
@@ -1251,6 +1252,7 @@ async function postMessagesInBatches(
   payloadBase: Omit<UploadPayload, 'messages'>,
   messages: UploadMessage[],
   batchSize: number,
+  batchDelay: number,
   runTotalMessages: number,
   uploadedBeforeRun: number
 ): Promise<{ status: ConversationUploadStatus; uploadedCount: number; uploadedTokens: number }> {
@@ -1309,7 +1311,7 @@ async function postMessagesInBatches(
       });
       if (status.lastError)
         return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
-      if (batchIndex < totalBatches) await wait(batchDelayMs());
+      if (batchIndex < totalBatches && batchDelay > 0) await wait(batchDelay);
     } catch (error) {
       const message = sanitizeUploadError(error);
       await appendUploadLog(home, 'upload-batch-failed', {
@@ -1428,6 +1430,7 @@ async function uploadPlatformMessages(
       process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE ??
       500
   );
+  const uploadBatchDelay = batchDelayMs(conversationCfg?.uploadBatchDelayMs);
   const payloadBase: Omit<UploadPayload, 'messages'> = {
     schemaVersion: 1,
     generatedAt,
@@ -1440,7 +1443,8 @@ async function uploadPlatformMessages(
   await appendUploadLog(home, 'upload-start', {
     platform,
     pending: messages.length,
-    batchSize: uploadBatchSize,
+    uploadBatchSize,
+    uploadBatchDelay,
     baseUrl,
   });
 
@@ -1455,6 +1459,7 @@ async function uploadPlatformMessages(
     payloadBase,
     messages,
     uploadBatchSize,
+    uploadBatchDelay,
     messages.length,
     0
   );

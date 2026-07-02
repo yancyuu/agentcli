@@ -238,6 +238,8 @@ export interface TaskBusConfig {
       uploadEnabled?: boolean;
       baseUrl?: string;
       batchSize?: number;
+      uploadBatchSize?: number;
+      uploadBatchDelayMs?: number;
     };
   };
 }

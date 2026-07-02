@@ -38,6 +38,7 @@ describe('ConversationMessageUploadService', () => {
     delete process.env.CODEX_HOME;
     delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
     delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    delete process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS;
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -550,6 +551,7 @@ describe('ConversationMessageUploadService', () => {
     // /report/usage/status is the server-authoritative fact source for committed cursor
     // and aggregate counts.
     process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE = '2'; // 3 messages => 2 batches
+    process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS = '0';
     const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
     await mkdir(projectDir, { recursive: true });
     const lines = [1, 2, 3].map((i) =>
