@@ -108,8 +108,8 @@ hermit usage start
 等价入口：
 
 ```bash
-openhermit teams list --json
-open-hermit usage today
+agentcli teams list --json
+agentcli usage today
 ```
 
 ## 7. 命令行为

@@ -122,4 +122,45 @@ describe('usageRemote fetch short-circuits when unauthenticated', () => {
     ).toBe(false);
     expect(result.channels.map((c) => c.cursorHash)).toEqual(['claudecode-coding']);
   });
+
+  // Node undici throws `TypeError('fetch failed')` whose real reason lives on
+  // `err.cause` (ECONNRESET / UND_ERR_CONNECT_TIMEOUT / ...). The CLI must
+  // surface that code so the panel doesn't just read a meaningless "fetch failed".
+  const networkError = () =>
+    Object.assign(new TypeError('fetch failed'), {
+      cause: { code: 'ECONNRESET', message: 'socket hang up' },
+    });
+
+  it('fetchRemoteUsageStatus surfaces fetch err.cause code, not bare "fetch failed"', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.endsWith('/api/v1/auth/me')) {
+        return Response.json({ authenticated: true, status: 'ok', feishu_authorized: true });
+      }
+      if (u.includes('/api/v1/report/usage/status')) throw networkError();
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    const { fetchRemoteUsageStatus } = await import('../usageRemote.mjs');
+    const result = await fetchRemoteUsageStatus(['claudecode']);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0].error).toMatch(/ECONNRESET/);
+    expect(result.errors[0].error).toMatch(/fetch failed/);
+  });
+
+  it('fetchAuthoritativeUsage surfaces fetch err.cause code', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.endsWith('/api/v1/auth/me')) {
+        return Response.json({ authenticated: true, status: 'ok', feishu_authorized: true });
+      }
+      if (u.endsWith('/api/v1/report/usage')) throw networkError();
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    const { fetchAuthoritativeUsage } = await import('../usageRemote.mjs');
+    const result = await fetchAuthoritativeUsage();
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/ECONNRESET/);
+  });
 });

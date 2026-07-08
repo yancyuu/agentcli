@@ -60,6 +60,24 @@ function responseBodyPreview(text) {
 }
 
 /**
+ * Surface the real reason a fetch failed. Node's undici throws
+ * `TypeError('fetch failed')` for any network-layer failure — the message is
+ * always that exact string and the actual cause (ECONNRESET,
+ * UND_ERR_CONNECT_TIMEOUT, ECONNREFUSED, TLS error, ...) lives on `err.cause`.
+ * Without this the panel reads a meaningless "fetch failed" and ops can't tell
+ * a dead server from a bad host. Returns `"<message> (<cause detail>)"`.
+ */
+function explainFetchError(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  const cause = err && typeof err === 'object' ? err.cause : undefined;
+  const code = cause?.code || cause?.errno;
+  const detail = code
+    || (cause?.message ? String(cause.message).split('\n')[0] : '')
+    || '';
+  return detail ? `${msg} (${detail})` : msg;
+}
+
+/**
  * Read-only preview of /report/usage/status channels. `providers` lets the caller pass
  * the configured upload providers (hermit.mjs currentFeatureStates). Defaults to
  * both. Parallelized across providers so one slow channel doesn't block the others.
@@ -117,7 +135,7 @@ export async function fetchRemoteUsageStatus(providers = ['claudecode', 'codex']
           lastUploadId: channel?.lastUploadId || null,
         };
       } catch (err) {
-        return { platform, scene, error: err instanceof Error ? err.message : String(err) };
+        return { platform, scene, error: explainFetchError(err) };
       }
     })
   );
@@ -160,6 +178,6 @@ export async function fetchAuthoritativeUsage() {
     }
     return { ok: true, ...(parseJsonText(text) || {}) };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: explainFetchError(err) };
   }
 }

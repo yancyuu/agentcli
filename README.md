@@ -5,79 +5,180 @@
 <h1 align="center">AgentCli</h1>
 
 <p align="center">
-  <strong>本地优先的 AI 数字员工团队管理平台</strong><br/>
-  创建数字员工团队，分配任务，协调多种 AI Agent 运行时，对接 IM 平台，统一管理工作流程和执行审计。<br/>
-  <sub>Local-first AI workforce management — teams, tasks, runtimes, IM routing, and audit trails.</sub>
+  <strong>开源 · 本地优先的 AI 数字员工工作台</strong><br/>
+  CLI 给 agent，Web 给人。自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。<br/>
+  <sub>Local-first, open-source AI workforce workbench. CLI for agents, Web for humans.</sub>
 </p>
 
 <p align="center">
-  <a href="https://github.com/yancyuu/Hermit/stargazers"><img src="https://img.shields.io/github/stars/yancyuu/Hermit?style=flat-square&color=brightgreen" alt="GitHub stars" /></a>
-  <a href="https://github.com/yancyuu/Hermit/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/Hermit?style=flat-square&label=release&color=brightgreen" alt="Latest release" /></a>
-  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/v/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/@yancyyu/openhermit"><img src="https://img.shields.io/npm/dm/@yancyyu/openhermit?style=flat-square&color=brightgreen" alt="npm downloads" /></a>
+  <a href="https://github.com/yancyuu/agentcli/stargazers"><img src="https://img.shields.io/github/stars/yancyuu/agentcli?style=flat-square&color=brightgreen" alt="GitHub stars" /></a>
+  <a href="https://github.com/yancyuu/agentcli/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/agentcli?style=flat-square&label=release&color=brightgreen" alt="Latest release" /></a>
+  <a href="https://www.npmjs.com/package/@yancyyu/agentcli"><img src="https://img.shields.io/npm/v/@yancyyu/agentcli?style=flat-square&color=brightgreen" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@yancyyu/agentcli"><img src="https://img.shields.io/npm/dm/@yancyyu/agentcli?style=flat-square&color=brightgreen" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-brightgreen?style=flat-square" alt="AGPL-3.0 license" /></a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/openhermit/team-detail.png" alt="AgentCli team workspace" width="100%" />
+  <img src="docs/screenshots/agentcli/team-detail.png" alt="AgentCli team workspace" width="100%" />
 </p>
 
 ---
 
 ## 这是什么
 
-AgentCli 是一个本地优先的 **AI 数字员工团队管理平台**。它让你像管理真实团队一样管理 AI Agent：组建团队、分配任务、追踪进度、审核交付——同时打通 IM 协作和多运行时协调。
+AgentCli 是一个**开源、本地优先的 AI 数字员工工作台**。它让你像管理真实团队一样管理 AI Agent：组建团队、分配任务、追踪进度、审核交付——同时自动采集多种运行时（Claude Code、Codex、Cursor…）的用量并统一上报。
+
+> **CLI for agents, Web for humans.** Web 工作台给人看和管；CLI 给 agent / operator 查询状态、上报用量、触发操作，所有命令支持 `--json` 输出机器可读结果。
 
 ### 解决的问题
 
 - AI Agent 越来越多，但**谁在做什么、进展如何**没有统一视图
-- 多种运行时（Claude Code、Codex、Cursor…）各自独立，**无法协调管理**
-- IM 中的 Bot 只能聊天，**无法形成可追踪的任务闭环**
-- 团队 AI 使用缺乏**可见性和审计能力**
+- 多种运行时各自独立，**无法协调管理与统一计量**
+- 团队 AI 使用缺乏**可见性、归因和审计能力**
+
+---
+
+## 🆓 开源免费 · 🏢 企业版 AgentBus
+
+AgentCli 由两个各司其职的产品组成，默认全部跑在本机、数据落在 `~/.hermit/`：
+
+| 产品 | 定位 | 价格 | 什么时候用 |
+|:--|:--|:--|:--|
+| **AgentCli** | 本地 CLI + Web 工作台。操作面，读写本地数据。 | **开源免费**（AGPL-3.0） | 单机使用、脚本化、自动化、本地数字员工团队 |
+| **AgentBus** | 中心化数据总线。团队协作、企业用量看板、IM 路由、跨团队派发、审计。 | **企业版 · 增值服务** | 多人 / 多团队协作、IM 触发任务、企业级用量看板 |
+
+> 关系一句话：**AgentCli（开源）是操作面，AgentBus（企业版）是协调骨干。** 不接 Bus = 单机模式，照样完整能跑；接入 Bus 才解锁多人协作与企业能力。开源版本现在就能免费用起来；企业版属于增值服务的一部分。
 
 ---
 
 ## 30 秒快速体验
 
 ```bash
-npx @yancyyu/openhermit@latest
+npx @yancyyu/agentcli@latest
 ```
 
 打开 [http://127.0.0.1:5680](http://127.0.0.1:5680)，创建你的第一个数字员工团队。
 
 ```bash
 # 或全局安装
-npm install -g @yancyyu/openhermit@latest
-openhermit
+npm install -g @yancyyu/agentcli@latest
+agentcli
 ```
+
+<details>
+<summary>macOS / Linux 一键安装脚本</summary>
+
+```bash
+curl -fsSL https://yancyuu.github.io/agentcli/install.sh | bash
+```
+</details>
 
 ---
 
-## 核心能力
+## 🤖 给 Agent 的最小上手路径（说明书）
 
-### 数字员工团队管理
+> 把这段交给一个 AI agent，它能照着装好、登录、上报、自检。
 
-创建数字员工团队，配置成员、角色、项目目录和运行时。每个团队拥有独立的工作区，包含任务、消息、配置和审计轨迹。
+```bash
+# 1. 安装（三选一）
+npm install -g @yancyyu/agentcli@latest      # 或 npx @yancyyu/agentcli@latest
+agentcli --version                            # ✅ 成功标志：打印版本号
 
-### 任务看板与工作流
+# 2. 登录上报目标（飞书授权绑定 AgentBus）
+agentcli auth login
+agentcli auth status                          # ✅ 成功标志：已登录
 
-看板式任务管理：创建任务、分配 Agent、追踪状态、评论协作、审核交付。支持跨团队任务派发和结构化的交付/审核流程。
+# 3. 开启后台用量采集（默认开机自启，约 5 分钟增量扫描）
+agentcli usage start
 
-### 多运行时协调
+# 4. 立即扫描并增量上报一次（验证链路）
+agentcli usage report                         # ✅ 成功标志：上报计数 > 0；--full 补报历史
 
-统一管理本地安装的多种 AI Agent 运行时。无需切换工具，在一个面板中启动、监控、配置所有 Agent。
+# 5. 核对状态
+agentcli status                               # daemon / worker 运行中
+agentcli usage today                          # 今日本地用量摘要（不上传）
+```
 
-### IM 平台对接
+> ⚠️ 自动上报需要**三要素同时满足**：已登录 + 消息上报已开启 + 后台采集运行中。「消息上报」开关只在交互菜单或 Web 里（`agentcli` →「用量同步」→「消息上报」），没有单独子命令——这是刻意设计。
 
-通过 hermit-bridge 将飞书、微信、Telegram、Discord、Slack 等 IM 消息路由到数字员工团队。支持群聊触发任务、thread 隔离会话、@ 机器人交互。
+---
+
+## CLI 命令速查
+
+所有命令支持 `--json` 输出机器可读结果（适合 agent / 脚本调用）。不带参数运行 `agentcli` 进入终端导航。
+
+### 启动与状态
+
+| 命令 | 说明 |
+|:--|:--|
+| `agentcli` | 打开终端导航（控制面菜单）：用量、工作台、用户、token 池(beta) |
+| `agentcli web` | 直接启动 Web 工作台（默认 127.0.0.1:5680）；加 `--daemon` 后台运行 |
+| `agentcli --daemon --port 8080` | 后台运行并指定端口 |
+| `agentcli status` | 查看后台 daemon / Web 运行状态 |
+| `agentcli doctor` | 只读本地诊断：配置、服务、路径 |
+| `agentcli stop` | 停止后台 daemon |
+
+### 用户授权（上报前提）
+
+| 命令 | 说明 |
+|:--|:--|
+| `agentcli auth status` | 查看 AgentBus 用户授权状态 |
+| `agentcli auth login` | 飞书授权登录 AgentBus；登录后用量才有上报目标 |
+| `agentcli auth logout` | 退出 AgentBus 用户（不影响本地 runtime 登录） |
 
 ### 用量采集与上报
 
-自动扫描本地 AI Agent 会话日志，识别 token 消耗、会话数、消息量。数据可上报至 AgentBus，按团队/成员/工具维度展示企业级用量看板。
+| 命令 | 说明 |
+|:--|:--|
+| `agentcli usage status` | 后台 worker 是否运行、消息上报是否开启、上报运行时 |
+| `agentcli usage today` | 查看今日本地 usage 摘要（不上传） |
+| `agentcli usage start` | 开启轻量后台采集，默认配置开机自启；仅扫描本机 JSONL |
+| `agentcli usage stop` | 停止后台采集（默认关闭开机自启，`--keep-autostart` 保留） |
+| `agentcli usage report` | 立即扫描并按服务端游标增量上报；`--full` 全量重扫补传历史 |
+| `agentcli usage autostart status\|enable\|disable` | 管理开机自启（macOS launchd） |
 
-### 本地优先架构
+### 团队 / 任务 / 维护
 
-所有数据默认存储在本地 `~/.hermit/`。不依赖云端即可完整运行；需要团队协同时可选择接入 AgentBus。
+| 命令 | 说明 |
+|:--|:--|
+| `agentcli teams list` | 列出本地团队（不启动 Web） |
+| `agentcli teams create` | 创建本地团队元数据；支持 `--name` / `--harness` / `--bind-project` / `--work-dir` |
+| `agentcli tasks list --team <t>` | 查看某团队活跃任务 |
+| `agentcli update` | 检查并自更新到最新版本 |
+| `agentcli add <plugin>` | 安装能力插件到 MCP library（例：`add worker-society`） |
+
+---
+
+## ⚙️ 配置 AI 运行时（客户端配置）
+
+### 本机数据来源
+
+AgentCli 无侵入扫描本地会话日志：
+
+| 运行时 | 数据位置 | 采集内容 |
+|:--|:--|:--|
+| Claude Code | `~/.claude/projects/**/*.jsonl` | token 用量、会话数、消息量；支持 IM 归因 |
+| Codex | `~/.codex/sessions/**/*.jsonl` | token 用量（output_tokens 为主） |
+
+### 把网关 Key 写进 Claude / Codex（token 池认领）
+
+登录后，在终端菜单 `agentcli` →「**token 池(beta)**」→「**认领**」，会自动签发一个一次性网关 key 并**直写**进本机配置：
+
+- **Claude Code** `~/.claude/settings.json`：deep-merge 进 `env`（`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_MODEL`），**保留其它顶层键与 env 键**。
+- **Codex** `~/.codex/auth.json`：写入 `OPENAI_API_KEY`；`~/.codex/config.toml`：surgical 改写 `model_provider` / `model` 与 `[model_providers.*]`，**原样保留 `[projects.*]`**。
+
+> 🔒 认领到的 key 是**即焚明文**，只在本机配置里落地，不落库、不回显明文。写前自动生成 `*.hermit-bak` 备份。该能力需服务端授权开通（部分账户暂未开放）。
+
+---
+
+## 默认路径与端口
+
+| 项目 | 默认值 | 说明 |
+|:--|:--|:--|
+| Web UI | `http://127.0.0.1:5680/teams` | 团队工作台入口 |
+| 本地状态 | `~/.hermit/` | 团队、任务、消息、设置、审计 |
+| Claude Code 会话 | `~/.claude/projects` | 用量和会话数据来源 |
+| Codex 会话 | `~/.codex/sessions` | Codex 用量数据来源 |
 
 ---
 
@@ -89,72 +190,26 @@ openhermit
 
 ---
 
-## 三个组件：CLI · Web · Bus
+## 架构
 
-AgentCli 由三个各司其职的组件组成，默认全部跑在本机、数据落在 `~/.hermit/`。不注册、不连云也能完整使用；接入 Bus 才解锁团队协作和企业看板。
-
-| 组件 | 是什么 | 怎么启动 | 什么时候用 |
-|:--|:--|:--|:--|
-| **CLI** (`openhermit`) | 终端控制面。交互式导航菜单 + 全部子命令（账号 / 用量 / 团队 / 服务 / 插件）。 | `openhermit` 进菜单，或直接 `openhermit <command>` | 脚本化、SSH/无 GUI、查状态、配自动化上报 |
-| **Web 工作台** | 本地浏览器面板（默认 [http://127.0.0.1:5680](http://127.0.0.1:5680)）。可视化的团队、看板、运行时、用量管理。 | `openhermit web` / `openhermit --daemon`，或菜单选「工作台」 | 日常可视化操作、看板拖拽、代码评审、配置调整 |
-| **Bus（团队总线）** | 协调骨干：团队元数据、IM→团队消息路由、任务池、跨团队派发、审计、用量收敛。分两层——**本地总线**（本地/自托管 Redis，纯本地协作）和**云端 AgentBus**（可选云后端，收用量/对话上报、出企业看板）。 | 本地：`openhermit collaboration start` 或 Web「设置 → 团队总线」；云端：`openhermit auth login` | 需要多人/多团队协作、IM 触发任务、企业用量看板时 |
-
-> 关系：**CLI 和 Web 都是 Bus 的操作面**——CLI 适合命令行与自动化，Web 适合可视化；两者读写同一份本地数据。不接 Bus = 单机模式，照样能跑。
-
-### CLI（终端，最常用）
-
-```bash
-openhermit                       # 交互菜单（推荐起点）
-openhermit status                # 后台服务状态
-openhermit doctor                # 只读本地诊断
-openhermit auth login            # 登录云端 AgentBus（上报前提之一）
-openhermit auth status           # 查看登录状态
-openhermit usage start           # 开后台用量采集（本机 JSONL，默认开机自启）
-openhermit usage stop            # 停后台采集
-openhermit usage status          # 本地 telemetry 状态（不上传）
-openhermit usage report          # 扫描并按服务端游标增量上报
-openhermit usage report --full   # 全量重扫重传（补报历史；服务端按 eventId 去重）
-openhermit teams list            # 查看本地团队
-openhermit teams create          # 创建团队
-openhermit tasks list --team <t> # 查看某团队活跃任务
-openhermit collaboration start   # 启用本地/自托管团队总线
-openhermit services start web|usage|collaboration|local   # 按项启动服务
-openhermit stop                  # 停后台服务
-openhermit update                # 自更新
-openhermit add <plugin>          # 装能力插件到 MCP library
+```text
+开发者本地
+  Claude Code / Codex / Cursor / Gemini / OpenCode ...
+        ↓ 会话日志 & token 用量
+  AgentCli  (开源 · 本地 CLI + Web 工作台)
+        ↓ 统一上报
+  AgentBus (企业版 · 中心化数据总线)
+        ↓ 看板 & 协作
+  企业管理者 / 团队成员
 ```
 
-### Web 工作台
+| 组件 | 是什么 | 怎么启动 |
+|:--|:--|:--|
+| **CLI** (`agentcli`) | 终端控制面。交互式导航菜单 + 全部子命令。 | `agentcli` 进菜单，或 `agentcli <command>` |
+| **Web 工作台** | 本地浏览器面板。团队、看板、运行时、用量、代码评审。 | `agentcli web` / `agentcli --daemon` |
+| **Bus（团队总线）** | 协调骨干。团队元数据、IM→团队路由、任务池、跨团队派发、审计、用量收敛。由独立商业项目 **agentbus** 提供。 | 企业版：`agentcli auth login` 接入 |
 
-```bash
-openhermit web            # 启动并打开浏览器工作台（默认 5680 端口）
-openhermit --daemon       # 后台运行（关掉终端不停）
-openhermit --port 8080    # 换端口
-```
-
-打开后：创建团队 → 配置数字员工与运行时 → 看板派活 → 评审交付 → 看用量看板。
-
-### Bus（团队总线）
-
-```bash
-openhermit collaboration start   # 启用本地总线（Redis；纯本地协作）
-openhermit auth login            # 接入云端 AgentBus（开启上报 + 企业看板）
-# 也可在 Web：设置 → 团队总线，可视化配置
-```
-
-### 给 CC 的引导：开启自动上报的最小步骤
-
-自动上报需要**三要素同时满足**——登录 + 消息上报开关 + 后台采集：
-
-```bash
-openhermit auth login            # 1. 登录云端 AgentBus（拿 Bearer token）
-# 2. 在菜单「用量同步」里打开「消息上报」（无子命令，只能菜单/Web 切换）
-openhermit usage start           # 3. 开后台采集（默认开机自启，每 5 分钟增量上报）
-openhermit usage report          # 4. 立即扫描并上报一次（可选，验证链路）
-openhermit status                # 5. 核对状态 / Web 用量看板查收
-```
-
-> 注意：步骤 2 没有对应子命令，是刻意设计——消息上报开关只在交互菜单或 Web 里切。CLI 只负责登录和后台采集。详见 [使用指南](https://yancyuu.github.io/Hermit/guide.html)。
+> CLI 和 Web 都是 Bus 的操作面——CLI 适合命令行与自动化，Web 适合可视化；两者读写同一份本地数据。
 
 ---
 
@@ -169,16 +224,16 @@ openhermit status                # 5. 核对状态 / Web 用量看板查收
     <td align="center"><b>团队工作区</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/openhermit/team-list.png" alt="Team list" width="480" /></td>
-    <td><img src="docs/screenshots/openhermit/team-detail.png" alt="Team detail" width="480" /></td>
+    <td><img src="docs/screenshots/agentcli/team-list.png" alt="Team list" width="480" /></td>
+    <td><img src="docs/screenshots/agentcli/team-detail.png" alt="Team detail" width="480" /></td>
   </tr>
   <tr>
     <td align="center"><b>任务看板</b></td>
     <td align="center"><b>运行时设置</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/openhermit/tasks.png" alt="Task board" width="480" /></td>
-    <td><img src="docs/screenshots/openhermit/settings.png" alt="Settings" width="480" /></td>
+    <td><img src="docs/screenshots/agentcli/tasks.png" alt="Task board" width="480" /></td>
+    <td><img src="docs/screenshots/agentcli/settings.png" alt="Settings" width="480" /></td>
   </tr>
 </table>
 
@@ -186,14 +241,67 @@ openhermit status                # 5. 核对状态 / Web 用量看板查收
 
 ---
 
+## 常见问题
+
+<details>
+<summary><b>EBUSY: resource busy or locked（Windows 安装 / 更新）</b></summary>
+
+不是权限问题（EBUSY ≠ EACCES），`sudo` / 管理员身份无效。是之前运行过的 agentcli 后台进程还占着包内文件，npm 无法替换。先关掉再装：
+
+```bash
+agentcli stop
+agentcli usage stop   # 开过后台用量采集才需要
+npm install -g @yancyyu/agentcli@latest --prefer-online
+```
+
+还不行就杀掉残留 node 进程（只杀 agentcli / hermit 相关），或直接重启电脑后重装。
+</details>
+
+<details>
+<summary><b>EACCES: permission denied（权限报错）</b></summary>
+
+之前用 `sudo` 运行过，部分文件被 root 占有：
+
+```bash
+sudo chown $(whoami) ~/.hermit/telemetry/worker.pid
+sudo chown -R $(whoami) ~/.npm-global   # npm global 目录也报错时
+```
+
+预防：不要用 `sudo` 运行 `agentcli` 或 `npm install -g`。
+</details>
+
+<details>
+<summary><b>agentcli 命令找不到</b></summary>
+
+npm 全局 bin 目录不在 PATH。添加到 `~/.zshrc` 或 `~/.bashrc`：
+
+```bash
+export PATH="$(npm config get prefix)/bin:$PATH"
+```
+</details>
+
+<details>
+<summary><b>会上传代码或消息内容吗？</b></summary>
+
+默认 **metadata-only**：不上传消息正文、助手回复、工具输入输出、cron prompt 或密钥。只上报 token 数、时间戳、维度。具体上报范围取决于 AgentBus 管理员配置。
+</details>
+
+<details>
+<summary><b>AgentCli 和 AgentBus 是什么关系？收费吗？</b></summary>
+
+**AgentCli 开源免费**（AGPL-3.0），本地 CLI + Web 工作台，单机完整可用。**AgentBus 是付费的企业版增值服务**：团队协作、企业用量看板、IM 路由、跨团队派发、审计。不接 Bus 不影响本地使用。
+</details>
+
+---
+
 ## 文档
 
-- [使用指南](https://yancyuu.github.io/Hermit/guide.html)
-- [Issues / 反馈](https://github.com/yancyuu/Hermit/issues)
+- [在线指南](https://yancyuu.github.io/agentcli/)（安装、命令、配置、FAQ）
+- [Issues / 反馈](https://github.com/yancyuu/agentcli/issues)
 - [Changelog](docs/CHANGELOG.md)
 
 ---
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE) · 开源免费。AgentBus 企业版属于增值服务的一部分。

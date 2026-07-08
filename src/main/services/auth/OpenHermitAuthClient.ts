@@ -22,7 +22,13 @@ import * as path from 'node:path';
 const AUTH_STORE_SCHEMA_VERSION = 1;
 const REFRESH_TIMEOUT_MS = 10_000;
 const PROBE_TIMEOUT_MS = 8_000;
-const EXPIRY_BUFFER_MS = 30_000;
+// Proactive refresh lead time. Must exceed the longest operation that ships the
+// token without re-checking — a full-upload batch POST (UPLOAD_TIMEOUT_MS = 60s
+// in ConversationMessageUploadService). With a 30s buffer a batch could start
+// at 31s-before-expiry and the token dies mid-POST → a permission error mid-run
+// ("抱着抱着报权限错"); 90s guarantees a ≥30s margin after the POST. Mirrors the
+// semantics bin/lib/auth.mjs isAuthTokenExpired uses for the CLI read path.
+const EXPIRY_BUFFER_MS = 90_000;
 const REQUIRED_UPLOAD_SCOPES = ['upload:read', 'upload:write'];
 
 export interface AuthToken {
@@ -233,12 +239,17 @@ export interface AuthedFetchHooks {
  * through unchanged.
  */
 function fetchErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const cause = (error as Error & { cause?: unknown }).cause;
-    const causeMessage = cause instanceof Error ? `: ${cause.message}` : '';
-    return `${error.message}${causeMessage}`.slice(0, 500);
-  }
-  return String(error || 'fetch failed').slice(0, 500);
+  const msg = error instanceof Error ? error.message : String(error || 'fetch failed');
+  // undici's TypeError('fetch failed') puts the real reason on `cause`. Prefer
+  // the cause's code/errno (ECONNRESET, UND_ERR_CONNECT_TIMEOUT, …) — the most
+  // diagnostic piece — then its message first line. Without this a transport
+  // fault surfaces as a bare "fetch failed" / HTTP 599 with no clue why. Mirrors
+  // explainFetchError in bin/lib/usageRemote.mjs (one shared semantics).
+  const cause = (error as { cause?: { code?: string; errno?: string; message?: string } } | null)
+    ?.cause;
+  const detail =
+    cause?.code || cause?.errno || (cause?.message ? String(cause.message).split('\n')[0] : '');
+  return (detail ? `${msg} (${detail})` : msg).slice(0, 500);
 }
 
 async function safeFetch(url: string, init: RequestInit): Promise<Response> {

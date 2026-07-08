@@ -38,7 +38,10 @@ export function cursorPendingRows(upload) {
   const hasPending = hasField(upload, 'pending') && upload.pending !== undefined && upload.pending !== null;
   const pending = hasPending ? Number(upload.pending) : NaN;
   if (lastError && (!hasPending || !Number.isFinite(pending) || pending <= 0)) {
-    return [['待上报', `扫描失败：${lastError}`, 'error']];
+    const message = /HTTP\s*(401|403)|授权不可用/u.test(lastError)
+      ? '登录已过期，请重新登录'
+      : `扫描失败：${lastError}`;
+    return [['待上报', message, 'error']];
   }
   if (!hasPending || !Number.isFinite(pending)) return [];
   if (pending <= 0) return [['待上报', '无', 'info']];
@@ -63,13 +66,22 @@ export function localServerRows(telemetry, authoritative) {
   const local = telemetry && typeof telemetry === 'object' ? telemetry : {};
   const locMsg = hasField(local, 'messages') ? finiteNumber(local.messages) : NaN;
   const locTok = hasField(local, 'totalTokens') ? finiteNumber(local.totalTokens) : NaN;
+  // 本地 — bounded to the last 24h when the worker ships recentMessages/
+  // recentTokensTotal (the "只检索 24 小时内的" contract). Falls back to the
+  // all-time tally under a plain 本地 label only for a stale pre-update status.
+  const recentMsg = hasField(local, 'recentMessages') ? finiteNumber(local.recentMessages) : NaN;
+  const recentTok = hasField(local, 'recentTokensTotal') ? finiteNumber(local.recentTokensTotal) : NaN;
+  const useRecent = Number.isFinite(recentMsg) || Number.isFinite(recentTok);
+  const localLabel = useRecent ? '本地（最近 7 天）' : '本地';
+  const localMsg = useRecent ? recentMsg : locMsg;
+  const localTok = useRecent ? recentTok : locTok;
 
-  // 本地 — what I have on this machine. Deliberately omit sessions: local JSONL
-  // files and server conversation ledgers do not share one stable cardinality.
+  // Deliberately omit sessions: local JSONL files and server conversation
+  // ledgers do not share one stable cardinality.
   const localParts = [];
-  if (Number.isFinite(locMsg)) localParts.push(`消息 ${formatNumber(locMsg)}`);
-  if (Number.isFinite(locTok)) localParts.push(`Token ${formatNumber(locTok)}`);
-  if (localParts.length) rows.push(['本地', localParts.join(' · '), 'info']);
+  if (Number.isFinite(localMsg)) localParts.push(`消息 ${formatNumber(localMsg)}`);
+  if (Number.isFinite(localTok)) localParts.push(`Token ${formatNumber(localTok)}`);
+  if (localParts.length) rows.push([localLabel, localParts.join(' · '), 'info']);
 
   // 服务端 — what the server received. Omit entirely when /report/usage wasn't read.
   let srvMsg = NaN;
@@ -104,4 +116,26 @@ export function localServerRows(telemetry, authoritative) {
   }
 
   return rows;
+}
+
+/**
+ * True when the server response itself reports an auth failure (401/403) — from
+ * either the /report/usage ledger or any /report/usage/status channel. When this
+ * holds, the 服务端 / 服务端状态 / per-channel rows are noise; callers collapse
+ * them into a single login-guidance row instead of dumping a wall of HTTP 401.
+ *
+ * Pure: operates only on the fetch-result shapes from usageRemote.mjs
+ * (authoritativeUsage: {ok,httpStatus,error,body}; remoteUsage: {errors[]}).
+ */
+export function serverUsageUnauthorized(authoritativeUsage, remoteUsage) {
+  if (authoritativeUsage?.httpStatus === 401 || authoritativeUsage?.httpStatus === 403) return true;
+  const remoteErrors = Array.isArray(remoteUsage?.errors) ? remoteUsage.errors : [];
+  if (remoteErrors.some((error) => error?.httpStatus === 401 || error?.httpStatus === 403)) return true;
+  // Fallback: some transports surface the status only inside the error/body text.
+  const texts = [
+    authoritativeUsage?.error,
+    authoritativeUsage?.body,
+    ...remoteErrors.map((error) => `${error?.error || ''} ${error?.body || ''}`),
+  ];
+  return texts.some((text) => /HTTP\s*(401|403)/u.test(String(text || '')));
 }

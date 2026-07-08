@@ -1,7 +1,7 @@
 {
-  "name": "@yancyyu/openhermit",
+  "name": "@yancyyu/agentcli",
   "type": "module",
-  "version": "1.8.8",
+  "version": "1.9.0",
   "description": "AgentCli: AI 工程协作平台，本地优先的用量采集与团队协作工具。",
   "license": "AGPL-3.0",
   "publishConfig": {
@@ -11,18 +11,16 @@
     "name": "yancyyu",
     "email": "yancyyu.ok@gmail.com"
   },
-  "homepage": "https://github.com/yancyuu/Hermit",
+  "homepage": "https://github.com/yancyyu/agentcli",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yancyuu/Hermit.git"
+    "url": "https://github.com/yancyyu/agentcli.git"
   },
   "bugs": {
-    "url": "https://github.com/yancyuu/Hermit/issues"
+    "url": "https://github.com/yancyyu/agentcli/issues"
   },
   "bin": {
-    "open-hermit": "./bin/hermit.mjs",
-    "openhermit": "./bin/hermit.mjs",
-    "hermit": "./bin/hermit.mjs"
+    "agentcli": "./bin/hermit.mjs"
   },
   "files": [
     "bin/",

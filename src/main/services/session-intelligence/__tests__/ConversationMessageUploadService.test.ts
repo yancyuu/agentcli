@@ -19,6 +19,10 @@ describe('ConversationMessageUploadService', () => {
     claudeBase = path.join(tmpDir, '.claude');
     process.env.HERMIT_HOME = hermitHome;
     process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL = 'http://monitor.test';
+    // Default: disable the periodic first-run date filter so the existing fixtures
+    // (hard-coded old timestamps, no cursor) still upload. The date-filter test
+    // re-enables it explicitly.
+    process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '0';
     await mkdir(path.join(hermitHome, 'auth'), { recursive: true });
     await writeFile(
       path.join(hermitHome, 'auth', 'openhermit.json'),
@@ -39,7 +43,167 @@ describe('ConversationMessageUploadService', () => {
     delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
     delete process.env.HERMIT_USAGE_FULL_RESCAN;
     delete process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS;
+    delete process.env.OPENHERMIT_UPLOAD_SINCE_HOURS;
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('bounds the first periodic scan to recent messages when no cursor exists (no full-history backfill)', async () => {
+    // Regression for the 776s hang: a channel that has never reported used to
+    // scan ALL history on its first cycle. The periodic worker now skips messages
+    // older than the since-window; only a manual full rescan re-uploads history.
+    process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '24';
+    delete process.env.HERMIT_USAGE_FOREGROUND_SCAN; // periodic daemon, not foreground
+    delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-project');
+    await mkdir(projectDir, { recursive: true });
+    const recentIso = (hoursAgo: number) =>
+      new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+    const oldIso = new Date(Date.now() - 3 * 24 * 3_600_000).toISOString(); // 3 days ago → filtered
+    const line = (uuid: string, ts: string) =>
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'session-1',
+        uuid,
+        cwd: '/tmp/project',
+        timestamp: ts,
+        message: { role: 'user', content: `msg-${uuid}`, model: 'claude-test-model' },
+      })}\n`;
+    await writeFile(
+      path.join(projectDir, 'session-1.jsonl'),
+      `${line('old-1', oldIso)}${line('new-1', recentIso(1))}${line('new-2', recentIso(2))}`
+    );
+
+    const posted: { eventId?: string }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          feishu_authorized: true,
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        posted.push(...(body.messages ?? []));
+        return Response.json({
+          ok: true,
+          receiptId: 'r1',
+          uploadId: 'u1',
+          received: posted.length,
+          acceptedForProcessing: posted.length,
+          status: 'queued',
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    // 3 fixtures, but the 3-day-old one is outside the 24h window → only 2 uploaded.
+    expect(posted.length).toBe(2);
+    // Identify messages by eventId (not content text — Lane A strips the body).
+    const eventIds = posted.map((m: { eventId?: string }) => m.eventId);
+    expect(eventIds).toContain('claudecode:session-1:new-1');
+    expect(eventIds).toContain('claudecode:session-1:new-2');
+    expect(eventIds).not.toContain('claudecode:session-1:old-1');
+  });
+
+  it('strips conversation text from uploads — usage-only reporting (Lane A)', async () => {
+    // Regression: message content text must never leave the machine. The wire
+    // contract keeps `content` (server-required) but it carries a fixed placeholder;
+    // usage + metadata (eventId, model, project hash) are still uploaded so token
+    // attribution and eventId dedup are unchanged.
+    process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-novault');
+    await mkdir(projectDir, { recursive: true });
+    const secret = 'SUPER_SECRET_PROMPT_TEXT_42';
+    await writeFile(
+      path.join(projectDir, 'session-novault.jsonl'),
+      `${JSON.stringify({
+        type: 'user',
+        sessionId: 'session-novault',
+        uuid: 'message-novault',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: secret, model: 'claude-test-model' },
+      })}\n`
+    );
+
+    const posted: { eventId?: string; message?: { content?: string } }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        posted.push(...body.messages);
+        return Response.json({
+          ok: true,
+          uploadId: 'u-novault',
+          status: 'queued',
+          received: body.messages.length,
+          acceptedForProcessing: body.messages.length,
+          rejectedAtReceive: 0,
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(posted).toHaveLength(1);
+    // The secret prompt text must NOT appear anywhere in the uploaded body.
+    expect(JSON.stringify(posted)).not.toContain(secret);
+    // The message itself IS uploaded (by eventId), with the placeholder content.
+    expect(posted[0].eventId).toBe('claudecode:session-novault:message-novault');
+    expect(posted[0].message?.content).toBe('[usage only]');
   });
 
   it('uses server usage status as cursor source and does not send client uploadId', async () => {
@@ -163,6 +327,183 @@ describe('ConversationMessageUploadService', () => {
     await expect(
       readFile(path.join(hermitHome, 'telemetry', 'conversation-message-scan-cursor.json'), 'utf-8')
     ).rejects.toThrow();
+  });
+
+  it('full rescan scans all history while still uploading in batches', async () => {
+    process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+    process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-full-rescan');
+    await mkdir(projectDir, { recursive: true });
+    const lines = Array.from({ length: 5 }, (_, index) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'session-full-rescan',
+        uuid: `message-${index + 1}`,
+        cwd: '/tmp/project',
+        timestamp: `2026-06-24T08:2${index}:00.000Z`,
+        message: {
+          role: 'user',
+          content: `full rescan ${index + 1}`,
+          model: 'claude-test-model',
+          usage: { totalTokens: 10 },
+        },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-full-rescan.jsonl'), `${lines.join('\n')}\n`);
+
+    const batchSizes: number[] = [];
+    const eventIds: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'success',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: {
+                schemaVersion: 1,
+                purpose: 'local-jsonl-scan-position',
+                generatedAt: '2026-06-24T08:30:00.000Z',
+                files: [
+                  {
+                    fileKey: 'already-at-end',
+                    pathHash: 'old',
+                    fromOffset: 0,
+                    toOffset: 999999,
+                    size: 999999,
+                    mtimeMs: 1,
+                  },
+                ],
+                fileCount: 1,
+                messageCount: 999,
+              },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        batchSizes.push(body.messages.length);
+        eventIds.push(...body.messages.map((message: { eventId: string }) => message.eventId));
+        return Response.json(
+          {
+            ok: true,
+            uploadId: `upl_full_${batchSizes.length}`,
+            status: 'queued',
+            received: body.messages.length,
+            acceptedForProcessing: body.messages.length,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        conversations: { batchSize: 2, uploadBatchSize: 2 },
+      },
+    });
+
+    expect(batchSizes).toEqual([2, 2, 1]);
+    expect(eventIds).toHaveLength(5);
+    expect(result.attempted).toBe(5);
+    expect(result.pending).toBe(0);
+    expect(result.pendingTokens).toBe(0);
+  });
+  it('full rescan across multiple windows keeps uploaded <= discovered (no 617/117)', async () => {
+    process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+    process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-multi-window');
+    await mkdir(projectDir, { recursive: true });
+    const lines = Array.from({ length: 5 }, (_, index) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'session-multi-window',
+        uuid: `message-${index + 1}`,
+        cwd: '/tmp/project',
+        timestamp: `2026-06-24T08:2${index}:00.000Z`,
+        message: {
+          role: 'user',
+          content: `multi window ${index + 1}`,
+          model: 'claude-test-model',
+          usage: { totalTokens: 10 },
+        },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-multi-window.jsonl'), `${lines.join('\n')}\n`);
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        return Response.json(
+          {
+            ok: true,
+            uploadId: `upl_mw_${body.messages[0]?.messageRef}`,
+            status: 'queued',
+            received: body.messages.length,
+            acceptedForProcessing: body.messages.length,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        // windowSize=2 forces 3 windows for 5 messages; uploadedAfterBatch is
+        // cumulative while totalMessages must track cumulative discovered too.
+        conversations: { batchSize: 2, uploadBatchSize: 2, fullRescanWindowSize: 2 },
+      },
+    });
+
+    // Regression guard for the 消息 617/117 bug: cumulative uploaded must never
+    // exceed cumulative discovered, and pending must never go negative.
+    expect(result.attempted).toBe(5);
+    expect(result.totalDiscovered).toBeGreaterThanOrEqual(result.accepted);
+    expect(result.pending).toBeGreaterThanOrEqual(0);
   });
 
   it('sends an Idempotency-Key header equal to the sha256 of the exact request body', async () => {
@@ -786,5 +1127,330 @@ describe('ConversationMessageUploadService', () => {
     const result = await withUploadLock(hermitHome, async () => 'should-not-run');
     expect(result).toBeNull();
     delete process.env.HERMIT_UPLOAD_LOCK_WAIT_MS;
+  });
+
+  it('aborts the whole run after 2 consecutive transport failures (server down)', async () => {
+    // fullRescan window = uploadBatchSize*2 = 2 messages → 2 batches in window 1.
+    // Both batches hit a transport failure (safeFetch → HTTP 599). The second
+    // consecutive network failure must abort the ENTIRE run — not pay
+    // UPLOAD_TIMEOUT_MS × remaining batches — so the 3rd message is never sent.
+    process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE = '1';
+    process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-netfail');
+    await mkdir(projectDir, { recursive: true });
+    const lines = Array.from({ length: 3 }, (_, i) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-netfail',
+        uuid: `m-${i + 1}`,
+        cwd: '/tmp/project',
+        timestamp: `2026-06-24T08:20:0${i}.000Z`,
+        message: { role: 'user', content: `net ${i + 1}`, model: 'claude-test-model' },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-netfail.jsonl'), `${lines.join('\n')}\n`);
+
+    let messagesCalls = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        messagesCalls += 1;
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: { code: 'ECONNRESET', message: 'socket hang up' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        conversations: { uploadBatchSize: 1 },
+      },
+    });
+
+    expect(messagesCalls).toBe(2);
+    expect(result.lastError ?? '').toMatch(/服务端不可用/);
+  });
+
+  it('does NOT abort on business errors (422) — stays on the 3-strike path', async () => {
+    // A 422 is a per-batch schema rejection, not a down server. It must NOT
+    // trigger the network-failure abort; it falls through to the existing
+    // MAX_CONSECUTIVE_FAILURES path. lastError carries the 422, never "服务端不可用".
+    process.env.HERMIT_USAGE_FULL_RESCAN = '1';
+    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE = '1';
+    process.env.OPENHERMIT_UPLOAD_BATCH_DELAY_MS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-bizfail');
+    await mkdir(projectDir, { recursive: true });
+    const lines = Array.from({ length: 3 }, (_, i) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-bizfail',
+        uuid: `b-${i + 1}`,
+        cwd: '/tmp/project',
+        timestamp: `2026-06-24T08:21:0${i}.000Z`,
+        message: { role: 'user', content: `biz ${i + 1}`, model: 'claude-test-model' },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-bizfail.jsonl'), `${lines.join('\n')}\n`);
+
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        return Response.json(
+          { detail: { code: 'schema_validation_failed', msg: 'bad' } },
+          { status: 422 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        conversations: { uploadBatchSize: 1 },
+      },
+    });
+
+    expect(result.lastError ?? '').toMatch(/422/);
+    expect(result.lastError ?? '').not.toMatch(/服务端不可用/);
+  });
+
+  it('proactively refreshes the access token before each upload batch when within the expiry buffer', async () => {
+    // Regression for "抱着抱着报权限错": a long multi-batch run outlasts the
+    // access-token TTL. The token is captured once at the start, so without a
+    // per-batch refresh the next POST ships an expired token → a permission
+    // error mid-run. With the fix, getValidBearerToken runs before EVERY batch
+    // and refreshes whenever the token is within EXPIRY_BUFFER_MS (90s).
+    await writeFile(
+      path.join(hermitHome, 'auth', 'openhermit.json'),
+      JSON.stringify({
+        token: {
+          accessToken: 'near-expiry',
+          refreshToken: 'rt',
+          // 60s out ⇒ inside the 90s proactive-refresh buffer, same shape as a
+          // token that will die mid-run if not refreshed.
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      })
+    );
+    // 3 messages, uploadBatchSize 2 ⇒ 2 batches.
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-refresh');
+    await mkdir(projectDir, { recursive: true });
+    const lines = [0, 1, 2].map((i) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'session-refresh',
+        uuid: `msg-${i}`,
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: `m${i}`, model: 'claude-test-model' },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-refresh.jsonl'), `${lines.join('\n')}\n`);
+
+    let refreshCalls = 0;
+    let messagesCalls = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/refresh')) {
+        refreshCalls += 1;
+        return Response.json({
+          access_token: `refreshed-${refreshCalls}`,
+          token_type: 'Bearer',
+          // Still within the 90s buffer ⇒ the next batch's getValidBearerToken
+          // refreshes again, isolating the per-batch wiring from start-of-run.
+          access_expires_in: 60,
+          scope: 'upload:read upload:write report:read',
+        });
+      }
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        messagesCalls += 1;
+        return Response.json(
+          {
+            ok: true,
+            uploadId: `upl_${messagesCalls}`,
+            status: 'queued',
+            received: 1,
+            acceptedForProcessing: 1,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        conversations: { uploadBatchSize: 2 },
+      },
+    });
+
+    // Both batches shipped...
+    expect(messagesCalls).toBe(2);
+    // ...and refresh fired once per batch PLUS the start-of-run getValidBearerToken
+    // (≥ 3). Without the per-batch refresh, refreshCalls would be 1 (start only) and
+    // a token expiring mid-run would surface as a permission error.
+    expect(refreshCalls).toBeGreaterThanOrEqual(3);
+    expect(result.lastError).toBeUndefined();
+  });
+
+  it('logs the transport-error cause (ECONNRESET) on failed batches, not a bare HTTP 599', async () => {
+    // Regression for "只给个599，鬼知道哪里报错": safeFetch turns a transport
+    // failure into a synthetic 599 with the cause in statusText. The diagnostic
+    // + upload-response log must carry that statusText (fetch failed (ECONNRESET))
+    // so the cause reaches lastError AND the persistent log — not a meaningless
+    // "HTTP 599" that tells nobody what broke.
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-cause');
+    await mkdir(projectDir, { recursive: true });
+    const lines = [0, 1].map((i) =>
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'session-cause',
+        uuid: `msg-${i}`,
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: { role: 'user', content: `m${i}`, model: 'claude-test-model' },
+      })
+    );
+    await writeFile(path.join(projectDir, 'session-cause.jsonl'), `${lines.join('\n')}\n`);
+
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: { code: 'ECONNRESET', message: 'socket hang up' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+        conversations: { uploadBatchSize: 1 },
+      },
+    });
+
+    // The cause propagates to lastError via the diagnostic (now including
+    // statusText), not a bare "HTTP 599".
+    expect(result.lastError ?? '').toMatch(/ECONNRESET/);
+
+    // The persistent upload log captures the cause per failed batch too.
+    const logPath = path.join(hermitHome, 'logs', 'conversation-upload.log');
+    const logText = await readFile(logPath, 'utf-8');
+    const responseEntries = logText
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { message?: string; status?: number; statusText?: string };
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is { message: string; status: number; statusText: string } =>
+        Boolean(entry && entry.message === 'upload-response')
+      );
+    expect(responseEntries.length).toBeGreaterThan(0);
+    for (const entry of responseEntries) {
+      expect(entry.status).toBe(599);
+      expect(entry.statusText).toMatch(/ECONNRESET/);
+    }
   });
 });

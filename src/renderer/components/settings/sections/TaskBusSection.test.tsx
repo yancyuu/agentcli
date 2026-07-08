@@ -353,18 +353,16 @@ describe('TaskBusSection telemetry settings', () => {
     });
   });
 
-  it('keeps Redis copy scoped to collaboration instead of usage upload', async () => {
+  it('keeps IM collaboration copy scoped away from usage upload', async () => {
     const fetchMock = mockFetch(1, {}, { enabled: true });
 
     const { host, root } = await renderTaskBusSection();
 
-    expect(host.textContent).toContain('Usage 统计不依赖 Redis');
-    expect(host.textContent).not.toContain('Claude Code 项目数据上报（自托管 Redis）');
-    expect(host.textContent).not.toContain(
-      '不会上传消息正文、助手回复、工具内容、cron prompt 或 MCP 密钥'
+    expect(host.textContent).toContain(
+      '企业版开放：在 Web 会话 → IM 中接入协作能力；agentbus 为独立项目'
     );
     expect(host.textContent).toContain(
-      '开启本地/自托管团队总线基础能力，供后续任务池和协作视图使用；'
+      '企业版开放：在 Web 会话 → IM 中开启团队协作、任务池和企业看板能力'
     );
     expect(host.textContent).not.toContain('不再提供手动派单入口');
 

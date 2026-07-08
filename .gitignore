@@ -10,6 +10,7 @@ out/
 release/
 coverage/
 .electron-builder-cache/
+*.tgz
 resources/runtime/claude-multimodel
 
 # IDE

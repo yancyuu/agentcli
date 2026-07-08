@@ -1,13 +1,13 @@
 # openHermit 文档索引
 
-本目录记录 openHermit 当前产品、架构和发布流程。当前版本以 `@yancyyu/openhermit` v1.6.42 为准。
+本目录记录 openHermit 当前产品、架构和发布流程。当前版本以 `@yancyyu/agentcli` v1.8.8 为准。
 
 ## 当前产品事实
 
 - 产品形态：Fastify API + Vite Web UI
 - 默认入口：`/teams`
 - 默认数据目录：`~/.hermit/`
-- 分发方式：npm CLI package，包名 `@yancyyu/openhermit`
+- 分发方式：npm CLI package，包名 `@yancyyu/agentcli`
 - 运行时桥接：hermit-bridge / Management API
 - 团队工作区：team、task、message、project workspace
 - 隔离能力：团队成员可使用独立 worktree

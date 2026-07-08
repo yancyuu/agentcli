@@ -13,14 +13,14 @@ export const DEFAULT_BRAND = Object.freeze({
   productName: 'AgentCli',
   productNameShort: 'AgentCli',
   stylizedName: 'AgentCli',
-  cliCommand: 'openhermit',
-  npmPackage: '@yancyyu/openhermit',
+  cliCommand: 'agentcli',
+  npmPackage: '@yancyyu/agentcli',
   runtimeBridgeName: 'hermit-bridge',
   authAccountLabel: 'AgentCli 用户',
   authProviderName: 'AgentCli',
   defaultLocalHomeName: '.hermit',
-  githubRepo: 'yancyuu/Hermit',
-  publicDocsUrl: 'https://yancyuu.github.io/Hermit/',
+  githubRepo: 'yancyyu/agentcli',
+  publicDocsUrl: 'https://yancyyu.github.io/agentcli/',
 });
 
 function readBrandConfig() {

@@ -13,6 +13,8 @@ import {
   menuColumnsLine,
   navHeaderLine,
   rowStatusDot,
+  statusBarLine,
+  writeFrameSync,
   glyphs,
   displayWidth,
 } from '../terminal.mjs';
@@ -136,5 +138,56 @@ describe('rowStatusDot', () => {
     expect(rowStatusDot('ok')).toBe(glyphs.dot);
     expect(rowStatusDot('info')).toBe(glyphs.dot);
     expect(rowStatusDot('unknown')).toBe(glyphs.dot); // default neutral
+  });
+});
+
+describe('statusBarLine', () => {
+  it('renders one justified line for multiple pills (pure — no console side effect)', () => {
+    const line = statusBarLine(
+      [
+        { label: '已登录', state: 'ok' },
+        { label: 'Web 未启动', state: 'off' },
+      ],
+      60,
+    );
+    expect(typeof line).toBe('string');
+    expect(line).toContain('已登录');
+    expect(line).toContain('Web 未启动');
+  });
+
+  it('returns the empty string when there are no items', () => {
+    expect(statusBarLine([], 60)).toBe('');
+  });
+});
+
+describe('writeFrameSync — flicker-free full-frame redraw', () => {
+  // Reproduces "选上下左右页面一闪一闪的": the old clearMenuFrame wrote
+  // \x1b[H\x1b[3J\x1b[J on EVERY repaint. \x1b[3J (scrollback wipe) + a full
+  // erase-then-redraw is what flashed the screen on each arrow press. The fix
+  // redraws IN PLACE: cursor home, overwrite each line with a per-line
+  // clear-to-EOL, then erase leftover rows — never wiping the whole screen.
+  let frames;
+  let realWrite;
+  beforeEach(() => {
+    frames = [];
+    realWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk) => { frames.push(String(chunk)); return true; };
+  });
+  afterEach(() => { process.stdout.write = realWrite; });
+
+  it('homes the cursor and clears each line in place, never wiping the screen', () => {
+    writeFrameSync(['row one', 'row two']);
+    const out = frames.join('');
+    expect(out.startsWith('\x1b[H')).toBe(true); // cursor home, no full erase first
+    expect(out).toContain('\x1b[K');             // per-line clear-to-EOL (in-place)
+    expect(out).not.toContain('\x1b[2J');        // no full-screen erase (the flash)
+    expect(out).not.toContain('\x1b[3J');        // no scrollback wipe (the flash)
+    expect(out).toContain('row one');
+    expect(out).toContain('row two');
+  });
+
+  it('erases leftover rows below a shorter frame so stale lines do not linger', () => {
+    writeFrameSync(['short']);
+    expect(frames.join('')).toContain('\x1b[J'); // clear-to-end-of-screen tail
   });
 });

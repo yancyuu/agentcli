@@ -37,7 +37,8 @@ export function progressBar(percent, width = 18) {
 function channelKey(event) {
   const platform = event?.platform;
   const mode = event?.mode;
-  return platform && mode ? `${platform}:${mode}` : null;
+  if (!platform) return null;
+  return mode ? `${platform}:${mode}` : String(platform);
 }
 
 /**
@@ -54,8 +55,9 @@ export function aggregateUploadProgress(events = []) {
     if (FAILURE_EVENT_MESSAGES.has(event.message)) latestFailure = event;
     const key = channelKey(event);
     if (!key) continue;
-    const channel = channels.get(key) ?? { scan: null, batch: null };
+    const channel = channels.get(key) ?? { scan: null, batch: null, progress: null };
     if (event.message === 'scan-collected') channel.scan = event;
+    if (event.message === 'scan-progress') channel.progress = event;
     if (BATCH_EVENT_MESSAGES.has(event.message)) channel.batch = event;
     channels.set(key, channel);
   }
@@ -63,17 +65,19 @@ export function aggregateUploadProgress(events = []) {
   let discovered = 0;
   let uploaded = 0;
   let total = 0;
-  let batchIndex = 0;
-  let totalBatches = 0;
+  let activeBatch = null;
+  let activeBatchChannels = 0;
   let hasBatch = false;
-  for (const { scan, batch: batchEvent } of channels.values()) {
-    const channelDiscovered = Number(scan?.totalDiscovered ?? 0);
+  let scanFiles = 0;
+  for (const { scan, batch: batchEvent, progress } of channels.values()) {
+    const channelDiscovered = Number(scan?.totalDiscovered ?? progress?.messagesCollected ?? 0);
     discovered += channelDiscovered;
+    scanFiles += Number(progress?.filesScanned ?? 0);
     if (batchEvent) {
       hasBatch = true;
       total += Number(batchEvent.totalMessages ?? channelDiscovered ?? 0);
-      batchIndex += Number(batchEvent.batchIndex ?? 0);
-      totalBatches += Number(batchEvent.totalBatches ?? 0);
+      activeBatch = batchEvent;
+      activeBatchChannels += 1;
       // Count only confirmed uploads: a batch-start's uploadedAfterBatch is the
       // prior total (not yet advanced), so use uploadedBeforeBatch for starts and
       // uploadedAfterBatch for finished/polled events.
@@ -96,12 +100,35 @@ export function aggregateUploadProgress(events = []) {
     discovered,
     uploaded,
     total,
-    batchIndex,
-    totalBatches,
+    batchIndex: activeBatchChannels === 1 ? Number(activeBatch?.batchIndex ?? 0) : 0,
+    totalBatches: activeBatchChannels === 1 ? Number(activeBatch?.totalBatches ?? 0) : 0,
+    showBatch: activeBatchChannels === 1,
+    scanFiles,
     hasBatch,
     failed,
     failureMessage: latestFailure?.lastError ?? null,
   };
+}
+
+/**
+ * Monotonic accumulator for finished batches across render frames. The upload
+ * log is read as a TAIL (.slice(-limit)); scan + batch events flood it, so a
+ * finished batch scrolls out of the window fast. Summing finished events over
+ * the window is non-monotonic — "已上传 300 条 · 3 批" dropped to "200 · 2 批"
+ * as the oldest batch scrolled out, and a window momentarily holding no
+ * finished event reset the bar to "上传启动中". Keying by platform:mode:batchIndex
+ * means a finished batch counts forever once seen, so both counts only grow.
+ * Call every render frame with the latest tail events and the prior `seen` map.
+ */
+export function foldFinishedBatches(events = [], prior = new Map()) {
+  for (const event of events) {
+    if (event?.message !== 'upload-batch-finished') continue;
+    const key = `${event.platform ?? ''}:${event.mode ?? ''}:${event.batchIndex ?? ''}`;
+    if (key && !prior.has(key)) prior.set(key, Number(event.attempted ?? 0));
+  }
+  let runUploaded = 0;
+  for (const value of prior.values()) runUploaded += value;
+  return { completedBatches: prior.size, runUploaded, seen: prior };
 }
 
 /**
@@ -116,6 +143,10 @@ export function uploadProgressLabel(snapshot = {}, { barWidth = 18 } = {}) {
   const hasBatch = Boolean(snapshot.hasBatch);
   const failed = Boolean(snapshot.failed);
 
+  const showBatch = Boolean(snapshot.showBatch);
+
+  const scanFiles = Number(snapshot.scanFiles ?? 0);
+
   const denom = total || discovered;
   const percent = denom > 0 ? Math.min(100, Math.round((uploaded / denom) * 100)) : 0;
   const state = failed
@@ -128,10 +159,45 @@ export function uploadProgressLabel(snapshot = {}, { barWidth = 18 } = {}) {
         ? '扫描中'
         : '等待扫描';
   if (!hasBatch && discovered <= 0) {
-    return `${progressBar(0, barWidth)} · ${state}`;
+    const scanned = scanFiles > 0 ? ` · 文件 ${formatNumber(scanFiles)}` : '';
+    return `${progressBar(0, barWidth)} · ${state}${scanned}`;
   }
-  const batchPart = hasBatch
+  const batchPart = hasBatch && showBatch
     ? ` · 批次 ${formatNumber(Number(snapshot.batchIndex ?? 0))}/${formatNumber(Number(snapshot.totalBatches ?? 0))}`
-    : '';
+    : !hasBatch && scanFiles > 0
+      ? ` · 文件 ${formatNumber(scanFiles)}`
+      : '';
   return `${progressBar(percent, barWidth)} ${percent}% · 消息 ${formatNumber(uploaded)}/${formatNumber(denom)}${batchPart} · ${state}`;
+}
+
+/**
+ * Full-rescan progress label: absolute counts + throughput + elapsed.
+ *
+ * A full rescan is a rolling window — the target total is only discovered as
+ * the scan proceeds, so a percent is mathematically undefined: numerator and
+ * denominator both move, with the denominator always one pending ahead, so a
+ * percent either jumps 0%→99% on the first batch or stalls at 98-99% forever.
+ * Monotonic absolute progress is honest, so the full-rescan bar uses it.
+ * `elapsedSec` and the spinner are the caller's responsibility (it owns the
+ * timer); this stays a pure function.
+ */
+export function absoluteProgressLabel(snapshot = {}, { elapsedSec = 0 } = {}) {
+  // Prefer runUploaded (this run's monotonic delta from 0) over the cumulative
+  // snapshot.uploaded — the latter is anchored to history and never reaches the
+  // (equally cumulative) total, so the percent stalled at 98-99% forever.
+  const uploaded = Number(snapshot.runUploaded ?? snapshot.uploaded ?? 0);
+  const completedBatches = Number(snapshot.completedBatches ?? 0);
+  const seconds = Math.max(0, Math.floor(Number(elapsedSec || 0)));
+  // Before the first batch finishes there's nothing to average a rate over:
+  // scanning (no batch yet) or the first batch in flight. Show a phase label so
+  // the bar never reads the meaningless "已上传 0 条 · 0 批" (looks stuck) during
+  // these few seconds.
+  if (completedBatches <= 0) {
+    const files = Number(snapshot.scanFiles ?? 0);
+    const filesPart = !snapshot.hasBatch && files > 0 ? ` · 已扫 ${formatNumber(files)} 文件` : '';
+    const phase = snapshot.hasBatch ? '上传启动中' : '扫描中';
+    return `${phase}${filesPart} · 已用时 ${seconds}s`;
+  }
+  const rate = seconds > 0 ? Math.round(uploaded / seconds) : 0;
+  return `已上传 ${formatNumber(uploaded)} 条 · ${formatNumber(completedBatches)} 批 · ${formatNumber(rate)}条/秒 · 已用时 ${seconds}s`;
 }

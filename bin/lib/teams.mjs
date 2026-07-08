@@ -219,7 +219,7 @@ function printTeamsList({ exitOnDone = true } = {}) {
     printCliRows('本地团队', [
       ['数量', '0'],
       ['路径', result.teamsDir],
-    ], '创建团队可运行：openhermit teams create');
+    ], '创建团队可运行：agentcli teams create');
   } else {
     printCliRows('本地团队', [
       ['数量', `${result.teams.length} 个可见团队`],
@@ -323,7 +323,7 @@ async function printTeamsCreate({ exitOnDone = true } = {}) {
       ['团队', `${team.slug} - ${team.displayName}`],
       ['运行时', team.harness],
       ['工作目录', team.workDir],
-    ], '下一步：openhermit teams list');
+    ], '下一步：agentcli teams list');
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
@@ -337,7 +337,7 @@ function printTasksList({ exitOnDone = true } = {}) {
   if (!teamArg) {
     const payload = { ok: false, command: 'tasks list', error: 'Missing required --team <team>' };
     if (jsonRequested) printJson(payload, 1);
-    console.error(`${brandLogPrefix()} 用法：openhermit tasks list --team <team>`);
+    console.error(`${brandLogPrefix()} 用法：agentcli tasks list --team <team>`);
     if (exitOnDone) process.exit(1);
     return payload;
   }

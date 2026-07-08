@@ -43,6 +43,27 @@ function normalizeExpiry(expiresIn, expiresAt) {
   return null;
 }
 
+// Access tokens whose expiry the server omits must not be treated as expired
+// forever. isAuthTokenExpired() treats an absent OR past expiresAt as expired (to
+// force a /me probe before trusting the token), so when the server declines to
+// send an expiry we synthesize a short probe horizon: long enough to ride out a
+// transient /me blip, short enough that the next probe re-checks. A past existing
+// expiry is NOT preserved — if /me just succeeded the token is provably alive, so
+// keeping a stale dead timestamp would leave authorized=false forever (the
+// "明明已登录却显示未登录" regression: /me returns authenticated:true but the local
+// expiry guess is old and there is no refresh token to renew with).
+const UNKNOWN_ACCESS_EXPIRY_HORIZON_MS = 5 * 60 * 1000;
+
+function resolveAccessTokenExpiry(payload, existingExpiresAt = null) {
+  const normalized = normalizeExpiry(
+    payload?.access_expires_in ?? payload?.accessExpiresIn ?? payload?.expires_in ?? payload?.expiresIn,
+    payload?.access_expires_at || payload?.accessExpiresAt || payload?.expires_at || payload?.expiresAt
+  );
+  if (normalized) return normalized;
+  if (existingExpiresAt && Date.parse(existingExpiresAt) > Date.now()) return existingExpiresAt;
+  return new Date(Date.now() + UNKNOWN_ACCESS_EXPIRY_HORIZON_MS).toISOString();
+}
+
 function readOpenHermitAuthStore() {
   const filePath = getAuthStorePath();
   if (!existsSync(filePath)) return { store: null, warning: null };
@@ -55,7 +76,11 @@ function readOpenHermitAuthStore() {
 
 function isAuthTokenExpired(store) {
   const expiresAt = store?.token?.expiresAt;
-  if (!expiresAt) return false;
+  // null/undefined means "we don't know — the token was stored before we tracked expiry,
+  // or the server didn't tell us". Treat it as expired so we always probe /auth/me
+  // before trusting the token.  This prevents "已登录" when the access token is
+  // actually dead but we have no refresh token to save us.
+  if (!expiresAt) return true;
   const timestamp = Date.parse(expiresAt);
   if (Number.isNaN(timestamp)) return true;
   return timestamp <= Date.now() + 30_000;
@@ -107,10 +132,7 @@ function normalizeAccessTokenPayload(payload) {
     tokenType: payload.token_type || payload.tokenType || 'Bearer',
     scope: typeof payload.scope === 'string' ? payload.scope : scopes?.join(' '),
     scopes,
-    expiresAt: normalizeExpiry(
-      payload.access_expires_in ?? payload.accessExpiresIn ?? payload.expires_in ?? payload.expiresIn,
-      payload.access_expires_at || payload.accessExpiresAt || payload.expires_at || payload.expiresAt
-    ),
+    expiresAt: resolveAccessTokenExpiry(payload),
     refreshExpiresAt: normalizeExpiry(
       payload.refresh_expires_in ?? payload.refreshExpiresIn,
       payload.refresh_expires_at || payload.refreshExpiresAt
@@ -270,6 +292,20 @@ function resolveConversationUploadBaseUrl(existingBaseUrl = '') {
     normalizeCloudBaseUrl(existingBaseUrl, 'existing conversation upload base URL') ||
     OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL
   );
+}
+
+// Shared authed-fetch context for any server endpoint that needs the logged-in
+// bearer (token distribution, ai-key, usage report, …). Resolves the /me-proven
+// login state, then lifts the access token + cloud base URL. Returns null when
+// not authorized / no token / no base — callers decide whether to degrade (aikey
+// falls back to a local mock) or throw (token distribution: "请先登录").
+async function resolveAuthedServerContext() {
+  const auth = await refreshOpenHermitAuthStatus();
+  if (!auth.authorized) return null;
+  const baseUrl = resolveConversationUploadBaseUrl();
+  const token = readOpenHermitAuthStore().store?.token?.accessToken;
+  if (!baseUrl || !token) return null;
+  return { baseUrl, token };
 }
 
 function isSourceCheckout() {
@@ -911,6 +947,17 @@ async function refreshOpenHermitAuthStatus() {
         });
         payload = await res.json().catch(() => null);
       }
+    } else if (accessRejected || bodyFlaggedExpiry) {
+      // No refresh token: the token is dead and unrecoverable.  Mark it expired
+      // immediately so `auth status` stops showing 已登录.  No point retrying /me —
+      // it will keep returning access_expired forever.
+      writeOpenHermitAuthStore({
+        ...store,
+        token: { ...store.token, expiresAt: '2000-01-01T00:00:00.000Z' },
+        updatedAt: new Date().toISOString(),
+        lastMeStatus: payload?.status || (accessRejected ? 'unauthenticated' : 'access_expired'),
+      });
+      return readOpenHermitAuthStatus();
     }
 
     // Persistent rejection after a refresh attempt = the token is truly dead
@@ -947,7 +994,7 @@ async function refreshOpenHermitAuthStatus() {
       payload?.account ||
       store.account ||
       null;
-    const nextExpiresAt = normalizeExpiry(payload?.access_expires_in ?? payload?.expires_in ?? payload?.expiresIn, payload?.access_expires_at || payload?.expires_at || payload?.expiresAt);
+    const nextExpiresAt = resolveAccessTokenExpiry(payload, store.token?.expiresAt);
     writeOpenHermitAuthStore({
       ...store,
       account,
@@ -1246,4 +1293,5 @@ DEFAULT_OPENHERMIT_CLOUD_HOST,
 OPENHERMIT_AUTH_BROKER_URL,
 OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL,
 DEV_AUTH_UNLOCK_CODE,
+resolveAuthedServerContext,
 };

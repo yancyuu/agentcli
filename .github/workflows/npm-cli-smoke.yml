@@ -29,10 +29,10 @@ jobs:
           node-version: 22
 
       - name: Install openHermit CLI
-        run: npm install -g @yancyyu/openhermit@latest --prefer-online
+        run: npm install -g @yancyyu/agentcli@latest --prefer-online
 
       - name: Check CLI commands
         run: |
-          openhermit --version
-          openhermit --help
-          open-hermit --version
+          agentcli --version
+          agentcli --help
+          agentcli --version

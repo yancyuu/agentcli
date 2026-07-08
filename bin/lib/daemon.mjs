@@ -25,14 +25,21 @@ import { appendLog, checkExistingOpenHermitServer } from './runtime.mjs';
 // the web console never came up.
 const hermitEntry = path.join(binDir, 'hermit.mjs');
 
-function readDaemonPid() {
+// Read any pidfile (daemon, telemetry worker, …) → live pid or null. The daemon
+// pid is just this applied to daemonPidPath (see readDaemonPid below); the
+// generic form is shared by the telemetry worker and feature-state lookups.
+function readPidFile(pidPath) {
   try {
-    const raw = readFileSync(daemonPidPath, 'utf-8').trim();
+    const raw = readFileSync(pidPath, 'utf-8').trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
   }
+}
+
+function readDaemonPid() {
+  return readPidFile(daemonPidPath);
 }
 
 function refreshDaemonPidFromReadyServer(pid) {
@@ -167,6 +174,50 @@ function collectFallbackPids() {
   return [...pids];
 }
 
+// Detached daemon children (server.ts / hermit-bridge) are spawned with
+// detached:true and only reaped by shutdown() on SIGINT/SIGTERM. If the daemon
+// dies via SIGKILL / crash / OOM, shutdown() never runs and those children are
+// reparented to PID 1 — permanent orphans. Reap ONLY PPID=1 ones at startup so
+// a LIVE daemon's own children are never touched.
+function collectOrphanedDaemonChildPids() {
+  if (process.platform === 'win32') {
+    // Windows has no PID-1 reparenting: an orphan keeps its (now-dead) parent's
+    // ppid, so "orphan" = ppid not in the live-pid set.
+    try {
+      const procs = listProcessesWin();
+      const live = new Set(procs.map((p) => p.pid));
+      return procs
+        .filter((p) => p.pid !== process.pid && !live.has(p.ppid)
+          && !p.command.includes('--scan-once')
+          && (p.command.includes('src/main/server.ts') || p.command.includes('hermit-bridge')))
+        .map((p) => p.pid);
+    } catch {
+      return [];
+    }
+  }
+  let output = '';
+  try {
+    output = execSync('ps -axo pid=,ppid=,command=', { encoding: 'utf-8' });
+  } catch {
+    return [];
+  }
+  const pids = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+([\s\S]+)$/u);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const ppid = Number(match[2]);
+    const command = match[3];
+    if (pid === process.pid) continue;
+    if (ppid !== 1) continue; // only true orphans — never a live daemon's child
+    if (command.includes('--scan-once')) continue; // transient foreground scan
+    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge')) {
+      pids.push(pid);
+    }
+  }
+  return pids;
+}
+
 async function stopFallbackProcesses(pids = collectFallbackPids()) {
   if (pids.length === 0) return false;
 
@@ -223,7 +274,7 @@ async function printDaemonStatus({ exitOnDone = true } = {}) {
     printCliRows('后台服务', [
       ['状态', `运行中，无 daemon pidfile (pids ${status.fallbackPids.join(', ')})`],
       ['地址', status.url],
-    ], '需要清理时可运行：openhermit stop');
+    ], '需要清理时可运行：agentcli stop');
     if (exitOnDone) process.exit(0);
     return status;
   }
@@ -345,6 +396,7 @@ function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {
 
 
 export {
+readPidFile,
 readDaemonPid,
 refreshDaemonPidFromReadyServer,
 isPidRunning,
@@ -352,6 +404,7 @@ removeDaemonPidFile,
 signalDaemon,
 listProcessesWin,
 collectFallbackPids,
+collectOrphanedDaemonChildPids,
 stopFallbackProcesses,
 collectDaemonStatus,
 printDaemonStatus,

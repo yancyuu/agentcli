@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aggregateUploadProgress, uploadProgressLabel } from '../usageProgress.mjs';
+import { absoluteProgressLabel, aggregateUploadProgress, foldFinishedBatches, uploadProgressLabel } from '../usageProgress.mjs';
 
 // Helpers: minimal log-event shapes (only the fields the aggregator reads).
 const ts = (seconds) => `2026-06-27T00:00:${String(seconds).padStart(2, '0')}.000Z`;
@@ -23,6 +23,14 @@ const batch = (seconds, platform, mode, extra = {}) => ({
   uploadedBeforeBatch: 0,
   uploadedAfterBatch: 0,
   ...extra,
+});
+const progress = (seconds, platform, filesScanned, messagesCollected, mode) => ({
+  timestamp: ts(seconds),
+  message: 'scan-progress',
+  platform,
+  mode,
+  filesScanned,
+  messagesCollected,
 });
 const failure = (seconds, platform, mode, lastError) => ({
   timestamp: ts(seconds),
@@ -54,6 +62,17 @@ describe('aggregateUploadProgress', () => {
     expect(aggregateUploadProgress(events).discovered).toBe(500);
   });
 
+  it('shows scan-progress before scan-collected so long full scans do not look stuck', () => {
+    const snap = aggregateUploadProgress([
+      progress(0, 'claudecode', 3, 120),
+      progress(1, 'codex', 2, 30),
+    ]);
+
+    expect(snap.discovered).toBe(150);
+    expect(snap.scanFiles).toBe(5);
+    expect(snap.hasBatch).toBe(false);
+  });
+
   it('keeps a stable global total when channels are out of phase (no scan/batch flip)', () => {
     // claudecode/plain is already uploading while claudecode/im's empty scan
     // lands last. The aggregated total stays the uploader's, not the empty scan's.
@@ -71,6 +90,7 @@ describe('aggregateUploadProgress', () => {
     expect(snap.total).toBe(500);
     expect(snap.uploaded).toBe(50);
     expect(snap.hasBatch).toBe(true);
+    expect(snap.showBatch).toBe(true);
   });
 
   it('counts uploaded from upload-batch-finished (not from upload-batch-start)', () => {
@@ -85,6 +105,20 @@ describe('aggregateUploadProgress', () => {
     ];
     // start must not count as confirmed — only the prior total (40) is done.
     expect(aggregateUploadProgress(events).uploaded).toBe(40);
+  });
+
+  it('does not show a fake summed batch when multiple channels upload concurrently', () => {
+    const snap = aggregateUploadProgress([
+      batch(0, 'claudecode', 'plain', { totalMessages: 100, batchIndex: 2, totalBatches: 10, uploadedAfterBatch: 20 }),
+      batch(1, 'codex', 'plain', { totalMessages: 50, batchIndex: 1, totalBatches: 5, uploadedAfterBatch: 10 }),
+    ]);
+    const label = uploadProgressLabel(snap);
+
+    expect(snap.hasBatch).toBe(true);
+    expect(snap.showBatch).toBe(false);
+    expect(label).toContain('上报中');
+    expect(label).not.toContain('批次 3/15');
+    expect(label).not.toContain('批次');
   });
 
   it('falls back to batch.totalMessages when a channel scan scrolled out of the log tail', () => {
@@ -138,12 +172,20 @@ describe('uploadProgressLabel', () => {
     expect(label).not.toContain('批次');
   });
 
+  it('shows scanned file count while scanning before upload batches start', () => {
+    const label = uploadProgressLabel({ discovered: 120, uploaded: 0, total: 120, hasBatch: false, scanFiles: 3 });
+    expect(label).toContain('扫描中');
+    expect(label).toContain('文件 3');
+    expect(label).not.toContain('批次');
+  });
+
   it('shows uploading state with percent, counts, and the batch segment', () => {
     const label = uploadProgressLabel({
       discovered: 500,
       uploaded: 210,
       total: 500,
       hasBatch: true,
+      showBatch: true,
       batchIndex: 3,
       totalBatches: 10,
     });
@@ -177,5 +219,66 @@ describe('uploadProgressLabel', () => {
   it('shows 失败 when the snapshot is failed', () => {
     const label = uploadProgressLabel({ discovered: 10, uploaded: 0, total: 10, hasBatch: true, failed: true });
     expect(label).toContain('失败');
+  });
+});
+
+describe('full-rescan absolute progress (no percent)', () => {
+  it('foldFinishedBatches is monotonic across log-tail scroll-out (never goes backwards)', () => {
+    // Regression for 300→200 + "又上传启动中": the log is read as a tail window,
+    // so summing finished events over the window dropped as old batches scrolled
+    // out. The accumulator keys by platform:mode:batchIndex and remembers a batch
+    // forever once seen — counts only grow.
+    const finished = (i, attempted) => ({
+      message: 'upload-batch-finished',
+      platform: 'claudecode',
+      mode: 'plain',
+      batchIndex: i,
+      attempted,
+    });
+    // A batch-start must NOT count as completed.
+    const startOnly = { message: 'upload-batch-start', platform: 'claudecode', mode: 'plain', batchIndex: 5, attempted: 99 };
+
+    let seen = new Map();
+    let acc = foldFinishedBatches([finished(1, 100), finished(2, 100), finished(3, 100), startOnly], seen);
+    expect(acc.completedBatches).toBe(3);
+    expect(acc.runUploaded).toBe(300); // monotonic from 0 — 100+100+100
+
+    // Tail scrolls: batch 1 is gone from the window. Counts must NOT drop.
+    seen = acc.seen;
+    acc = foldFinishedBatches([finished(2, 100), finished(3, 100)], seen);
+    expect(acc.completedBatches).toBe(3);
+    expect(acc.runUploaded).toBe(300);
+
+    // A new batch arrives → counts grow, never reset to "上传启动中".
+    seen = acc.seen;
+    acc = foldFinishedBatches([finished(3, 100), finished(4, 100)], seen);
+    expect(acc.completedBatches).toBe(4);
+    expect(acc.runUploaded).toBe(400);
+  });
+
+  it('absoluteProgressLabel renders counts + rate + elapsed and never a percent', () => {
+    // runUploaded 1500 / 30s = 50 msg/s; 1500 formats as 1.5K, 50/10/30 stay bare.
+    const label = absoluteProgressLabel({ runUploaded: 1500, completedBatches: 10 }, { elapsedSec: 30 });
+    expect(label).toContain('已上传');
+    expect(label).toContain('1.5K');
+    expect(label).toContain('10 批');
+    expect(label).toContain('50条/秒');
+    expect(label).toContain('已用时 30s');
+    expect(label).not.toMatch(/%/);
+  });
+
+  it('shows 扫描中 with file count before any batch starts', () => {
+    const label = absoluteProgressLabel({ hasBatch: false, scanFiles: 5, completedBatches: 0 }, { elapsedSec: 12 });
+    expect(label).toContain('扫描中');
+    expect(label).toContain('已扫 5 文件');
+    expect(label).toContain('已用时 12s');
+    expect(label).not.toMatch(/%/);
+  });
+
+  it('shows 上传启动中 while the first batch is in flight, not yet finished', () => {
+    const label = absoluteProgressLabel({ hasBatch: true, completedBatches: 0 }, { elapsedSec: 3 });
+    expect(label).toContain('上传启动中');
+    expect(label).toContain('已用时 3s');
+    expect(label).not.toMatch(/%/);
   });
 });

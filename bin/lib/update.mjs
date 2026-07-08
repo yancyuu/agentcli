@@ -64,13 +64,13 @@ async function runUpdate({ onUpdated } = {}) {
       console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand()}\n`);
     } catch (err) {
       // Platform-aware fallback. `sudo` does not exist on Windows, and the
-      // common failure there is EBUSY — a lingering openhermit process holds
+      // common failure there is EBUSY — a lingering agentcli process holds
       // the package files (not a permissions issue) — so steer Windows users to
       // release the lock. macOS/Linux may genuinely need sudo for a root-owned
       // global prefix.
       const hint =
         process.platform === 'win32'
-          ? `先关闭所有运行中的 openhermit 进程（或重启电脑）再重试：npm install -g ${BRAND.npmPackage}@latest --prefer-online`
+          ? `先关闭所有运行中的 agentcli 进程（或重启电脑）再重试：npm install -g ${BRAND.npmPackage}@latest --prefer-online`
           : `Try: sudo npm install -g ${BRAND.npmPackage}@latest`;
       console.error(`${brandLogPrefix()} npm update failed. ${hint}`);
       process.exit(1);
@@ -83,7 +83,7 @@ async function runUpdate({ onUpdated } = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Known installable feature plugins. Each maps a `openhermit add <name>` key to
+ * Known installable feature plugins. Each maps a `agentcli add <name>` key to
  * the MCP library entry it registers (pointing at a hermit-served MCP endpoint).
  * Mirrors src/features/worker-society/main/composition/workerSocietyPlugin.ts.
  */

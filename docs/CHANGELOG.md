@@ -6,7 +6,8 @@
 
 ### Changed
 
-- 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/openhermit` v1.6.42 包事实。
+- 重写 README 与公开站点为「开源 + 企业版」双产品说明书：AgentCli 开源免费（AGPL-3.0），AgentBus 定位为付费企业增值服务；合并首页与使用指南为单页，补齐 token 池认领（直写 Claude/Codex 配置）与用量上报三要素说明。
+- 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/agentcli` v1.8.8 包事实。
 - 统一 README、文档索引、团队架构、跨团队协作和发布指南中的 Loop Engineering 叙述。
 - 明确 cc-connect Bridge 边界：Hermit 负责团队路由、渠道绑定、白名单和审计；平台 Bot 适配由 cc-connect 承载。
 - 明确团队工作区由 team、task、message 和 project workspace 组成，并记录 worktree 隔离是当前并行协作能力。

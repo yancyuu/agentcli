@@ -39,6 +39,8 @@ jobs:
       - name: Set up Pages
         if: github.ref == 'refs/heads/master'
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/master'

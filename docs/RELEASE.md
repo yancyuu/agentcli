@@ -1,14 +1,14 @@
 # Release Guide
 
-本文记录 `yancyuu/Hermit` 当前发布流程。当前包名是 `@yancyyu/openhermit`，版本事实以 `package.json` 为准；当前版本为 v1.6.42。
+本文记录 `yancyuu/Hermit` 当前发布流程。当前包名是 `@yancyyu/agentcli`，版本事实以 `package.json` 为准；当前版本为 v1.6.42。
 
 ## 当前发布事实
 
 | 项 | 当前值 |
 |:---|:---|
 | Repository | `https://github.com/yancyuu/Hermit` |
-| npm package | `@yancyyu/openhermit` |
-| CLI binaries | `openhermit`、`open-hermit`、`hermit` |
+| npm package | `@yancyyu/agentcli` |
+| CLI binaries | `agentcli`、`agentcli`、`hermit` |
 | Web build | `pnpm build:web` |
 | Release workflow | `.github/workflows/release.yml` |
 | Docker image | workflow 目标为 `ghcr.io/yancyuu/hermit`；当前仓库必须先补齐 `docker/Dockerfile` 才能实际构建 |
@@ -98,8 +98,8 @@ pnpm publish --access public
 发布后验证：
 
 ```bash
-npm view @yancyyu/openhermit version
-npx @yancyyu/openhermit@latest --version
+npm view @yancyyu/agentcli version
+npx @yancyyu/agentcli@latest --version
 ```
 
 ## Release notes 模板

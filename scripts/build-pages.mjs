@@ -24,10 +24,10 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentCli — AI 工程协作平台</title>
-  <meta name="description" content="本地优先的 AI 编程工具用量采集与团队协作平台。自动监控 Claude Code、Codex、Cursor 等工具消耗，上报至 AgentBus。" />
-  <meta property="og:title" content="AgentCli" />
-  <meta property="og:description" content="本地优先的 AI 工程协作平台。采集 → 上报 → 协作。" />
+  <title>AgentCli — 开源本地优先的 AI 数字员工工作台</title>
+  <meta name="description" content="开源、本地优先的 AI 数字员工工作台。CLI 给 agent，Web 给人；自动采集 Claude Code / Codex / Cursor 等运行时用量。企业版 AgentBus 提供团队协作、IM 路由与企业看板。" />
+  <meta property="og:title" content="AgentCli — 开源 AI 数字员工工作台" />
+  <meta property="og:description" content="开源 · 本地优先。CLI for agents, Web for humans. 采集 → 上报 → 协作。企业版 AgentBus 增值服务。" />
   <meta property="og:type" content="website" />
   <link rel="icon" href="icon.png" />
   <style>
@@ -41,324 +41,161 @@ const html = `<!DOCTYPE html>
       --accent: #8B5CF6;
       --accent-light: #a78bfa;
       --green: #22c55e;
+      --yellow: #eab308;
       color-scheme: dark;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.6;
+      line-height: 1.7;
       -webkit-font-smoothing: antialiased;
     }
     a { color: var(--accent-light); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 0.9em;
+      color: var(--green);
+    }
+    pre {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13.5px;
+      line-height: 1.6;
+      margin: 12px 0;
+    }
+    pre code { background: none; border: none; padding: 0; color: var(--green); }
 
     .header {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(9, 10, 11, 0.85);
+      backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
-      padding: 16px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      max-width: 1200px;
-      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: 1100px; margin: 0 auto;
     }
-    .header-logo {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .header-logo img { width: 28px; height: 28px; border-radius: 6px; }
-    .header-nav { display: flex; gap: 24px; align-items: center; }
+    .header-logo { font-size: 20px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .header-logo img { width: 26px; height: 26px; border-radius: 6px; }
+    .header-nav { display: flex; gap: 22px; align-items: center; }
     .header-nav a { color: var(--text-muted); font-size: 14px; }
     .header-nav a:hover { color: var(--text); text-decoration: none; }
 
-    .hero {
-      text-align: center;
-      padding: 80px 24px 60px;
-      max-width: 800px;
-      margin: 0 auto;
-    }
+    section { max-width: 860px; margin: 0 auto; padding: 56px 24px; }
+    section h2 { font-size: 28px; font-weight: 800; margin-bottom: 10px; letter-spacing: -0.01em; }
+    section .section-sub { color: var(--text-muted); margin-bottom: 28px; font-size: 16px; }
+    section h3 { font-size: 18px; font-weight: 600; margin: 28px 0 10px; }
+
+    .hero { text-align: center; padding: 72px 24px 40px; max-width: 860px; margin: 0 auto; }
     .hero-badge {
       display: inline-block;
       background: rgba(139, 92, 246, 0.1);
       border: 1px solid rgba(139, 92, 246, 0.3);
       border-radius: 999px;
-      padding: 4px 14px;
-      font-size: 13px;
-      color: var(--accent-light);
-      margin-bottom: 24px;
+      padding: 5px 16px; font-size: 13px; color: var(--accent-light); margin-bottom: 22px;
     }
     .hero h1 {
-      font-size: clamp(36px, 6vw, 64px);
-      font-weight: 800;
-      line-height: 1.1;
-      margin-bottom: 16px;
+      font-size: clamp(40px, 7vw, 68px); font-weight: 800; line-height: 1.05; margin-bottom: 18px;
       background: linear-gradient(135deg, var(--text) 0%, var(--accent-light) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-    .hero p {
-      font-size: 18px;
-      color: var(--text-muted);
-      max-width: 640px;
-      margin: 0 auto 32px;
-    }
+    .hero .lede { font-size: 19px; color: var(--text-muted); max-width: 640px; margin: 0 auto 14px; }
+    .hero .oss-line { font-size: 14px; color: var(--text-dim); margin-bottom: 30px; }
+    .hero .oss-line strong { color: var(--green); }
 
-    .install-box {
-      max-width: 640px;
-      margin: 0 auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .install-tabs {
-      display: flex;
-      border-bottom: 1px solid var(--border);
-    }
-    .install-tab {
-      flex: 1;
-      padding: 10px 16px;
-      font-size: 13px;
-      color: var(--text-muted);
-      text-align: center;
-      cursor: pointer;
-      border: none;
-      background: none;
-      transition: color 0.2s, background 0.2s;
-    }
-    .install-tab.active {
-      color: var(--accent-light);
-      background: rgba(139, 92, 246, 0.05);
-      border-bottom: 2px solid var(--accent);
-    }
-    .install-content { display: none; padding: 20px 24px; }
+    .install-box { max-width: 600px; margin: 0 auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; text-align: left; }
+    .install-tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .install-tab { flex: 1; padding: 10px 16px; font-size: 13px; color: var(--text-muted); text-align: center; cursor: pointer; border: none; background: none; transition: color 0.2s, background 0.2s; }
+    .install-tab.active { color: var(--accent-light); background: rgba(139, 92, 246, 0.05); border-bottom: 2px solid var(--accent); }
+    .install-content { display: none; padding: 18px 22px; }
     .install-content.active { display: block; }
-    .install-cmd {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 14px;
-      color: var(--green);
-      word-break: break-all;
-      user-select: all;
-    }
+    .install-cmd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; color: var(--green); word-break: break-all; user-select: all; }
     .install-cmd .comment { color: var(--text-dim); }
-
-    .install-help {
-      max-width: 640px;
-      margin: 16px auto 0;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-left: 3px solid #eab308;
-      border-radius: 8px;
-      padding: 14px 18px;
-      font-size: 13px;
-      color: var(--text-muted);
-      text-align: left;
-      line-height: 1.6;
-    }
+    .install-help { max-width: 600px; margin: 14px auto 0; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--text-muted); text-align: left; line-height: 1.6; }
     .install-help strong { color: var(--text); }
-    .install-help code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      color: var(--accent-light);
-    }
-    .install-help pre {
-      margin: 8px 0 6px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 10px;
-      overflow-x: auto;
-      font-size: 12px;
-    }
-    .install-help pre code { color: var(--green); background: none; border: none; padding: 0; }
 
-    .arch-section {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 60px 24px;
-      text-align: center;
-    }
-    .arch-section h2 {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 32px;
-    }
-    .arch-diagram {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 32px 24px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 14px;
-      line-height: 2;
-      color: var(--text-muted);
-      text-align: left;
-      overflow-x: auto;
-    }
+    .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .tier { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 26px 24px; }
+    .tier.enterprise { border-color: rgba(139, 92, 246, 0.35); background: linear-gradient(180deg, rgba(139,92,246,0.06), var(--bg-card)); }
+    .tier-tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; margin-bottom: 12px; }
+    .tier-tag.free { background: rgba(34, 197, 94, 0.12); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.25); }
+    .tier-tag.ent { background: rgba(139, 92, 246, 0.12); color: var(--accent-light); border: 1px solid rgba(139, 92, 246, 0.3); }
+    .tier h3 { font-size: 20px; margin: 0 0 6px; }
+    .tier .tier-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
+    .tier ul { list-style: none; padding: 0; }
+    .tier li { font-size: 14px; color: var(--text-muted); padding: 5px 0 5px 22px; position: relative; }
+    .tier li::before { content: '\\2713'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    .tier.enterprise li::before { color: var(--accent-light); }
+    .tier .tier-cta { margin-top: 16px; font-size: 13px; }
+
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .feature-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 22px 20px; transition: border-color 0.2s; }
+    .feature-card:hover { border-color: var(--accent); }
+    .feature-icon { width: 36px; height: 36px; background: rgba(139, 92, 246, 0.1); border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; font-size: 18px; }
+    .feature-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+    .feature-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.5; }
+
+    .commands-list { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .command-group-title { padding: 12px 20px 4px; font-size: 13px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .command-row { display: flex; align-items: center; gap: 14px; padding: 11px 20px; border-top: 1px solid var(--border); }
+    .command-row .cmd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; color: var(--green); background: rgba(34, 197, 94, 0.07); border: 1px solid rgba(34, 197, 94, 0.18); border-radius: 6px; padding: 4px 9px; white-space: nowrap; flex-shrink: 0; min-width: 230px; user-select: all; }
+    .command-row .cmd-desc { color: var(--text-muted); font-size: 13.5px; }
+
+    .prose p { margin: 12px 0; color: var(--text-muted); }
+    .prose strong { color: var(--text); }
+    .prose ul, .prose ol { margin: 10px 0; padding-left: 22px; color: var(--text-muted); }
+    .prose li { margin: 5px 0; }
+    .prose .step-label { color: var(--accent-light); font-weight: 600; }
+
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    th, td { text-align: left; padding: 9px 13px; border: 1px solid var(--border); }
+    th { background: var(--bg-card); font-weight: 600; white-space: nowrap; }
+    td code { font-size: 0.85em; }
+
+    .callout { background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 18px; margin: 16px 0; }
+    .callout.warn { border-left-color: var(--yellow); }
+    .callout.success { border-left-color: var(--green); }
+    .callout-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+    .callout p, .callout ul, .callout ol { color: var(--text-muted); margin: 4px 0; }
+
+    .runtimes-section { text-align: center; }
+    .runtime-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+    .runtime-tag { background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px; padding: 7px 15px; font-size: 13px; color: var(--text-muted); }
+
+    .arch-diagram { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 26px 22px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13.5px; line-height: 2; color: var(--text-muted); overflow-x: auto; }
     .arch-diagram .highlight { color: var(--accent-light); }
+    .arch-diagram .green { color: var(--green); }
     .arch-diagram .dim { color: var(--text-dim); }
 
-    .features-section {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 60px 24px;
-    }
-    .features-header {
-      text-align: center;
-      margin-bottom: 48px;
-    }
-    .features-header h2 {
-      font-size: 32px;
-      font-weight: 700;
-      margin-bottom: 12px;
-    }
-    .features-header p {
-      color: var(--text-muted);
-      font-size: 16px;
-    }
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
-    }
-    .feature-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 28px 24px;
-      transition: border-color 0.2s;
-    }
-    .feature-card:hover { border-color: var(--accent); }
-    .feature-icon {
-      width: 40px;
-      height: 40px;
-      background: rgba(139, 92, 246, 0.1);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-      font-size: 20px;
-    }
-    .feature-card h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .feature-card p {
-      font-size: 14px;
-      color: var(--text-muted);
-      line-height: 1.5;
-    }
+    .faq-item { border-bottom: 1px solid var(--border); padding: 16px 0; }
+    .faq-item:last-child { border-bottom: none; }
+    .faq-q { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
 
-    .runtimes-section {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 40px 24px 60px;
-      text-align: center;
-    }
-    .runtimes-section h2 {
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 20px;
-    }
-    .runtime-tags {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-    }
-    .runtime-tag {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 8px 16px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-
-    .footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 24px;
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-    }
+    .footer { border-top: 1px solid var(--border); padding: 36px 24px; max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; }
     .footer-left { color: var(--text-dim); font-size: 13px; }
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { color: var(--text-muted); font-size: 13px; }
 
-    .commands-section {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 0 24px 60px;
-    }
-    .commands-section h2 {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-    .commands-section > p {
-      text-align: center;
-      color: var(--text-muted);
-      margin-bottom: 28px;
-      font-size: 16px;
-    }
-    .commands-list {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .command-row {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--border);
-    }
-    .command-row:last-child { border-bottom: none; }
-    .command-row .cmd {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 14px;
-      color: var(--green);
-      background: rgba(34, 197, 94, 0.08);
-      border: 1px solid rgba(34, 197, 94, 0.2);
-      border-radius: 6px;
-      padding: 4px 10px;
-      white-space: nowrap;
-      flex-shrink: 0;
-      min-width: 220px;
-      user-select: all;
-    }
-    .command-row .cmd-desc {
-      color: var(--text-muted);
-      font-size: 14px;
-    }
-    .commands-more {
-      display: block;
-      text-align: center;
-      margin-top: 20px;
-      font-size: 14px;
-    }
-
-    @media (max-width: 640px) {
-      .header { flex-direction: column; gap: 12px; }
-      .hero { padding: 48px 16px 40px; }
-      .features-grid { grid-template-columns: 1fr; }
-      .footer { flex-direction: column; text-align: center; }
-      .command-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+    @media (max-width: 720px) {
+      .header { flex-direction: column; gap: 10px; }
+      .header-nav { gap: 16px; flex-wrap: wrap; justify-content: center; }
+      .hero { padding: 48px 16px 32px; }
+      .tiers { grid-template-columns: 1fr; }
+      section { padding: 40px 16px; }
+      .command-row { flex-direction: column; align-items: flex-start; gap: 5px; }
       .command-row .cmd { min-width: 0; }
+      .footer { flex-direction: column; text-align: center; }
     }
   </style>
 </head>
@@ -369,128 +206,171 @@ const html = `<!DOCTYPE html>
       AgentCli
     </div>
     <nav class="header-nav">
-      <a href="guide.html">使用指南</a>
+      <a href="#tiers">开源 / 企业版</a>
+      <a href="#capabilities">能力</a>
+      <a href="#commands">命令</a>
+      <a href="#config">配置</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/yancyuu/agentcli">GitHub</a>
     </nav>
   </header>
 
   <section class="hero">
-    <span class="hero-badge">Local-first &middot; Open Source</span>
+    <span class="hero-badge">开源 · Local-first · AGPL-3.0</span>
     <h1>AgentCli</h1>
-    <p>本地优先的 AI 工程协作平台。自动采集 AI 编程工具用量，上报至 AgentBus，面向企业提供用量看板与团队协作能力。</p>
+    <p class="lede">本地优先的开源 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
+    <p class="oss-line">100% 开源免费，数据落在本机 <code>~/.hermit/</code>。需要团队协作与企业看板时，接入商业版 <strong>AgentBus</strong>。</p>
 
     <div class="install-box">
       <div class="install-tabs">
         <button class="install-tab active" data-target="tab-curl">macOS / Linux</button>
         <button class="install-tab" data-target="tab-npm">npm</button>
-        <button class="install-tab" data-target="tab-npx">npx (免安装)</button>
+        <button class="install-tab" data-target="tab-npx">npx（免安装）</button>
       </div>
       <div class="install-content active" id="tab-curl">
-        <div class="install-cmd">curl -fsSL https://yancyuu.github.io/Hermit/install.sh | bash</div>
+        <div class="install-cmd">curl -fsSL https://yancyuu.github.io/agentcli/install.sh | bash</div>
       </div>
       <div class="install-content" id="tab-npm">
-        <div class="install-cmd">npm install -g @yancyyu/openhermit</div>
+        <div class="install-cmd">npm install -g @yancyyu/agentcli</div>
       </div>
       <div class="install-content" id="tab-npx">
-        <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/openhermit</div>
+        <div class="install-cmd"><span class="comment"># 无需安装，直接运行</span><br/>npx @yancyyu/agentcli</div>
       </div>
     </div>
     <div class="install-help">
-      <strong>安装或更新报错？</strong> Windows 上遇到 <code>EBUSY: resource busy or locked</code>，是之前的 openhermit 进程还占着文件，不是权限问题（别用 <code>sudo</code>）。先关掉再装：
-      <pre><code>openhermit stop
-npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
-      还不行？看 <a href="guide.html#faq">完整排查步骤 →</a>
+      <strong>安装 / 更新报错？</strong> Windows 遇到 <code>EBUSY: resource busy or locked</code> 不是权限问题（别用 sudo / 管理员），是之前的 agentcli 后台进程还占着文件。先关掉再装：
+      <pre><code>agentcli stop
+npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
+      完整排查见下方 <a href="#faq">FAQ</a>。
     </div>
   </section>
 
-  <section class="commands-section">
-    <h2>常用命令</h2>
-    <p>装好之后，从这几条开始。<code>openhermit</code> 与 <code>hermit</code> 是同一程序别名。</p>
-    <div class="commands-list">
-      <div class="command-row">
-        <code class="cmd">openhermit</code>
-        <span class="cmd-desc">打开终端导航（控制面菜单）：用量同步、本地工作台、用户、token 池</span>
+  <section id="tiers">
+    <h2>两个产品，一条路径</h2>
+    <p class="section-sub">先免费用起来，需要团队化时再升级。<strong>AgentCli 开源免费，AgentBus 是付费的企业增值服务。</strong></p>
+    <div class="tiers">
+      <div class="tier">
+        <span class="tier-tag free">开源 · 免费</span>
+        <h3>AgentCli</h3>
+        <p class="tier-sub">本地优先的 CLI + Web 工作台。你现在就能装、立刻能用。</p>
+        <ul>
+          <li>交互式终端菜单 + 全套子命令（账号 / 用量 / 团队 / 服务 / 插件）</li>
+          <li>本地 Web 工作台：团队、看板、运行时、代码评审</li>
+          <li>自动采集本机 AI 运行时用量（token / 会话 / 消息）</li>
+          <li>数据默认落 <code>~/.hermit/</code>，单机完整可用，无需注册</li>
+          <li>AGPL-3.0 开源，可自托管、可二次开发</li>
+        </ul>
+        <p class="tier-cta"><a href="#commands">装好之后从这几条命令开始 →</a></p>
       </div>
-      <div class="command-row">
-        <code class="cmd">openhermit web</code>
-        <span class="cmd-desc">直接启动 Web 工作台（默认 http://127.0.0.1:5680），加 <code>--daemon</code> 后台运行</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit auth login</code>
-        <span class="cmd-desc">飞书授权登录 AgentBus —— 登录后用量才有上报目标</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit usage status</code>
-        <span class="cmd-desc">查看后台 worker 是否运行、消息上报是否开启</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit usage start</code>
-        <span class="cmd-desc">开启轻量后台用量采集，默认配置开机自启</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit usage report</code>
-        <span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 补报历史</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit usage today</code>
-        <span class="cmd-desc">查看今日本地用量摘要（不上传）</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit status · doctor</code>
-        <span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span>
-      </div>
-      <div class="command-row">
-        <code class="cmd">openhermit update</code>
-        <span class="cmd-desc">检查并自更新到最新版本</span>
+      <div class="tier enterprise">
+        <span class="tier-tag ent">企业版 · 增值服务</span>
+        <h3>AgentBus</h3>
+        <p class="tier-sub">中心化数据总线，把单机工具升级成团队 / 企业平台。</p>
+        <ul>
+          <li>企业级用量看板：按团队 / 成员 / 运行时 / 时间段汇总</li>
+          <li>IM 消息路由：飞书、微信等消息直达数字员工、触发任务</li>
+          <li>跨团队任务派发与 Task Bus（offer / bid / lease）</li>
+          <li>完整审计轨迹、权限与渠道白名单</li>
+          <li>统一收敛全组织的 AI 工程用量与协作数据</li>
+        </ul>
+        <p class="tier-cta">企业版增值服务，<a href="https://github.com/yancyuu/agentcli/issues">关注 / 联系我们 →</a></p>
       </div>
     </div>
-    <a class="commands-more" href="guide.html#cli-ref">完整命令参考 →</a>
-  </section>
-
-  <section class="arch-section">
-    <h2>架构</h2>
-    <div class="arch-diagram">
-      <span class="dim">开发者本地</span><br/>
-      <span class="highlight">Claude Code / Codex / Cursor / Gemini / OpenCode ...</span><br/>
-      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 会话日志 &amp; token 用量<br/>
-      <span class="highlight">AgentCli</span> <span class="dim">(本地采集 &amp; Web 工作台)</span><br/>
-      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 统一上报<br/>
-      <span class="highlight">AgentBus</span> <span class="dim">(中心化服务端 &middot; 数据总线)</span><br/>
-      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 看板 &amp; 协作<br/>
-      <span class="dim">企业管理者 / 团队成员</span>
+    <div class="callout">
+      <div class="callout-title">关系一句话</div>
+      <p><strong>AgentCli（开源）</strong>是操作面，读写本地数据；<strong>AgentBus（企业版）</strong>是协调骨干，提供团队协作、IM 路由与企业看板。不接 Bus = 单机模式，照样完整能跑；接入 Bus 才解锁多人协作与企业能力。</p>
     </div>
   </section>
 
-  <section class="features-section">
-    <div class="features-header">
-      <h2>核心能力</h2>
-      <p>从用量可见到团队协作</p>
-    </div>
+  <section id="capabilities">
+    <h2>核心能力</h2>
+    <p class="section-sub">从用量可见，到数字员工团队化。</p>
     <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">&#9881;</div>
-        <h3>自动采集</h3>
-        <p>无侵入式扫描本地 AI Agent 会话日志，自动识别 token 消耗、会话数、消息量，零配置开箱即用。</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#8644;</div>
-        <h3>统一上报</h3>
-        <p>多运行时、多场景通过同一个接口汇总至 AgentBus。支持断点续传、幂等去重、背压控制。</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#128202;</div>
-        <h3>企业看板</h3>
-        <p>按团队、成员、工具、场景维度展示 token 用量和会话活跃度。企业管理者一目了然。</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#128101;</div>
-        <h3>团队协作</h3>
-        <p>数字员工 IM 消息路由、跨团队任务派发、多 Agent 编排。让 AI 编程从单兵走向团队化。</p>
-      </div>
+      <div class="feature-card"><div class="feature-icon">&#9881;</div><h4>自动采集</h4><p>无侵入扫描本地 AI Agent 会话日志，自动识别 token 消耗、会话数、消息量，零配置开箱即用。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#8644;</div><h4>统一上报</h4><p>多运行时、多场景汇总至 AgentBus。断点续传、幂等去重、背压控制。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#128202;</div><h4>用量看板</h4><p>按团队、成员、工具、场景维度展示 token 用量与会话活跃度（企业版）。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#128101;</div><h4>数字员工团队</h4><p>创建团队、配置成员与运行时、看板派活、评论协作、审核交付。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#128268;</div><h4>多运行时协调</h4><p>Claude Code、Codex、Cursor、Gemini、OpenCode 在一个面板里启动与监控。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#128274;</div><h4>本地优先 · 安全</h4><p>默认 metadata-only 上报，不上传消息正文、代码或密钥。数据在你本机。</p></div>
+    </div>
+  </section>
+
+  <section id="commands">
+    <h2>常用命令</h2>
+    <p class="section-sub">装好之后从这几条开始。命令统一为 <code>agentcli</code>，所有命令支持 <code>--json</code> 输出机器可读结果（适合 agent / 脚本调用）。</p>
+    <div class="commands-list">
+      <div class="command-group-title">启动与状态</div>
+      <div class="command-row"><code class="cmd">agentcli</code><span class="cmd-desc">打开终端导航（控制面菜单）：用量、工作台、用户、token 池(beta)</span></div>
+      <div class="command-row"><code class="cmd">agentcli web</code><span class="cmd-desc">直接启动 Web 工作台（默认 127.0.0.1:5680）；加 <code>--daemon</code> 后台运行</span></div>
+      <div class="command-row"><code class="cmd">agentcli status · doctor</code><span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span></div>
+      <div class="command-row"><code class="cmd">agentcli stop</code><span class="cmd-desc">停止后台 daemon</span></div>
+
+      <div class="command-group-title">用户授权（上报前提）</div>
+      <div class="command-row"><code class="cmd">agentcli auth login</code><span class="cmd-desc">飞书授权登录 AgentBus——登录后用量才有上报目标</span></div>
+      <div class="command-row"><code class="cmd">agentcli auth status</code><span class="cmd-desc">查看 AgentBus 用户授权状态</span></div>
+
+      <div class="command-group-title">用量采集与上报</div>
+      <div class="command-row"><code class="cmd">agentcli usage status</code><span class="cmd-desc">后台 worker 是否运行、消息上报是否开启</span></div>
+      <div class="command-row"><code class="cmd">agentcli usage start</code><span class="cmd-desc">开启轻量后台采集，默认配置开机自启</span></div>
+      <div class="command-row"><code class="cmd">agentcli usage report</code><span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 补报历史</span></div>
+      <div class="command-row"><code class="cmd">agentcli usage today</code><span class="cmd-desc">查看今日本地用量摘要（不上传）</span></div>
+
+      <div class="command-group-title">团队 / 任务 / 维护</div>
+      <div class="command-row"><code class="cmd">agentcli teams list · create</code><span class="cmd-desc">查看 / 创建本地团队</span></div>
+      <div class="command-row"><code class="cmd">agentcli tasks list --team &lt;t&gt;</code><span class="cmd-desc">查看某团队活跃任务</span></div>
+      <div class="command-row"><code class="cmd">agentcli update</code><span class="cmd-desc">检查并自更新到最新版本</span></div>
+      <div class="command-row"><code class="cmd">agentcli add &lt;plugin&gt;</code><span class="cmd-desc">安装能力插件到 MCP library</span></div>
+    </div>
+  </section>
+
+  <section id="config" class="prose">
+    <h2>配置 AI 运行时（客户端配置）</h2>
+    <p class="section-sub">AgentCli 读写的本机配置位置，以及如何把网关 key 写进 Claude / Codex。</p>
+
+    <h3>本机数据来源</h3>
+    <table>
+      <thead><tr><th>运行时</th><th>数据位置</th><th>采集内容</th></tr></thead>
+      <tbody>
+        <tr><td>Claude Code</td><td><code>~/.claude/projects/**/*.jsonl</code></td><td>token 用量、会话数、消息量；支持 IM 归因</td></tr>
+        <tr><td>Codex</td><td><code>~/.codex/sessions/**/*.jsonl</code></td><td>token 用量（output_tokens 为主）</td></tr>
+      </tbody>
+    </table>
+
+    <h3>把网关 Key 写进 Claude / Codex（token 池认领）</h3>
+    <p>登录后，在终端菜单 <code>agentcli</code> →「token 池(beta)」→「认领」，会自动签发一个一次性网关 key 并<strong>直写</strong>进本机配置：</p>
+    <ul>
+      <li><strong>Claude Code</strong> <code>~/.claude/settings.json</code>：deep-merge 进 <code>env</code>（<code>ANTHROPIC_BASE_URL</code> + <code>ANTHROPIC_AUTH_TOKEN</code> + <code>ANTHROPIC_MODEL</code>），保留其它顶层键与 env 键。</li>
+      <li><strong>Codex</strong> <code>~/.codex/auth.json</code>：写入 <code>OPENAI_API_KEY</code>；<code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。</li>
+    </ul>
+    <div class="callout warn">
+      <div class="callout-title">注意</div>
+      <p>认领到的 key 是<strong>即焚明文</strong>，只在本机配置里落地，不落库、不回显明文。写前自动生成 <code>*.hermit-bak</code> 备份。该能力需服务端授权开通（部分账户暂未开放）。</p>
+    </div>
+  </section>
+
+  <section id="usage" class="prose">
+    <h2>开启用量上报（三要素）</h2>
+    <p class="section-sub">自动上报需要<strong>三件事同时满足</strong>：已登录 + 消息上报已开启 + 后台采集运行中。缺一不上报。</p>
+    <ol>
+      <li><span class="step-label">登录上报目标</span> — <code>agentcli auth login</code>（飞书授权绑定 AgentBus），<code>agentcli auth status</code> 确认已登录。</li>
+      <li><span class="step-label">启用消息上报</span> — <code>agentcli</code> →「用量同步」→ 回车展开 →「消息上报」开启，选择上报运行时。<em>该开关只在终端菜单 / Web 里，没有单独子命令。</em></li>
+      <li><span class="step-label">启动后台采集</span> — <code>agentcli usage start</code>，开启轻量 worker（默认开机自启，约 5 分钟增量扫描）。</li>
+      <li><span class="step-label">立即补报一次</span> — <code>agentcli usage report</code>（增量）；<code>usage report --full</code> 全量重扫补传历史。</li>
+      <li><span class="step-label">核对状态</span> — <code>agentcli usage status</code>，或 Web 工作台「用量」Tab。</li>
+    </ol>
+    <div class="callout success">
+      <div class="callout-title">上报不工作？三要素自检</div>
+      <p>按顺序排查：<code>auth status</code>（已登录？）→ <code>usage status</code>（worker running 且消息上报 enabled？）→ <code>usage report</code>（手动触发一次看输出）。补报历史用 <code>usage report --full</code>。</p>
+    </div>
+    <div class="callout">
+      <div class="callout-title">隐私</div>
+      <p>默认 metadata-only：只上报 token 数、时间戳、维度，不上传消息正文、助手回复、工具输入输出或密钥。具体范围取决于 AgentBus 管理员配置。</p>
     </div>
   </section>
 
   <section class="runtimes-section">
     <h2>支持的 AI 编程工具</h2>
+    <p class="section-sub">一等适配 + 兼容注册，持续扩展。</p>
     <div class="runtime-tags">
       <span class="runtime-tag">Claude Code</span>
       <span class="runtime-tag">Codex</span>
@@ -503,10 +383,70 @@ npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
     </div>
   </section>
 
+  <section class="prose">
+    <h2>架构</h2>
+    <div class="arch-diagram">
+      <span class="dim">开发者本地</span><br/>
+      <span class="highlight">Claude Code / Codex / Cursor / Gemini / OpenCode ...</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 会话日志 &amp; token 用量<br/>
+      <span class="green">AgentCli</span> <span class="dim">(开源 · 本地 CLI + Web 工作台)</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 统一上报<br/>
+      <span class="highlight">AgentBus</span> <span class="dim">(企业版 · 中心化数据总线)</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 看板 &amp; 协作<br/>
+      <span class="dim">企业管理者 / 团队成员</span>
+    </div>
+  </section>
+
+  <section id="faq" class="prose">
+    <h2>常见问题</h2>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：EBUSY: resource busy or locked（Windows 安装 / 更新）</div>
+      <p><strong>原因：</strong>不是权限问题（EBUSY ≠ EACCES），sudo / 管理员身份无效。是之前运行过的 agentcli 后台进程还占着包内文件，npm 无法替换。</p>
+      <p><strong>解决（按顺序，多数第 ① 步就够）：</strong></p>
+      <pre><code>agentcli stop
+agentcli usage stop   # 开过后台用量采集才需要
+npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
+      <p>还不行就杀掉残留 node 进程（只杀 agentcli / hermit 相关），或直接重启电脑后重装。</p>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：EACCES: permission denied（权限报错）</div>
+      <p><strong>原因：</strong>之前用 <code>sudo</code> 运行过，部分文件被 root 占有。</p>
+      <pre><code>sudo chown $(whoami) ~/.hermit/telemetry/worker.pid
+# npm global 目录也报错时：
+sudo chown -R $(whoami) ~/.npm-global</code></pre>
+      <div class="callout warn"><div class="callout-title">预防</div><p>不要用 sudo 运行 agentcli 或 npm install -g。</p></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：agentcli 命令找不到</div>
+      <p>npm 全局 bin 目录不在 PATH。添加到 <code>~/.zshrc</code> 或 <code>~/.bashrc</code>：</p>
+      <pre><code>export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：更新失败 / 想强制重装</div>
+      <pre><code>npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：会上传代码或消息内容吗？</div>
+      <p>默认 metadata-only：不上传消息正文、助手回复、工具输入输出、cron prompt 或密钥。具体上报范围取决于 AgentBus 管理员配置。</p>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">Q：AgentCli 和 AgentBus 是什么关系？收费吗？</div>
+      <p><strong>AgentCli 开源免费</strong>（AGPL-3.0），本地 CLI + Web 工作台，单机完整可用。<strong>AgentBus 是付费的企业版增值服务</strong>：团队协作、企业用量看板、IM 路由、跨团队派发、审计。不接 Bus 不影响本地使用。</p>
+    </div>
+  </section>
+
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
+    <div class="footer-left">&copy; 2026 AgentCli · AGPL-3.0 License · AgentBus 企业版增值服务</div>
     <div class="footer-links">
-      <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
+      <a href="https://github.com/yancyuu/agentcli">GitHub</a>
+      <a href="https://www.npmjs.com/package/@yancyyu/agentcli">npm</a>
+      <a href="https://github.com/yancyuu/agentcli/issues">反馈</a>
     </div>
   </footer>
 
@@ -524,498 +464,13 @@ npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
 </html>
 `;
 
-const guideHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentCli 使用指南</title>
-  <meta name="description" content="AgentCli 完整使用指南：安装、命令参考、用量上报、常见问题排查。" />
-  <link rel="icon" href="icon.png" />
-  <style>
-    :root {
-      --bg: #090A0B;
-      --bg-card: #111113;
-      --border: #27272a;
-      --text: #e4e4e7;
-      --text-muted: #a1a1aa;
-      --text-dim: #71717a;
-      --accent: #8B5CF6;
-      --accent-light: #a78bfa;
-      --green: #22c55e;
-      --red: #ef4444;
-      --yellow: #eab308;
-      color-scheme: dark;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.7;
-      -webkit-font-smoothing: antialiased;
-    }
-    a { color: var(--accent-light); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 2px 6px;
-      font-size: 0.9em;
-    }
-    pre {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 20px;
-      overflow-x: auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 14px;
-      line-height: 1.6;
-      margin: 12px 0;
-    }
-    pre code { background: none; border: none; padding: 0; }
-
-    .header {
-      border-bottom: 1px solid var(--border);
-      padding: 16px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    .header-logo {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .header-logo img { width: 28px; height: 28px; border-radius: 6px; }
-    .header-nav { display: flex; gap: 24px; align-items: center; }
-    .header-nav a { color: var(--text-muted); font-size: 14px; }
-    .header-nav a:hover { color: var(--text); text-decoration: none; }
-
-    .container {
-      max-width: 860px;
-      margin: 0 auto;
-      padding: 48px 24px 80px;
-    }
-    .container h1 {
-      font-size: 36px;
-      font-weight: 800;
-      margin-bottom: 8px;
-    }
-    .container .subtitle {
-      color: var(--text-muted);
-      font-size: 16px;
-      margin-bottom: 48px;
-    }
-    .container h2 {
-      font-size: 24px;
-      font-weight: 700;
-      margin: 48px 0 16px;
-      padding-top: 24px;
-      border-top: 1px solid var(--border);
-    }
-    .container h2:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
-    .container h3 {
-      font-size: 18px;
-      font-weight: 600;
-      margin: 28px 0 12px;
-    }
-    .container p { margin: 12px 0; }
-    .container ul, .container ol { margin: 12px 0; padding-left: 24px; }
-    .container li { margin: 6px 0; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      font-size: 14px;
-    }
-    th, td {
-      text-align: left;
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-    }
-    th {
-      background: var(--bg-card);
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    td code { font-size: 0.85em; }
-
-    .callout {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--accent);
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin: 16px 0;
-    }
-    .callout.warn { border-left-color: var(--yellow); }
-    .callout.error { border-left-color: var(--red); }
-    .callout.success { border-left-color: var(--green); }
-    .callout-title {
-      font-weight: 600;
-      margin-bottom: 8px;
-      font-size: 14px;
-    }
-
-    .toc {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 24px 28px;
-      margin-bottom: 48px;
-    }
-    .toc h3 { margin: 0 0 12px; font-size: 16px; }
-    .toc ul { list-style: none; padding: 0; }
-    .toc li { margin: 6px 0; }
-    .toc a { font-size: 14px; }
-
-    .footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 24px;
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-    }
-    .footer-left { color: var(--text-dim); font-size: 13px; }
-    .footer-links { display: flex; gap: 20px; }
-    .footer-links a { color: var(--text-muted); font-size: 13px; }
-
-    @media (max-width: 640px) {
-      .header { flex-direction: column; gap: 12px; }
-      .container { padding: 32px 16px 60px; }
-      .container h1 { font-size: 28px; }
-      .footer { flex-direction: column; text-align: center; }
-    }
-  </style>
-</head>
-<body>
-  <header class="header">
-    <a class="header-logo" href="./">
-      <img src="icon.png" alt="AgentCli" />
-      AgentCli
-    </a>
-    <nav class="header-nav">
-      <a href="./">首页</a>
-    </nav>
-  </header>
-
-  <div class="container">
-    <h1>AgentCli 使用指南</h1>
-    <p class="subtitle">安装、命令参考、用量上报、常见问题</p>
-
-    <div class="toc">
-      <h3>目录</h3>
-      <ul>
-        <li><a href="#install">1. 安装</a></li>
-        <li><a href="#cli-ref">2. CLI 命令参考</a></li>
-        <li><a href="#first-use">3. 首次使用流程</a></li>
-        <li><a href="#usage-report">4. 用量上报</a></li>
-        <li><a href="#faq">5. 常见问题</a></li>
-      </ul>
-    </div>
-
-    <h2 id="install">1. 安装</h2>
-
-    <h3>方式一：一键安装脚本（推荐）</h3>
-    <pre><code>curl -fsSL https://yancyuu.github.io/Hermit/install.sh | bash</code></pre>
-    <p>脚本会自动检测系统环境，如果没有 Node.js 会自动安装。支持 macOS 和 Linux。</p>
-
-    <h3>方式二：npm 全局安装</h3>
-    <pre><code>npm install -g @yancyyu/openhermit@latest --prefer-online
-openhermit</code></pre>
-
-    <h3>方式三：npx 免安装运行</h3>
-    <pre><code>npx @yancyyu/openhermit@latest</code></pre>
-
-    <div class="callout">
-      <div class="callout-title">前置要求</div>
-      <ul>
-        <li>Node.js 18+（安装脚本会自动处理）</li>
-        <li>能访问 npm registry（或配置了企业内网镜像）</li>
-        <li>需要执行任务时，本机需安装并登录对应 Agent CLI（如 Claude Code、Codex 等）</li>
-      </ul>
-    </div>
-
-    <h2 id="cli-ref">2. CLI 命令参考</h2>
-
-    <p>所有命令都支持 <code>--json</code> 返回机器可读结果（适合脚本和 Claude Code 调用）。不带参数运行 <code>openhermit</code> 进入终端导航。<code>openhermit</code> 与 <code>hermit</code> 是同一程序的别名。</p>
-
-    <h3>启动与状态</h3>
-    <table>
-      <thead><tr><th>命令</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr><td><code>openhermit</code></td><td>打开终端导航（控制面菜单）：用量同步、本地工作台、用户、token 池</td></tr>
-        <tr><td><code>openhermit web</code></td><td>直接启动并打开 Web 工作台，跳过终端导航；可加 <code>--daemon</code> 后台运行</td></tr>
-        <tr><td><code>openhermit --daemon --port 8080</code></td><td>后台运行 Web 工作台并指定端口（默认 5680）</td></tr>
-        <tr><td><code>openhermit status</code></td><td>查看后台 daemon / Web 运行状态</td></tr>
-        <tr><td><code>openhermit doctor</code></td><td>只读本地诊断：配置、服务、路径</td></tr>
-        <tr><td><code>openhermit stop</code></td><td>停止后台 daemon</td></tr>
-        <tr><td><code>openhermit services</code></td><td>终端服务菜单，按项启动/停止 <code>web</code> / <code>usage</code> / <code>collaboration</code></td></tr>
-        <tr><td><code>openhermit --version</code> · <code>--help</code></td><td>查看版本 / 完整命令帮助</td></tr>
-      </tbody>
-    </table>
-
-    <h3>用量采集与上报（核心）</h3>
-    <table>
-      <thead><tr><th>命令</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr><td><code>openhermit usage status</code></td><td>查看后台 worker 是否运行、消息上报是否开启、上报运行时</td></tr>
-        <tr><td><code>openhermit usage today</code></td><td>查看今日本地 usage 摘要（不上传）</td></tr>
-        <tr><td><code>openhermit usage start</code></td><td>开启轻量后台 usage 采集，默认配置开机自启；仅扫描本机 JSONL</td></tr>
-        <tr><td><code>openhermit usage stop</code></td><td>停止后台采集；默认关闭开机自启（<code>--keep-autostart</code> 保留）</td></tr>
-        <tr><td><code>openhermit usage report</code></td><td>立即扫描并按服务端游标增量上报新增消息；<code>--full</code> 忽略游标全量重扫，用于补报历史</td></tr>
-        <tr><td><code>openhermit usage autostart status|enable|disable</code></td><td>管理开机自启（macOS launchd）</td></tr>
-      </tbody>
-    </table>
-
-    <h3>用户授权（上报目标）</h3>
-    <table>
-      <thead><tr><th>命令</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr><td><code>openhermit auth status</code></td><td>查看 AgentBus 用户授权状态</td></tr>
-        <tr><td><code>openhermit auth login</code></td><td>通过飞书授权登录 AgentBus；登录后用量才有上报目标</td></tr>
-        <tr><td><code>openhermit auth logout</code></td><td>退出 AgentBus 用户（不影响本地 runtime 登录）</td></tr>
-      </tbody>
-    </table>
-
-    <h3>团队与任务</h3>
-    <table>
-      <thead><tr><th>命令</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr><td><code>openhermit teams list</code></td><td>列出本地团队（不启动 Web）</td></tr>
-        <tr><td><code>openhermit teams create</code></td><td>创建本地团队元数据；支持 <code>--name</code> / <code>--harness</code> / <code>--bind-project</code> / <code>--work-dir</code></td></tr>
-        <tr><td><code>openhermit tasks list --team &lt;team&gt;</code></td><td>查看某个团队的活跃任务</td></tr>
-        <tr><td><code>openhermit collaboration start</code></td><td>启用本地/自托管团队协作配置</td></tr>
-      </tbody>
-    </table>
-
-    <h3>维护与插件</h3>
-    <table>
-      <thead><tr><th>命令</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr><td><code>openhermit update</code></td><td>检查并自更新到最新版本</td></tr>
-        <tr><td><code>openhermit add &lt;plugin&gt;</code></td><td>安装能力插件到 MCP library（例：<code>add worker-society</code>）</td></tr>
-        <tr><td><code>openhermit aikey</code></td><td>认领 token 池密钥（功能开发中，暂未开放）</td></tr>
-      </tbody>
-    </table>
-
-    <div class="callout">
-      <div class="callout-title">提示</div>
-      <p><code>openhermit</code> 不带参数进入终端导航（控制面菜单）。只想打开浏览器工作台用 <code>openhermit web</code>。任何命令加 <code>--help</code> 看完整说明，加 <code>--json</code> 输出机器可读结果。</p>
-    </div>
-
-    <h3>默认路径和端口</h3>
-    <table>
-      <thead>
-        <tr><th>项目</th><th>默认值</th><th>说明</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Web UI</td><td><code>http://127.0.0.1:5680/teams</code></td><td>团队工作台入口</td></tr>
-        <tr><td>本地状态</td><td><code>~/.hermit/</code></td><td>团队、任务、消息、设置、审计</td></tr>
-        <tr><td>Claude Code 会话</td><td><code>~/.claude/projects</code></td><td>用量和会话数据来源</td></tr>
-        <tr><td>Codex 会话</td><td><code>~/.codex/sessions</code></td><td>Codex 用量数据来源</td></tr>
-      </tbody>
-    </table>
-
-    <h2 id="first-use">3. 首次使用流程</h2>
-    <ol>
-      <li>运行 <code>openhermit</code> 或 <code>openhermit web</code></li>
-      <li>浏览器打开 <code>http://127.0.0.1:5680/teams</code></li>
-      <li>点击「创建数字员工」，填写团队名称和 slug</li>
-      <li>选择运行时（如 <code>claudecode</code>、<code>codex</code>）</li>
-      <li>绑定本地项目目录</li>
-      <li>创建任务，开始使用</li>
-    </ol>
-
-    <h3>支持的 Agent 运行时</h3>
-    <table>
-      <thead>
-        <tr><th>级别</th><th>运行时</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>一等适配</td><td>Claude Code、Codex、Gemini、OpenCode、Cursor</td></tr>
-        <tr><td>兼容注册</td><td>Devin、Qoder、Kimi、iFlow、ACP、tmux</td></tr>
-      </tbody>
-    </table>
-
-    <h2 id="usage-report">4. 用量上报</h2>
-
-    <h3>配置自动上报（完整步骤）</h3>
-    <p>自动上报需要三个条件同时满足：<strong>① 已登录 AgentBus</strong> + <strong>② 消息上报已开启</strong> + <strong>③ 后台采集 worker 运行中</strong>。缺任何一个都不会上报。</p>
-    <ol>
-      <li><strong>登录上报目标</strong> — 运行 <code>openhermit auth login</code>（飞书授权绑定 AgentBus 用户），用 <code>openhermit auth status</code> 确认已登录。未登录则上报没有目标服务端。</li>
-      <li><strong>启用消息上报</strong> — 运行 <code>openhermit</code> →「用量同步」→ 回车展开 →「消息上报」→ 回车开启，首次选择上报运行时（Claude Code / Codex）。<em>启用上报的开关目前只在终端导航里，没有单独的子命令。</em></li>
-      <li><strong>启动后台采集</strong> — 运行 <code>openhermit usage start</code>，开启轻量后台 worker 并默认配置开机自启，持续扫描本地 JSONL。</li>
-      <li><strong>立即补报一次</strong> — 运行 <code>openhermit usage report</code>，按服务端游标增量上报新增消息；<code>--full</code> 忽略游标全量重扫，用于补报历史漏掉的消息。</li>
-      <li><strong>查看状态</strong> — <code>openhermit usage status</code>（worker 是否运行 / 上报是否开启）、<code>openhermit usage today</code>（今日摘要），或 Web 工作台「用量」Tab。</li>
-    </ol>
-
-    <div class="callout success">
-      <div class="callout-title">上报不工作？三要素自检</div>
-      <p>按顺序排查：<code>openhermit auth status</code>（已登录?）→ <code>openhermit usage status</code>（worker running 且 消息上报 enabled?）→ <code>openhermit usage report</code>（手动触发一次，看输出 / 报错）。补报历史用 <code>usage report --full</code>；开机不自启用 <code>usage autostart enable</code>。</p>
-    </div>
-
-    <h3>Web 工作台查看用量</h3>
-    <ol>
-      <li>运行 <code>openhermit web</code> 或在终端导航器选择「本地工作台」</li>
-      <li>浏览器打开 <code>http://127.0.0.1:5680</code></li>
-      <li>进入任意团队页面，顶部 Tab 切换到「用量」查看 token 消耗趋势、会话数、消息量</li>
-      <li>支持按成员、运行时、时间段筛选</li>
-    </ol>
-
-    <div class="callout success">
-      <div class="callout-title">提示</div>
-      <p>Web 工作台在后台持续运行时（<code>openhermit --daemon</code>）会自动定时采集，无需手动触发。打开浏览器即可查看最新数据。</p>
-    </div>
-
-    <h3>上报目标与看板</h3>
-    <p>用量统一上报到 <strong>AgentBus</strong>（中心化服务端 / 数据总线）。完成 <code>openhermit auth login</code> 后，后台 worker 会自动把增量数据上报到 AgentBus；企业管理者可在 AgentBus 看板查看全团队、按成员 / 运行时 / 时间段汇总的用量。</p>
-
-    <h3>支持的数据源</h3>
-    <table>
-      <thead>
-        <tr><th>运行时</th><th>数据位置</th><th>采集内容</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Claude Code</td><td><code>~/.claude/projects/**/*.jsonl</code></td><td>token 用量、会话数、消息量；支持 IM 归因</td></tr>
-        <tr><td>Codex</td><td><code>~/.codex/sessions/**/*.jsonl</code></td><td>token 用量（output_tokens 为主）</td></tr>
-      </tbody>
-    </table>
-
-    <div class="callout">
-      <div class="callout-title">上报机制</div>
-      <ul>
-        <li>统一通过 <code>POST /api/v1/report/messages</code> 上报</li>
-        <li>支持断点续传，幂等去重（基于 eventId）</li>
-        <li>启动后初始化扫描，后续按周期（约 5 分钟）增量扫描</li>
-        <li>隐私安全：只上报 metadata（token 数、时间戳、维度），不上传消息正文、代码内容或密钥</li>
-      </ul>
-    </div>
-
-    <h3>Codex 已知限制</h3>
-    <p>Codex 本地 JSONL 中 <code>input_tokens</code> 和 <code>cached_input_tokens</code> 经常为 0，因此无法精确计算上下文窗口占比。<code>output_tokens</code> 上报正常，不影响整体用量统计。</p>
-
-    <h3>停止上报</h3>
-    <p>关闭消息上报：运行 <code>openhermit</code> →「用量同步」→「消息上报」关闭；停止后台采集用 <code>openhermit usage stop</code>。两者相互独立——关掉 worker 不影响「消息上报」开关状态，反之亦然。</p>
-
-    <h2 id="faq">5. 常见问题</h2>
-
-    <h3>Q: EACCES: permission denied 权限报错</h3>
-    <div class="callout error">
-      <div class="callout-title">典型报错</div>
-      <pre><code>Error: EACCES: permission denied, open '~/.hermit/telemetry/worker.pid'
-# 或
-npm error code EACCES syscall rename</code></pre>
-    </div>
-    <p><strong>原因：</strong>之前以 <code>sudo</code> 运行过 hermit 或 npm，导致部分文件被 root 占有。</p>
-    <p><strong>修复：</strong></p>
-    <pre><code># 修复 telemetry 文件权限
-sudo chown $(whoami) ~/.hermit/telemetry/worker.pid
-
-# 如果 npm global 目录也报权限错误
-sudo chown -R $(whoami) ~/.npm-global</code></pre>
-    <div class="callout warn">
-      <div class="callout-title">预防</div>
-      <p>不要用 <code>sudo</code> 运行 <code>openhermit</code> 或 <code>npm install -g</code>。如果 npm global 目录权限正确（属于当前用户），全局安装不需要 sudo。</p>
-    </div>
-
-    <h3>Q: openhermit 命令找不到</h3>
-    <p>npm 全局 bin 目录可能不在 PATH 中。检查并添加：</p>
-    <pre><code># 查看 npm 全局 bin 目录
-npm config get prefix
-
-# 添加到 PATH（写入 ~/.zshrc 或 ~/.bashrc）
-export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
-
-    <h3>Q: 更新失败</h3>
-    <p>如果 <code>openhermit update</code> 失败，可以直接用 npm 重新安装：</p>
-    <pre><code>npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
-
-    <h3>Q: Windows 安装/更新报 EBUSY: resource busy or locked</h3>
-    <div class="callout error">
-      <div class="callout-title">典型报错</div>
-      <pre><code>npm error code EBUSY
-npm error syscall rename
-npm error path D:\...\node_modules\@yancyyu\openhermit
-npm error errno -4082
-npm error EBUSY: resource busy or locked, rename '...' -&gt; '...'</code></pre>
-    </div>
-    <p><strong>原因：</strong>这不是权限问题（EBUSY ≠ EACCES），所以 <code>sudo</code> 或"以管理员身份运行"都无效（Windows 也没有 <code>sudo</code>）。是之前运行过的 openhermit 后台进程（daemon / usage worker / 反复重启的子进程）还占着包里的文件，npm 无法替换。</p>
-    <p><strong>解决：</strong>按顺序试，多数情况第 ① 步就够了。先释放文件占用，再安装。</p>
-
-    <p><strong>① 首选 —— 用 openhermit 自己关掉后台（最干净，1.8.4 上也能跑）：</strong></p>
-    <pre><code>openhermit stop
-openhermit usage stop   # 如果开过后台用量采集
-npm install -g @yancyyu/openhermit@latest --prefer-online
-openhermit --version</code></pre>
-
-    <p><strong>② 还报 EBUSY —— 有残留进程没退，杀掉它们（只杀 openhermit/hermit 相关，不碰 VS Code 等）：</strong></p>
-    <pre><code># PowerShell
-Get-CimInstance Win32_Process -Filter "name='node.exe'" |
-  Where-Object { $_.CommandLine -match 'openhermit|hermit' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force
-
-npm install -g @yancyyu/openhermit@latest --prefer-online</code></pre>
-
-    <div class="callout warn">
-      <div class="callout-title">③ 兜底 —— 重启</div>
-      <p>如果上面都不行，或不想敲命令：<strong>重启电脑 → 直接 <code>npm install -g @yancyyu/openhermit@latest --prefer-online</code></strong>。重启后没有任何进程占用，必成。</p>
-    </div>
-
-    <h3>Q: Web UI 打不开</h3>
-    <ul>
-      <li>确认 daemon 正在运行：<code>openhermit status</code></li>
-      <li>检查端口是否被占用：<code>lsof -i :5680</code></li>
-      <li>尝试指定其他端口：<code>openhermit --port 8080</code></li>
-    </ul>
-
-    <h3>Q: 本地用量里为什么有 IM 用量？</h3>
-    <p>IM 触发的 Agent 执行最终仍落到本地 Claude Code session。AgentCli 统一读取本地 JSONL，再根据 bridge 元数据归因为 <code>source=feishu</code> 或 <code>source=wechat</code>。</p>
-
-    <h3>Q: worktree 是安全沙箱吗？</h3>
-    <p>不是。worktree 是 Git 工作区隔离，用来降低并行编辑冲突；不等于容器隔离或权限沙箱。</p>
-
-    <h3>Q: AgentCli 会上传代码或消息内容吗？</h3>
-    <p>默认 metadata-only：不上传消息正文、助手回复、工具输入输出、cron prompt 或 MCP 密钥。具体上报范围取决于管理员在 Settings 中的 Task Bus / Redis 配置。</p>
-
-    <h3>Q: Codex 上报数据不完整？</h3>
-    <p>这是已知限制。Codex 本地 JSONL 中 <code>input_tokens</code> 字段经常为 0（OpenAI 本地客户端未完整记录），但 <code>output_tokens</code> 正常。不影响总用量统计，只是无法精确展示输入 token 占比。</p>
-  </div>
-
-  <footer class="footer">
-    <div class="footer-left">&copy; 2026 AgentCli. AGPL-3.0 License.</div>
-    <div class="footer-links">
-      <a href="./">首页</a>
-      <a href="https://github.com/yancyuu/Hermit/issues">反馈</a>
-    </div>
-  </footer>
-</body>
-</html>
-`;
-
 rmSync(OUT_DIR, { recursive: true, force: true });
 mkdirSync(OUT_DIR, { recursive: true });
 writeText('index.html', html);
-writeText('guide.html', guideHtml);
 copyFile('scripts/install.sh', 'install.sh');
 copyFile('public/icon.png', 'icon.png');
 
 console.log(`Built GitHub Pages site at ${OUT_DIR}`);
-console.log('- index.html');
-console.log('- guide.html');
+console.log('- index.html (merged single page)');
 console.log('- install.sh');
 console.log('- icon.png');

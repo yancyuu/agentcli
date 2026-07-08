@@ -22,6 +22,12 @@ type ConversationUploadTelemetryConfig = {
     batchSize?: number;
     uploadBatchSize?: number;
     uploadBatchDelayMs?: number;
+    fullRescanWindowSize?: number;
+    // Hours back the PERIODIC first-run scan will collect (no server cursor yet).
+    // Bounds the initial backfill so a never-reported channel doesn't try to upload
+    // all history at once. 0 = no floor (collect everything). A manual full rescan
+    // and any run that already has a server cursor ignore this (cursor resumes).
+    uploadSinceHours?: number;
     baseUrl?: string;
   };
 };
@@ -42,9 +48,20 @@ const UPLOAD_LOG_FILE = 'conversation-upload.log';
 // a new server-side channel, isolated from any history stored under the old value.
 const SOURCE = 'agentcli' as const;
 const API_TIMEOUT_MS = 8_000;
+// Uploading a batch is a heavy server-side write (N messages with usage +
+// dedup). 8s is plenty for auth/usage-status reads but routinely times out a
+// 100- or 500-message batch → HTTP 599, which left claudecode stuck on the
+// same failing batch forever (cursor never advanced, full rescan retried the
+// identical window every time). Give uploads their own longer timeout.
+const UPLOAD_TIMEOUT_MS = 60_000;
 // Unified upload endpoint for local coding (Claude Code / Codex) usage. Each
 // message carries its own project/conversation context; scene is always `coding`.
 const UPLOAD_ENDPOINT = '/api/v1/report/messages';
+// Lane A — usage-only reporting: conversation text is NEVER shipped, only token
+// usage + metadata. The wire contract still requires `message.content`, so it
+// carries this fixed placeholder instead of any user/assistant text. Dropping the
+// field entirely is safe only after confirming the server treats it as optional.
+const REPORTED_CONTENT_PLACEHOLDER = '[usage only]';
 
 export interface ConversationUploadStatus {
   enabled: boolean;
@@ -318,6 +335,32 @@ async function appendUploadLog(
   }
 }
 
+async function appendScanProgress(
+  platform: UploadPlatform,
+  filesScanned: number,
+  messagesCollected: number
+): Promise<void> {
+  await appendUploadLog(hermitHome(), 'scan-progress', {
+    platform,
+    filesScanned,
+    messagesCollected,
+  });
+}
+
+function clientCursorAsServerCursor(cursor: ClientCursor): ServerCursor {
+  return {
+    schemaVersion: cursor.schemaVersion,
+    purpose: cursor.purpose,
+    transactionId: cursor.transactionId,
+    baseCursorHash: cursor.baseCursorHash,
+    targetCursorHash: cursor.targetCursorHash,
+    fileCount: cursor.fileCount,
+    messageCount: cursor.messageCount,
+    generatedAt: cursor.generatedAt,
+    files: cursor.files,
+  };
+}
+
 function uploadLockPath(hermitHome: string): string {
   return path.join(hermitHome, 'telemetry', UPLOAD_LOCK_FILE);
 }
@@ -583,12 +626,13 @@ async function fetchUsageChannel(
   });
   const text = await res.text().catch(() => '');
   if (!res.ok) {
-    const diagnostic = responseDiagnosticFromText(res.status, text);
+    const diagnostic = responseDiagnosticFromText(res.status, text, res.statusText);
     await (home
       ? appendUploadLog(home, 'usage-status-response', {
           platform,
           ok: false,
           status: res.status,
+          statusText: res.statusText,
           body: sanitizeDiagnosticText(text),
         })
       : Promise.resolve());
@@ -698,15 +742,15 @@ function claudeUploadMessage(
   const role = msg.role === 'user' || msg.role === 'assistant' ? msg.role : undefined;
   if (!role) return null;
 
-  const content = textFromContent(msg.content ?? obj.content);
+  const hasText = Boolean(textFromContent(msg.content ?? obj.content));
   const usage = usageFromMessage(msg);
   // Keep a message if it has readable text OR token usage. Tool-use / tool-result
   // turns carry no text but hold the bulk of token usage — dropping them made the
   // server undercount tokens, and the cursor advances past them so they would
-  // never be retried. Textless usage-bearing messages get a placeholder content
-  // so their usage is still reported; the server dedupes by eventId.
-  if (!content && !usage) return null;
-  const reportedContent = content || (role === 'assistant' ? '[tool use]' : '[no text]');
+  // never be retried. `hasText` only decides whether the line is a real message —
+  // the text itself is never shipped (Lane A, usage-only reporting).
+  if (!hasText && !usage) return null;
+  const reportedContent = REPORTED_CONTENT_PLACEHOLDER;
 
   const sessionId = claudeSessionId(filePath, obj);
   const messageId = claudeMessageId(obj, msg);
@@ -750,12 +794,14 @@ function claudeUploadMessage(
 async function collectClaudeCodeMessages(
   serverCursor: ServerCursor | null | undefined,
   limit: number,
-  generatedAt: string
+  generatedAt: string,
+  sinceMs = 0
 ): Promise<CollectedMessages> {
   const messages: UploadMessage[] = [];
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
+  let filesScanned = 0;
 
   for await (const filePath of walkJsonl(getProjectsBasePath())) {
     if (maxMessages > 0 && messages.length >= maxMessages) break;
@@ -775,6 +821,8 @@ async function collectClaudeCodeMessages(
         fromOffset,
         toOffset: scanEndOffset,
       });
+      filesScanned += 1;
+      await appendScanProgress('claudecode', filesScanned, messages.length);
       continue;
     }
 
@@ -796,6 +844,7 @@ async function collectClaudeCodeMessages(
         continue;
       }
       const occurredAt = typeof obj.timestamp === 'string' ? obj.timestamp : undefined;
+      if (sinceMs > 0 && occurredAt && Date.parse(occurredAt) < sinceMs) continue;
       startedAt ||= occurredAt;
       const baseMessage = claudeUploadMessage(filePath, obj, generatedAt, startedAt);
       if (!baseMessage) continue;
@@ -814,6 +863,8 @@ async function collectClaudeCodeMessages(
       fromOffset,
       toOffset,
     });
+    filesScanned += 1;
+    await appendScanProgress('claudecode', filesScanned, messages.length);
   }
 
   return {
@@ -891,12 +942,14 @@ function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
 async function collectCodexMessages(
   serverCursor: ServerCursor | null | undefined,
   limit: number,
-  generatedAt: string
+  generatedAt: string,
+  sinceMs = 0
 ): Promise<CollectedMessages> {
   const messages: UploadMessage[] = [];
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
+  let filesScanned = 0;
 
   for (const root of [
     path.join(codexHome(), 'sessions'),
@@ -920,6 +973,8 @@ async function collectCodexMessages(
           fromOffset,
           toOffset: scanEndOffset,
         });
+        filesScanned += 1;
+        await appendScanProgress('codex', filesScanned, messages.length);
         continue;
       }
 
@@ -972,6 +1027,7 @@ async function collectCodexMessages(
               : typeof record.timestamp === 'string'
                 ? record.timestamp
                 : generatedAt;
+        if (sinceMs > 0 && Date.parse(occurredAt) < sinceMs) continue;
         startedAt ||= occurredAt;
         const messageId = String(
           obj.id ??
@@ -1020,6 +1076,8 @@ async function collectCodexMessages(
         fromOffset,
         toOffset,
       });
+      filesScanned += 1;
+      await appendScanProgress('codex', filesScanned, messages.length);
     }
     if (maxMessages > 0 && messages.length >= maxMessages) break;
   }
@@ -1034,11 +1092,12 @@ async function collectMessagesForPlatform(
   platform: UploadPlatform,
   serverCursor: ServerCursor | null | undefined,
   limit: number,
-  generatedAt: string
+  generatedAt: string,
+  sinceMs = 0
 ): Promise<CollectedMessages> {
   return platform === 'codex'
-    ? collectCodexMessages(serverCursor, limit, generatedAt)
-    : collectClaudeCodeMessages(serverCursor, limit, generatedAt);
+    ? collectCodexMessages(serverCursor, limit, generatedAt, sinceMs)
+    : collectClaudeCodeMessages(serverCursor, limit, generatedAt, sinceMs);
 }
 
 function sanitizeDiagnosticText(value: unknown): string {
@@ -1055,14 +1114,37 @@ function sanitizeUploadError(error: unknown): string {
   return sanitizeDiagnosticText(error instanceof Error ? error.message : String(error));
 }
 
-function responseDiagnosticFromText(status: number, text = ''): string {
-  if (!text) return `HTTP ${status}`;
-  return `HTTP ${status}: ${sanitizeDiagnosticText(text)}`;
+/**
+ * A server that is effectively unavailable: updating, crashed, or unreachable.
+ * safeFetch turns transport failures (network/DNS/timeout) into a synthetic
+ * HTTP 599, and real server faults arrive as 5xx — both match this. Business
+ * errors (422/409) do NOT match: those are per-batch rejections that must stay
+ * on the per-batch 3-strike path.
+ */
+function isServerUnavailableError(error: unknown): boolean {
+  return error instanceof Error && /HTTP 5\d\d/.test(error.message);
+}
+
+/** Thrown to abort the entire upload run when the server is down. */
+class ServerUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ServerUnavailableError';
+  }
+}
+
+function responseDiagnosticFromText(status: number, text = '', statusText = ''): string {
+  // statusText carries the real cause for synthetic 599s (safeFetch puts the
+  // undici cause there: 'fetch failed (ECONNRESET)') and for real server faults
+  // — without it a transport failure diagnoses as just "HTTP 599", which tells
+  // nobody what actually broke.
+  const head = statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
+  return text ? `${head}: ${sanitizeDiagnosticText(text)}` : head;
 }
 
 async function responseDiagnostic(res: Response): Promise<string> {
   const text = await res.text().catch(() => '');
-  return responseDiagnosticFromText(res.status, text);
+  return responseDiagnosticFromText(res.status, text, res.statusText);
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
@@ -1114,6 +1196,42 @@ function batchDelayMs(configured?: number): number {
   return Number.isFinite(raw) && raw >= 0 ? raw : 1_000;
 }
 
+/**
+ * Two-tier timestamp floor (ms) for scans:
+ *
+ * Incremental (periodic daemon): 24 hours.
+ *   The 本地 row in the usage dashboard is always capped at 24h.
+ *
+ * Full rescan (manual `usage report` / `--full`): 168 hours (7 days).
+ *   One-shot manual scans should reach back further so the user sees a
+ *   meaningful window of data even if the daemon hasn't run recently.
+ *
+ * The server dedups by eventId, so re-scanning the overlap never double-counts.
+ * Set OPENHERMIT_UPLOAD_SINCE_HOURS to 0 to remove the floor (ops escape hatch only).
+ */
+function hoursToMs(hours: number): number {
+  if (!Number.isFinite(hours) || hours <= 0) return 0;
+  return Date.now() - hours * 3_600_000;
+}
+
+function incrementalSinceMs(cfg: ConversationUploadConfig | undefined): number {
+  const hours = Number(
+    cfg?.telemetry?.conversations?.uploadSinceHours ??
+      process.env.OPENHERMIT_UPLOAD_SINCE_HOURS ??
+      24
+  );
+  return hoursToMs(hours);
+}
+
+function fullRescanSinceMs(cfg: ConversationUploadConfig | undefined): number {
+  const hours = Number(
+    cfg?.telemetry?.conversations?.uploadSinceHours ??
+      process.env.OPENHERMIT_UPLOAD_SINCE_HOURS ??
+      168
+  );
+  return hoursToMs(hours);
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1161,7 +1279,7 @@ async function postPayload(
       'Idempotency-Key': idempotencyKey,
     },
     body,
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   const text = await res.text().catch(() => '');
   await appendUploadLog(home, 'upload-response', {
@@ -1169,6 +1287,7 @@ async function postPayload(
     platform,
     ok: res.ok,
     status: res.status,
+    statusText: res.statusText,
     body: sanitizeDiagnosticText(text),
   });
   const receipt = parseJsonObject(text) as UploadReceipt;
@@ -1261,6 +1380,19 @@ async function postMessagesInBatches(
   let uploadedTokens = 0;
   const size = Math.max(1, batchSize);
   const totalBatches = Math.ceil(messages.length / size);
+  // Stability over speed: a single transient timeout (HTTP 599) must NOT abort
+  // the whole window — that left claudecode stuck retrying the identical batch
+  // forever. Skip the failed batch and keep going; only bail after several
+  // CONSECUTIVE failures so a genuinely-down server stops fast instead of
+  // waiting UPLOAD_TIMEOUT_MS × every batch.
+  const MAX_CONSECUTIVE_FAILURES = 3;
+  // Network-layer / 5xx = the server is effectively down. Bail the whole run
+  // after 2 in a row instead of paying UPLOAD_TIMEOUT_MS per remaining batch.
+  // Business errors (422/409) are NOT network failures and stay on the
+  // 3-strike MAX_CONSECUTIVE_FAILURES path above.
+  const MAX_NETWORK_FAILURES = 2;
+  let consecutiveFailures = 0;
+  let consecutiveNetworkFailures = 0;
 
   for (let offset = 0; offset < messages.length; offset += size) {
     const batchIndex = Math.floor(offset / size) + 1;
@@ -1276,12 +1408,23 @@ async function postMessagesInBatches(
       totalMessages: runTotalMessages,
     });
 
+    // Keep the bearer token fresh across a long multi-batch run. The token is
+    // captured once before the loop; without this, a run that outlasts the
+    // access-token TTL expires mid-batch and the next POST ships an expired
+    // token → a permission error that derails the run ("抱着抱着报权限错").
+    // Refreshing just before each batch is a no-op unless the token is within
+    // the expiry buffer (EXPIRY_BUFFER_MS in OpenHermitAuthClient), so every
+    // batch ships a valid token. Fall back to the captured token only if the
+    // store can't be read at all.
+    const freshToken = await getValidBearerToken(home, baseUrl);
+    const batchToken = freshToken ?? token;
+
     try {
       // Attach the cursor to EVERY batch, not only the last. The cursor marks
       // the scan position (per-file offsets) and is identical across batches;
       // the server commits it from whichever batch it durably processes, so a
       // mid-run crash still leaves an accurate cursor instead of none.
-      const status = await postPayload(home, baseUrl, endpointPath, platform, token, {
+      const status = await postPayload(home, baseUrl, endpointPath, platform, batchToken, {
         ...payloadBase,
         messages: batchMessages,
       });
@@ -1292,6 +1435,8 @@ async function postMessagesInBatches(
       if (!status.lastError) {
         uploadedCount += batchMessages.length;
         uploadedTokens += sumMessageTokens(batchMessages);
+        consecutiveFailures = 0;
+        consecutiveNetworkFailures = 0;
       }
       await appendUploadLog(home, 'upload-batch-finished', {
         platform,
@@ -1309,8 +1454,10 @@ async function postMessagesInBatches(
         totalMessages: runTotalMessages,
         lastError: status.lastError,
       });
-      if (status.lastError)
-        return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
+      if (status.lastError) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
+      }
       if (batchIndex < totalBatches && batchDelay > 0) await wait(batchDelay);
     } catch (error) {
       const message = sanitizeUploadError(error);
@@ -1332,7 +1479,18 @@ async function postMessagesInBatches(
           lastError: message,
         })
       );
-      return { status: mergeStatuses(statuses), uploadedCount, uploadedTokens };
+      // Transport failure (safeFetch HTTP 599) or a real 5xx ⇒ the server is
+      // down/updating. Bail the whole run after 2 in a row. Business errors
+      // (422/409) fall through to the 3-strike path — one bad batch must not
+      // abort a backfill that is otherwise making progress.
+      if (isServerUnavailableError(error)) {
+        consecutiveNetworkFailures += 1;
+        if (consecutiveNetworkFailures >= MAX_NETWORK_FAILURES) {
+          throw new ServerUnavailableError(message);
+        }
+      }
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
     }
   }
 
@@ -1355,13 +1513,16 @@ async function uploadPlatformMessages(
   // foreground scan must push through so a pending backlog actually drains.
   const foreground = process.env.HERMIT_USAGE_FOREGROUND_SCAN === '1';
   const inFlightCount = Number(channel?.inFlight?.count ?? 0);
+  const isIncremental = !fullRescan && !foreground;
+  const sinceMs = isIncremental ? incrementalSinceMs(cfg) : fullRescanSinceMs(cfg);
   if (inFlightCount > 0 && !(foreground || fullRescan)) {
     const conversationCfgEarly = cfg.telemetry?.conversations;
     const { messages: pendingMessages } = await collectMessagesForPlatform(
       platform,
       channel?.currentCursor,
       conversationCfgEarly?.batchSize ?? 0,
-      generatedAt
+      generatedAt,
+      sinceMs
     );
     await appendUploadLog(home, 'server-channel-inflight', {
       platform,
@@ -1394,84 +1555,108 @@ async function uploadPlatformMessages(
   // Incremental resumes automatically once the server starts committing.
 
   const conversationCfg = cfg.telemetry?.conversations;
-  // `usage report --full` backfill: ignore the server cursor so every file scans
-  // from offset 0 and re-uploads everything. The server dedupes by eventId, so
-  // already-uploaded messages become duplicates (not re-counted) and messages
-  // newly included by a filter change (e.g. tool-use turns that now keep their
-  // usage) get inserted. After success the server commits the full-range cursor.
-  const { messages, clientCursor } = await collectMessagesForPlatform(
-    platform,
-    fullRescan ? null : channel?.currentCursor,
-    conversationCfg?.batchSize ?? 0,
-    generatedAt
-  );
-  const discoveredTokens = sumMessageTokens(messages);
-  const baseStatus = {
-    totalDiscovered: messages.length,
-    skippedAlreadyUploaded: 0,
-    pending: messages.length,
-    pendingTokens: discoveredTokens,
-  };
-  await appendUploadLog(home, 'scan-collected', {
-    platform,
-    ...baseStatus,
-    cursorSource: 'server-usage-status-currentCursor',
-    baseCursorHash: clientCursor.baseCursorHash,
-    targetCursorHash: clientCursor.targetCursorHash,
-  });
-
-  if (!messages.length) {
-    await appendUploadLog(home, 'no-incremental-messages', { platform, ...baseStatus });
-    return emptyStatus(true, true, baseStatus);
-  }
-
   const uploadBatchSize = Number(
     (conversationCfg as { uploadBatchSize?: number } | undefined)?.uploadBatchSize ??
       process.env.OPENHERMIT_CONVERSATION_UPLOAD_BATCH_SIZE ??
       500
   );
   const uploadBatchDelay = batchDelayMs(conversationCfg?.uploadBatchDelayMs);
-  const payloadBase: Omit<UploadPayload, 'messages'> = {
-    schemaVersion: 1,
-    generatedAt,
-    reporter: SOURCE,
-    client: { tool: platform },
-    scene: 'coding',
-    clientCursor,
-  };
+  const windowSize = fullRescan
+    ? Math.max(1, conversationCfg?.fullRescanWindowSize ?? uploadBatchSize * 2)
+    : (conversationCfg?.batchSize ?? 0);
 
-  await appendUploadLog(home, 'upload-start', {
-    platform,
-    pending: messages.length,
-    uploadBatchSize,
-    uploadBatchDelay,
-    baseUrl,
-  });
+  let cursorForScan: ServerCursor | null | undefined = fullRescan ? null : channel?.currentCursor;
+  const statuses: ConversationUploadStatus[] = [];
+  let totalDiscovered = 0;
+  let totalDiscoveredTokens = 0;
+  let totalUploaded = 0;
+  let totalUploadedTokens = 0;
 
-  // Unified endpoint: every coding turn POSTs to /api/v1/report/messages in a
-  // single batch sequence. Each message carries its own project/conversation.
-  const { status, uploadedCount, uploadedTokens } = await postMessagesInBatches(
-    home,
-    baseUrl,
-    UPLOAD_ENDPOINT,
-    platform,
-    token,
-    payloadBase,
-    messages,
-    uploadBatchSize,
-    uploadBatchDelay,
-    messages.length,
-    0
-  );
-  // pending = discovered − uploaded (remaining), not the raw discovered count —
-  // otherwise it shows "N 待上报" even after a fully-successful upload. The same
-  // rule applies to pendingTokens (discovered − uploaded tokens) so 待上报 reads
-  // in tokens — the local backlog's real cost — and drops to 0 on success.
+  while (true) {
+    const { messages, clientCursor } = await collectMessagesForPlatform(
+      platform,
+      cursorForScan,
+      windowSize,
+      generatedAt,
+      sinceMs
+    );
+    const discoveredTokens = sumMessageTokens(messages);
+    totalDiscovered += messages.length;
+    totalDiscoveredTokens += discoveredTokens;
+    // baseStatus.totalDiscovered is CUMULATIVE across all windows so the progress
+    // bar's denominator (scan-collected / batch totalMessages) matches the
+    // cumulative uploadedAfterBatch numerator — otherwise a windowed full rescan
+    // rendered 消息 617/117 (uploaded > total). pending stays per-window (what
+    // this window still owes).
+    const baseStatus = {
+      totalDiscovered,
+      skippedAlreadyUploaded: 0,
+      pending: messages.length,
+      pendingTokens: discoveredTokens,
+    };
+    await appendUploadLog(home, 'scan-collected', {
+      platform,
+      ...baseStatus,
+      cursorSource: fullRescan ? 'full-rescan-window' : 'server-usage-status-currentCursor',
+      baseCursorHash: clientCursor.baseCursorHash,
+      targetCursorHash: clientCursor.targetCursorHash,
+    });
+
+    if (!messages.length) {
+      await appendUploadLog(home, 'no-incremental-messages', { platform, ...baseStatus });
+      break;
+    }
+
+    const payloadBase: Omit<UploadPayload, 'messages'> = {
+      schemaVersion: 1,
+      generatedAt,
+      reporter: SOURCE,
+      client: { tool: platform },
+      scene: 'coding',
+      clientCursor,
+    };
+
+    await appendUploadLog(home, 'upload-start', {
+      platform,
+      pending: messages.length,
+      uploadBatchSize,
+      uploadBatchDelay,
+      baseUrl,
+    });
+
+    const { status, uploadedCount, uploadedTokens } = await postMessagesInBatches(
+      home,
+      baseUrl,
+      UPLOAD_ENDPOINT,
+      platform,
+      token,
+      payloadBase,
+      messages,
+      uploadBatchSize,
+      uploadBatchDelay,
+      totalDiscovered,
+      totalUploaded
+    );
+    statuses.push(status);
+    totalUploaded += uploadedCount;
+    totalUploadedTokens += uploadedTokens;
+
+    // Break the window loop only when this window uploaded NOTHING — a fully-down
+    // server. A transient per-batch timeout (handled inside postMessagesInBatches
+    // by skipping and continuing) must not abort the whole backfill: it left
+    // claudecode stuck retrying window 1 forever. Some success ⇒ advance cursor
+    // and keep draining history.
+    if (!fullRescan || messages.length < windowSize || uploadedCount === 0) break;
+    cursorForScan = clientCursorAsServerCursor(clientCursor);
+  }
+
+  const merged = mergeStatuses(statuses);
   const result = {
-    ...status,
-    ...baseStatus,
-    pending: Math.max(0, messages.length - uploadedCount),
-    pendingTokens: Math.max(0, discoveredTokens - uploadedTokens),
+    ...merged,
+    totalDiscovered,
+    skippedAlreadyUploaded: 0,
+    pending: Math.max(0, totalDiscovered - totalUploaded),
+    pendingTokens: Math.max(0, totalDiscoveredTokens - totalUploadedTokens),
   };
   await appendUploadLog(home, 'upload-finished', {
     platform,
@@ -1534,19 +1719,33 @@ async function uploadConversationMessagesLocked(
   // eventId-dedup namespaces, so there is no contention between them.
   // appendUploadLog uses single-line atomic appendFile, so interleaved channel
   // logs stay line-coherent.
-  const statuses = await Promise.all(
-    providers.map((platform) =>
-      uploadPlatformMessages(
-        platform,
-        channels.get(platform) ?? null,
-        cfg,
-        home,
-        baseUrl,
-        token,
-        generatedAt
+  let statuses: ConversationUploadStatus[];
+  try {
+    statuses = await Promise.all(
+      providers.map((platform) =>
+        uploadPlatformMessages(
+          platform,
+          channels.get(platform) ?? null,
+          cfg,
+          home,
+          baseUrl,
+          token,
+          generatedAt
+        )
       )
-    )
-  );
+    );
+  } catch (error) {
+    // A platform hit MAX_NETWORK_FAILURES (ServerUnavailableError) — the server
+    // is effectively down. Promise.all rejects the moment any platform throws,
+    // so the other channels stop too. Surface it as a normal "try again next
+    // cycle" status instead of letting the rejection crash the worker.
+    const message =
+      error instanceof ServerUnavailableError
+        ? `服务端不可用，已跳过本次上报：${error.message}`
+        : `上报异常：${sanitizeUploadError(error)}`;
+    await appendUploadLog(home, 'server-unavailable', { providers, lastError: message });
+    return emptyStatus(true, true, { lastError: message });
+  }
   return mergeStatuses(statuses);
 }
 

@@ -14,7 +14,7 @@ import {
 } from './workerSocietyPlugin';
 
 describe('WORKER_SOCIETY_PLUGIN descriptor', () => {
-  it('has a stable plugin id matching the `openhermit add` key', () => {
+  it('has a stable plugin id matching the `agentcli add` key', () => {
     expect(WORKER_SOCIETY_PLUGIN_ID).toBe('worker-society');
     expect(WORKER_SOCIETY_PLUGIN.id).toBe('worker-society');
   });

@@ -566,7 +566,7 @@ export function TaskBusSection(): React.JSX.Element {
     },
   });
 
-  const testRedisConnection = async (): Promise<boolean> => {
+  const testImConnection = async (): Promise<boolean> => {
     setConnecting(true);
     setMessage(null);
     const config = buildConfig();
@@ -579,7 +579,7 @@ export function TaskBusSection(): React.JSX.Element {
       const data = await res.json();
       const ok = !!data.connected;
       setConnected(ok);
-      setMessage(ok ? 'Redis 连接成功' : 'Redis 连接失败，请检查配置');
+      setMessage(ok ? 'IM 连接成功' : 'IM 连接失败，请检查配置');
       return ok;
     } catch (err) {
       setMessage(`连接失败: ${err}`);
@@ -635,11 +635,11 @@ export function TaskBusSection(): React.JSX.Element {
         )}
       </div>
 
-      <SettingsSectionHeader title="团队总线（本地 / 自托管）" icon={<Radio size={12} />} />
+      <SettingsSectionHeader title="IM 协作（企业版开放）" icon={<Radio size={12} />} />
 
       <SettingRow
-        label="启用团队总线"
-        description="用于本地/自托管 Redis 和跨团队协作；Usage 统计不依赖 Redis"
+        label="IM 协作"
+        description="企业版开放：在 Web 会话 → IM 中接入协作能力；agentbus 为独立项目"
       >
         <SettingsToggle enabled={enabled} onChange={toggle} />
       </SettingRow>
@@ -649,10 +649,8 @@ export function TaskBusSection(): React.JSX.Element {
           <div className="border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
             <div className="flex items-center gap-2 px-1 pb-2">
               <span className="text-sm font-medium text-red-500">*</span>
-              <span className="text-sm font-medium">Redis</span>
-              <span className="text-xs text-[var(--color-text-muted)]">
-                （仅用于本地/自托管协作）
-              </span>
+              <span className="text-sm font-medium">IM</span>
+              <span className="text-xs text-[var(--color-text-muted)]">（企业版协作配置）</span>
               <div className="ml-auto flex items-center gap-2">
                 {connected ? (
                   <span className="flex items-center gap-1 text-xs text-emerald-500">
@@ -713,7 +711,7 @@ export function TaskBusSection(): React.JSX.Element {
               <div className="flex items-center gap-3 pt-1">
                 <Button
                   size="sm"
-                  onClick={testRedisConnection}
+                  onClick={testImConnection}
                   disabled={connecting}
                   className="gap-1.5"
                 >
@@ -732,7 +730,7 @@ export function TaskBusSection(): React.JSX.Element {
           <div>
             <SettingRow
               label="分布式团队协作"
-              description="开启本地/自托管团队总线基础能力，供后续任务池和协作视图使用；"
+              description="企业版开放：在 Web 会话 → IM 中开启团队协作、任务池和企业看板能力"
             >
               <SettingsToggle
                 enabled={collaborationEnabled}
@@ -743,7 +741,7 @@ export function TaskBusSection(): React.JSX.Element {
             {!connected && collaborationEnabled && (
               <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
                 <AlertCircle size={12} />
-                <span>跨团队协作需要本地/自托管 Redis 连接。</span>
+                <span>跨团队协作需要先完成企业版 IM 连接。</span>
               </div>
             )}
           </div>

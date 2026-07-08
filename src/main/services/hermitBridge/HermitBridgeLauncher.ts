@@ -48,39 +48,36 @@ export interface BridgeCommand {
 }
 
 /**
- * Resolve the bridge binary path from the `hermit-bridge` npm dependency. Returns
- * null when the optional dependency was skipped (e.g. on a platform hermit-bridge
- * ships no binary for) so the caller can fall back to `npx`. Pure of side effects
- * apart from the resolution read.
+ * Pure name-mapper: maps platform+arch to the canonical `cc-connect` binary name.
+ * Used by tests; the actual resolution in production goes through
+ * `resolveBridgeCommand` which probes the `cc-connect` npm package directly.
  */
 export function resolveHermitBridgeBinaryName(
   platform: NodeJS.Platform = process.platform,
   arch: NodeJS.Architecture = process.arch
 ): string | null {
-  const platformName =
-    platform === 'win32'
-      ? 'windows'
-      : platform === 'darwin' || platform === 'linux'
-        ? platform
-        : null;
-  const archName = arch === 'x64' ? 'amd64' : arch === 'arm64' ? 'arm64' : null;
-  if (!platformName || !archName) return null;
-  return `hermit-bridge-${platformName}-${archName}${platformName === 'windows' ? '.exe' : ''}`;
+  // cc-connect ships a single cross-platform binary named `cc-connect`
+  // (the Go binary is the canonical cc-connect, identical to hermit-bridge).
+  if (platform === 'win32') return 'cc-connect.exe';
+  if (platform === 'darwin' || platform === 'linux') return 'cc-connect';
+  return null;
 }
 
-function defaultResolveBinary(): string | null {
+/**
+ * Resolve the hermit-bridge npm package's `run.js` entry. The package was renamed
+ * cc-connect → hermit-bridge (it lives in optionalDependencies); `run.js` is the
+ * self-installing launcher that fetches the canonical cc-connect Go binary on
+ * first run, so it is always present once the package is installed — unlike the
+ * old resolver, which looked for a Go binary at the package root that hermit-bridge
+ * never ships (the binary lands in `bin/` only after run.js runs install.js).
+ * Returns null when hermit-bridge is not installed so the caller can fall back to
+ * an externally managed bridge.
+ */
+function resolveHermitBridgeRunner(): string | null {
   try {
     const pkgRoot = path.dirname(require.resolve('hermit-bridge/package.json'));
-    const binaryName = resolveHermitBridgeBinaryName();
-    const candidates = [
-      binaryName ? path.join(pkgRoot, 'bin', binaryName) : null,
-      path.join(
-        pkgRoot,
-        'bin',
-        process.platform === 'win32' ? 'hermit-bridge.exe' : 'hermit-bridge'
-      ),
-    ].filter((candidate): candidate is string => Boolean(candidate));
-    return candidates.find((candidate) => existsSync(candidate)) ?? null;
+    const runner = path.join(pkgRoot, 'run.js');
+    return existsSync(runner) ? runner : null;
   } catch {
     return null;
   }
@@ -92,24 +89,23 @@ export function buildBridgeArgs(opts: BridgeLaunchOptions): string[] {
 }
 
 /**
- * Resolve the command + args to launch the bridge from the bundled
- * `hermit-bridge` binary. Throws when the binary is absent (the optional
- * dependency was skipped, e.g. on a platform hermit-bridge ships no binary for)
- * so the boot wiring can skip auto-launch and fall through to an externally
- * managed cc-connect.
+ * Resolve the command + args to launch the bridge via the bundled hermit-bridge
+ * `run.js` entry. Mirrors the CLI (bin/hermit.mjs: `node run.js -config <path>`)
+ * so the same self-installing Go binary runs under node on every platform.
+ * Throws when hermit-bridge is absent so the boot wiring can skip auto-launch
+ * and fall through to an externally managed bridge.
  */
 export function resolveBridgeCommand(
   opts: BridgeLaunchOptions,
-  resolveBinary: ResolveBinaryFn = defaultResolveBinary
+  resolveBinary: ResolveBinaryFn = resolveHermitBridgeRunner
 ): BridgeCommand {
-  const bin = resolveBinary();
-  if (!bin) {
+  const runner = resolveBinary();
+  if (!runner) {
     throw new Error(
-      'hermit-bridge binary not found — optional dependency not installed or ' +
-        'the current platform is unsupported by the bundled runtime.'
+      'hermit-bridge runner not found — install hermit-bridge via npm or use --no-hermit-bridge to skip.'
     );
   }
-  return { cmd: bin, args: buildBridgeArgs(opts) };
+  return { cmd: process.execPath, args: [runner, ...buildBridgeArgs(opts)] };
 }
 
 /** Spawn the bridge detached, redirecting stdio to a log file (or ignoring it). */
@@ -122,16 +118,16 @@ function defaultSpawn(cmd: string, args: string[], opts: { logFile?: string }): 
   } else {
     child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
   }
-  child.on('error', (err) => log.error({ err, cmd }, 'hermit-bridge spawn failed'));
+  child.on('error', (err) => log.error({ err, cmd }, 'cc-connect spawn failed'));
   child.unref();
   return child;
 }
 
 /**
- * Owns launching the hermit-bridge sidecar (via the `hermit-bridge` package) when it
- * is not already running. Idempotent and double-launch-safe: if the management
- * API already responds, ensureRunning() is a no-op and leaves any externally
- * managed hermit-bridge untouched. Only stop() kills a process THIS launcher started.
+ * Owns launching the cc-connect sidecar when it is not already running. Idempotent
+ * and double-launch-safe: if the management API already responds, ensureRunning()
+ * is a no-op and leaves any externally managed cc-connect untouched. Only stop()
+ * kills a process THIS launcher started.
  */
 export class HermitBridgeLauncher {
   private child: SpawnedBridge | null = null;
@@ -144,7 +140,7 @@ export class HermitBridgeLauncher {
     } = {}
   ) {}
 
-  /** True when the hermit-bridge management API responds. */
+  /** True when the cc-connect management API responds. */
   async isRunning(client: BridgeManagementProbe): Promise<boolean> {
     try {
       await client.listProjects();
@@ -160,9 +156,9 @@ export class HermitBridgeLauncher {
     }
     const { cmd, args } = resolveBridgeCommand(
       opts,
-      this.deps.resolveBinary ?? defaultResolveBinary
+      this.deps.resolveBinary ?? resolveHermitBridgeRunner
     );
-    log.info({ cmd, args }, 'launching hermit-bridge');
+    log.info({ cmd, args }, 'launching cc-connect');
     const spawnFn = this.deps.spawn ?? defaultSpawn;
     this.child = spawnFn(cmd, args, { logFile: opts.logFile });
     const pid = this.child.pid;
@@ -179,7 +175,7 @@ export class HermitBridgeLauncher {
       await new Promise((r) => setTimeout(r, interval));
       if (await this.isRunning(opts.client)) return;
     }
-    throw new Error(`hermit-bridge did not become ready within ${timeoutMs}ms`);
+    throw new Error(`cc-connect did not become ready within ${timeoutMs}ms`);
   }
 
   /** Stop the bridge only if THIS launcher started it. */
@@ -187,9 +183,9 @@ export class HermitBridgeLauncher {
     if (!this.child) return;
     try {
       this.child.kill('SIGTERM');
-      log.info('stopped hermit-bridge launched by Hermit');
+      log.info('stopped cc-connect launched by Hermit');
     } catch (err) {
-      log.warn({ err }, 'failed to stop hermit-bridge');
+      log.warn({ err }, 'failed to stop cc-connect');
     }
     this.child = null;
   }

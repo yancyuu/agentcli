@@ -73,6 +73,17 @@ function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetry
 function statusFromCollection(collection: UsageCollectionResult): UsageTelemetryStatus {
   const aggregate: UsageAggregate = collection.legacyParseResult.aggregate;
 
+  // Rolling 7-day local volume for the 本地（最近 7 天）row. events7d already
+  // holds the last 7 days of per-message events; sum tokens across the window.
+  const cutoff7d = Math.floor(Date.now() / 1000) - 86_400 * 7;
+  let recentMessages = 0;
+  let recentTokensTotal = 0;
+  for (const event of aggregate.events7d) {
+    if (event.ts < cutoff7d) continue;
+    recentMessages += 1;
+    recentTokensTotal += event.tokensTotal;
+  }
+
   return {
     connected: false,
     lastScan: collection.computedAt,
@@ -85,6 +96,8 @@ function statusFromCollection(collection: UsageCollectionResult): UsageTelemetry
     cacheRead: aggregate.tokens.cacheRead,
     cacheCreation: aggregate.tokens.cacheCreation,
     totalTokens: aggregate.tokens.total,
+    recentMessages,
+    recentTokensTotal,
     activeDays: aggregate.activeDays,
     hourly: aggregate.hourly,
     projects: aggregate.projects,

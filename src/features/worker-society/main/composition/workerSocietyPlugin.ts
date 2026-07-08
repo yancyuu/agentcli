@@ -8,12 +8,12 @@
  * 即可获得 society_* 工具，参与去中心化自治社会。这正是 hermit「定义一次、给任意
  * worker 启用」的 MCP 安装模型（见 McpLibraryService）。
  *
- * 纯描述符 + 构造器，无副作用，便于单测；`openhermit add worker-society` 据此生成
+ * 纯描述符 + 构造器，无副作用，便于单测；`agentcli add worker-society` 据此生成
  * MCP library 条目并 POST 到 `/api/extensions/mcp/library`。
  */
 import { SOCIETY_MCP_TOOLS } from '../adapters/input/societyMcp';
 
-/** 稳定插件 id，也是 `openhermit add <id>` 的键。 */
+/** 稳定插件 id，也是 `agentcli add <id>` 的键。 */
 export const WORKER_SOCIETY_PLUGIN_ID = 'worker-society';
 
 export interface WorkerSocietyPluginDescriptor {

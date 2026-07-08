@@ -24,7 +24,7 @@
 | 应用服务 | `core/application/WorkerSocietyService.ts` | 编排领域 + 端口（17 方法） | `WorkerSocietyService.test.ts` |
 | 基础设施 | `main/infrastructure/` | FsStores（`~/.hermit/society/`）+ CrossTeamMessageGateway | `fsStores.test.ts`、`crossTeamMessageGateway.test.ts` |
 | 组合根 | `main/composition/societyComposition.ts` | `createWorkerSociety()` 装配 | `societyComposition.test.ts` |
-| 插件描述符 | `main/composition/workerSocietyPlugin.ts` | `openhermit add worker-society` | `workerSocietyPlugin.test.ts` |
+| 插件描述符 | `main/composition/workerSocietyPlugin.ts` | `agentcli add worker-society` | `workerSocietyPlugin.test.ts` |
 | 输入适配器 | `main/adapters/input/` | Fastify `/api/society/*` + `society_*` MCP（13 工具） | `societyRoutes.test.ts`、`societyMcp.test.ts` |
 | 渲染层 | `renderer/` | api 客户端 / Zustand / 视图工具 / 图谱投影 / 挂载 | 4 个 `*.test.ts` |
 
@@ -256,7 +256,7 @@ closed   ← 声誉 +、Relationship collaborations+1 / trust 更新
 
 ---
 
-## 10. SOCIETY-010 · 可安装插件（`openhermit add worker-society`）
+## 10. SOCIETY-010 · 可安装插件（`agentcli add worker-society`）
 
 **文件**：`main/composition/workerSocietyPlugin.ts`、`bin/hermit.mjs`（`add <plugin>`）
 
@@ -264,7 +264,7 @@ closed   ← 声誉 +、Relationship collaborations+1 / trust 更新
 |---|---|---|---|---|---|---|
 | SOCIETY-010-001 | 描述符 id/SSE 端点/工具名 | 端点指向 `/mcp`、工具名实时取自 SOCIETY_MCP_TOOLS | 写死/错 | unit | P0 | ✅ plugin（7 测试） |
 | SOCIETY-010-002 | `buildWorkerSocietyMcpLibraryEntry` | 契约匹配 `McpLibraryService.upsert` | 字段不匹配 | unit | P0 | ✅ |
-| SOCIETY-010-003 | `openhermit add worker-society` POST /api/extensions/mcp/library | 落 `~/.hermit/mcp-library.json` | 失败 | e2e | P1 | ⚠️ 端到端已人工验证、无自动化 |
+| SOCIETY-010-003 | `agentcli add worker-society` POST /api/extensions/mcp/library | 落 `~/.hermit/mcp-library.json` | 失败 | e2e | P1 | ⚠️ 端到端已人工验证、无自动化 |
 | SOCIETY-010-004 | 重复 add 幂等 | 报「already in library」而非崩 | 崩/重复 | e2e | P1 | ⚠️ 人工验证 |
 | SOCIETY-010-005 | KNOWN_PLUGINS 初始化时序 | add 检查在 runAddPlugin 定义之后 | 时序崩 | integration | P1 | ⚠️ 人工验证 |
 

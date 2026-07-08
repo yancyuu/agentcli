@@ -526,7 +526,7 @@ publishNeed(open) → volunteerFor(自荐,FitScore) → selectAssignee(择优,as
 | SOCIETY-007 视图工具 | ✅ | societyViewUtils | ✅ |
 | SOCIETY-008 REST `/api/society/*` | ✅ | societyRoutes（19 路由） | ✅ |
 | SOCIETY-009 MCP `society_*` | ✅ | societyMcp（13 工具） | ✅ |
-| SOCIETY-010 可安装插件 | ⚠️ | workerSocietyPlugin + `openhermit add` | ✅ unit / ⚠️ e2e 人工 |
+| SOCIETY-010 可安装插件 | ⚠️ | workerSocietyPlugin + `agentcli add` | ✅ unit / ⚠️ e2e 人工 |
 | SOCIETY-011 持久化 | ✅ | fsStores | ✅ |
 | SOCIETY-012 组合根/渲染挂载 | ⚠️ | composition/SocietyGraph/SocietyView | ✅ 逻辑 / ❌ UI 未测 |
 
@@ -555,7 +555,7 @@ curl -s http://127.0.0.1:5680/mcp/tools/list | grep society_   # 应见 13 个
 
 ### 6.5 已知缺口（优先补）
 - ❌ React 组件挂载（SocietyGraph 全屏 / 空状态引导 / 全屏铺满 / 实时重投影）：需 @testing-library/react 或 playwright。
-- ⚠️ 插件 `openhermit add` 端到端自动化（POST /api/extensions/mcp/library + 临时 HOME）。
+- ⚠️ 插件 `agentcli add` 端到端自动化（POST /api/extensions/mcp/library + 临时 HOME）。
 - ⚠️ feed 倒序单测、收件人不存在边界。
 
 ---

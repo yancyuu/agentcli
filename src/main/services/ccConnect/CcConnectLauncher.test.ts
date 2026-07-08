@@ -30,27 +30,26 @@ describe('CcConnectLauncher', () => {
       ]);
     });
 
-    it('returns the resolved binary path when present', () => {
+    it('launches via `node run.js` with -config <path> + extras', () => {
       const { cmd, args } = resolveBridgeCommand(
-        { configPath: '/c.toml' },
-        () => '/node_modules/hermit-bridge/bin/hermit-bridge'
+        { configPath: '/c.toml', extraArgs: ['--force'] },
+        () => '/node_modules/hermit-bridge/run.js'
       );
-      expect(cmd).toBe('/node_modules/hermit-bridge/bin/hermit-bridge');
-      expect(args).toEqual(['-config', '/c.toml']);
+      // Mirrors the CLI (bin/hermit.mjs): spawn(node, [run.js, -config, ...]).
+      expect(cmd).toBe(process.execPath);
+      expect(args).toEqual(['/node_modules/hermit-bridge/run.js', '-config', '/c.toml', '--force']);
     });
 
-    it('maps host platforms to packaged hermit-bridge binary names', () => {
-      expect(resolveHermitBridgeBinaryName('darwin', 'arm64')).toBe('hermit-bridge-darwin-arm64');
-      expect(resolveHermitBridgeBinaryName('linux', 'x64')).toBe('hermit-bridge-linux-amd64');
-      expect(resolveHermitBridgeBinaryName('win32', 'x64')).toBe('hermit-bridge-windows-amd64.exe');
-      expect(resolveHermitBridgeBinaryName('win32', 'arm64')).toBe(
-        'hermit-bridge-windows-arm64.exe'
-      );
+    it('maps host platforms to the single cc-connect cross-platform binary', () => {
+      expect(resolveHermitBridgeBinaryName('darwin', 'arm64')).toBe('cc-connect');
+      expect(resolveHermitBridgeBinaryName('linux', 'x64')).toBe('cc-connect');
+      expect(resolveHermitBridgeBinaryName('win32', 'x64')).toBe('cc-connect.exe');
+      expect(resolveHermitBridgeBinaryName('win32', 'arm64')).toBe('cc-connect.exe');
     });
 
-    it('throws when the hermit-bridge binary is absent (no silent fallback)', () => {
+    it('throws when the hermit-bridge runner is absent (no silent fallback)', () => {
       expect(() => resolveBridgeCommand({ configPath: '/c.toml' }, () => null)).toThrow(
-        /hermit-bridge binary not found/
+        /hermit-bridge runner not found/
       );
     });
   });
@@ -77,7 +76,7 @@ describe('CcConnectLauncher', () => {
       const spawn = vi.fn<SpawnFn>(() => fakeChild);
       const launcher = new CcConnectLauncher({
         spawn,
-        resolveBinary: () => '/bin/hermit-bridge',
+        resolveBinary: () => '/node_modules/hermit-bridge/run.js',
       });
       const client = probe(2); // initial check fails, first poll succeeds
 
@@ -91,15 +90,20 @@ describe('CcConnectLauncher', () => {
 
       expect(result).toEqual({ launched: true, alreadyRunning: false, pid: 4242 });
       expect(spawn).toHaveBeenCalledTimes(1);
-      expect(spawn.mock.calls[0][0]).toBe('/bin/hermit-bridge');
-      expect(spawn.mock.calls[0][1]).toEqual(['-config', '/c.toml', '--force']);
+      expect(spawn.mock.calls[0][0]).toBe(process.execPath);
+      expect(spawn.mock.calls[0][1]).toEqual([
+        '/node_modules/hermit-bridge/run.js',
+        '-config',
+        '/c.toml',
+        '--force',
+      ]);
     });
 
     it('rejects when the bridge never becomes ready in time', async () => {
       const spawn = vi.fn<SpawnFn>(() => ({ pid: 99, kill: vi.fn() }));
       const launcher = new CcConnectLauncher({
         spawn,
-        resolveBinary: () => '/bin/hermit-bridge',
+        resolveBinary: () => '/bin/cc-connect',
       });
       const client = probe(999); // never ready
 
@@ -118,7 +122,7 @@ describe('CcConnectLauncher', () => {
     it('is a no-op when nothing was launched', () => {
       const launcher = new CcConnectLauncher({
         spawn: vi.fn(),
-        resolveBinary: () => '/bin/hermit-bridge',
+        resolveBinary: () => '/bin/cc-connect',
       });
       expect(() => launcher.stop()).not.toThrow();
     });

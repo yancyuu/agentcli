@@ -227,18 +227,20 @@ function rowStateFromValue(value, fallback = 'info') {
 
 // Justifies the pills across `width` so the nav-menu status bar reads as one
 // balanced line (✓ 已登录 … ○ Web 未启动 … ○ 上报未开启) instead of a `·`-joined
-// run clumped at the left. Single pill prints left-aligned.
-function printStatusBar(items = [], width = panelWidth()) {
+// run clumped at the left. Single pill prints left-aligned. Pure (returns the
+// string) so renderNavMenu can drop it into a writeFrameSync buffer.
+function statusBarLine(items = [], width = panelWidth()) {
   const visible = items.filter(Boolean);
-  if (visible.length === 0) return;
+  if (visible.length === 0) return '';
   const cells = visible.map((item) => `${statusDot(item.state)} ${colorByState(item.label, item.state)}`);
-  if (visible.length === 1) {
-    console.log(cells[0]);
-    return;
-  }
+  if (visible.length === 1) return cells[0];
   const total = cells.reduce((sum, cell) => sum + displayWidth(cell), 0);
   const gap = Math.max(2, Math.floor((width - total) / (visible.length - 1)));
-  console.log(cells.join(' '.repeat(gap)));
+  return cells.join(' '.repeat(gap));
+}
+function printStatusBar(items = [], width = panelWidth()) {
+  const line = statusBarLine(items, width);
+  if (line) console.log(line);
 }
 
 function boxLine(left, fill = glyphs.h, right = left) {
@@ -371,6 +373,21 @@ function clearTerminal() {
   process.stdout.write('\x1b[2J\x1b[H');
 }
 
+// Flicker-free full-frame redraw. Used on every menu repaint (arrow keys,
+// expand/collapse, status refresh). The old approach cleared the whole screen
+// (\x1b[H\x1b[3J\x1b[J) on each keypress — the scrollback wipe + blank-then-
+// redraw is what made the page flash ("一闪一闪") whenever ↑/↓ was pressed.
+// Instead: move the cursor home, overwrite each line IN PLACE with a per-line
+// clear-to-EOL (\x1b[K) so a shorter frame leaves no stale tail, then erase any
+// leftover rows below (\x1b[J). No \x1b[2J / \x1b[3J, so there is never a blank
+// gap for the eye to catch — old pixels stay visible until overwritten.
+function writeFrameSync(lines) {
+  let out = '\x1b[H';
+  for (const line of lines) out += `\r${line}\x1b[K\n`;
+  out += '\x1b[J';
+  process.stdout.write(out);
+}
+
 
 export {
   cancelCli,
@@ -401,6 +418,7 @@ export {
   formatStatusPill,
   colorByState,
   rowStateFromValue,
+  statusBarLine,
   printStatusBar,
   boxLine,
   boxContentLine,
@@ -415,4 +433,5 @@ export {
   welcomeLogoLines,
   printWelcomeLogo,
   clearTerminal,
+  writeFrameSync,
 };

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE="@yancyyu/openhermit"
+PACKAGE="@yancyyu/agentcli"
 MIN_NODE_VERSION=18
 
 RED='\033[0;31m'
@@ -92,16 +92,16 @@ install_package() {
 }
 
 verify_install() {
-  if command -v openhermit &>/dev/null; then
+  if command -v agentcli &>/dev/null; then
     local ver
-    ver=$(openhermit --version 2>/dev/null || echo "unknown")
+    ver=$(agentcli --version 2>/dev/null || echo "unknown")
     printf "\n"
-    success "✓ openHermit 已安装成功"
+    success "✓ AgentCli 已安装成功"
     info "  版本: ${ver}"
-    info "  运行: openhermit"
+    info "  运行: agentcli"
     printf "\n"
   else
-    warn "安装似乎成功但 openhermit 命令未找到。"
+    warn "安装似乎成功但 agentcli 命令未找到。"
     warn "请确认 npm 全局 bin 目录在 PATH 中："
     warn "  npm config get prefix"
     warn "  export PATH=\"\$(npm config get prefix)/bin:\$PATH\""
@@ -110,7 +110,7 @@ verify_install() {
 
 main() {
   printf "\n"
-  printf "${BOLD}  openHermit 安装程序${RESET}\n"
+  printf "${BOLD}  AgentCli 安装程序${RESET}\n"
   printf "  ─────────────────────\n\n"
 
   detect_os

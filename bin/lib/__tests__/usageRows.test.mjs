@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { cursorPendingRows, localServerRows } from '../usageRows.mjs';
+import { cursorPendingRows, localServerRows, serverUsageUnauthorized } from '../usageRows.mjs';
 
 describe('usageRows', () => {
   it('renders local and server message/token rows without deriving pending from ledger delta', () => {
@@ -27,6 +27,9 @@ describe('usageRows', () => {
     expect(cursorPendingRows({ pending: 0 })).toEqual([['待上报', '无', 'info']]);
     expect(cursorPendingRows({ pending: 0, lastError: 'network down' })).toEqual([
       ['待上报', '扫描失败：network down', 'error'],
+    ]);
+    expect(cursorPendingRows({ pending: 0, lastError: '授权不可用：HTTP 401' })).toEqual([
+      ['待上报', '登录已过期，请重新登录', 'error'],
     ]);
     expect(cursorPendingRows(undefined)).toEqual([]);
   });
@@ -85,5 +88,55 @@ describe('usageRows', () => {
   it('does not invent pending zero when upload pending is missing', () => {
     expect(cursorPendingRows({})).toEqual([]);
     expect(cursorPendingRows({ pending: undefined })).toEqual([]);
+  });
+
+  it('shows 本地（最近 7 天）from rolling-24h recent* when the worker ships them', () => {
+    expect(
+      localServerRows(
+        { messages: 196107, totalTokens: 9836330316, recentMessages: 320, recentTokensTotal: 4_000_000 },
+        { ok: true, totals: { messages: 64511, totalTokens: 5706241053 } }
+      )
+    ).toEqual([
+      ['本地（最近 7 天）', '消息 320 · Token 4.0M', 'info'],
+      ['服务端', '消息 64.5K · Token 5706.2M', 'info'],
+    ]);
+  });
+
+  it('falls back to all-time 本地 when recent* fields are absent (stale worker status)', () => {
+    expect(localServerRows({ messages: 196107, totalTokens: 9836330316 }, { ok: true, totals: {} })).toEqual([
+      ['本地', '消息 196.1K · Token 9836.3M', 'info'],
+    ]);
+  });
+});
+
+describe('serverUsageUnauthorized', () => {
+  it('is true when the /report/usage ledger returns 401', () => {
+    expect(serverUsageUnauthorized({ ok: false, httpStatus: 401, error: 'usage HTTP 401' }, null)).toBe(true);
+  });
+
+  it('is true when a /report/usage/status channel returns 403', () => {
+    expect(serverUsageUnauthorized(null, { errors: [{ platform: 'claudecode', httpStatus: 403 }] })).toBe(true);
+  });
+
+  it('is true when 401 only appears inside the channel error text', () => {
+    expect(
+      serverUsageUnauthorized(null, { errors: [{ platform: 'codex', error: 'usage status codex/coding HTTP 401' }] })
+    ).toBe(true);
+  });
+
+  it('is false when the server is reachable and authorized', () => {
+    expect(
+      serverUsageUnauthorized({ ok: true, totals: {} }, { channels: [{ platform: 'claudecode' }], errors: [] })
+    ).toBe(false);
+  });
+
+  it('is false for non-auth failures (500 / network)', () => {
+    expect(serverUsageUnauthorized({ ok: false, httpStatus: 500 }, { errors: [{ httpStatus: 500 }] })).toBe(false);
+    expect(serverUsageUnauthorized(null, { errors: [{ error: 'fetch failed (ECONNREFUSED)' }] })).toBe(false);
+  });
+
+  it('is false when nothing was fetched', () => {
+    expect(serverUsageUnauthorized(undefined, undefined)).toBe(false);
+    expect(serverUsageUnauthorized(null, null)).toBe(false);
   });
 });

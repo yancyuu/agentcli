@@ -1,4 +1,4 @@
-// runtime.mjs — hermit-bridge runtime config (TOML/migration/ensure), port checks,
+// runtime.mjs — cc-connect runtime config (TOML/migration/ensure), port checks,
 // log helpers, dependency resolution, and the bundled-runtime/tsx/alias-loader
 // resolvers. Depends only on env + branding.
 
@@ -48,7 +48,7 @@ Please install dependencies first:
 }
 
 // ---------------------------------------------------------------------------
-// hermit-bridge sidecar
+// cc-connect sidecar
 // ---------------------------------------------------------------------------
 
 function escapeTomlPath(value) {
@@ -145,8 +145,8 @@ function hasTomlSection(raw, section) {
 }
 
 function buildOpenHermitStarterConfig(managementToken, bridgeToken) {
-  return `# hermit-bridge configuration
-# Runtime bridge packaged by Hermit.
+  return `# cc-connect configuration
+# Runtime bridge packaged by Hermit (cc-connect).
 
 data_dir = "${escapeTomlPath(defaultHermitBridgeDataDir)}"
 language = "zh"

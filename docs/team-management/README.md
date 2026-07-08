@@ -17,7 +17,7 @@ Hermit 不是团队内部 Leader/Member 模拟器。更稳定的模型是：
 | 产品形态 | Fastify API + Vite Web UI |
 | 默认入口 | `/teams` |
 | 默认数据目录 | `~/.hermit/` |
-| 包名 | `@yancyyu/openhermit` v1.6.42 |
+| 包名 | `@yancyyu/agentcli` v1.6.42 |
 | Bridge | hermit-bridge / Management API |
 | 工作区 | team、task、message、project workspace |
 | 隔离 | 成员可使用独立 worktree |

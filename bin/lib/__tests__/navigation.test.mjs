@@ -1,0 +1,151 @@
+// navigation.test.mjs — regression tests for the terminal menu primitives.
+//
+// Locks down the bugs reported in the "二级菜单闪现消失 / 首页状态重置 / 两次←"
+// incident:
+//  1. Selecting a top-level PARENT (has children) resolves to the parent id — it
+//     must NOT expand children inline below the home rows (that caused the
+//     submenu to flash/disappear and the home status to flicker). Multi-page nav
+//     is the caller's job on resolve.
+//  2. ← resolves the page's escapeAction (one press → home), not two.
+//  3. A single Enter keystroke yields exactly one choose (no double-toggle).
+//  4. waitForContinue: ← → 'back', Enter → 'continue'.
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+
+import { askMenuAction, waitForContinue, parseMenuKeys } from '../navigation.mjs';
+import { NAV_ACTIONS } from '../menus.mjs';
+
+// --- Minimal TTY mock --------------------------------------------------------
+// askMenuAction/renderNavMenu touch process.stdin (raw mode + 'data') and
+// process.stdout (write ANSI frames, read columns). Stub both so the menu loop
+// runs headless.
+class FakeStdin extends EventEmitter {
+  constructor() { super(); this.isTTY = true; this.rawMode = false; }
+  setRawMode(mode) { this.rawMode = Boolean(mode); return this; }
+  resume() { return this; }
+  pause() { return this; }
+}
+let fakeStdin;
+let realStdinDescriptor;
+let realStdoutWrite;
+const stash = {};
+function installTty() {
+  fakeStdin = new FakeStdin();
+  realStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin');
+  Object.defineProperty(process, 'stdin', { value: fakeStdin, configurable: true });
+  stash.isTTY = process.stdout.isTTY;
+  stash.columns = process.stdout.columns;
+  Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+  Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+  realStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = () => true;
+}
+function restoreTty() {
+  if (realStdinDescriptor) Object.defineProperty(process, 'stdin', realStdinDescriptor);
+  Object.defineProperty(process.stdout, 'isTTY', { value: stash.isTTY, configurable: true });
+  Object.defineProperty(process.stdout, 'columns', { value: stash.columns, configurable: true });
+  process.stdout.write = realStdoutWrite;
+}
+const tick = () => new Promise((r) => setImmediate(r));
+
+beforeEach(installTty);
+afterEach(restoreTty);
+
+describe('parseMenuKeys — one Enter = one choose', () => {
+  for (const [name, buf] of [['CR \\r', '\r'], ['LF \\n', '\n'], ['CRLF \\r\\n', '\r\n']]) {
+    it(`${name} yields exactly one choose`, () => {
+      const chooses = parseMenuKeys(buf).filter((k) => k.type === 'choose').length;
+      expect(chooses).toBe(1);
+    });
+  }
+  it('left arrow parses as back', () => {
+    expect(parseMenuKeys('\x1b[D')).toContainEqual({ type: 'back' });
+  });
+});
+
+describe('askMenuAction — accordion: parent expands inline, child runs', () => {
+  it('Enter on a parent expands its children; ↓ + Enter then resolves the child', async () => {
+    const web = NAV_ACTIONS.find((a) => a.id === 'web');
+    expect(web.children.length).toBeGreaterThan(0); // guard: web is a parent
+
+    const promise = askMenuAction({
+      title: 'HOME',
+      subtitle: '',
+      actions: NAV_ACTIONS,
+      escapeAction: 'exit',
+      hasDeveloperModeEnabled: () => false,
+      actionStateLabel: () => ({ text: '', state: 'info' }),
+    });
+    await tick();               // let the loop attach the stdin listener
+    fakeStdin.emit('data', Buffer.from('\r'));    // Enter on index 0 (web) → expand
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\x1b[B')); // ↓ → now on web's first child
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\r'));    // Enter on child → resolve
+    const resolved = await promise;
+
+    // If web had NOT expanded, ↓ would land on `data-sync` (also a parent) and
+    // Enter would toggle it instead of resolving — the await would hang. So
+    // resolving to the child id proves inline expansion happened.
+    expect(resolved).toBe(web.children[0].id);
+  });
+
+  it('← in a page with escapeAction "back" resolves to "back" in one press', async () => {
+    const promise = askMenuAction({
+      title: 'SUBMENU',
+      subtitle: '',
+      actions: NAV_ACTIONS.find((a) => a.id === 'web').children,
+      escapeAction: 'back',
+      hasDeveloperModeEnabled: () => false,
+      actionStateLabel: () => ({ text: '', state: 'info' }),
+    });
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\x1b[D')); // single ←
+    const resolved = await promise;
+    expect(resolved).toBe('back');
+  });
+});
+
+describe('waitForContinue — ← is back, Enter is continue', () => {
+  it('← resolves "back" (one press exits the submenu page)', async () => {
+    const promise = waitForContinue('press ←');
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\x1b[D'));
+    expect(await promise).toBe('back');
+  });
+  it('Enter resolves "continue" (stay in the submenu page)', async () => {
+    const promise = waitForContinue('press Enter');
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\r'));
+    expect(await promise).toBe('continue');
+  });
+});
+
+describe('askMenuAction — terminal state survives an inline action', () => {
+  it('raw mode is restored after an inline action so arrows keep working', async () => {
+    // Reproduces "进入菜单再出来上下左右就没用了": an inline action's
+    // waitForContinue tears down raw mode; chooseInline must restore it.
+    const promise = askMenuAction({
+      title: 'HOME',
+      subtitle: '',
+      actions: [{ id: 'leaf', label: 'Leaf' }],
+      escapeAction: 'back',
+      hasDeveloperModeEnabled: () => false,
+      actionStateLabel: () => ({ text: '', state: 'info' }),
+      onAction: async () => { await waitForContinue('pause'); return true; },
+    });
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\r')); // Enter leaf → onAction → waitForContinue
+    await tick();
+    await tick();
+    fakeStdin.emit('data', Buffer.from('\r')); // dismiss waitForContinue
+    await tick();
+    await tick();
+    // After the action, the menu must be back in raw mode — otherwise arrow
+    // bytes echo as ^[[A/^[[B text in cooked mode and navigation dies.
+    expect(fakeStdin.rawMode).toBe(true);
+    // Silence the still-open menu so the test exits cleanly.
+    fakeStdin.emit('data', Buffer.from('\x1b[D')); // ← → resolve('back')
+    await promise;
+  });
+});

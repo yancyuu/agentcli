@@ -91,6 +91,8 @@ export function emptyUsageTelemetryStatus(): UsageTelemetryStatus {
     cacheRead: 0,
     cacheCreation: 0,
     totalTokens: 0,
+    recentMessages: 0,
+    recentTokensTotal: 0,
     activeDays: 0,
     hourly: Array.from({ length: 24 }, () => 0),
     projects: [],

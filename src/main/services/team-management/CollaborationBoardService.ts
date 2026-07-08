@@ -16,6 +16,7 @@ import type {
   CollabTaskEventType,
   CollabTaskStatus,
 } from '@shared/types/team';
+// @ts-expect-error TS2307: ioredis is an optional enterprise dependency (agentbus).
 import type Redis from 'ioredis';
 
 const HERMIT_HOME = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');

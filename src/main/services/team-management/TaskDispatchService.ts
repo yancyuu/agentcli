@@ -10,6 +10,7 @@ import type {
 } from '@shared/types/team';
 import type { TeamWorkspaceService, TeamManifest, Task } from './TeamWorkspaceService';
 import type { CollaborationBoardService } from './CollaborationBoardService';
+// @ts-expect-error TS2307: ioredis is an optional enterprise dependency (agentbus).
 import type Redis from 'ioredis';
 
 import { normalizeRedisHost } from '@main/utils/redisConfig';
@@ -909,6 +910,7 @@ export class TaskDispatchService {
     let redis: Redis | null = null;
     let redisSub: Redis | null = null;
     try {
+      // @ts-expect-error TS2307: Redis collaboration is optional and delegated to agentbus.
       const ioredis = await import('ioredis');
       const { port, password, db } = this.config.redis;
       const opts = {
