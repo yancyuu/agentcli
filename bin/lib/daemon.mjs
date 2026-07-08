@@ -17,7 +17,7 @@ import {
 } from './env.mjs';
 import { brandCommand } from '../branding.mjs';
 import { printCliRows, printJson } from './terminal.mjs';
-import { appendLog, checkExistingOpenHermitServer } from './runtime.mjs';
+import { appendLog, checkExistingOpenHermitServer, isTcpPortAvailable } from './runtime.mjs';
 
 // The daemon child must re-enter bin/hermit.mjs (which owns the server-start
 // fall-through at the bottom of that file). Spawning daemon.mjs itself does
@@ -331,18 +331,39 @@ async function stopDaemon({ exitOnDone = true, quiet = false } = {}) {
   return { stopped: true, pid };
 }
 
-async function waitForOpenHermitServerReady(pid, timeoutMs = 20_000) {
+async function waitForOpenHermitServerReady(pid, timeoutMs = 120_000) {
+  // The HTTP probe (/api/version) is the source of truth — NOT the spawned pid.
+  // The pid is a launcher that hands off to a reparented src/main/server.ts
+  // grandchild and may exit on its own, so a dead launcher pid is not a failure.
+  // Cold tsx boots are also slow. So: keep polling the probe; only fail fast on a
+  // genuine crash (launcher dead AND nothing binding the port). At the deadline,
+  // re-probe once more (the server may have bound the instant it expired) and,
+  // if the port is still bound by a booting process, report `stillBooting`
+  // instead of a false "启动失败" for a workbench that actually came up.
+  const portNum = Number.parseInt(port, 10);
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (pid && !isPidRunning(pid)) {
-      return { ready: false, reason: '服务进程已退出，请查看日志', url: `http://127.0.0.1:${port}` };
-    }
-
     const server = await checkExistingOpenHermitServer();
     if (server.running) return { ready: true, ...server };
+    if (pid && !isPidRunning(pid)) {
+      const portBound = !(await isTcpPortAvailable(portNum));
+      if (!portBound) {
+        return { ready: false, reason: '服务进程已退出，请查看日志', url: `http://127.0.0.1:${port}` };
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  return { ready: false, reason: '服务还没准备好，请稍后刷新或查看日志', url: `http://127.0.0.1:${port}` };
+  const final = await checkExistingOpenHermitServer();
+  if (final.running) return { ready: true, ...final };
+  const stillBooting = !(await isTcpPortAvailable(portNum)) || (pid ? isPidRunning(pid) : false);
+  return {
+    ready: false,
+    stillBooting,
+    reason: stillBooting
+      ? '工作台仍在启动中（冷启动较慢），稍后刷新即可使用'
+      : '服务还没准备好，请稍后刷新或查看日志',
+    url: `http://127.0.0.1:${port}`,
+  };
 }
 
 function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {

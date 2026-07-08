@@ -76,7 +76,7 @@ export interface UsageTelemetryStatus {
   cacheRead: number;
   cacheCreation: number;
   totalTokens: number;
-  // Rolling 24h local volume — drives the 本地（最近 24 小时）row.
+  // Rolling 7-day local volume — drives the 本地（最近 7 天）row.
   recentMessages: number;
   recentTokensTotal: number;
   activeDays: number;

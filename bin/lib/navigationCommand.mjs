@@ -701,21 +701,34 @@ export async function runNavigationAction(action) {
     const daemon = startDaemon({ exitOnDone: false, quiet: true });
     // Stream the daemon's startup log while we wait for readiness, so the user
     // sees live progress (Starting… Launching… bound to port…) instead of a
-    // blank busy screen for up to 30s.
-    const ready = await streamLogWhile(daemon.logPath, waitForOpenHermitServerReady(daemon.pid, 60_000));
-    if (ready.ready) {
+    // blank busy screen.
+    const ready = await streamLogWhile(daemon.logPath, waitForOpenHermitServerReady(daemon.pid, 120_000));
+    if (ready.ready || ready.stillBooting) {
       const url = ready.url || daemon.url;
       await openExternalUrl(url).catch(() => {});
-      printCliRows('本地数字员工工作台', [
-        ['状态', daemon.started ? '已启动并已在浏览器打开' : '已运行并已在浏览器打开', 'ok'],
-        ['地址', url, 'info'],
-        ['设置', '复杂配置请在工作台中完成', 'info'],
-      ]);
+      if (ready.ready) {
+        printCliRows('本地数字员工工作台', [
+          ['状态', daemon.started ? '已启动并已在浏览器打开' : '已运行并已在浏览器打开', 'ok'],
+          ['地址', url, 'info'],
+          ['设置', '复杂配置请在工作台中完成', 'info'],
+        ]);
+      } else {
+        // stillBooting: the process is up and binding the port but the HTTP
+        // probe hasn't answered within the deadline (cold tsx boot). The
+        // workbench WILL come up — open the browser and tell the user to
+        // refresh, instead of the old false "启动失败" for a workbench that
+        // actually opened.
+        printCliRows('本地数字员工工作台', [
+          ['状态', '仍在启动中（冷启动较慢），已打开浏览器', 'warn'],
+          ['地址', url, 'info'],
+          ['提示', '服务进程正在启动，等待几秒后刷新页面即可', 'info'],
+        ], '冷启动首次编译较慢；浏览器已打开，稍后刷新即可进入工作台。');
+      }
       console.log('');
       return waitForContinue(ACTION_DONE_MSG);
     }
     printCliRows('本地数字员工工作台', [
-      ['状态', '启动失败或仍在启动中', 'error'],
+      ['状态', '启动失败', 'error'],
       ['地址', daemon.url, 'info'],
       ['日志', daemon.logPath, 'info'],
       ['原因', ready.reason, 'warn'],

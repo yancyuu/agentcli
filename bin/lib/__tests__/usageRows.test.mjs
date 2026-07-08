@@ -90,7 +90,7 @@ describe('usageRows', () => {
     expect(cursorPendingRows({ pending: undefined })).toEqual([]);
   });
 
-  it('shows 本地（最近 7 天）from rolling-24h recent* when the worker ships them', () => {
+  it('shows 本地（最近 7 天）from rolling-7d recent* when the worker ships them', () => {
     expect(
       localServerRows(
         { messages: 196107, totalTokens: 9836330316, recentMessages: 320, recentTokensTotal: 4_000_000 },

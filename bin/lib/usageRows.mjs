@@ -66,9 +66,10 @@ export function localServerRows(telemetry, authoritative) {
   const local = telemetry && typeof telemetry === 'object' ? telemetry : {};
   const locMsg = hasField(local, 'messages') ? finiteNumber(local.messages) : NaN;
   const locTok = hasField(local, 'totalTokens') ? finiteNumber(local.totalTokens) : NaN;
-  // 本地 — bounded to the last 24h when the worker ships recentMessages/
-  // recentTokensTotal (the "只检索 24 小时内的" contract). Falls back to the
-  // all-time tally under a plain 本地 label only for a stale pre-update status.
+  // 本地 — rolling 7-day volume. The worker ships recentMessages/
+  // recentTokensTotal summed over the last 7 days (RECENT_DAYS=7 in the parser,
+  // cutoff7d in UsageTelemetryService). Falls back to the all-time tally under
+  // a plain 本地 label only for a stale pre-update status.
   const recentMsg = hasField(local, 'recentMessages') ? finiteNumber(local.recentMessages) : NaN;
   const recentTok = hasField(local, 'recentTokensTotal') ? finiteNumber(local.recentTokensTotal) : NaN;
   const useRecent = Number.isFinite(recentMsg) || Number.isFinite(recentTok);

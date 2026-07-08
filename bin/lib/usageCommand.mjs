@@ -369,7 +369,14 @@ export async function enableConversationUploadWithProvider(providers = ['claudec
   const selectedProviders = normalizeUploadProviders(providers);
   const enabledProviders = selectedProviders.length ? selectedProviders : ['claudecode', 'codex'];
   const taskBus = setConversationUploadEnabled(true, enabledProviders);
-  return { taskBus, providers: enabledProviders, started: true };
+  // Actually launch the background worker so the toggle is running, not just
+  // "enabled + 未运行". Mirrors the `usage start` lifecycle: the worker reads
+  // telemetry.enabled (set above) and scans immediately on boot, which also
+  // refreshes the 本地（最近 7 天）row right away. Without this the menu showed
+  // no checkmark + "未运行" because usageRunning stayed false after toggling ON.
+  await restartTelemetryWorkerIfStale({ quiet: true });
+  const worker = await startTelemetryWorker({ quiet: true });
+  return { taskBus, providers: enabledProviders, started: true, worker };
 }
 
 // --- Worker lifecycle ---------------------------------------------------------
