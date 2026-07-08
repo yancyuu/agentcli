@@ -243,6 +243,13 @@ const html = `<!DOCTYPE html>
 npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
       完整排查见下方 <a href="#faq">FAQ</a>。
     </div>
+    <div class="install-help">
+      <strong>卸载</strong> 先停掉后台进程，再卸载包：
+      <pre><code>agentcli stop
+agentcli usage stop
+npm uninstall -g @yancyyu/agentcli</code></pre>
+      本地数据 <code>~/.hermit/</code> 不会自动删除；确认无需保留后可手动 <code>rm -rf ~/.hermit</code>。
+    </div>
   </section>
 
   <section id="tiers">

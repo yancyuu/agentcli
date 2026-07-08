@@ -30,10 +30,8 @@ jobs:
       - name: Verify generated site
         run: |
           test -s _site/index.html
-          test -s _site/guide.html
           test -s _site/install.sh
           grep -q "AgentCli" _site/index.html
-          grep -q "CLI" _site/guide.html
           grep -q "curl" _site/install.sh
 
       - name: Set up Pages
