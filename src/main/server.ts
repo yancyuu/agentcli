@@ -7584,11 +7584,14 @@ function reply500(err: unknown) {
 // Start
 // ===========================================================================
 
-// Ensure hermit-bridge is running before Hermit connects to it. A no-op
-// when the management API already responds (an externally-managed hermit-bridge is
-// left untouched); otherwise launches the bundled hermit-bridge sidecar. Best-effort:
-// a launch failure never blocks Hermit boot — the bridge just won't auto-start.
-await bridgeLauncher
+// Ensure hermit-bridge is running for Hermit to connect to. A no-op when the
+// management API already responds (an externally-managed hermit-bridge is left
+// untouched); otherwise launches the bundled sidecar. Fire-and-forget: a slow or
+// failed launch must NEVER block app.listen() — otherwise a missing sidecar
+// stalls /api/version for up to HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS (180s
+// default) and the workbench reports "启动失败" on cold boot. The bridge connects
+// in the background via its own retry loop (bridge.start() below).
+bridgeLauncher
   .ensureRunning({
     client: cc,
     configPath: HERMIT_BRIDGE_CONFIG_FILE,
