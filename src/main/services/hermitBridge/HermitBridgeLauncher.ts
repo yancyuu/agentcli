@@ -64,18 +64,18 @@ export function resolveHermitBridgeBinaryName(
 }
 
 /**
- * Resolve the hermit-bridge npm package's `run.js` entry. The package was renamed
- * cc-connect → hermit-bridge (it lives in optionalDependencies); `run.js` is the
- * self-installing launcher that fetches the canonical cc-connect Go binary on
- * first run, so it is always present once the package is installed — unlike the
- * old resolver, which looked for a Go binary at the package root that hermit-bridge
- * never ships (the binary lands in `bin/` only after run.js runs install.js).
- * Returns null when hermit-bridge is not installed so the caller can fall back to
- * an externally managed bridge.
+ * Resolve the cc-connect npm package's `run.js` entry (an optionalDependency).
+ * `run.js` is the self-installing launcher that fetches the canonical cc-connect
+ * Go binary on first run, so it is always present once the package is installed.
+ * Returns null when cc-connect is not installed so the caller can fall back to
+ * an externally managed bridge. (agentcli brands this component as "bridge"
+ * outward, but the upstream npm package it ships is `cc-connect` — the former
+ * `hermit-bridge` wrapper was dropped because it duplicated cc-connect with no
+ * added logic and broke its own version→release coupling.)
  */
 function resolveHermitBridgeRunner(): string | null {
   try {
-    const pkgRoot = path.dirname(require.resolve('hermit-bridge/package.json'));
+    const pkgRoot = path.dirname(require.resolve('cc-connect/package.json'));
     const runner = path.join(pkgRoot, 'run.js');
     return existsSync(runner) ? runner : null;
   } catch {
@@ -89,10 +89,10 @@ export function buildBridgeArgs(opts: BridgeLaunchOptions): string[] {
 }
 
 /**
- * Resolve the command + args to launch the bridge via the bundled hermit-bridge
+ * Resolve the command + args to launch the bridge via the bundled cc-connect
  * `run.js` entry. Mirrors the CLI (bin/hermit.mjs: `node run.js -config <path>`)
  * so the same self-installing Go binary runs under node on every platform.
- * Throws when hermit-bridge is absent so the boot wiring can skip auto-launch
+ * Throws when cc-connect is absent so the boot wiring can skip auto-launch
  * and fall through to an externally managed bridge.
  */
 export function resolveBridgeCommand(
@@ -102,7 +102,7 @@ export function resolveBridgeCommand(
   const runner = resolveBinary();
   if (!runner) {
     throw new Error(
-      'hermit-bridge runner not found — install hermit-bridge via npm or use --no-hermit-bridge to skip.'
+      'cc-connect runner not found — install cc-connect via npm (npm i cc-connect) or use --no-hermit-bridge to skip.'
     );
   }
   return { cmd: process.execPath, args: [runner, ...buildBridgeArgs(opts)] };

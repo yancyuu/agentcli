@@ -1,7 +1,7 @@
 {
   "name": "@yancyyu/agentcli",
   "type": "module",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "description": "AgentCli: AI 工程协作平台，本地优先的用量采集与团队协作工具。",
   "license": "AGPL-3.0",
   "publishConfig": {
@@ -71,7 +71,7 @@
   },
   "optionalDependencies": {
     "@modelzen/feishu-codex-bridge": "0.6.4",
-    "hermit-bridge": "0.1.5"
+    "cc-connect": "1.4.1"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.0",

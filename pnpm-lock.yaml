@@ -385,9 +385,9 @@ importers:
       '@modelzen/feishu-codex-bridge':
         specifier: 0.6.4
         version: 0.6.4
-      hermit-bridge:
-        specifier: 0.1.5
-        version: 0.1.5
+      cc-connect:
+        specifier: 1.4.1
+        version: 1.4.1
 
   packages/agent-graph:
     dependencies:
@@ -2928,6 +2928,10 @@ packages:
   caniuse-lite@1.0.30001781:
     resolution: {integrity: sha512-RdwNCyMsNBftLjW6w01z8bKEvT6e/5tpPVEgtn22TiLGlstHOVecsX2KHFkD5e/vRnIE4EGzpuIODb3mtswtkw==}
 
+  cc-connect@1.4.1:
+    resolution: {integrity: sha512-acoRJzBZGo9wSbOv0jykR3vp9VvrJCZ0poJtPyiK+BGjgcUZa0Mq1p3RcrDxmGPBxxneyaXacR3nQId+HFmBMA==}
+    hasBin: true
+
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
 
@@ -4076,10 +4080,6 @@ packages:
 
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
-
-  hermit-bridge@0.1.5:
-    resolution: {integrity: sha512-PwRVvnEmIqggA+aLLalnP+buXA1HsERRZxwFt2/YSalBeaw2MI5i8MHJHgsUXWnrBvy9D9D0EaCEjTnUocONVQ==}
-    hasBin: true
 
   highlight.js@11.11.1:
     resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
@@ -9172,6 +9172,9 @@ snapshots:
 
   caniuse-lite@1.0.30001781: {}
 
+  cc-connect@1.4.1:
+    optional: true
+
   ccount@2.0.1: {}
 
   chai@5.3.3:
@@ -10614,9 +10617,6 @@ snapshots:
   hermes-parser@0.25.1:
     dependencies:
       hermes-estree: 0.25.1
-
-  hermit-bridge@0.1.5:
-    optional: true
 
   highlight.js@11.11.1: {}
 
