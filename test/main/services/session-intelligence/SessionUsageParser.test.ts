@@ -77,6 +77,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-session-usage-parser-'));
   claudeBase = path.join(tmpDir, '.claude');
   fs.mkdirSync(path.join(claudeBase, 'projects'), { recursive: true });
+  process.env.CODEX_HOME = path.join(tmpDir, '.codex');
   setClaudeBasePathOverride(claudeBase);
 });
 
@@ -105,6 +106,45 @@ describe('scanProjectStats', () => {
       totalTokens: 180,
       durationMs: 10_000,
     });
+  });
+
+  it('prefers Claude total_tokens over recomputing cache-inclusive totals', async () => {
+    const workDir = path.join(tmpDir, 'claude-total-tokens-project');
+    const sessionPath = path.join(projectDirFor(workDir), 'session-total-tokens.jsonl');
+    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+    fs.writeFileSync(
+      sessionPath,
+      `${JSON.stringify({
+        type: 'assistant',
+        cwd: workDir,
+        timestamp: '2026-01-01T00:00:10.000Z',
+        message: {
+          role: 'assistant',
+          content: 'Assistant response',
+          usage: {
+            input_tokens: 12,
+            output_tokens: 34,
+            cache_read_input_tokens: 56,
+            cache_creation_input_tokens: 78,
+            total_tokens: 46,
+          },
+        },
+      })}\n`
+    );
+
+    const stats = await scanProjectStats(workDir);
+    const result = await scanSessions();
+    const session = result.sessions.find((item) => item.projectPath === workDir);
+
+    expect(stats).toMatchObject({
+      tokensIn: 12,
+      tokensOut: 34,
+      cacheRead: 56,
+      cacheCreation: 78,
+      totalTokens: 46,
+    });
+    expect(session?.tokens.total).toBe(46);
+    expect(result.aggregate.tokens.total).toBe(46);
   });
 
   it('includes top-level assistant usage in total tokens', async () => {

@@ -277,7 +277,8 @@ async function parseJsonl(
       const out = Number(usage.output_tokens ?? 0) || 0;
       const cread = Number(usage.cache_read_input_tokens ?? 0) || 0;
       const ccreate = Number(usage.cache_creation_input_tokens ?? 0) || 0;
-      const total = inp + out + cread + ccreate;
+      const total =
+        Number(usage.total_tokens ?? usage.totalTokens ?? inp + out + cread + ccreate) || 0;
 
       tokens.input += inp;
       tokens.output += out;
