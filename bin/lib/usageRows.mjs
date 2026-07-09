@@ -103,7 +103,7 @@ export function localServerRows(telemetry, authoritative) {
       const srvParts = [];
       if (Number.isFinite(srvMsg)) srvParts.push(`消息 ${formatNumber(srvMsg)}`);
       if (Number.isFinite(srvTok)) srvParts.push(`Token ${formatNumber(srvTok)}`);
-      if (srvParts.length) rows.push(['服务端', srvParts.join(' · '), 'info']);
+      if (srvParts.length) rows.push(['服务端（全量）', srvParts.join(' · '), 'info']);
       const rejected = hasField(totals, 'rejected') || hasField(authoritative, 'rejected')
         ? finiteNumber(totals.rejected ?? authoritative.rejected)
         : NaN;
@@ -112,7 +112,7 @@ export function localServerRows(telemetry, authoritative) {
       const suffix = authoritative.httpStatus
         ? `HTTP ${authoritative.httpStatus}${authoritative.body ? ` · ${authoritative.body}` : ''}`
         : authoritative.error || '无响应';
-      rows.push(['服务端', `读取 /report/usage 失败：${suffix}`, 'error']);
+      rows.push(['服务端（全量）', `读取 /report/usage 失败：${suffix}`, 'error']);
     }
   }
 

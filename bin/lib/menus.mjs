@@ -17,7 +17,7 @@ export const NAV_ACTIONS = [
     description: '本地 CC/Codex session → IM，把本机 Agent 会话接入企业版 IM 协作',
     recommended: true,
     children: [
-      { id: 'toggle-web', label: 'AgentCli 工作台', toggle: 'web', description: '启动/停止本机 AgentCli Web 工作台；用于本地 CC/Codex session → IM 的配置与管理' },
+      { id: 'toggle-web', label: '开启/关闭 AgentCli 工作台', toggle: 'web', description: '启动/停止本机 AgentCli Web 工作台；用于本地 CC/Codex session → IM 的配置与管理' },
       { id: 'workbench-status', label: '查看本地工作台状态', description: '查看 AgentCli 工作台运行状态' },
     ],
   },
@@ -26,7 +26,7 @@ export const NAV_ACTIONS = [
     label: '用量同步',
     description: '回车展开；消息上报启动后台增量扫描，只上报最近 7 天；可手动重报最近 7 天',
     children: [
-      { id: 'toggle-message-upload', label: '消息上报', toggle: 'conversation-upload' },
+      { id: 'toggle-message-upload', label: '开启/关闭 消息上报', toggle: 'conversation-upload' },
       { id: 'overview', label: '查看同步状态' },
       { id: 'scan', label: '重报最近 7 天', description: '忽略游标重扫最近 7 天并补传；服务端按 eventId 自动去重' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
@@ -37,7 +37,7 @@ export const NAV_ACTIONS = [
     label: '用户',
     description: '回车展开；登录、查看登录状态、退出登录',
     children: [
-      { id: 'login', label: '登录 / OAuth 授权' },
+      { id: 'login', label: '飞书登录' },
       { id: 'status', label: '查看登录状态' },
       { id: 'logout', label: '退出登录' },
     ],
@@ -267,7 +267,7 @@ export const TASK_BUS_ACTIONS = [
 export const ACCOUNT_ACTIONS = [
   {
     id: 'login',
-    label: '登录 / OAuth 授权',
+    label: '飞书登录',
     description: '用于云端授权和托管服务；本地使用无需登录',
   },
   {

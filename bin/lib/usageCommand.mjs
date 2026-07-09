@@ -3,6 +3,7 @@
 // hermit.mjs to keep it under 3000 lines.
 import {
   args,
+  currentVersion,
   commandArgs,
   jsonRequested,
   port,
@@ -132,6 +133,21 @@ function normalizeScopes({ scope }) {
   return scope.split(/[,\s]+/).filter(Boolean);
 }
 
+// Server channel status strings (succeeded / unknown / failed / never_reported)
+// are protocol values, not user-facing labels — humanize so "unknown" during a
+// first/in-flight upload reads as a normal waiting state instead of the alarming
+// raw "unknown · 无服务端游标". Unrecognized values fall through verbatim so new
+// server statuses stay visible.
+function humanizeChannelStatus(status) {
+  switch (status) {
+    case 'succeeded': return '已上报';
+    case 'unknown': return '上报中';
+    case 'failed': return '上报失败';
+    case 'never_reported': return '未上报';
+    default: return status || '';
+  }
+}
+
 function cursorStatusText(channel) {
   if (channel.hasCursor) {
     const parts = [`cursor ${String(channel.cursorHash || '').slice(0, 12)}`];
@@ -139,6 +155,10 @@ function cursorStatusText(channel) {
     if (channel.cursorGeneratedAt) parts.push(new Date(channel.cursorGeneratedAt).toLocaleString('zh-CN'));
     return parts.join(' · ');
   }
+  // No committed server cursor yet. 'unknown' = the server hasn't confirmed one
+  // (first upload / mid-batch) — normal, not broken. Other non-never_reported
+  // statuses keep the dedup reminder.
+  if (channel.status === 'unknown') return '等待服务端确认游标';
   if (channel.status && channel.status !== 'never_reported') return '无服务端游标 · 上报最近 7 天（服务端按 eventId 去重）';
   if (channel.attemptedCursorHash) {
     return `attempted ${String(channel.attemptedCursorHash).slice(0, 12)}${Number.isFinite(channel.attemptedCursorMessageCount) ? ` · ${formatNumber(channel.attemptedCursorMessageCount)} msg` : ''}`;
@@ -155,9 +175,15 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
     const remoteErrors = Array.isArray(remote.errors) ? remote.errors : [];
     if (remoteChannels.length) {
       for (const c of remoteChannels) {
+        const parts = [
+          humanizeChannelStatus(c.status),
+          cursorStatusText(c),
+          c.inFlight ? `处理中 ${c.inFlight}` : '',
+          c.lastUploadId ? String(c.lastUploadId).slice(0, 12) : '',
+        ].filter(Boolean);
         rows.push([
           `${uploadProviderLabel(c.platform)}/${c.scene || 'coding'}`,
-          `${c.status || '未知'} · ${cursorStatusText(c)}${c.inFlight ? ` · 处理中 ${c.inFlight}` : ''}${c.lastUploadId ? ` · ${String(c.lastUploadId).slice(0, 12)}` : ''}`,
+          parts.join(' · '),
           c.inFlight ? 'warn' : 'info',
         ]);
       }
@@ -866,7 +892,10 @@ async function printUsageRows(title, data, hint) {
   const uploadText = uploadEnabled
     ? auth.authorized ? workerText : `${workerText}，等待登录授权`
     : '关闭';
-  const rows = [['消息上报', uploadText, uploadEnabled ? auth.authorized ? states.usageRunning ? 'ok' : 'warn' : 'warn' : 'off']];
+  const rows = [
+    ['版本', `agentcli v${currentVersion}`, 'info'],
+    ['消息上报', uploadText, uploadEnabled ? auth.authorized ? states.usageRunning ? 'ok' : 'warn' : 'warn' : 'off'],
+  ];
   const unauthorized = appendUsageServerRows(rows, {
     telemetry: data.telemetry,
     authoritativeUsage: data.authoritativeUsage,

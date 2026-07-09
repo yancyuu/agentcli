@@ -2,10 +2,10 @@
 //
 // Backs the "本地工作台 → 飞书 Codex 桥" menu actions. The bridge is the npm
 // package `@modelzen/feishu-codex-bridge` (bin `feishu-codex-bridge`) — a
-// Feishu/Lark group → local Codex / Claude Code bridge. It ships with AgentCli
-// as an optionalDependency, so the binary is present right after install
-// ("默认安装"); the user turns it on in 本地工作台 and we start it
-// ("用户自己打开"). Same bundled-then-on-demand-start contract as hermit-bridge.
+// Feishu/Lark group → local Codex / Claude Code bridge. It is NOT a bundled
+// dependency: the first time the user turns it on in 本地工作台 we install it on
+// demand via `npm i -g` (ensureFeishuCodexBridge), then start it. Keeps the
+// default install lean — the ~26M Lark SDK is only pulled when 飞书桥 is used.
 //
 // Stays in the bin/lib shape: importable, no import-time side effects, returns
 // structured results the caller renders, never throws. The daemon writes its pid
@@ -231,11 +231,10 @@ export function feishuBridgeWebUrl() {
 }
 
 /**
- * Ensures the bridge binary is available. The bundled optionalDependency covers
- * the normal case; this is the fallback that globally installs
- * `@modelzen/feishu-codex-bridge` when the dep is missing (e.g. optional install
- * was skipped). Resolves to a structured result (never throws) so the menu can
- * always render an outcome.
+ * Ensures the bridge binary is available. feishu-codex-bridge is installed on
+ * demand (not bundled): this globally `npm i -g @modelzen/feishu-codex-bridge`
+ * the first time the user enables 飞书桥. Resolves to a structured result (never
+ * throws) so the menu can always render an outcome.
  */
 export async function ensureFeishuCodexBridge() {
   const existing = resolveBridgeLauncher();

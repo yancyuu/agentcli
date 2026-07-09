@@ -275,8 +275,12 @@ function menuColumnsLine(left = '', right = '', anchor = CLI_MENU_WIDTH) {
 // Adaptive panel width for the rounded status panels (printCliRows). Falls back
 // to a sane fixed width when stdout has no columns (pipes, tests).
 function panelWidth() {
-  const columns = Number(process.stdout.columns) || 80;
-  return Math.max(52, Math.min(columns - 2, 80));
+  const columns = Number(process.stdout.columns) || 100;
+  // Cap at 120 (was 80) so wide status rows — e.g. the per-provider upload rows
+  // carrying cursor hash + message count + timestamp — are no longer truncated
+  // to "2026/7/9 1…" on terminals that have room. Still adaptive: a genuinely
+  // narrow terminal stays narrow (floor 52).
+  return Math.max(52, Math.min(columns - 2, 120));
 }
 
 // Build the lines of a rounded status panel (╭─ title ─╮ │ rows │ ╰─╯). Pure

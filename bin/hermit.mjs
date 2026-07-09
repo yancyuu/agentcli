@@ -405,6 +405,10 @@ if (commandArgs[0] === 'doctor') {
   await printDoctor();
 }
 
+if (commandArgs[0] === 'update') {
+  await runUpdate();
+}
+
 if (commandArgs[0] === 'usage' && commandArgs[1] === 'status') {
   await printUsageStatus();
 }

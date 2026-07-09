@@ -70,7 +70,6 @@
     "yaml": "^2.8.2"
   },
   "optionalDependencies": {
-    "@modelzen/feishu-codex-bridge": "0.6.4",
     "cc-connect": "1.4.1"
   },
   "devDependencies": {
