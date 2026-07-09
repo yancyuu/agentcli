@@ -32,6 +32,16 @@ function finiteNumber(value) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function providerParts(metrics) {
+  if (!metrics || typeof metrics !== 'object') return [];
+  const msg = finiteNumber(metrics.messages);
+  const tok = finiteNumber(metrics.tokensTotal);
+  const parts = [];
+  if (Number.isFinite(msg)) parts.push(`消息 ${formatNumber(msg)}`);
+  if (Number.isFinite(tok)) parts.push(`Token ${formatNumber(tok)}`);
+  return parts;
+}
+
 export function cursorPendingRows(upload) {
   if (!upload || typeof upload !== 'object') return [];
   const lastError = typeof upload.lastError === 'string' ? upload.lastError.trim() : '';
@@ -79,10 +89,20 @@ export function localServerRows(telemetry, authoritative) {
 
   // Deliberately omit sessions: local JSONL files and server conversation
   // ledgers do not share one stable cardinality.
-  const localParts = [];
-  if (Number.isFinite(localMsg)) localParts.push(`消息 ${formatNumber(localMsg)}`);
-  if (Number.isFinite(localTok)) localParts.push(`Token ${formatNumber(localTok)}`);
-  if (localParts.length) rows.push([localLabel, localParts.join(' · '), 'info']);
+  const providerMetrics = useRecent ? local.recentByProvider : local.byProvider;
+  const claudecodeParts = providerParts(providerMetrics?.claudecode);
+  const codexParts = providerParts(providerMetrics?.codex);
+  if (claudecodeParts.length || codexParts.length) {
+    const segments = [];
+    if (claudecodeParts.length) segments.push(`Claude Code ${claudecodeParts.join(' · ')}`);
+    if (codexParts.length) segments.push(`Codex ${codexParts.join(' · ')}`);
+    rows.push([localLabel, segments.join(' ｜ '), 'info']);
+  } else {
+    const localParts = [];
+    if (Number.isFinite(localMsg)) localParts.push(`消息 ${formatNumber(localMsg)}`);
+    if (Number.isFinite(localTok)) localParts.push(`Token ${formatNumber(localTok)}`);
+    if (localParts.length) rows.push([localLabel, localParts.join(' · '), 'info']);
+  }
 
   // 服务端 — what the server received. Omit entirely when /report/usage wasn't read.
   let srvMsg = NaN;

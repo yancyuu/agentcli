@@ -34,7 +34,7 @@ export interface UsageTelemetryWorkerStatus {
   startedAt: string | null;
   updatedAt: string;
   lastScan: string | null;
-  source: 'claude-jsonl';
+  source: 'claude-jsonl' | 'local-jsonl';
   telemetryEnabled: boolean;
   telemetry: UsageTelemetryStatus;
   lastError?: string;
@@ -93,12 +93,52 @@ export function emptyUsageTelemetryStatus(): UsageTelemetryStatus {
     totalTokens: 0,
     recentMessages: 0,
     recentTokensTotal: 0,
+    recentByProvider: {
+      claudecode: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+      codex: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+    },
     activeDays: 0,
     hourly: Array.from({ length: 24 }, () => 0),
     projects: [],
     workSecondsByDay: {},
     daily: {},
     localUsers: [],
+    byProvider: {
+      claudecode: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+      codex: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+    },
     unresolvedUsage: { sessions: 0, messages: 0, tokensTotal: 0 },
   };
 }
@@ -190,7 +230,7 @@ async function writeStatus(
     startedAt: options.startedAt === undefined ? startedAt : options.startedAt,
     updatedAt: new Date().toISOString(),
     lastScan,
-    source: 'claude-jsonl',
+    source: 'local-jsonl',
     telemetryEnabled: Boolean(cfg?.telemetry?.enabled),
     telemetry,
     ...(options.error ? { lastError: options.error } : {}),

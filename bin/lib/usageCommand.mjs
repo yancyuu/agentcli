@@ -214,15 +214,19 @@ function conversationUploadRows(_upload = {}, auth = readOpenHermitAuthStatus(),
 }
 
 function appendUsageServerRows(rows, { telemetry, authoritativeUsage, remoteUsage, upload, auth, uploadEnabled }) {
-  const unauthorized = serverUsageUnauthorized(authoritativeUsage, remoteUsage);
-  rows.push(...localServerRows(telemetry, unauthorized ? undefined : authoritativeUsage));
+  const usageUnauthorized = serverUsageUnauthorized(authoritativeUsage, remoteUsage);
+  const loginExpired = usageUnauthorized && (!auth?.authorized || auth?.expired);
+  rows.push(...localServerRows(telemetry, usageUnauthorized ? undefined : authoritativeUsage));
   rows.push(...cursorPendingRows(upload));
-  if (unauthorized) {
+  if (loginExpired) {
     rows.push(['登录', '登录已失效，请重新登录', 'warn']);
+  } else if (usageUnauthorized) {
+    rows.push(['上报接口', '授权异常；本地登录态仍有效，请重试或检查 upload 授权', 'warn']);
+    if (uploadEnabled) rows.push(...conversationUploadRows(upload, auth, remoteUsage));
   } else if (uploadEnabled) {
     rows.push(...conversationUploadRows(upload, auth, remoteUsage));
   }
-  return unauthorized;
+  return { usageUnauthorized, loginExpired };
 }
 
 // --- Usage auth availability check -------------------------------------------
@@ -414,6 +418,8 @@ function latestUsageWorkerSourceMtime() {
     ...[
       'src/main/telemetry/worker.ts',
       'src/main/services/session-intelligence/UsageTelemetryService.ts',
+      'src/main/services/session-intelligence/SessionUsageParser.ts',
+      'src/main/services/session-intelligence/usageTypes.ts',
       'src/main/services/session-intelligence/ConversationMessageUploadService.ts',
       'src/main/services/session-intelligence/AiMonitorUsageClient.ts',
       'src/main/services/auth/OpenHermitAuthClient.ts',
@@ -896,7 +902,7 @@ async function printUsageRows(title, data, hint) {
     ['版本', `agentcli v${currentVersion}`, 'info'],
     ['消息上报', uploadText, uploadEnabled ? auth.authorized ? states.usageRunning ? 'ok' : 'warn' : 'warn' : 'off'],
   ];
-  const unauthorized = appendUsageServerRows(rows, {
+  const serverAuth = appendUsageServerRows(rows, {
     telemetry: data.telemetry,
     authoritativeUsage: data.authoritativeUsage,
     remoteUsage: data.remoteUsage,
@@ -907,9 +913,11 @@ async function printUsageRows(title, data, hint) {
   printCliRows(
     title,
     rows,
-    unauthorized
-      ? '服务端返回未授权（HTTP 401）。进入「用户」登录（命令行：agentcli auth login）后重试。'
-      : (hint || '待上报来自服务端 cursor 扫描结果；本地/服务端总账只作诊断对比。')
+    serverAuth.loginExpired
+      ? '服务端确认登录已失效。进入「用户」登录（命令行：agentcli auth login）后重试。'
+      : serverAuth.usageUnauthorized
+        ? '本地登录态仍有效，但上报接口返回未授权；请稍后重试，或重新登录刷新 upload 授权。'
+        : (hint || '待上报来自服务端 cursor 扫描结果；本地/服务端总账只作诊断对比。')
   );
 }
 
@@ -1085,7 +1093,7 @@ export async function printScanOnceResult({ exitOnDone = true, fullRescan = fals
             : '无新增消息',
       accepted > 0 ? 'ok' : uploadError ? 'error' : 'info',
     ]);
-    const unauthorized = appendUsageServerRows(rows, {
+    const serverAuth = appendUsageServerRows(rows, {
       telemetry: data.telemetry,
       authoritativeUsage: data.authoritativeUsage,
       remoteUsage: data.remoteUsage,
@@ -1100,11 +1108,13 @@ export async function printScanOnceResult({ exitOnDone = true, fullRescan = fals
     printCliRows(
       title,
       rows,
-      unauthorized
-        ? '服务端返回未授权（HTTP 401）。进入「用户」登录（命令行：agentcli auth login）后重试。'
-        : fullRescan
-          ? '重报忽略游标、仅最近 7 天；服务端按 eventId 去重，已入库的消息不会重复计数。'
-          : '待上报来自本次按服务端 cursor 扫描后尚未成功提交的消息数。',
+      serverAuth.loginExpired
+        ? '服务端确认登录已失效。进入「用户」登录（命令行：agentcli auth login）后重试。'
+        : serverAuth.usageUnauthorized
+          ? '本地登录态仍有效，但上报接口返回未授权；请稍后重试，或重新登录刷新 upload 授权。'
+          : fullRescan
+            ? '重报忽略游标、仅最近 7 天；服务端按 eventId 去重，已入库的消息不会重复计数。'
+            : '待上报来自本次按服务端 cursor 扫描后尚未成功提交的消息数。',
     );
     if (exitOnDone) process.exit(0);
     return result;

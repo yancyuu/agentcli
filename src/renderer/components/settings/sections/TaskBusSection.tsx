@@ -19,6 +19,16 @@ import {
   Zap,
 } from 'lucide-react';
 
+interface ProviderMetrics {
+  sessions: number;
+  messages: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheCreation: number;
+  tokensTotal: number;
+}
+
 interface TelemetryStatus {
   connected: boolean;
   lastScan: string | null;
@@ -29,6 +39,10 @@ interface TelemetryStatus {
   cacheRead: number;
   cacheCreation: number;
   totalTokens: number;
+  recentMessages?: number;
+  recentTokensTotal?: number;
+  recentByProvider?: { claudecode: ProviderMetrics; codex: ProviderMetrics };
+  byProvider?: { claudecode: ProviderMetrics; codex: ProviderMetrics };
   activeDays: number;
   hourly: number[];
   projects: Array<{
@@ -124,7 +138,7 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-[var(--color-text-muted)]">Loop 使用概览</span>
         <span className="text-[10px] text-[var(--color-text-muted)]">
-          累计 Loop 数据（全部历史）
+          本地 Loop 数据（最近 7 天与全部历史）
         </span>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -140,8 +154,13 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
         />
         <StatCard
           icon={<Zap size={14} />}
-          label="Total Tokens"
-          value={formatNum(status.totalTokens)}
+          label="Tokens（近7天）"
+          value={formatNum(status.recentTokensTotal ?? status.totalTokens)}
+        />
+        <StatCard
+          icon={<Zap size={14} />}
+          label="Claude/Codex"
+          value={`CC ${formatNum(status.recentByProvider?.claudecode?.tokensTotal)} / Codex ${formatNum(status.recentByProvider?.codex?.tokensTotal)}`}
         />
         <StatCard icon={<Zap size={14} />} label="Input" value={formatNum(status.tokensIn)} />
         <StatCard icon={<Zap size={14} />} label="Output" value={formatNum(status.tokensOut)} />

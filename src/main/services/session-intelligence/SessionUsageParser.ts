@@ -14,7 +14,20 @@ import { createInterface } from 'node:readline';
 
 import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
 
+export type UsageProvider = 'claudecode' | 'codex';
+
+export interface UsageProviderMetrics {
+  sessions: number;
+  messages: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheCreation: number;
+  tokensTotal: number;
+}
+
 export interface SessionEntry {
+  provider: UsageProvider;
   relPath: string;
   projectPath: string;
   title: string;
@@ -52,6 +65,7 @@ export interface UsageAggregate {
   projects: ProjectMetricsEntry[];
   events7d: EventEntry[];
   workSecondsByDay: Record<string, number>;
+  byProvider: Record<UsageProvider, UsageProviderMetrics>;
 }
 
 export interface DailyMetrics {
@@ -66,6 +80,7 @@ export interface DailyMetrics {
 }
 
 export interface ProjectMetricsEntry {
+  provider: UsageProvider;
   cwd: string;
   sessions: number;
   messages: number;
@@ -75,6 +90,7 @@ export interface ProjectMetricsEntry {
 }
 
 export interface EventEntry {
+  provider: UsageProvider;
   ts: number;
   tokensIn: number;
   tokensOut: number;
@@ -164,6 +180,7 @@ function normalizeCwd(cwd: string): { normalized: string; isWorktree: boolean } 
 }
 
 interface ParsedSession {
+  provider: UsageProvider;
   title: string;
   projectPath: string;
   isWorktree: boolean;
@@ -185,7 +202,10 @@ interface ParsedSession {
   events: EventEntry[];
 }
 
-async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
+async function parseJsonl(
+  filePath: string,
+  provider: UsageProvider = 'claudecode'
+): Promise<ParsedSession | null> {
   let messageCount = 0;
   let imMessageCount = 0;
   let imTotalTokens = 0;
@@ -297,6 +317,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
       const tsUnix = Date.parse(ts) / 1000;
       if (!isNaN(tsUnix)) {
         events.push({
+          provider,
           ts: tsUnix,
           tokensIn: inp,
           tokensOut: out,
@@ -314,6 +335,7 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
   if (messageCount === 0) return null;
 
   return {
+    provider,
     title,
     projectPath: normalizeCwd(rawCwd).normalized,
     isWorktree,
@@ -321,6 +343,173 @@ async function parseJsonl(filePath: string): Promise<ParsedSession | null> {
     imMessageCount,
     imTotalTokens,
     toolCalls,
+    tokens,
+    startTime,
+    endTime,
+    dailyTokens,
+    hourly,
+    events,
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function codexHome(): string {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+}
+
+function codexUsageRecordFromEvent(obj: Record<string, unknown>): Record<string, unknown> | null {
+  const payload = objectRecord(obj.payload);
+  if (!payload) return null;
+  const info = objectRecord(payload.info);
+  return objectRecord(info?.last_token_usage) ?? objectRecord(info?.total_token_usage);
+}
+
+function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
+  const payload = objectRecord(record.payload);
+  return String(payload?.type ?? '') === 'token_count';
+}
+
+function codexTokenUsageFromRecord(source: Record<string, unknown>) {
+  const input =
+    Number(
+      source.input_tokens ??
+        source.inputTokens ??
+        source.input ??
+        source.prompt_tokens ??
+        source.promptTokens ??
+        0
+    ) || 0;
+  const cacheRead =
+    Number(
+      source.cached_input_tokens ??
+        source.cache_read_input_tokens ??
+        source.cacheReadTokens ??
+        source.cachedInputTokens ??
+        0
+    ) || 0;
+  const rawOutput =
+    Number(
+      source.output_tokens ??
+        source.outputTokens ??
+        source.output ??
+        source.completion_tokens ??
+        source.completionTokens ??
+        0
+    ) || 0;
+  const reasoning =
+    Number(
+      source.reasoning_output_tokens ?? source.reasoningTokens ?? source.reasoning_tokens ?? 0
+    ) || 0;
+  const output = rawOutput + reasoning;
+  const total =
+    Number(source.total_tokens ?? source.totalTokens ?? input + cacheRead + output) || 0;
+  if (!input && !cacheRead && !output && !total) return null;
+  return { input, output, cacheRead, cacheCreation: 0, total };
+}
+
+async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> {
+  let rawCwd = '';
+  let model = '';
+  let messageCount = 0;
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
+  let startTime = '';
+  let endTime = '';
+  const dailyTokens: Record<string, DailyMetrics> = {};
+  const hourly: number[] = new Array(24).fill(0);
+  const events: EventEntry[] = [];
+  const rl = createInterface({ input: createReadStream(filePath, 'utf-8'), crlfDelay: Infinity });
+
+  for await (const rawLine of rl) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const payload = objectRecord(obj.payload);
+    if (payload) {
+      if (typeof payload.cwd === 'string' && payload.cwd) rawCwd = payload.cwd;
+      if (!rawCwd && Array.isArray(payload.workspace_roots)) {
+        const firstRoot = payload.workspace_roots.find((root) => typeof root === 'string' && root);
+        if (typeof firstRoot === 'string') rawCwd = firstRoot;
+      }
+      if (typeof payload.model === 'string' && payload.model) model = payload.model;
+      if (!model && typeof payload.model_provider === 'string' && payload.model_provider)
+        model = payload.model_provider;
+    }
+    const record = codexUsageRecordFromEvent(obj);
+    if (!record || !isCodexTokenCountRecord(obj)) continue;
+    const usage = codexTokenUsageFromRecord(record);
+    if (!usage) continue;
+    const ts =
+      typeof obj.timestamp === 'string'
+        ? obj.timestamp
+        : typeof payload?.timestamp === 'string'
+          ? payload.timestamp
+          : typeof record.timestamp === 'string'
+            ? String(record.timestamp)
+            : '';
+    if (!ts) continue;
+
+    messageCount++;
+    tokens.input += usage.input;
+    tokens.output += usage.output;
+    tokens.cacheRead += usage.cacheRead;
+    tokens.cacheCreation += usage.cacheCreation;
+    tokens.total += usage.total;
+
+    const day = ts.slice(0, 10);
+    if (day.length === 10) {
+      const d = (dailyTokens[day] ??= {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+        workSeconds: 0,
+      });
+      d.messages++;
+      d.tokensIn += usage.input;
+      d.tokensOut += usage.output;
+      d.cacheRead += usage.cacheRead;
+      d.cacheCreation += usage.cacheCreation;
+      d.tokensTotal += usage.total;
+    }
+    const hour = Number(ts.slice(11, 13));
+    if (hour >= 0 && hour < 24) hourly[hour]++;
+    const tsUnix = Date.parse(ts) / 1000;
+    if (!isNaN(tsUnix))
+      events.push({
+        provider: 'codex',
+        ts: tsUnix,
+        tokensIn: usage.input,
+        tokensOut: usage.output,
+        cacheRead: usage.cacheRead,
+        cacheCreation: usage.cacheCreation,
+        tokensTotal: usage.total,
+      });
+    if (!startTime) startTime = ts;
+    endTime = ts;
+  }
+
+  if (messageCount === 0) return null;
+  const projectPath = normalizeCwd(rawCwd || path.dirname(filePath)).normalized;
+  return {
+    provider: 'codex',
+    title: model ? `Codex ${model}` : 'Codex token usage',
+    projectPath,
+    isWorktree: false,
+    messageCount,
+    imMessageCount: 0,
+    imTotalTokens: 0,
+    toolCalls: {},
     tokens,
     startTime,
     endTime,
@@ -452,6 +641,33 @@ export async function scanProjectStats(workDir: string): Promise<ProjectUsageSta
   return stats;
 }
 
+function emptyProviderMetrics(): UsageProviderMetrics {
+  return {
+    sessions: 0,
+    messages: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    tokensTotal: 0,
+  };
+}
+
+function addProviderMetrics(
+  aggregate: UsageAggregate,
+  provider: UsageProvider,
+  parsed: ParsedSession
+): void {
+  const metrics = aggregate.byProvider[provider];
+  metrics.sessions++;
+  metrics.messages += parsed.messageCount;
+  metrics.tokensIn += parsed.tokens.input;
+  metrics.tokensOut += parsed.tokens.output;
+  metrics.cacheRead += parsed.tokens.cacheRead;
+  metrics.cacheCreation += parsed.tokens.cacheCreation;
+  metrics.tokensTotal += parsed.tokens.total;
+}
+
 export async function scanSessions(): Promise<ParseResult> {
   const sessions: SessionEntry[] = [];
   const aggregate: UsageAggregate = {
@@ -466,6 +682,10 @@ export async function scanSessions(): Promise<ParseResult> {
     projects: [],
     events7d: [],
     workSecondsByDay: {},
+    byProvider: {
+      claudecode: emptyProviderMetrics(),
+      codex: emptyProviderMetrics(),
+    },
   };
 
   const activeDaySet = new Set<string>();
@@ -486,6 +706,7 @@ export async function scanSessions(): Promise<ParseResult> {
 
     const relPath = path.relative(projectsRoot, filePath);
     sessions.push({
+      provider: parsed.provider,
       relPath,
       projectPath: parsed.projectPath,
       title: parsed.title,
@@ -508,6 +729,7 @@ export async function scanSessions(): Promise<ParseResult> {
     aggregate.tokens.cacheRead += parsed.tokens.cacheRead;
     aggregate.tokens.cacheCreation += parsed.tokens.cacheCreation;
     aggregate.tokens.total += parsed.tokens.total;
+    addProviderMetrics(aggregate, parsed.provider, parsed);
 
     // Hourly
     for (let h = 0; h < 24; h++) {
@@ -541,8 +763,10 @@ export async function scanSessions(): Promise<ParseResult> {
 
     // Projects
     const proj = parsed.projectPath || '(untracked)';
-    if (!projectMap[proj]) {
-      projectMap[proj] = {
+    const projectKey = `${parsed.provider}:${proj}`;
+    if (!projectMap[projectKey]) {
+      projectMap[projectKey] = {
+        provider: parsed.provider,
         cwd: proj,
         sessions: 0,
         messages: 0,
@@ -551,12 +775,92 @@ export async function scanSessions(): Promise<ParseResult> {
         tokensTotal: 0,
       };
     }
-    const p = projectMap[proj];
+    const p = projectMap[projectKey];
     p.sessions++;
     p.messages += parsed.messageCount;
     p.tokensIn += parsed.tokens.input;
     p.tokensOut += parsed.tokens.output;
     p.tokensTotal += parsed.tokens.total;
+  }
+
+  const codexRoot = codexHome();
+  for (const root of [
+    path.join(codexRoot, 'sessions'),
+    path.join(codexRoot, 'archived_sessions'),
+  ]) {
+    for await (const filePath of walkJsonl(root)) {
+      let fileStat;
+      try {
+        fileStat = await stat(filePath);
+      } catch {
+        continue;
+      }
+      const parsed = await parseCodexJsonl(filePath);
+      if (!parsed) continue;
+      sessions.push({
+        provider: 'codex',
+        relPath: `codex:${path.relative(codexRoot, filePath)}`,
+        projectPath: parsed.projectPath,
+        title: parsed.title,
+        messageCount: parsed.messageCount,
+        toolCalls: parsed.toolCalls,
+        tokens: parsed.tokens,
+        startTime: parsed.startTime,
+        endTime: parsed.endTime,
+        fileSize: fileStat.size,
+        mtime: fileStat.mtimeMs,
+        isWorktree: parsed.isWorktree,
+      });
+      aggregate.sessions++;
+      aggregate.messages += parsed.messageCount;
+      aggregate.tokens.input += parsed.tokens.input;
+      aggregate.tokens.output += parsed.tokens.output;
+      aggregate.tokens.cacheRead += parsed.tokens.cacheRead;
+      aggregate.tokens.cacheCreation += parsed.tokens.cacheCreation;
+      aggregate.tokens.total += parsed.tokens.total;
+      addProviderMetrics(aggregate, 'codex', parsed);
+      for (let h = 0; h < 24; h++) aggregate.hourly[h] += parsed.hourly[h];
+      allEvents.push(...parsed.events);
+      for (const [day, m] of Object.entries(parsed.dailyTokens)) {
+        activeDaySet.add(day);
+        const d = (aggregate.daily[day] ??= {
+          sessions: 0,
+          messages: 0,
+          tokensIn: 0,
+          tokensOut: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          tokensTotal: 0,
+          workSeconds: 0,
+        });
+        d.sessions++;
+        d.messages += m.messages;
+        d.tokensIn += m.tokensIn;
+        d.tokensOut += m.tokensOut;
+        d.cacheRead += m.cacheRead;
+        d.cacheCreation += m.cacheCreation;
+        d.tokensTotal += m.tokensTotal;
+      }
+      const proj = parsed.projectPath || '(untracked)';
+      const projectKey = `codex:${proj}`;
+      if (!projectMap[projectKey]) {
+        projectMap[projectKey] = {
+          provider: 'codex',
+          cwd: proj,
+          sessions: 0,
+          messages: 0,
+          tokensIn: 0,
+          tokensOut: 0,
+          tokensTotal: 0,
+        };
+      }
+      const p = projectMap[projectKey];
+      p.sessions++;
+      p.messages += parsed.messageCount;
+      p.tokensIn += parsed.tokens.input;
+      p.tokensOut += parsed.tokens.output;
+      p.tokensTotal += parsed.tokens.total;
+    }
   }
 
   // Work seconds per day

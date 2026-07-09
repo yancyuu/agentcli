@@ -66,6 +66,40 @@ describe('access-token expiry resolution', () => {
     expect(msUntilExpiry).toBeGreaterThan(59 * 60 * 1000);
   });
 
+
+  it('expires local auth when /me keeps returning access_expired after a refresh attempt', async () => {
+    const auth = await freshAuth();
+    const store = auth.buildAuthStoreFromToken(
+      config,
+      { access_token: 'atk-old', refresh_token: 'rtk' },
+      { id: 'u1', name: 'Tester' }
+    );
+    auth.writeOpenHermitAuthStore(store);
+
+    const originalFetch = globalThis.fetch;
+    let meCalls = 0;
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      if (href.endsWith('/api/v1/auth/token')) {
+        return new Response('refresh failed', { status: 500 });
+      }
+      if (href.endsWith('/api/v1/auth/me')) {
+        meCalls += 1;
+        return Response.json({ authenticated: true, status: 'access_expired' });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+    try {
+      const status = await auth.refreshOpenHermitAuthStatus();
+      expect(meCalls).toBe(2);
+      expect(status.authorized).toBe(false);
+      expect(status.expired).toBe(true);
+      expect(auth.readOpenHermitAuthStatus().authorized).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('does not synthesize a horizon for payloads without an access token', async () => {
     const auth = await freshAuth();
     // No access token → normalizeAccessTokenPayload returns null (no store built).

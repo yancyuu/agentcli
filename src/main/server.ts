@@ -6583,6 +6583,10 @@ type TelemetryStatusShape = {
   cacheRead: number;
   cacheCreation: number;
   totalTokens: number;
+  recentMessages?: number;
+  recentTokensTotal?: number;
+  recentByProvider?: UsageTelemetryStatus['recentByProvider'];
+  byProvider?: UsageTelemetryStatus['byProvider'];
   activeDays: number;
   hourly: number[];
   projects: TelemetryProjectRow[];
@@ -6861,6 +6865,48 @@ function telemetryEmptyStatus(): TelemetryStatusShape {
     cacheRead: 0,
     cacheCreation: 0,
     totalTokens: 0,
+    recentMessages: 0,
+    recentTokensTotal: 0,
+    recentByProvider: {
+      claudecode: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+      codex: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+    },
+    byProvider: {
+      claudecode: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+      codex: {
+        sessions: 0,
+        messages: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        tokensTotal: 0,
+      },
+    },
     activeDays: 0,
     hourly: [],
     projects: [],

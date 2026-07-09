@@ -933,7 +933,8 @@ async function refreshOpenHermitAuthStatus() {
     // 一定要及时刷新" contract: a server rejection must not leave the local store
     // showing 已登录. 5xx / network errors are transient and keep the local token.
     const accessRejected = res.status === 401 || res.status === 403;
-    const bodyFlaggedExpiry = res.ok && payload?.access_expired === true;
+    const bodyFlaggedExpiry =
+      res.ok && (payload?.access_expired === true || payload?.status === 'access_expired');
     if ((accessRejected || bodyFlaggedExpiry) && store?.token?.refreshToken) {
       store = await refreshExpiredOpenHermitToken({
         ...store,
@@ -964,12 +965,14 @@ async function refreshOpenHermitAuthStatus() {
     // (revoked / refresh token expired). Expire it locally so `auth status` stops
     // reporting 已登录 after a server-side logout. Transient 5xx / network errors
     // fall through to the local-status return below unchanged.
-    if (res.status === 401 || res.status === 403) {
+    const retryBodyFlaggedExpiry =
+      res.ok && (payload?.access_expired === true || payload?.status === 'access_expired');
+    if (res.status === 401 || res.status === 403 || retryBodyFlaggedExpiry) {
       writeOpenHermitAuthStore({
         ...store,
         token: { ...store.token, expiresAt: '2000-01-01T00:00:00.000Z' },
         updatedAt: new Date().toISOString(),
-        lastMeStatus: payload?.status || 'unauthenticated',
+        lastMeStatus: payload?.status || (retryBodyFlaggedExpiry ? 'access_expired' : 'unauthenticated'),
       });
       return readOpenHermitAuthStatus();
     }

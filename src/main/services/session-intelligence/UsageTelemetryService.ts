@@ -9,7 +9,7 @@ import type { TaskBusConfig } from '@shared/types/team';
 
 import { SessionUsageCollector } from './SessionUsageCollector';
 import { uploadConversationMessages } from './ConversationMessageUploadService';
-import type { SessionEntry, UsageAggregate } from './SessionUsageParser';
+import type { SessionEntry, UsageAggregate, UsageProviderMetrics } from './SessionUsageParser';
 import type {
   UsageCollectionResult,
   UsageTelemetryStatus,
@@ -45,18 +45,33 @@ function projectNameForPath(projectPath: string): string | undefined {
   return projectPath ? projectPath.split('/').filter(Boolean).at(-1) : undefined;
 }
 
+function emptyProviderMetrics(): UsageProviderMetrics {
+  return {
+    sessions: 0,
+    messages: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    tokensTotal: 0,
+  };
+}
+
 function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetryRow[] {
   return sessions
     .filter((session) => session.tokens.total > 0 || session.messageCount > 0)
     .map((session) => ({
-      key: `local:${session.relPath}`,
+      key: `local:${session.provider}:${session.relPath}`,
       kind: 'local' as const,
       identity: {
         platform: 'local',
         type: 'person' as const,
-        displayName: projectNameForPath(session.projectPath) || 'Local Claude Code',
-        confidence: 'local-jsonl',
+        displayName:
+          projectNameForPath(session.projectPath) ||
+          (session.provider === 'codex' ? 'Local Codex' : 'Local Claude Code'),
+        confidence: `${session.provider}-jsonl`,
       },
+      provider: session.provider,
       projectName: projectNameForPath(session.projectPath),
       workDir: session.projectPath || undefined,
       sessions: 1,
@@ -78,10 +93,21 @@ function statusFromCollection(collection: UsageCollectionResult): UsageTelemetry
   const cutoff7d = Math.floor(Date.now() / 1000) - 86_400 * 7;
   let recentMessages = 0;
   let recentTokensTotal = 0;
+  const recentByProvider = {
+    claudecode: emptyProviderMetrics(),
+    codex: emptyProviderMetrics(),
+  };
   for (const event of aggregate.events7d) {
     if (event.ts < cutoff7d) continue;
     recentMessages += 1;
     recentTokensTotal += event.tokensTotal;
+    const providerMetrics = recentByProvider[event.provider];
+    providerMetrics.messages += 1;
+    providerMetrics.tokensIn += event.tokensIn;
+    providerMetrics.tokensOut += event.tokensOut;
+    providerMetrics.cacheRead += event.cacheRead;
+    providerMetrics.cacheCreation += event.cacheCreation;
+    providerMetrics.tokensTotal += event.tokensTotal;
   }
 
   return {
@@ -98,12 +124,14 @@ function statusFromCollection(collection: UsageCollectionResult): UsageTelemetry
     totalTokens: aggregate.tokens.total,
     recentMessages,
     recentTokensTotal,
+    recentByProvider,
     activeDays: aggregate.activeDays,
     hourly: aggregate.hourly,
     projects: aggregate.projects,
     workSecondsByDay: aggregate.workSecondsByDay,
     daily: aggregate.daily,
     localUsers: localUserRowsFromSessions(collection.legacyParseResult.sessions),
+    byProvider: aggregate.byProvider,
     unresolvedUsage: emptyUnresolvedUsage(),
   };
 }
