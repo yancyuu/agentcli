@@ -11,8 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yancyuu/agentcli/stargazers"><img src="https://img.shields.io/github/stars/yancyuu/agentcli?style=flat-square&color=brightgreen" alt="GitHub stars" /></a>
-  <a href="https://github.com/yancyuu/agentcli/releases/latest"><img src="https://img.shields.io/github/v/release/yancyuu/agentcli?style=flat-square&label=release&color=brightgreen" alt="Latest release" /></a>
   <a href="https://www.npmjs.com/package/@yancyyu/agentcli"><img src="https://img.shields.io/npm/v/@yancyyu/agentcli?style=flat-square&color=brightgreen" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/@yancyyu/agentcli"><img src="https://img.shields.io/npm/dm/@yancyyu/agentcli?style=flat-square&color=brightgreen" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-brightgreen?style=flat-square" alt="AGPL-3.0 license" /></a>
@@ -38,16 +36,16 @@ AgentCli 是一个**开源、本地优先的 AI 数字员工工作台**。它让
 
 ---
 
-## 🆓 开源免费 · 🏢 企业版 AgentBus
+## 两个产品，一条路径
 
-AgentCli 由两个各司其职的产品组成，默认全部跑在本机、数据落在 `~/.hermit/`：
+先免费用起来，需要团队化时再升级。**AgentCli 开源免费，AgentBus 是付费的企业增值服务。**
 
 | 产品 | 定位 | 价格 | 什么时候用 |
 |:--|:--|:--|:--|
-| **AgentCli** | 本地 CLI + Web 工作台。操作面，读写本地数据。 | **开源免费**（AGPL-3.0） | 单机使用、脚本化、自动化、本地数字员工团队 |
-| **AgentBus** | 中心化数据总线。团队协作、企业用量看板、IM 路由、跨团队派发、审计。 | **企业版 · 增值服务** | 多人 / 多团队协作、IM 触发任务、企业级用量看板 |
+| **AgentCli** | 本地优先的 CLI + Web 工作台。你现在就能装、立刻能用。 | **开源免费**（AGPL-3.0） | 单机使用、脚本化、自动化、本地数字员工团队 |
+| **AgentBus** | 中心化数据总线，把单机工具升级成团队 / 企业平台。 | **企业版 · 增值服务** | 多人 / 多团队协作、IM 触发任务、企业级用量看板 |
 
-> 关系一句话：**AgentCli（开源）是操作面，AgentBus（企业版）是协调骨干。** 不接 Bus = 单机模式，照样完整能跑；接入 Bus 才解锁多人协作与企业能力。开源版本现在就能免费用起来；企业版属于增值服务的一部分。
+> 关系一句话：**AgentCli（开源）是操作面，AgentBus（企业版）是协调骨干。** 不接 Bus = 单机模式，照样完整能跑；接入 Bus 才解锁多人协作与企业能力。
 
 ---
 
@@ -297,7 +295,6 @@ export PATH="$(npm config get prefix)/bin:$PATH"
 ## 文档
 
 - [在线指南](https://yancyuu.github.io/agentcli/)（安装、命令、配置、FAQ）
-- [Issues / 反馈](https://github.com/yancyuu/agentcli/issues)
 - [Changelog](docs/CHANGELOG.md)
 
 ---
