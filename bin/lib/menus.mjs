@@ -39,6 +39,7 @@ export const NAV_ACTIONS = [
     children: [
       { id: 'login', label: '飞书登录' },
       { id: 'status', label: '查看登录状态' },
+      { id: 'guide', label: '在线说明书', description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex' },
       { id: 'logout', label: '退出登录' },
     ],
   },
@@ -274,6 +275,11 @@ export const ACCOUNT_ACTIONS = [
     id: 'status',
     label: '查看登录状态',
     description: `查看 ${BRAND.authAccountLabel} 授权状态`,
+  },
+  {
+    id: 'guide',
+    label: '在线说明书',
+    description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex',
   },
   {
     id: 'logout',

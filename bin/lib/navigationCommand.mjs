@@ -14,6 +14,7 @@ import {
   telemetryWorkerStatusPath,
   telemetryWorkerLogPath,
   telemetryWorkerErrorLogPath,
+  currentVersion,
 } from './env.mjs';
 import {
   cancelCli,
@@ -103,6 +104,25 @@ import { fileURLToPath } from 'node:url';
 
 // --- Busy screen message for inline actions ------------------------------------
 
+const ONLINE_GUIDE_URL = 'https://yancyuu.github.io/agentcli/';
+const ONLINE_GUIDE_HANDOFF = [
+  `请先阅读 AgentCli 在线说明书：${ONLINE_GUIDE_URL}`,
+  '这是本机 AgentCli/Hermit 的使用手册。',
+  '后续回答和操作请以这份说明书为准。',
+];
+
+export function onlineGuideRows() {
+  return [
+    ['说明书', ONLINE_GUIDE_URL, 'info'],
+    ['交给 Claude Code', ONLINE_GUIDE_HANDOFF, 'ok'],
+    ['用途', '把这段提示复制给 Claude Code / Codex，让它先读说明书再操作', 'info'],
+  ];
+}
+
+function printOnlineGuide() {
+  printCliRows('在线说明书', onlineGuideRows(), '复制「交给 Claude Code」这一行给其他 AI 助手即可。');
+}
+
 function inlineBusyMessage(action) {
   if (action.id === 'toggle-feishu-bridge') {
     const fb = currentFeatureStates().feishuBridge;
@@ -138,6 +158,7 @@ function hasDeveloperModeEnabled() {
 function currentMenuStatusItems(states = currentFeatureStates()) {
   const upload = describeUploadToggle({ enabled: states.conversationUploadEnabled, running: states.usageRunning });
   return [
+    { label: `${BRAND.stylizedName} v${currentVersion}`, state: 'info' },
     { label: states.auth.authorized ? `已登录 ${states.auth.account?.name || BRAND.authProviderName}` : '未登录', state: states.auth.authorized ? 'ok' : 'off' },
     { label: states.webRunning ? 'Web 运行中' : 'Web 未启动', state: states.webRunning ? 'ok' : 'off' },
     { label: upload.rowLabel, state: upload.rowState },
@@ -226,20 +247,30 @@ function usageDaemonPayload(server) {
 // Re-export these so usageCommand.mjs can share them
 export { emptyUsageTelemetryStatus, usageDaemonPayload };
 
+function menuRenderState() {
+  const states = currentFeatureStates();
+  return {
+    states,
+    statusItems: currentMenuStatusItems(states),
+    actionStateLabel: (action) => actionStateLabel(action, states),
+  };
+}
+
 // --- Menu-driven action subroutines ------------------------------------------
 
 async function runLocalCollectionAction() {
   const { printScanOnceResult, printUsageStart, printUsageStop, printUsageStatus, isUsageAuthUnavailable, loginAfterUsageAuthExpired, enableConversationUploadWithProvider } = await import('./usageCommand.mjs');
 
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '用量上报',
       subtitle: '本地扫描可免登录；消息上报支持多选 Claude Code / Codex，按批次增量上传',
       actions: LOCAL_COLLECTION_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     if (actionId === 'overview') {
@@ -291,14 +322,15 @@ async function openWebSettingsTaskBus() {
 
 async function runTaskBusAction() {
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '团队总线',
       subtitle: '企业版开放：agentbus、IM 路由与企业看板配置',
       actions: TASK_BUS_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     if (actionId === 'status') await printTaskBusStatus();
@@ -479,16 +511,23 @@ async function runTokenClaimFlow() {
 
 async function runAccountAction() {
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '登录状态',
       subtitle: `本地使用无需登录；云端授权、托管服务或显式上传需要 ${BRAND.authAccountLabel}`,
       actions: ACCOUNT_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
+    if (actionId === 'guide') {
+      printOnlineGuide();
+      const continueAction = await waitForContinue('按 Enter/← 返回登录状态菜单 | Esc/Ctrl+C 退出');
+      if (continueAction === 'back' || continueAction === 'cancel') return;
+      continue;
+    }
     if (actionId === 'status') await printAuthStatus({ exitOnDone: false });
     if (actionId === 'login') await runAuthLogin({ exitOnDone: false, interactiveMenu: true });
     if (actionId === 'logout') await runAuthLogout({ exitOnDone: false });
@@ -501,14 +540,15 @@ async function runAccountAction() {
 
 async function runLocalUseAction() {
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '本地使用',
       subtitle: '无需登录 | 本机 Web、数字员工、本地采集和运行时',
       actions: LOCAL_USE_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     const action = findMenuAction(LOCAL_USE_ACTIONS, actionId);
@@ -551,14 +591,15 @@ async function runTeamCollaborationAction() {
   if (nextAction === 'back') return;
 
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '团队协作',
       subtitle: auth.authorized ? '已登录 | 企业版协作配置已写入本机设置' : '未登录 | 企业版协作需登录授权',
       actions: TEAM_COLLAB_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     if (actionId === 'open-web-settings') await openWebSettingsTaskBus();
@@ -570,14 +611,15 @@ async function runTeamCollaborationAction() {
 
 async function runEmployeeAction() {
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '数字员工',
       subtitle: '团队、任务与协作入口',
       actions: EMPLOYEE_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     if (actionId === 'create-team') {
@@ -594,14 +636,15 @@ async function runEmployeeAction() {
 
 async function runRuntimeAction() {
   while (true) {
+    const renderState = menuRenderState();
     const actionId = await askMenuAction({
       title: '本地运行时',
       subtitle: 'Web / daemon / runtime 生命周期管理',
       actions: RUNTIME_ACTIONS,
       escapeAction: 'back',
-      statusItems: currentMenuStatusItems(),
+      statusItems: renderState.statusItems,
       hasDeveloperModeEnabled,
-      actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+      actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
     if (actionId === 'status') {
@@ -786,6 +829,11 @@ export async function runNavigationAction(action) {
     return waitForContinue(ACTION_DONE_MSG);
   }
   if (action.id === 'exit') { cancelCli(); return; }
+  if (action.id === 'guide') {
+    printOnlineGuide();
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
   // Auth transitions re-probe /api/v1/auth/me and cache the server-confirmed
   // state BEFORE the pause screen repaints. /me is authoritative for "logged in
   // right now" — the local store can lag a login write — so awaiting it means
@@ -859,17 +907,24 @@ export async function printNavigation() {
   await refreshAuthCacheFromServer();
   await refreshWebRunningState();
 
-  // statusItems is a FUNCTION so askMenuAction re-reads currentFeatureStates()
-  // on every repaint — otherwise the top status bar stays stale after an inline
-  // login / toggle-web / toggle-message-upload (the original "登陆了也没用").
+  // Keep the home status fresh after inline actions, but compute expensive feature
+  // probes once per repaint. Windows process discovery is slow; expanding a
+  // second-level menu must not call currentFeatureStates() once per rendered row.
+  let repaintState = null;
   await askMenuAction({
     title: '',
     subtitle: '',
     actions: NAV_ACTIONS,
     escapeAction: 'exit',
-    statusItems: () => currentMenuStatusItems(currentFeatureStates()),
+    statusItems: () => {
+      repaintState = menuRenderState();
+      return repaintState.statusItems;
+    },
     hasDeveloperModeEnabled,
-    actionStateLabel: (action) => actionStateLabel(action, currentFeatureStates()),
+    actionStateLabel: (action) => {
+      repaintState ??= menuRenderState();
+      return repaintState.actionStateLabel(action);
+    },
     inlineBusyMessage,
     // Child / leaf actions run INLINE: the home menu stays open and repaints
     // with fresh state when the action finishes. Parents toggle expansion

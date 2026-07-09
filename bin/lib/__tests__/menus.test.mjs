@@ -4,7 +4,7 @@
 // assertions against menus.mjs.
 import { describe, expect, it } from 'vitest';
 
-import { LOCAL_COLLECTION_ACTIONS, NAV_ACTIONS, findMenuAction } from '../menus.mjs';
+import { ACCOUNT_ACTIONS, LOCAL_COLLECTION_ACTIONS, NAV_ACTIONS, findMenuAction } from '../menus.mjs';
 
 describe('menus — scan action re-reports the last 24h', () => {
   it('data-sync nav group offers a 重报最近 7 天 action', () => {
@@ -41,5 +41,16 @@ describe('menus — 本地工作台只保留 AgentCli 工作台', () => {
     expect(ids).toEqual(['toggle-web', 'workbench-status']);
     expect(ids).not.toContain('install-lark-cli');
     expect(ids).not.toContain('toggle-feishu-bridge');
+  });
+});
+
+describe('menus — 用户菜单提供在线说明书', () => {
+  it('shows the AgentCli guide as a user-facing handoff link', () => {
+    const guide = findMenuAction(ACCOUNT_ACTIONS, 'guide');
+
+    expect(guide).toBeTruthy();
+    expect(guide.label).toBe('在线说明书');
+    expect(guide.description).toContain('https://yancyuu.github.io/agentcli/');
+    expect(guide.description).toContain('Claude Code');
   });
 });

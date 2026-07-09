@@ -24,10 +24,10 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentCli — 开源本地优先的 AI 数字员工工作台</title>
-  <meta name="description" content="开源、本地优先的 AI 数字员工工作台。CLI 给 agent，Web 给人；自动采集 Claude Code / Codex / Cursor 等运行时用量。企业版 AgentBus 提供团队协作、IM 路由与企业看板。" />
-  <meta property="og:title" content="AgentCli — 开源 AI 数字员工工作台" />
-  <meta property="og:description" content="开源 · 本地优先。CLI for agents, Web for humans. 采集 → 上报 → 协作。企业版 AgentBus 增值服务。" />
+  <title>AgentCli — 本地优先的 AI 数字员工工作台</title>
+  <meta name="description" content="本地优先的 AI 数字员工工作台。AgentCli 负责本地 CLI / Web 控制面，AgentBus 负责消息总线、团队协作与组织级协调。" />
+  <meta property="og:title" content="AgentCli — AI 数字员工工作台" />
+  <meta property="og:description" content="本地 CLI 控制面 + 消息总线协调。CLI for agents, Web for humans. 采集 → 路由 → 协作。" />
   <meta property="og:type" content="website" />
   <link rel="icon" href="icon.png" />
   <style>
@@ -215,10 +215,10 @@ const html = `<!DOCTYPE html>
   </header>
 
   <section class="hero">
-    <span class="hero-badge">开源 · Local-first · AGPL-3.0</span>
+    <span class="hero-badge">Local-first · 本地控制面 · v1.9.5</span>
     <h1>AgentCli</h1>
-    <p class="lede">本地优先的开源 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
-    <p class="oss-line">100% 开源免费，数据落在本机 <code>~/.hermit/</code>。需要团队协作与企业看板时，接入商业版 <strong>AgentBus</strong>。</p>
+    <p class="lede">本地优先的 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
+    <p class="oss-line">AgentCli 管本地运行时与工作台，数据默认落在本机 <code>~/.hermit/</code>；AgentBus 负责消息路由、团队协作与组织级用量汇总。</p>
 
     <div class="install-box">
       <div class="install-tabs">
@@ -237,26 +237,27 @@ const html = `<!DOCTYPE html>
       </div>
     </div>
     <div class="install-help">
-      <strong>安装 / 更新报错？</strong> Windows 遇到 <code>EBUSY: resource busy or locked</code> 不是权限问题（别用 sudo / 管理员），是之前的 agentcli 后台进程还占着文件。先关掉再装：
-      <pre><code>agentcli stop
+      <strong>安装 / 更新报错？</strong> Windows 遇到 <code>EBUSY: resource busy or locked</code> 不是权限问题（别用 sudo / 管理员），通常是 Web daemon 或用量 worker 还占着文件。先按需停掉后台服务再装：
+      <pre><code>agentcli services stop web
+agentcli usage stop
 npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
-      完整排查见下方 <a href="#faq">FAQ</a>。
+      <code>agentcli stop</code> 只显示停止指引，不会主动关闭后台服务；完整排查见下方 <a href="#faq">FAQ</a>。
     </div>
     <div class="install-help">
-      <strong>卸载</strong> 先停掉后台进程，再卸载包：
-      <pre><code>agentcli stop
+      <strong>卸载</strong> 先停掉后台服务，再卸载包：
+      <pre><code>agentcli services stop web
 agentcli usage stop
 npm uninstall -g @yancyyu/agentcli</code></pre>
-      本地数据 <code>~/.hermit/</code> 不会自动删除；确认无需保留后可手动 <code>rm -rf ~/.hermit</code>。
+      裸 <code>agentcli stop</code> 不会停止 worker；本地数据 <code>~/.hermit/</code> 不会自动删除；确认无需保留后可手动 <code>rm -rf ~/.hermit</code>。
     </div>
   </section>
 
   <section id="tiers">
-    <h2>两个产品，一条路径</h2>
-    <p class="section-sub">先免费用起来，需要团队化时再升级。<strong>AgentCli 开源免费，AgentBus 是付费的企业增值服务。</strong></p>
+    <h2>本地控制面 + 消息总线</h2>
+    <p class="section-sub">先把本机 AI 运行时管起来，再把团队消息、任务与用量接入统一总线。<strong>AgentCli 负责本地控制面，AgentBus 负责跨团队协调。</strong></p>
     <div class="tiers">
       <div class="tier">
-        <span class="tier-tag free">开源 · 免费</span>
+        <span class="tier-tag free">本地控制面</span>
         <h3>AgentCli</h3>
         <p class="tier-sub">本地优先的 CLI + Web 工作台。你现在就能装、立刻能用。</p>
         <ul>
@@ -264,14 +265,14 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
           <li>本地 Web 工作台：团队、看板、运行时、代码评审</li>
           <li>自动采集本机 AI 运行时用量（token / 会话 / 消息）</li>
           <li>数据默认落 <code>~/.hermit/</code>，单机完整可用，无需注册</li>
-          <li>AGPL-3.0 开源，可自托管、可二次开发</li>
+          <li>支持自托管、可二次开发</li>
         </ul>
         <p class="tier-cta"><a href="#commands">装好之后从这几条命令开始 →</a></p>
       </div>
       <div class="tier enterprise">
-        <span class="tier-tag ent">企业版 · 增值服务</span>
+        <span class="tier-tag ent">消息总线 · 协调层</span>
         <h3>AgentBus</h3>
-        <p class="tier-sub">中心化数据总线，把单机工具升级成团队 / 企业平台。</p>
+        <p class="tier-sub">统一消息、任务与用量的协调层，把多个本地控制面连接成团队协作网络。</p>
         <ul>
           <li>企业级用量看板：按团队 / 成员 / 运行时 / 时间段汇总</li>
           <li>IM 消息路由：飞书、微信等消息直达数字员工、触发任务</li>
@@ -284,7 +285,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     </div>
     <div class="callout">
       <div class="callout-title">关系一句话</div>
-      <p><strong>AgentCli（开源）</strong>是操作面，读写本地数据；<strong>AgentBus（企业版）</strong>是协调骨干，提供团队协作、IM 路由与企业看板。不接 Bus = 单机模式，照样完整能跑；接入 Bus 才解锁多人协作与企业能力。</p>
+      <p><strong>AgentCli（本地控制面）</strong>是操作面，读写本地数据；<strong>AgentBus（消息总线）</strong>是协调骨干，提供团队协作、IM 路由与组织级看板。不接 Bus = 本地控制面独立运行；接入 Bus = 消息、任务、用量进入统一协调层。</p>
     </div>
   </section>
 
@@ -294,7 +295,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <div class="features-grid">
       <div class="feature-card"><div class="feature-icon">&#9881;</div><h4>自动采集</h4><p>无侵入扫描本地 AI Agent 会话日志，自动识别 token 消耗、会话数、消息量，零配置开箱即用。</p></div>
       <div class="feature-card"><div class="feature-icon">&#8644;</div><h4>统一上报</h4><p>多运行时、多场景汇总至 AgentBus。断点续传、幂等去重、背压控制。</p></div>
-      <div class="feature-card"><div class="feature-icon">&#128202;</div><h4>用量看板</h4><p>按团队、成员、工具、场景维度展示 token 用量与会话活跃度（企业版）。</p></div>
+      <div class="feature-card"><div class="feature-icon">&#128202;</div><h4>用量看板</h4><p>按团队、成员、工具、场景维度展示 token 用量与会话活跃度。</p></div>
       <div class="feature-card"><div class="feature-icon">&#128101;</div><h4>数字员工团队</h4><p>创建团队、配置成员与运行时、看板派活、评论协作、审核交付。</p></div>
       <div class="feature-card"><div class="feature-icon">&#128268;</div><h4>多运行时协调</h4><p>Claude Code、Codex、Cursor、Gemini、OpenCode 在一个面板里启动与监控。</p></div>
       <div class="feature-card"><div class="feature-icon">&#128274;</div><h4>本地优先 · 安全</h4><p>默认 metadata-only 上报，不上传消息正文、代码或密钥。数据在你本机。</p></div>
@@ -303,13 +304,15 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
 
   <section id="commands">
     <h2>常用命令</h2>
-    <p class="section-sub">装好之后从这几条开始。命令统一为 <code>agentcli</code>，所有命令支持 <code>--json</code> 输出机器可读结果（适合 agent / 脚本调用）。</p>
+    <p class="section-sub">装好之后从这几条开始。命令统一为 <code>agentcli</code>，所有命令支持 <code>--json</code> 输出机器可读结果（适合 agent / 脚本调用）。也可以直接把本说明书链接 <code>https://yancyuu.github.io/agentcli/</code> 丢给 Claude Code / Codex，让 agent 按步骤安装、登录、上报和自检。</p>
     <div class="commands-list">
       <div class="command-group-title">启动与状态</div>
       <div class="command-row"><code class="cmd">agentcli</code><span class="cmd-desc">打开终端导航（控制面菜单）：用量、工作台、用户、token 池(beta)</span></div>
+      <div class="command-row"><code class="cmd">agentcli init</code><span class="cmd-desc">快速初始化：默认启动 Web 工作台 + 用量后台 worker（默认开机自启）</span></div>
       <div class="command-row"><code class="cmd">agentcli web</code><span class="cmd-desc">直接启动 Web 工作台（默认 127.0.0.1:5680）；加 <code>--daemon</code> 后台运行</span></div>
       <div class="command-row"><code class="cmd">agentcli status · doctor</code><span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span></div>
-      <div class="command-row"><code class="cmd">agentcli stop</code><span class="cmd-desc">停止后台 daemon</span></div>
+      <div class="command-row"><code class="cmd">agentcli stop</code><span class="cmd-desc">显示停止指引（不会主动关闭 Web / 用量 worker）</span></div>
+      <div class="command-row"><code class="cmd">agentcli services stop web</code><span class="cmd-desc">停止 Web 后台 daemon</span></div>
 
       <div class="command-group-title">用户授权（上报前提）</div>
       <div class="command-row"><code class="cmd">agentcli auth login</code><span class="cmd-desc">飞书授权登录 AgentBus——登录后用量才有上报目标</span></div>
@@ -318,7 +321,8 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <div class="command-group-title">用量采集与上报</div>
       <div class="command-row"><code class="cmd">agentcli usage status</code><span class="cmd-desc">后台 worker 是否运行、消息上报是否开启</span></div>
       <div class="command-row"><code class="cmd">agentcli usage start</code><span class="cmd-desc">开启轻量后台采集，默认配置开机自启</span></div>
-      <div class="command-row"><code class="cmd">agentcli usage report</code><span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 补报历史</span></div>
+      <div class="command-row"><code class="cmd">agentcli usage stop</code><span class="cmd-desc">停止用量后台 worker，并默认关闭开机自启</span></div>
+      <div class="command-row"><code class="cmd">agentcli usage report</code><span class="cmd-desc">立即扫描并按服务端游标增量上报；<code>--full</code> 手动补报最近 7 天</span></div>
       <div class="command-row"><code class="cmd">agentcli usage today</code><span class="cmd-desc">查看今日本地用量摘要（不上传）</span></div>
 
       <div class="command-group-title">团队 / 任务 / 维护</div>
@@ -360,8 +364,8 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <ol>
       <li><span class="step-label">登录上报目标</span> — <code>agentcli auth login</code>（飞书授权绑定 AgentBus），<code>agentcli auth status</code> 确认已登录。</li>
       <li><span class="step-label">启用消息上报</span> — <code>agentcli</code> →「用量同步」→ 回车展开 →「消息上报」开启，选择上报运行时。<em>该开关只在终端菜单 / Web 里，没有单独子命令。</em></li>
-      <li><span class="step-label">启动后台采集</span> — <code>agentcli usage start</code>，开启轻量 worker（默认开机自启，约 5 分钟增量扫描）。</li>
-      <li><span class="step-label">立即补报一次</span> — <code>agentcli usage report</code>（增量）；<code>usage report --full</code> 全量重扫补传历史。</li>
+      <li><span class="step-label">启动后台采集</span> — 推荐 <code>agentcli init</code> 一次性启动 Web 工作台 + 轻量 worker；也可单独运行 <code>agentcli usage start</code>。后台 worker 默认开机自启，约 5 分钟按服务端 cursor 增量扫描。停止用 <code>agentcli usage stop</code>。</li>
+      <li><span class="step-label">立即补报一次</span> — <code>agentcli usage report</code>（增量）；<code>usage report --full</code> 手动全量重扫最近 7 天。</li>
       <li><span class="step-label">核对状态</span> — <code>agentcli usage status</code>，或 Web 工作台「用量」Tab。</li>
     </ol>
     <div class="callout success">
@@ -395,9 +399,9 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <span class="dim">开发者本地</span><br/>
       <span class="highlight">Claude Code / Codex / Cursor / Gemini / OpenCode ...</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 会话日志 &amp; token 用量<br/>
-      <span class="green">AgentCli</span> <span class="dim">(开源 · 本地 CLI + Web 工作台)</span><br/>
+      <span class="green">AgentCli</span> <span class="dim">(本地 CLI + Web 工作台)</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 统一上报<br/>
-      <span class="highlight">AgentBus</span> <span class="dim">(企业版 · 中心化数据总线)</span><br/>
+      <span class="highlight">AgentBus</span> <span class="dim">(消息总线 · 协调层)</span><br/>
       &nbsp;&nbsp;&nbsp;&nbsp;&#8595; 看板 &amp; 协作<br/>
       <span class="dim">企业管理者 / 团队成员</span>
     </div>
@@ -410,10 +414,10 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <div class="faq-q">Q：EBUSY: resource busy or locked（Windows 安装 / 更新）</div>
       <p><strong>原因：</strong>不是权限问题（EBUSY ≠ EACCES），sudo / 管理员身份无效。是之前运行过的 agentcli 后台进程还占着包内文件，npm 无法替换。</p>
       <p><strong>解决（按顺序，多数第 ① 步就够）：</strong></p>
-      <pre><code>agentcli stop
-agentcli usage stop   # 开过后台用量采集才需要
+      <pre><code>agentcli services stop web      # 停 Web daemon
+agentcli usage stop            # 停用量后台 worker
 npm install -g @yancyyu/agentcli@latest --prefer-online</code></pre>
-      <p>还不行就杀掉残留 node 进程（只杀 agentcli / hermit 相关），或直接重启电脑后重装。</p>
+      <p><code>agentcli stop</code> 只显示停止指引，不会主动关闭 Web / 用量 worker；还不行就杀掉残留 node 进程（只杀 agentcli / hermit 相关），或直接重启电脑后重装。</p>
     </div>
 
     <div class="faq-item">
@@ -442,13 +446,13 @@ sudo chown -R $(whoami) ~/.npm-global</code></pre>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q">Q：AgentCli 和 AgentBus 是什么关系？收费吗？</div>
-      <p><strong>AgentCli 开源免费</strong>（AGPL-3.0），本地 CLI + Web 工作台，单机完整可用。<strong>AgentBus 是付费的企业版增值服务</strong>：团队协作、企业用量看板、IM 路由、跨团队派发、审计。不接 Bus 不影响本地使用。</p>
+      <div class="faq-q">Q：AgentCli 和 AgentBus 是什么关系？</div>
+      <p><strong>AgentCli</strong> 是本地 CLI + Web 控制面，负责管理本机 AI 运行时、用量采集、工作台与团队任务。<strong>AgentBus</strong> 是消息总线与协调层，负责 IM 路由、跨团队任务派发、组织级用量汇总与审计。不接 Bus 时，AgentCli 仍可作为本地控制面独立运行；接入 Bus 后进入团队协作网络。</p>
     </div>
   </section>
 
   <footer class="footer">
-    <div class="footer-left">&copy; 2026 AgentCli · 开源免费 · AgentBus 企业增值服务</div>
+    <div class="footer-left">&copy; 2026 AgentCli · 本地控制面 · AgentBus 消息总线协调</div>
     <div class="footer-links">
       <a href="https://www.npmjs.com/package/@yancyyu/agentcli">npm</a>
     </div>

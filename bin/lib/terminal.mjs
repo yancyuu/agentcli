@@ -44,15 +44,6 @@ function detectUnicode() {
   if (process.env.HERMIT_FORCE_UNICODE === '0') return false;
   const term = (process.env.TERM || '').toLowerCase();
   if (term === 'dumb') return false;
-  if (process.platform === 'win32') {
-    return Boolean(
-      process.env.WT_SESSION ||
-        process.env.TERM_PROGRAM ||
-        process.env.ConPTY ||
-        process.env.COLORTERM ||
-        /xterm|screen|cygwin|tmux|alacritty|wezterm|kitty/u.test(term)
-    );
-  }
   return true;
 }
 
@@ -306,11 +297,14 @@ function renderRowsPanel(title, rows = [], hint = '') {
   for (const [label, value, state] of rows) {
     const resolvedState = state || rowStateFromValue(value);
     const valueW = Math.max(8, contentW - labelWidth - 4);
-    const valueText = truncateDisplay(colorByState(String(value), resolvedState), valueW);
-    const labelText = fitDisplay(String(label), labelWidth);
-    const content = `${statusDot(resolvedState)} ${labelText}  ${valueText}`;
-    const pad = ' '.repeat(Math.max(0, contentW - displayWidth(content)));
-    lines.push(`${ui.dim(glyphs.v)} ${content}${pad} ${ui.dim(glyphs.v)}`);
+    const values = Array.isArray(value) ? value : [value];
+    values.forEach((lineValue, index) => {
+      const valueText = truncateDisplay(colorByState(String(lineValue), resolvedState), valueW);
+      const labelText = index === 0 ? fitDisplay(String(label), labelWidth) : ' '.repeat(labelWidth);
+      const content = `${statusDot(resolvedState)} ${labelText}  ${valueText}`;
+      const pad = ' '.repeat(Math.max(0, contentW - displayWidth(content)));
+      lines.push(`${ui.dim(glyphs.v)} ${content}${pad} ${ui.dim(glyphs.v)}`);
+    });
   }
 
   lines.push(`${ui.dim(glyphs.bl)}${ui.dim(glyphs.h.repeat(inner))}${ui.dim(glyphs.br)}`);

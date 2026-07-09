@@ -95,14 +95,21 @@ export async function collectServicesStatus() {
 
 // --- Display helpers -----------------------------------------------------------
 
+export function servicesStatusRows(status) {
+  const usageRunning = Boolean(status.usage.worker?.running);
+  const usageEnabled = Boolean(status.usage.enabled);
+  const collaborationEnabled = Boolean(status.collaboration.enabled);
+  return [
+    ['Web 控制台', status.web.running ? `运行中 ${status.web.url}` : '未运行', status.web.running ? 'ok' : 'off'],
+    ['用量后台', usageRunning ? `运行中 (pid ${status.usage.worker.pid})` : '未运行', usageRunning ? 'ok' : 'off'],
+    ['用量统计', usageEnabled ? (usageRunning ? '本地扫描开启' : '已开启，后台未运行') : '关闭', usageEnabled && !usageRunning ? 'warn' : (usageEnabled ? 'ok' : 'off')],
+    ['IM 协作', collaborationEnabled ? '配置已开启（非本地进程）' : '关闭', collaborationEnabled ? 'info' : 'off'],
+    ['用户', status.auth.authorized ? '已登录' : '未登录', status.auth.authorized ? 'ok' : 'off'],
+  ];
+}
+
 function printServicesRows(title, status, hint = '') {
-  printCliRows(title, [
-    ['Web 控制台', status.web.running ? `运行中 ${status.web.url}` : '未运行'],
-    ['用量后台', status.usage.worker?.running ? `运行中 (pid ${status.usage.worker.pid})` : '未运行'],
-    ['用量统计', status.usage.enabled ? '本地扫描开启' : '关闭'],
-    ['IM 协作', status.collaboration.enabled ? '开启' : '关闭'],
-    ['用户', status.auth.authorized ? '已登录' : '未登录'],
-  ], hint);
+  printCliRows(title, servicesStatusRows(status), hint);
 }
 
 // --- Individual service start/stop --------------------------------------------

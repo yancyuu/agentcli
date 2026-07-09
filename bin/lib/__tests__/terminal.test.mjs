@@ -49,6 +49,17 @@ describe('terminal capability detection', () => {
     expect(detectUnicode()).toBe(false);
   });
 
+  it('detectUnicode defaults to Unicode on Windows unless explicitly disabled', () => {
+    if (process.platform !== 'win32') return; // platform-specific branch
+    delete process.env.HERMIT_FORCE_UNICODE;
+    delete process.env.WT_SESSION;
+    delete process.env.TERM_PROGRAM;
+    delete process.env.ConPTY;
+    delete process.env.COLORTERM;
+    process.env.TERM = '';
+    expect(detectUnicode()).toBe(true);
+  });
+
   it('detectUnicode is true on win32 when a UTF-8 host marker is present', () => {
     if (process.platform !== 'win32') return; // platform-specific branch
     delete process.env.HERMIT_FORCE_UNICODE;
@@ -99,7 +110,7 @@ describe('renderRowsPanel', () => {
   it('clamps panel width to a readable range', () => {
     const narrow = panelWidth.call(null); // current columns
     expect(narrow).toBeGreaterThanOrEqual(52);
-    expect(narrow).toBeLessThanOrEqual(80);
+    expect(narrow).toBeLessThanOrEqual(120);
   });
 
   it('builds top/bottom borders, a title row, and content rows', () => {
@@ -115,6 +126,17 @@ describe('renderRowsPanel', () => {
     expect(joined).toContain('用量上报状态');
     expect(joined).toContain('会话数');
     expect(joined).toContain('Token 总量');
+  });
+
+  it('renders array values as multiple rows without dropping later lines', () => {
+    const lines = renderRowsPanel('在线说明书', [
+      ['交给 Claude Code', ['请先阅读 AgentCli 在线说明书：https://yancyuu.github.io/agentcli/', '后续回答和操作请以这份说明书为准'], 'ok'],
+    ]);
+
+    const joined = lines.join('\n');
+    expect(joined).toContain('交给 Claude Code');
+    expect(joined).toContain('请先阅读 AgentCli 在线说明书');
+    expect(joined).toContain('后续回答和操作请以这份说明书为准');
   });
 });
 
