@@ -1,23 +1,11 @@
 import { useEffect, useState } from 'react';
 
-import { Button } from '@renderer/components/ui/button';
-import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
+import { SettingsSectionHeader } from '../components';
 import type {
   CapabilityTelemetrySummary,
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
-import type { TaskBusConfig } from '@shared/types/team';
-import {
-  AlertCircle,
-  Calendar,
-  Clock,
-  Loader2,
-  MessageSquare,
-  Radio,
-  Wifi,
-  WifiOff,
-  Zap,
-} from 'lucide-react';
+import { Calendar, Clock, Loader2, MessageSquare, Zap } from 'lucide-react';
 
 interface ProviderMetrics {
   sessions: number;
@@ -122,11 +110,6 @@ const CAPABILITY_KIND_ORDER: CapabilityAssetKind[] = [
   'mcp',
   'command',
 ];
-
-type BusSettingsPatch = Partial<{
-  enabled: boolean;
-  collaborationEnabled: boolean;
-}>;
 
 function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Element {
   const maxHourly = Math.max(...status.hourly, 1);
@@ -531,107 +514,16 @@ function StatCard({
 }
 
 export function TaskBusSection(): React.JSX.Element {
-  const [enabled, setEnabled] = useState(false);
-  const [host, setHost] = useState('127.0.0.1');
-  const [port, setPort] = useState(6379);
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [collaborationEnabled, setCollaborationEnabled] = useState(false);
-  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
-  const [telemetryPlatform, setTelemetryPlatform] = useState<'claudecode' | 'codex'>('claudecode');
-  const [telemetryConfig, setTelemetryConfig] = useState<TaskBusConfig['telemetry'] | undefined>(
-    undefined
-  );
   const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
 
   useEffect(() => {
-    fetch('/api/settings/task-bus')
-      .then((r) => r.json())
-      .then((data: TaskBusConfig) => {
-        setEnabled(data.enabled);
-        if (data.redis) {
-          setHost(data.redis.host ?? '127.0.0.1');
-          setPort(data.redis.port ?? 6379);
-          setPassword(data.redis.password ?? '');
-        }
-        if (data.telemetry) {
-          setTelemetryEnabled(data.telemetry.enabled);
-          setTelemetryPlatform(data.telemetry.platform ?? 'claudecode');
-        }
-        setCollaborationEnabled(data.collaboration ?? false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
     fetch('/api/telemetry/status')
       .then((r) => r.json())
-      .then((status: TelemetryStatus) => {
-        setTelemetryStatus(status);
-        setConnected(status.connected === true);
-      })
-      .catch(() => {});
+      .then((status: TelemetryStatus) => setTelemetryStatus(status))
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
-
-  const buildConfig = (overrides: BusSettingsPatch = {}): TaskBusConfig => ({
-    enabled: overrides.enabled ?? enabled,
-    redis: { host, port, password: password || undefined },
-    collaboration: overrides.collaborationEnabled ?? collaborationEnabled,
-    telemetry: {
-      enabled: telemetryEnabled,
-      platform: telemetryPlatform,
-    },
-  });
-
-  const testImConnection = async (): Promise<boolean> => {
-    setConnecting(true);
-    setMessage(null);
-    const config = buildConfig();
-    try {
-      const res = await fetch('/api/settings/task-bus', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      const ok = !!data.connected;
-      setConnected(ok);
-      setMessage(ok ? 'IM 连接成功' : 'IM 连接失败，请检查配置');
-      return ok;
-    } catch (err) {
-      setMessage(`连接失败: ${err}`);
-      return false;
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const toggle = (value: boolean) => {
-    setEnabled(value);
-    const config = buildConfig({ enabled: value });
-    fetch('/api/settings/task-bus', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    })
-      .then((r) => r.json())
-      .then(() => setMessage(value ? '团队总线已激活' : '已关闭'))
-      .catch(() => setMessage('操作失败'));
-  };
-
-  const toggleCollaboration = (value: boolean) => {
-    setCollaborationEnabled(value);
-    const config = buildConfig({ collaborationEnabled: value });
-    fetch('/api/settings/task-bus', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    })
-      .then(() => setMessage(value ? '已开启分布式团队协作' : '已关闭分布式团队协作'))
-      .catch(() => setMessage('操作失败'));
-  };
 
   if (loading) {
     return (
@@ -653,128 +545,6 @@ export function TaskBusSection(): React.JSX.Element {
           </div>
         )}
       </div>
-
-      <SettingsSectionHeader title="IM 协作（企业版开放）" icon={<Radio size={12} />} />
-
-      <SettingRow
-        label="IM 协作"
-        description="企业版开放：在 Web 会话 → IM 中接入协作能力；agentbus 为独立项目"
-      >
-        <SettingsToggle enabled={enabled} onChange={toggle} />
-      </SettingRow>
-
-      {enabled && (
-        <>
-          <div className="border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
-            <div className="flex items-center gap-2 px-1 pb-2">
-              <span className="text-sm font-medium text-red-500">*</span>
-              <span className="text-sm font-medium">IM</span>
-              <span className="text-xs text-[var(--color-text-muted)]">（企业版协作配置）</span>
-              <div className="ml-auto flex items-center gap-2">
-                {connected ? (
-                  <span className="flex items-center gap-1 text-xs text-emerald-500">
-                    <Wifi size={12} />
-                    已连接
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-xs text-red-500">
-                    <WifiOff size={12} />
-                    未连接
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-3 px-1 pt-2">
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">主机</label>
-                  <input
-                    type="text"
-                    value={host}
-                    onChange={(e) => {
-                      setHost(e.target.value);
-                      setConnected(false);
-                    }}
-                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
-                    placeholder="127.0.0.1"
-                  />
-                </div>
-                <div className="w-24">
-                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">端口</label>
-                  <input
-                    type="number"
-                    value={port}
-                    onChange={(e) => {
-                      setPort(Number(e.target.value));
-                      setConnected(false);
-                    }}
-                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
-                    placeholder="6379"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-[var(--color-text-muted)]">密码</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setConnected(false);
-                  }}
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]"
-                  placeholder="可选"
-                />
-              </div>
-              <div className="flex items-center gap-3 pt-1">
-                <Button
-                  size="sm"
-                  onClick={testImConnection}
-                  disabled={connecting}
-                  className="gap-1.5"
-                >
-                  {connecting ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
-                  {connecting ? '连接中...' : '测试连接'}
-                </Button>
-                {message && (
-                  <span className={`text-xs ${connected ? 'text-emerald-500' : 'text-red-500'}`}>
-                    {message}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <SettingRow
-              label="分布式团队协作"
-              description="企业版开放：在 Web 会话 → IM 中开启团队协作、任务池和企业看板能力"
-            >
-              <SettingsToggle
-                enabled={collaborationEnabled}
-                onChange={(value) => void toggleCollaboration(value)}
-              />
-            </SettingRow>
-
-            {!connected && collaborationEnabled && (
-              <div className="flex items-center gap-2 px-1 py-2 text-xs text-amber-500">
-                <AlertCircle size={12} />
-                <span>跨团队协作需要先完成企业版 IM 连接。</span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {!enabled && message && (
-        <div
-          className="border-b py-2 text-xs text-[var(--color-text-muted)]"
-          style={{ borderColor: 'var(--color-border-subtle)' }}
-        >
-          {message}
-        </div>
-      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { Bot, Info, Settings, Share2, Wrench } from 'lucide-react';
+import { BarChart3, Bot, Info, Settings, Wrench } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
 
@@ -39,9 +39,9 @@ const tabs: TabConfig[] = [
   },
   {
     id: 'task-bus',
-    label: '团队总线',
-    icon: Share2,
-    description: '配置 Redis 消息总线实现跨主机团队协作，以及本地 Usage 数据采集。',
+    label: 'Usage 监测',
+    icon: BarChart3,
+    description: '查看本地 Claude Code 和 Codex 会话的 Usage 数据。',
   },
   {
     id: 'advanced',

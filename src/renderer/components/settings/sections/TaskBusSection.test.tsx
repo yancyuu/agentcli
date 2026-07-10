@@ -2,7 +2,6 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TaskBusConfig } from '@shared/types/team';
 
 import { TaskBusSection } from './TaskBusSection';
 
@@ -54,28 +53,14 @@ function telemetryStatus(projects: TelemetryProjectFixture[]) {
 
 function mockFetch(
   projectCountOrProjects: number | TelemetryProjectFixture[],
-  telemetryOverrides: Record<string, unknown> = {},
-  settingsOverrides: Partial<TaskBusConfig> = {}
+  telemetryOverrides: Record<string, unknown> = {}
 ): ReturnType<typeof vi.fn> {
   const projects = Array.isArray(projectCountOrProjects)
     ? projectCountOrProjects
     : telemetryProjects(projectCountOrProjects);
   const status = { ...telemetryStatus(projects), ...telemetryOverrides };
-  const settings: TaskBusConfig = {
-    enabled: false,
-    redis: { host: '127.0.0.1', port: 6379 },
-    telemetry: { enabled: true, platform: 'claudecode' },
-    collaboration: false,
-    ...settingsOverrides,
-  };
-  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes('/api/settings/task-bus')) {
-      if (init?.method === 'PUT') {
-        return Promise.resolve(new Response('{"ok":true,"connected":true}', { status: 200 }));
-      }
-      return Promise.resolve(new Response(JSON.stringify(settings), { status: 200 }));
-    }
     if (url.includes('/api/telemetry/status')) {
       return Promise.resolve(new Response(JSON.stringify(status), { status: 200 }));
     }
@@ -353,22 +338,21 @@ describe('TaskBusSection telemetry settings', () => {
     });
   });
 
-  it('keeps IM collaboration copy scoped away from usage upload', async () => {
-    const fetchMock = mockFetch(1, {}, { enabled: true });
+  it('renders usage monitoring without enterprise IM or distributed collaboration controls', async () => {
+    const fetchMock = mockFetch(1);
 
     const { host, root } = await renderTaskBusSection();
 
-    expect(host.textContent).toContain(
-      '企业版开放：在 Web 会话 → IM 中接入协作能力；agentbus 为独立项目'
+    expect(host.textContent).toContain('Usage 监测');
+    expect(host.textContent).not.toContain('IM 协作');
+    expect(host.textContent).not.toContain('分布式团队协作');
+    expect(host.textContent).not.toContain('企业版开放');
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain(
+      '/api/settings/task-bus'
     );
-    expect(host.textContent).toContain(
-      '企业版开放：在 Web 会话 → IM 中开启团队协作、任务池和企业看板能力'
-    );
-    expect(host.textContent).not.toContain('不再提供手动派单入口');
 
     await act(async () => {
       root.unmount();
     });
-    expect(fetchMock).toHaveBeenCalled();
   });
 });
