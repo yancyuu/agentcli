@@ -1044,7 +1044,10 @@ function isAuthCommandAllowedWithoutLogin() {
 }
 
 function isLocalCommandAllowedWithoutLogin() {
-  if (['status', 'doctor', 'services', 'stop', 'lark-credentials'].includes(commandArgs[0])) return true;
+  // Local lifecycle commands (self-update, restart, init, web server) never
+  // need cloud auth — they only touch this machine. Per the login-free policy
+  // for local surfaces. ('lark-credentials' removed: command deleted.)
+  if (['status', 'doctor', 'services', 'stop', 'update', 'restart', 'init', 'web'].includes(commandArgs[0])) return true;
   if (commandArgs[0] === 'usage') return ['status', 'today', 'report', 'start', 'stop', 'autostart'].includes(commandArgs[1]);
   if (commandArgs[0] === 'collaboration' && commandArgs[1] === 'start') return true;
   if (commandArgs[0] === 'teams') return ['list', 'create'].includes(commandArgs[1]);

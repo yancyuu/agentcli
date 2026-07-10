@@ -56,7 +56,11 @@ async function runUpdate({ onUpdated } = {}) {
     // npm install: directly update to latest
     console.log(`${brandLogPrefix()} Updating via npm...`);
     try {
-      execSync(`npm install -g ${BRAND.npmPackage}@latest`, { stdio: 'inherit' });
+      // Pin the official registry: a user's default registry (e.g. npmmirror)
+      // can lag behind registry.npmjs.org, so @latest resolved there may be
+      // stale or missing → silent staleness or ETARGET. Self-update always
+      // pulls the true latest from the authoritative source.
+      execSync(`npm install -g ${BRAND.npmPackage}@latest --registry=https://registry.npmjs.org/`, { stdio: 'inherit' });
       migrateLegacyHermitBridgeConfigIfNeeded();
       // Files just changed (global reinstall): reload the live usage worker so
       // it picks up the new code without waiting for a manual restart.
