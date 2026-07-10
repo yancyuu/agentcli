@@ -196,7 +196,7 @@
   </header>
 
   <section class="hero">
-    <span class="hero-badge">Local-first · 本地控制面 · v1.9.5</span>
+    <span class="hero-badge">Local-first · 本地控制面 · v1.9.8</span>
     <h1>AgentCli</h1>
     <p class="lede">本地优先的 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
     <p class="oss-line">AgentCli 管本地运行时与工作台，数据默认落在本机 <code>~/.hermit/</code>；AgentBus 负责消息路由、团队协作与组织级用量汇总。</p>
@@ -295,6 +295,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <div class="command-row"><code class="cmd">agentcli status · doctor</code><span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span></div>
       <div class="command-row"><code class="cmd">agentcli stop</code><span class="cmd-desc">显示停止指引（不会主动关闭 Web / 用量 worker）</span></div>
       <div class="command-row"><code class="cmd">agentcli services stop web</code><span class="cmd-desc">停止 Web 后台 daemon</span></div>
+      <div class="command-row"><code class="cmd">agentcli restart</code><span class="cmd-desc">重启 Web daemon + 用量 worker（更新后用它让新代码生效；本地命令，免登录）</span></div>
 
       <div class="command-group-title">用户授权（上报前提）</div>
       <div class="command-row"><code class="cmd">agentcli auth login</code><span class="cmd-desc">飞书授权登录 AgentBus——登录后用量才有上报目标</span></div>
@@ -329,14 +330,14 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     </table>
 
     <h3>把网关 Key 写进 Claude / Codex（token 池认领）</h3>
-    <p>登录后，在终端菜单 <code>agentcli</code> →「token 池(beta)」→「认领」，会自动签发一个一次性网关 key 并<strong>直写</strong>进本机配置：</p>
+    <p>登录后，在终端菜单 <code>agentcli</code> →「token 池(测试版)」→「认领」，会自动签发一个一次性网关 key，让你<strong>选择写入哪些运行时</strong>（Claude Code / Codex，默认两者都写），然后直写进所选运行时的本地配置：</p>
     <ul>
-      <li><strong>Claude Code</strong> <code>~/.claude/settings.json</code>：deep-merge 进 <code>env</code>（<code>ANTHROPIC_BASE_URL</code> + <code>ANTHROPIC_AUTH_TOKEN</code> + <code>ANTHROPIC_MODEL</code>），保留其它顶层键与 env 键。</li>
-      <li><strong>Codex</strong> <code>~/.codex/auth.json</code>：写入 <code>OPENAI_API_KEY</code>；<code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。</li>
+      <li><strong>Claude Code</strong> <code>~/.claude/settings.json</code>：写入网关 endpoint（<code>ANTHROPIC_BASE_URL</code>）+ <code>ANTHROPIC_AUTH_TOKEN</code>，deep-merge 保留其它键，<strong>不固定模型</strong>。</li>
+      <li><strong>Codex</strong> <code>~/.codex/auth.json</code>（<code>OPENAI_API_KEY</code>）+ <code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> / wire_api 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。Codex base_url 由网关 <code>proxyPaths</code> 按所选 wire_api 解析，与 Claude endpoint 不同。</li>
     </ul>
     <div class="callout warn">
       <div class="callout-title">注意</div>
-      <p>认领到的 key 是<strong>即焚明文</strong>，只在本机配置里落地，不落库、不回显明文。写前自动生成 <code>*.hermit-bak</code> 备份。该能力需服务端授权开通（部分账户暂未开放）。</p>
+      <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit-env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
     </div>
   </section>
 
@@ -389,7 +390,7 @@ agentcli usage status
 agentcli doctor</code></pre>
 
     <h3>使用内置更新命令</h3>
-    <p><code>agentcli update</code> 会更新当前安装，并在成功后重载原本正在运行的用量 worker。为最大限度避免 Windows 文件锁，仍建议先运行 <code>agentcli services stop web</code>；如果更新报 <code>EBUSY</code>，改用上面的完整手动流程。</p>
+    <p><code>agentcli update</code> 是内置自更新：<strong>免登录</strong>（本地生命周期命令），且固定走官方 <code>registry.npmjs.org</code>——避免默认镜像（如 npmmirror）同步延迟导致装到旧版或 <code>ETARGET</code>。它会在成功后热重载用量 worker，但<strong>不重启 Web daemon</strong>；更新后跑一次 <code>agentcli restart</code> 让 Web daemon / hermit-bridge / cc-connect 也切到新代码。为最大限度避免 Windows 文件锁，仍建议先运行 <code>agentcli services stop web</code>；如果更新报 <code>EBUSY</code>，改用上面的完整手动流程。</p>
 
     <div class="callout warn">
       <div class="callout-title">不要漏停这些进程</div>
