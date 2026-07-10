@@ -2,6 +2,7 @@
 // All domain-specific subroutines live here (not in hermit.mjs).  Navigation primitives
 // (askMenuAction, renderNavMenu, waitForContinue) are imported from navigation.mjs.
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 import {
   args,
@@ -24,6 +25,7 @@ import {
   printCliRows,
   printWelcomeLogo,
   clearTerminal,
+  clearTerminalScrollback,
   isInteractiveCli,
   createPromptInterface,
 } from './terminal.mjs';
@@ -68,7 +70,32 @@ import {
   resolveConversationUploadBaseUrl,
   openExternalUrl,
 } from './auth.mjs';
-import { runAikeyStatus, applyToConfigs, maskKey } from './aikey.mjs';
+import {
+  runAikeyStatus,
+  activateAikeyBundle,
+  maskKey,
+  applyClaimedSecret,
+  resolveClaudeBaseUrl,
+  resolveCodexBaseUrl,
+} from './aikey.mjs';
+import {
+  snapshotOriginals,
+  restoreOriginals,
+  hasSnapshot,
+  originalEnvBackupRoot,
+} from './configEnvBackup.mjs';
+import {
+  assistantPlatformMeta,
+  assistantAgentTypeActions,
+  assistantPlatformActions,
+  assistantWecomModeActions,
+  isAssistantQrPlatform,
+  labelForAssistantAgentType,
+  labelForAssistantPlatform,
+  normalizeAssistantBindProject,
+} from './assistantCreationOptions.mjs';
+import { ensureLarkCliDigitalWorkerAuth } from './larkCli.mjs';
+import { provisionDigitalWorker } from './digitalWorkerCommand.mjs';
 import { provisionRun, pollRun, claimSecret, discoverCatalog } from './tokenDistribution.mjs';
 import {
   printDoctor,
@@ -103,6 +130,18 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 // --- Busy screen message for inline actions ------------------------------------
+
+const require = createRequire(import.meta.url);
+
+function renderTerminalQr(value) {
+  try {
+    const qrcode = require('qrcode-terminal');
+    qrcode.generate(value, { small: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const ONLINE_GUIDE_URL = 'https://yancyuu.github.io/agentcli/';
 const ONLINE_GUIDE_HANDOFF = [
@@ -340,71 +379,92 @@ async function runTaskBusAction() {
   }
 }
 
-// --- token 池「认领」flow: provision → poll → claim → discover → pick → apply ---
+// --- token 池「认领」flow: provision → poll → claim → discover → pick → activate ---
 // Reached from the home menu's token 池 accordion (aikey-claim child). The claimed
 // key is one-time/即焚, so it lives only in memory between claimSecret() and the
-// applyToConfigs() write — it is never printed in full and never persisted to the
-// hermit data dir.
+// aikey env activation write. It is never printed in full and no Claude/Codex
+// config files are modified by default.
 async function promptText(label, defaultValue = '') {
   const rl = createPromptInterface();
   try {
     const suffix = defaultValue ? ` [${defaultValue}]` : '';
     const answer = await rl.question(`${label}${suffix}: `);
-    return String(answer || '').trim();
+    const trimmed = String(answer || '').trim();
+    return trimmed || defaultValue;
   } finally {
     rl.close();
   }
 }
 
-function collectModels(catalog) {
-  const seen = new Set();
-  const models = [];
-  for (const api of catalog?.modelApis || []) {
-    for (const model of api.models || []) {
-      if (model && !seen.has(model)) {
-        seen.add(model);
-        models.push(model);
-      }
-    }
-  }
-  return models;
-}
-
-function labelForRuntime(runtime) {
-  if (runtime === 'claude') return 'Claude';
-  if (runtime === 'codex-auth') return 'Codex auth.json';
-  if (runtime === 'codex-config') return 'Codex config.toml';
-  return runtime;
-}
-
-// Two sequential pickers (model, then wire_api) with manual-entry fallbacks.
-// Returns { model, wireApi } or null if the user cancelled.
-async function pickProtocolAndModel({ secret, catalog }) {
-  const models = collectModels(catalog);
-  const modelActions = models.map((m) => ({ id: `model::${m}`, label: m }));
-  modelActions.push({
-    id: 'model::manual',
-    label: models.length ? '✍  手动输入模型名' : '✍  手动输入模型名（未取到模型列表）',
-  });
-  const modelPick = await askMenuAction({
-    title: '认领 token · 选择模型',
-    subtitle: secret.endpoint ? `网关：${secret.endpoint}` : '把网关 key 配到本机 Codex / Claude',
-    actions: modelActions,
+async function promptBoolean(label) {
+  const actionId = await askMenuAction({
+    title: label,
+    subtitle: '选择是否启用该选项',
+    actions: [
+      { id: 'false', label: '否' },
+      { id: 'true', label: '是' },
+    ],
     escapeAction: 'back',
     statusItems: currentMenuStatusItems(),
     hasDeveloperModeEnabled,
   });
-  if (modelPick === 'back') return null;
-  let model;
-  if (modelPick === 'model::manual') {
-    model = await promptText('模型名');
-    if (!model) return null;
-  } else {
-    model = modelPick.startsWith('model::') ? modelPick.slice('model::'.length) : modelPick;
-  }
+  if (actionId === 'back') return null;
+  return actionId === 'true';
+}
 
-  // wire_api only governs Codex (config.toml); Claude always uses the anthropic
-  // env vars. Prefer the protocols the gateway actually advertised.
+function collectModelChoices(catalog) {
+  const choices = [];
+  for (const api of catalog?.modelApis || []) {
+    if (!api?.httpApiId) continue;
+    for (const model of api.models || []) {
+      if (model) choices.push({ model, apiName: api.name, httpApiId: api.httpApiId });
+    }
+  }
+  return choices;
+}
+
+function bundleFromClaimedSecret({ secret, choices }) {
+  // Per-runtime endpoints: Claude = gateway endpoint, Codex = resolved proxy
+  // route for the chosen wire_api. Fixes the old "same endpoint for both" bug.
+  const claudeBaseUrl = resolveClaudeBaseUrl(secret);
+  const codexBaseUrl = resolveCodexBaseUrl(secret, choices.wireApi);
+  const anthropic = { apiKey: secret.key, ...(claudeBaseUrl ? { baseUrl: claudeBaseUrl } : {}) };
+  const openai = { apiKey: secret.key, ...(codexBaseUrl ? { baseUrl: codexBaseUrl } : {}) };
+  return {
+    displayName: choices.model ? `agentcli-token-pool:${choices.model}` : 'agentcli-token-pool',
+    providers: { anthropic, openai },
+  };
+}
+
+// Select a model while retaining the owning Aliyun Model API ID required by
+// /aliyun/auto-provision. Returns null if the user cancels.
+async function pickModelApi(catalog) {
+  const choices = collectModelChoices(catalog);
+  if (choices.length === 0) {
+    printCliRows('认领 token 失败', [
+      ['错误', '未获取到可用的阿里云 Model API', 'error'],
+    ], '服务端签发消费者前要求选择 Model API，请稍后重试。');
+    return null;
+  }
+  const actionId = await askMenuAction({
+    title: '认领 token · 选择模型',
+    subtitle: '选择要授权给消费者的阿里云 Model API',
+    actions: choices.map((choice, index) => ({
+      id: `model::${index}`,
+      label: choice.model,
+      detail: choice.apiName,
+    })),
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  if (actionId === 'back') return null;
+  const index = Number(actionId.slice('model::'.length));
+  return Number.isInteger(index) ? choices[index] || null : null;
+}
+
+// wire_api governs only Codex; Claude always uses the anthropic protocol.
+async function pickWireApi(secret) {
   const proxy = secret.proxyPaths || {};
   const wireOptions = [];
   if (proxy.openai_chat) wireOptions.push({ id: 'wire::chat', label: 'OpenAI Chat (openai-chat)' });
@@ -423,23 +483,32 @@ async function pickProtocolAndModel({ secret, catalog }) {
     hasDeveloperModeEnabled,
   });
   if (wirePick === 'back') return null;
-  let wireApi;
-  if (wirePick === 'wire::manual') {
-    wireApi = (await promptText('wire_api', 'chat')) || 'chat';
-  } else {
-    wireApi = wirePick === 'wire::responses' ? 'responses' : 'chat';
-  }
-  return { model, wireApi };
+  if (wirePick === 'wire::manual') return (await promptText('wire_api', 'chat')) || 'chat';
+  return wirePick === 'wire::responses' ? 'responses' : 'chat';
 }
 
-function renderClaimResult({ result, secret, choices }) {
-  const rows = result.runtimes.map((r) => [labelForRuntime(r.runtime), r.path, 'ok']);
-  rows.push(['endpoint', secret.endpoint || '(未返回)', 'info']);
-  rows.push(['model', choices.model, 'info']);
-  rows.push(['key', `${maskKey(secret.key)}  (即焚，已写入配置，不会再显示)`, 'warn']);
+function renderClaimResult({ activation, apply, secret, choices, runtimes, snapshot }) {
+  const runtimeLabel = runtimes
+    .map((r) => (r === 'claude' ? 'Claude Code' : 'Codex'))
+    .join(' + ');
+  const rows = [...activation.providerRows, ['写入运行时', runtimeLabel, 'ok']];
+  if (apply.endpoints.claude) rows.push(['Claude endpoint', apply.endpoints.claude, 'info']);
+  if (apply.endpoints.codex) rows.push(['Codex endpoint', apply.endpoints.codex, 'info']);
+  rows.push(
+    ['aikey env', activation.envPath, 'ok'],
+    ['shell hook', activation.hookStatus, 'ok'],
+    ['model', choices.model, 'info'],
+    [
+      '原始配置快照',
+      snapshot?.created ? `${originalEnvBackupRoot()}（本次新建）` : `${originalEnvBackupRoot()}（已存在，未覆盖）`,
+      'info',
+    ],
+    ['key', `${maskKey(secret.key)}  (即焚，已写入配置/env，不会再显示)`, 'warn'],
+  );
   printCliRows('认领 token 完成', rows, [
-    '已写入本机 Codex + Claude 配置；新开终端或重启 Codex / Claude 后生效。',
-    '⚠ Claude 是否生效取决于网关 endpoint 是否开放 anthropic 协议；若调不通请确认 endpoint 或只使用 Codex。',
+    '已按所选运行时写入 Claude/Codex 配置；aikey env + shell hook 同步更新。',
+    '原始配置已快照到 ~/.hermit-env.bak，可在「token 池 → 恢复原始配置」一键还原。',
+    `新开终端即可生效，或立即执行：source ${activation.envPath}`,
   ].join('\n'));
 }
 
@@ -450,18 +519,33 @@ function printClaimError(err) {
 }
 
 async function runTokenClaimFlow() {
-  // 1. provision (async run)
+  // 1. Discover and select the Aliyun Model API required by auto-provision.
+  let catalog;
+  try {
+    renderBusyScreen('认领 token', '正在拉取可用模型列表…');
+    catalog = await discoverCatalog();
+  } catch (err) {
+    printClaimError(err);
+    return;
+  }
+  const modelChoice = await pickModelApi(catalog);
+  if (!modelChoice) return;
+
+  // 2. Provision the selected Model API consumer.
   let runId;
   try {
     renderBusyScreen('认领 token', '正在签发消费者（auto-provision）…');
-    const provision = await provisionRun();
+    const provision = await provisionRun({
+      apiName: modelChoice.apiName || catalog.defaultApiName,
+      aliyunModelApiIds: [modelChoice.httpApiId],
+    });
     runId = provision.runId;
   } catch (err) {
     printClaimError(err);
     return;
   }
 
-  // 2. poll until succeeded
+  // 3. Poll until succeeded.
   try {
     await pollRun(runId, {
       intervalMs: 2_000,
@@ -472,7 +556,7 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 3. claim the one-time secret
+  // 4. Claim the one-time secret.
   let secret;
   try {
     renderBusyScreen('认领 token', '正在领取明文 key（一次性）…');
@@ -482,31 +566,350 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 4. discover models (non-fatal — picker falls back to manual entry)
-  let catalog = { modelApis: [], defaultApiName: null };
-  try {
-    renderBusyScreen('认领 token', '正在拉取可用模型列表…');
-    catalog = await discoverCatalog();
-  } catch {
-    // discover is best-effort; keep the empty catalog and let the user type a model.
-  }
-
-  // 5. pick model + wire_api
-  const choices = await pickProtocolAndModel({ secret, catalog });
-  if (!choices) {
+  // 5. Choose which runtimes to write (default both). Single-select primitive —
+  //    the three options cover every intent without inventing a multi-select UI.
+  const runtimes = await pickRuntimes();
+  if (!runtimes) {
     printCliRows('认领 token', [['状态', '已取消', 'warn']], '未写入任何配置。');
     return;
   }
 
-  // 6. apply to local configs + render
-  const result = applyToConfigs({
-    key: secret.key,
-    endpoint: secret.endpoint,
-    model: choices.model,
-    wireApi: choices.wireApi,
-    runtimes: ['codex', 'claude'],
+  // 6. Codex wire protocol — only relevant when Codex is selected.
+  let wireApi = 'chat';
+  if (runtimes.includes('codex')) {
+    wireApi = await pickWireApi(secret);
+    if (!wireApi) {
+      printCliRows('认领 token', [['状态', '已取消', 'warn']], '未写入任何配置。');
+      return;
+    }
+  }
+  const choices = { model: modelChoice.model, wireApi };
+
+  // 7. Snapshot originals (create-once) BEFORE any write, so one-click restore
+  //    always returns to the pre-token-pool state regardless of future claims.
+  let snapshot;
+  try {
+    renderBusyScreen('认领 token', '正在快照原始配置…');
+    snapshot = snapshotOriginals();
+  } catch (err) {
+    printClaimError(err);
+    return;
+  }
+
+  // 8. Write the chosen runtimes' config files directly (backup:false — the
+  //    snapshot above owns the restore story, so no stray .hermit-bak files).
+  let apply;
+  try {
+    renderBusyScreen('认领 token', '正在写入 Claude / Codex 配置…');
+    apply = applyClaimedSecret({ secret, choices, runtimes });
+  } catch (err) {
+    printClaimError(err);
+    return;
+  }
+
+  // 9. Also refresh aikey env + shell hook (keeps Status accurate + propagates
+  //    the key to new shells / env-reading tools). Same key, no divergence.
+  let activation;
+  try {
+    activation = await activateAikeyBundle({ bundle: bundleFromClaimedSecret({ secret, choices }) });
+  } catch (err) {
+    printClaimError(err);
+    return;
+  }
+
+  renderClaimResult({ activation, apply, secret, choices, runtimes, snapshot });
+}
+
+// pickRuntimes — askMenuAction single-select mirroring pickModelApi/pickWireApi.
+// Returns ['claude','codex'] | ['claude'] | ['codex'], or null on cancel.
+async function pickRuntimes() {
+  const actionId = await askMenuAction({
+    title: '认领 token · 选择运行时',
+    subtitle: '选择要写入的本地运行时（默认两者都写）',
+    actions: [
+      { id: 'runtime::both', label: 'Claude Code + Codex（默认）', recommended: true },
+      { id: 'runtime::claude', label: '仅 Claude Code' },
+      { id: 'runtime::codex', label: '仅 Codex' },
+    ],
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
   });
-  renderClaimResult({ result, secret, choices });
+  if (actionId === 'back') return null;
+  if (actionId === 'runtime::claude') return ['claude'];
+  if (actionId === 'runtime::codex') return ['codex'];
+  return ['claude', 'codex'];
+}
+
+// One-click restore of the original Claude/Codex configs from the create-once
+// snapshot. Existed files are copied back; files the pool created are deleted.
+async function runRestoreOriginalsFlow() {
+  if (!hasSnapshot()) {
+    printCliRows('恢复原始配置', [['状态', '无可恢复的原始配置', 'warn']], 'token 池尚未改过 Claude / Codex 配置，无需恢复。');
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
+  const confirmed = await promptBoolean('确认恢复 Claude/Codex 原始配置？当前 token 池写入将被覆盖/删除');
+  if (confirmed !== true) {
+    printCliRows('恢复原始配置', [['状态', '已取消', 'warn']], '未做任何改动。');
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
+  const { results } = restoreOriginals();
+  const rows = results.map((r) => {
+    if (r.action === 'restored') return [r.runtime, `还原 ${r.path}`, 'ok'];
+    if (r.action === 'deleted') return [r.runtime, `删除 ${r.path}（token 池新建）`, 'ok'];
+    return [r.runtime, `跳过（${r.reason}）`, 'off'];
+  });
+  printCliRows('恢复原始配置完成', rows, [
+    '已回到 token 池介入前的本地配置。',
+    '快照保留在 ~/.hermit-env.bak，可再次恢复或在下次认领时复用。',
+  ].join('\n'));
+  console.log('');
+  return waitForContinue(ACTION_DONE_MSG);
+}
+
+function assistantStageRow(label, result, successText) {
+  if (!result) return [label, '待执行', 'off'];
+  if (result.ok) return [label, successText || result.message || '完成', 'ok'];
+  return [label, result.message || '失败', 'error'];
+}
+
+async function confirmAssistantWizardStart() {
+  printCliRows('开通数字员工向导', [
+    ['1', '填写数字员工名称和描述', 'info'],
+    ['2', '绑定渠道', 'info'],
+    ['3', '配置 lark-cli 个人授权（飞书/Lark）', 'info'],
+    ['4', '返回团队 ID、绑定状态和下一步', 'info'],
+  ], '按 Enter 开始；按 ← / Esc 取消。');
+  return (await waitForContinue('按 Enter 开始创建数字员工 | ←/Esc 取消')) === 'continue';
+}
+
+async function pickAssistantAgentType() {
+  const actionId = await askMenuAction({
+    title: '开通数字员工 · 选择运行时',
+    subtitle: '与外部端 Agent 类型选项保持一致',
+    actions: assistantAgentTypeActions(),
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  return actionId === 'back' ? null : actionId;
+}
+
+async function pickAssistantPlatform() {
+  const actionId = await askMenuAction({
+    title: '开通数字员工 · 选择绑定渠道',
+    subtitle: '与外部端渠道绑定选项保持一致；飞书/Lark、微信走扫码绑定',
+    actions: assistantPlatformActions(),
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  if (actionId === 'back') return null;
+  if (actionId !== 'wecom_im') return actionId;
+  const wecomMode = await askMenuAction({
+    title: '开通数字员工 · 企业微信接入方式',
+    subtitle: '与外部端企业微信二级选项保持一致',
+    actions: assistantWecomModeActions(),
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  return wecomMode === 'back' ? null : wecomMode;
+}
+
+async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
+  renderBusyScreen('开通数字员工', '正在用已绑定飞书应用准备 lark-cli 个人身份授权...');
+  const renderAuthQr = async (url, authState, authInit) => {
+    clearTerminalScrollback();
+    const hasUser = Boolean(authState?.user);
+    const title = hasUser ? '补充 lark-cli 个人权限' : '授权 lark-cli 使用本次飞书应用';
+    console.log(ui.accent(ui.bold(title)));
+    console.log('');
+    const browser = await openExternalUrl(url).catch(() => ({ opened: false }));
+    printCliRows(title, [
+      ['应用来源', '本次渠道绑定的飞书应用', 'ok'],
+      ['授权对象', '创建者个人飞书身份', 'info'],
+      ...(authInit?.user_code ? [['验证码', authInit.user_code, 'ok']] : []),
+      ['浏览器', browser.opened ? '已自动打开授权页面' : '未自动打开，请复制下方完整链接', browser.opened ? 'ok' : 'warn'],
+    ], '请在浏览器完成授权；CLI 会在下方等待确认。');
+    console.log('');
+    console.log(ui.dim('完整授权链接：'));
+    console.log(url);
+    console.log('');
+    let lastStatus = null;
+    return (status) => {
+      if (status === lastStatus) return;
+      lastStatus = status;
+      console.log(ui.dim(`等待 lark-cli 授权确认中... 当前状态：${status}`));
+    };
+  };
+  const result = await ensureLarkCliDigitalWorkerAuth(renderAuthQr, options);
+  if (!result.ok) {
+    printCliRows('飞书个人身份未绑定', [
+      ['lark-cli', result.installed?.message || result.message || '未就绪', result.installed?.ok ? 'ok' : 'error'],
+      ['绑定对象', '创建数字员工的飞书个人身份', 'info'],
+      ['授权范围', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'info'],
+      ['原因', result.message || '授权失败', 'error'],
+      ...(result.detail ? [['详情', result.detail, 'warn']] : []),
+    ], '请按 lark-cli 打开的页面或二维码完成个人身份授权后，再重新进入”开通数字员工”。');
+    return null;
+  }
+  printCliRows('飞书个人身份已绑定', [
+    ['lark-cli', result.installed?.message || '已安装', 'ok'],
+    ['个人身份', result.message || '已完成', 'ok'],
+    ['能力', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'ok'],
+  ], '接下来绑定飞书应用渠道。');
+  return result;
+}
+
+async function collectAssistantManualOptions(meta) {
+  const options = { ...(meta.defaultOptions || {}) };
+  for (const field of meta.fields || []) {
+    const advancedOptional = field.group === 'advanced' && !field.required;
+    const label = [
+      `${field.label}${field.required ? ' *' : advancedOptional ? '（可选，留空跳过）' : ''}`,
+      field.placeholder ? `示例：${field.placeholder}` : '',
+      field.hint ? `说明：${field.hint}` : '',
+    ].filter(Boolean).join(' · ');
+    let value;
+    if (field.type === 'boolean') {
+      value = await promptBoolean(label);
+      if (value === null) continue;
+    } else {
+      value = await promptText(label);
+      if (!value && field.required) throw new Error(`${field.label} 为必填项`);
+      if (field.type === 'number' && value) value = Number(value);
+    }
+    if (value !== undefined && value !== '') options[field.key] = value;
+  }
+  return options;
+}
+
+async function runQuickCreateAssistantFlow() {
+  if (!(await confirmAssistantWizardStart())) {
+    printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+    return;
+  }
+
+  const name = await promptText('数字员工名称');
+  if (!name) {
+    printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+    return;
+  }
+  const description = await promptText('描述（可选）');
+  const workDir = await promptText('工作目录', process.cwd());
+  const agentType = await pickAssistantAgentType();
+  if (!agentType) {
+    printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+    return;
+  }
+  const platform = await pickAssistantPlatform();
+  if (!platform) {
+    printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+    return;
+  }
+
+  const bindProject = normalizeAssistantBindProject(name);
+  let platformOptions = {};
+  if (!isAssistantQrPlatform(platform)) {
+    const meta = assistantPlatformMeta(platform);
+    if (!meta) {
+      printCliRows('开通数字员工失败', [['原因', `未找到 ${platform} 的渠道字段定义`, 'error']]);
+      return;
+    }
+    printCliRows('手动绑定渠道', [
+      ['渠道', meta.label || labelForAssistantPlatform(platform), 'info'],
+      ['字段来源', '与外部端共享 assistantCreationOptions.json', 'ok'],
+    ], '按提示填写该渠道凭据；高级可选字段可直接回车跳过。');
+    platformOptions = await collectAssistantManualOptions(meta);
+  }
+
+  let lastQrStatus = null;
+  const result = await provisionDigitalWorker(
+    port,
+    { name, bindProject, description, workDir, agentType, platform, platformOptions },
+    {
+      onStage(stage) {
+        const messages = {
+          server: '阶段 1/5：正在启动本地工作台 API...',
+          team: '阶段 2/5：正在创建数字员工团队元数据...',
+          runtime: '阶段 3/5：正在准备渠道连接...',
+          binding: '阶段 4/5：正在绑定渠道...',
+        };
+        renderBusyScreen('开通数字员工', messages[stage] || '正在处理...');
+      },
+      onQrCode({ qrUrl }) {
+        if (!qrUrl) return;
+        clearTerminalScrollback();
+        console.log(ui.accent(ui.bold('扫码绑定渠道')));
+        console.log('');
+        const rendered = renderTerminalQr(qrUrl);
+        console.log('');
+        printCliRows('扫码绑定渠道', [
+          ['渠道', labelForAssistantPlatform(platform), 'info'],
+          ['二维码', rendered ? '已显示在终端' : '当前终端无法渲染二维码，请复制链接扫码', rendered ? 'ok' : 'warn'],
+          ['备用链接', qrUrl, 'info'],
+        ], '请用手机扫码；CLI 会在下方等待确认。');
+      },
+      onQrStatus(status) {
+        if (status === lastQrStatus) return;
+        lastQrStatus = status;
+        console.log(ui.dim(`等待手机确认中... 当前状态：${status}`));
+      },
+      async afterPlatformBound({ binding }) {
+        if (platform !== 'feishu' && platform !== 'lark') return null;
+        const auth = await ensureFeishuDigitalWorkerPrerequisites({
+          profile: bindProject,
+          appId: binding.appId,
+          appSecret: binding.appSecret,
+          brand: binding.platformType === 'lark' ? 'lark' : 'feishu',
+        });
+        return auth
+          ? { ok: true, profile: auth.profile || bindProject, auth }
+          : { ok: false, message: '飞书个人身份授权未完成' };
+      },
+    }
+  );
+
+  if (!result.ok) {
+    printCliRows('开通数字员工失败', [
+      ['数字员工名称', name, 'info'],
+      ['项目标识', bindProject, 'info'],
+      ['运行时', labelForAssistantAgentType(agentType), 'info'],
+      ['渠道', labelForAssistantPlatform(platform), 'info'],
+      ['阶段', result.failedStage || '准备参数', 'error'],
+      ['原因', result.message, 'error'],
+      ...(result.rollback?.attempted
+        ? [[
+            '未完成资源清理',
+            result.rollback.ok ? result.rollback.message : `清理失败：${result.rollback.message}`,
+            result.rollback.ok ? 'ok' : 'warn',
+          ]]
+        : []),
+    ], '创建未完成；如已产生团队或渠道项目，系统已按上方结果执行完整回滚。');
+    return;
+  }
+
+  const postBinding = result.binding?.postBinding;
+  renderBusyScreen('开通数字员工', '阶段 5/5：正在汇总创建结果...');
+  printCliRows('数字员工已创建', [
+    ['数字员工名称', name, 'ok'],
+    ['项目标识', bindProject, 'ok'],
+    ['运行时', labelForAssistantAgentType(agentType), 'ok'],
+    ['渠道', labelForAssistantPlatform(platform), 'ok'],
+    assistantStageRow('创建团队', result.team, result.team?.message),
+    ['绑定渠道', result.binding?.message || '已绑定', 'ok'],
+    ...(postBinding?.profile ? [['lark-cli profile', postBinding.profile, 'ok']] : []),
+    ['连接服务',
+      result.binding?.restartHandled
+        ? '已自动重启并接入新渠道'
+        : result.binding?.restartRequired === false
+          ? '配置已生效，无需额外重启'
+          : '连接状态未确认',
+      result.binding?.restartHandled || result.binding?.restartRequired === false ? 'ok' : 'warn'],
+  ], '下一步：在已绑定的外部渠道里给这个数字员工发消息。');
 }
 
 async function runAccountAction() {
@@ -528,6 +931,7 @@ async function runAccountAction() {
       if (continueAction === 'back' || continueAction === 'cancel') return;
       continue;
     }
+    if (actionId === 'quick-create-assistant') await runQuickCreateAssistantFlow();
     if (actionId === 'status') await printAuthStatus({ exitOnDone: false });
     if (actionId === 'login') await runAuthLogin({ exitOnDone: false, interactiveMenu: true });
     if (actionId === 'logout') await runAuthLogout({ exitOnDone: false });
@@ -857,8 +1261,10 @@ export async function runNavigationAction(action) {
     return waitForContinue(ACTION_DONE_MSG);
   }
   if (action.id === 'status') { await printAuthStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
+  if (action.id === 'quick-create-assistant') { await runQuickCreateAssistantFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-claim') { await runTokenClaimFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-status') { await runAikeyStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
+  if (action.id === 'aikey-restore') { return runRestoreOriginalsFlow(); }
   // Dedicated submenu pages (reached from nested menus, not home navigation).
   if (action.id === 'local-use') { return runLocalUseAction(); }
   if (action.id === 'data-sync') { return runLocalCollectionAction(); }

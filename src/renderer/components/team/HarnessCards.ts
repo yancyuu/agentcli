@@ -3,36 +3,15 @@
  * Mirrors cc-connect's HermitBridgeAgentType.
  */
 
+import assistantCreationOptions from '@shared/assistantCreationOptions.json';
 import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 export type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
-export const ALL_AGENT_TYPES: HermitBridgeAgentType[] = [
-  'claudecode',
-  'codex',
-  'cursor',
-  'gemini',
-  'iflow',
-  'kimi',
-  'devin',
-  'opencode',
-  'qoder',
-  'pi',
-  'acp',
-  'tmux',
-];
+export const ALL_AGENT_TYPES: HermitBridgeAgentType[] = assistantCreationOptions.agentTypes.map(
+  (option) => option.key as HermitBridgeAgentType
+);
 
-export const AGENT_TYPE_LABELS: Record<HermitBridgeAgentType, string> = {
-  claudecode: 'Claude Code',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  gemini: 'Gemini',
-  iflow: 'iFlow',
-  kimi: 'Kimi',
-  devin: 'Devin',
-  opencode: 'OpenCode',
-  qoder: 'Qoder',
-  pi: 'Pi',
-  acp: 'ACP',
-  tmux: 'Tmux',
-};
+export const AGENT_TYPE_LABELS: Record<HermitBridgeAgentType, string> = Object.fromEntries(
+  assistantCreationOptions.agentTypes.map((option) => [option.key, option.label])
+) as Record<HermitBridgeAgentType, string>;

@@ -130,11 +130,98 @@ describe('ConversationMessageUploadService', () => {
     expect(eventIds).not.toContain('claudecode:session-1:old-1');
   });
 
-  it('strips conversation text from uploads — usage-only reporting (Lane A)', async () => {
-    // Regression: message content text must never leave the machine. The wire
-    // contract keeps `content` (server-required) but it carries a fixed placeholder;
-    // usage + metadata (eventId, model, project hash) are still uploaded so token
-    // attribution and eventId dedup are unchanged.
+  it('uses message.occurredAt with a half-open upload window', async () => {
+    process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '168';
+    delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
+    delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    const referenceMs = Date.parse('2026-07-09T12:00:00.000Z');
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-window');
+    await mkdir(projectDir, { recursive: true });
+    const line = (uuid: string, timestamp: string, tokens: number) =>
+      `${JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-window',
+        uuid,
+        cwd: '/tmp/project',
+        timestamp,
+        message: {
+          role: 'assistant',
+          content: `msg-${uuid}`,
+          model: 'claude-test-model',
+          usage: { input_tokens: tokens, output_tokens: 0, total_tokens: tokens },
+        },
+      })}\n`;
+    await writeFile(
+      path.join(projectDir, 'session-window.jsonl'),
+      [
+        line('start-in', '2026-07-02T12:00:00.000Z', 10),
+        line('end-out', '2026-07-09T12:00:00.000Z', 20),
+        line('future-out', '2026-07-09T12:00:00.001Z', 30),
+        line('old-out', '2026-07-02T11:59:59.999Z', 40),
+      ].join('')
+    );
+
+    const posted: { eventId?: string; message?: { usage?: { totalTokens?: number } } }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        posted.push(...(body.messages ?? []));
+        return Response.json({
+          ok: true,
+          receiptId: 'r1',
+          uploadId: 'u1',
+          received: body.messages?.length ?? 0,
+          acceptedForProcessing: body.messages?.length ?? 0,
+          status: 'queued',
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await uploadConversationMessages(
+      {
+        telemetry: {
+          enabled: true,
+          platform: 'claudecode',
+          conversationUploadEnabled: true,
+          uploadProviders: ['claudecode'],
+        },
+      },
+      referenceMs
+    );
+
+    expect(posted.map((message) => message.eventId)).toEqual([
+      'claudecode:session-window:start-in',
+    ]);
+    expect(posted[0]?.message?.usage?.totalTokens).toBe(10);
+  });
+
+  it('ships full conversation text in uploads (content transmission enabled)', async () => {
+    // Conversation text is now transmitted in full (not content-stripped). The
+    // real user/assistant text populates `message.content`; usage + metadata
+    // (eventId, model, project hash) are still uploaded so token attribution and
+    // eventId dedup are unchanged. Text-less tool-use turns keep the placeholder.
     process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '0';
     const projectDir = path.join(claudeBase, 'projects', '-tmp-novault');
     await mkdir(projectDir, { recursive: true });
@@ -199,11 +286,85 @@ describe('ConversationMessageUploadService', () => {
     });
 
     expect(posted).toHaveLength(1);
-    // The secret prompt text must NOT appear anywhere in the uploaded body.
-    expect(JSON.stringify(posted)).not.toContain(secret);
-    // The message itself IS uploaded (by eventId), with the placeholder content.
+    // The real prompt text IS shipped in full, verbatim.
     expect(posted[0].eventId).toBe('claudecode:session-novault:message-novault');
-    expect(posted[0].message?.content).toBe('[usage only]');
+    expect(posted[0].message?.content).toBe(secret);
+  });
+
+  it('uses the shared totalTokens calculation when total_tokens is missing', async () => {
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-missing-total');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'session-missing-total.jsonl'),
+      `${JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-missing-total',
+        uuid: 'message-missing-total',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:20:00.000Z',
+        message: {
+          role: 'assistant',
+          content: 'usage with missing total',
+          model: 'claude-test-model',
+          usage: {
+            input_tokens: 12,
+            output_tokens: 34,
+            cache_read_input_tokens: 56,
+            cache_creation_input_tokens: 78,
+          },
+        },
+      })}\n`
+    );
+
+    const posted: { message?: { usage?: { totalTokens?: number } } }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        posted.push(...body.messages);
+        return Response.json({
+          ok: true,
+          uploadId: 'u-missing-total',
+          status: 'queued',
+          received: body.messages.length,
+          acceptedForProcessing: body.messages.length,
+          rejectedAtReceive: 0,
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0].message?.usage?.totalTokens).toBe(180);
   });
 
   it('uses server usage status as cursor source and does not send client uploadId', async () => {
@@ -327,6 +488,110 @@ describe('ConversationMessageUploadService', () => {
     await expect(
       readFile(path.join(hermitHome, 'telemetry', 'conversation-message-scan-cursor.json'), 'utf-8')
     ).rejects.toThrow();
+  });
+
+  it('uses server cursor offsets for background incremental scans', async () => {
+    delete process.env.HERMIT_USAGE_FOREGROUND_SCAN;
+    delete process.env.HERMIT_USAGE_FULL_RESCAN;
+    const { createHash } = await import('node:crypto');
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-incremental');
+    await mkdir(projectDir, { recursive: true });
+    const sessionPath = path.join(projectDir, 'session-incremental.jsonl');
+    const uploadedLine = `${JSON.stringify({
+      type: 'user',
+      sessionId: 'session-incremental',
+      uuid: 'already-uploaded',
+      cwd: '/tmp/project',
+      timestamp: '2026-06-24T08:20:00.000Z',
+      message: { role: 'user', content: 'already uploaded', model: 'claude-test-model' },
+    })}\n`;
+    const newLine = `${JSON.stringify({
+      type: 'user',
+      sessionId: 'session-incremental',
+      uuid: 'new-message',
+      cwd: '/tmp/project',
+      timestamp: '2026-06-24T08:21:00.000Z',
+      message: { role: 'user', content: 'new only', model: 'claude-test-model' },
+    })}\n`;
+    await writeFile(sessionPath, `${uploadedLine}${newLine}`);
+    const uploadedOffset = Buffer.byteLength(uploadedLine, 'utf-8');
+    const fileKey = createHash('sha256').update(sessionPath).digest('hex');
+    const postedEventIds: string[] = [];
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'success',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: {
+                schemaVersion: 1,
+                purpose: 'local-jsonl-scan-position',
+                generatedAt: '2026-06-24T08:20:30.000Z',
+                files: [
+                  {
+                    fileKey,
+                    pathHash: `sha256-${fileKey}`,
+                    size: uploadedOffset,
+                    mtimeMs: 1,
+                    fromOffset: 0,
+                    toOffset: uploadedOffset,
+                  },
+                ],
+                fileCount: 1,
+                messageCount: 1,
+              },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        postedEventIds.push(
+          ...body.messages.map((message: { eventId: string }) => message.eventId)
+        );
+        expect(body.clientCursor.files[0]).toMatchObject({
+          fileKey,
+          fromOffset: uploadedOffset,
+          toOffset: uploadedOffset + Buffer.byteLength(newLine, 'utf-8'),
+        });
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_incremental',
+            status: 'queued',
+            received: body.messages.length,
+            acceptedForProcessing: body.messages.length,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(result.attempted).toBe(1);
+    expect(postedEventIds).toEqual(['claudecode:session-incremental:new-message']);
   });
 
   it('full rescan scans all history while still uploading in batches', async () => {
@@ -1096,6 +1361,204 @@ describe('ConversationMessageUploadService', () => {
     expect(result.lastError).toBeUndefined();
     expect(result.attempted).toBe(1);
     expect(result.accepted).toBe(1);
+  });
+
+  it('uploads per-turn deltas, not cumulative snapshots, for total_token_usage-only Codex logs', async () => {
+    // Real Codex logs may omit last_token_usage and carry only the CUMULATIVE
+    // total_token_usage. The server sums message.usage.totalTokens, so sending
+    // raw cumulative snapshots (100,200,300) would total 600 — double the real
+    // 300. The client must convert each snapshot to a per-turn delta.
+    const codexHome = path.join(tmpDir, '.codex');
+    process.env.CODEX_HOME = codexHome;
+    const sessionDir = path.join(codexHome, 'sessions', '2026', '07', '02');
+    await mkdir(sessionDir, { recursive: true });
+    const tokenLine = (cumulative: number, ts: string) =>
+      `${JSON.stringify({
+        timestamp: ts,
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: cumulative,
+              output_tokens: 0,
+              total_tokens: cumulative,
+            },
+          },
+        },
+      })}\n`;
+    await writeFile(
+      path.join(sessionDir, 'rollout-cumulative.jsonl'),
+      tokenLine(100, '2026-07-02T00:00:00.000Z') +
+        tokenLine(200, '2026-07-02T00:01:00.000Z') +
+        tokenLine(300, '2026-07-02T00:02:00.000Z')
+    );
+
+    const posted: { eventId: string; totalTokens: number }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'codex',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        for (const m of body.messages) {
+          posted.push({ eventId: m.eventId, totalTokens: m.message.usage.totalTokens });
+        }
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_cum',
+            status: 'queued',
+            received: body.messages.length,
+            acceptedForProcessing: body.messages.length,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'codex',
+        conversationUploadEnabled: true,
+        uploadProviders: ['codex'],
+      },
+    });
+
+    expect(result.lastError).toBeUndefined();
+    expect(posted).toHaveLength(3);
+    expect(posted.map((m) => m.totalTokens)).toEqual([100, 100, 100]);
+    expect(posted.reduce((sum, m) => sum + m.totalTokens, 0)).toBe(300); // not 600
+  });
+
+  it('uploads Codex user_message / agent_message text in full (content transmission)', async () => {
+    // Real Codex logs interleave content rows (user_message / agent_message)
+    // with token_count rows. Content rows must ship their payload.message text
+    // verbatim as real user/assistant messages; response_item/* rows duplicate
+    // that text and are skipped.
+    const codexHome = path.join(tmpDir, '.codex');
+    process.env.CODEX_HOME = codexHome;
+    const sessionDir = path.join(codexHome, 'sessions', '2026', '07', '02');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'rollout-content.jsonl'),
+      `${JSON.stringify({
+        timestamp: '2026-07-02T00:16:00.000Z',
+        type: 'session_meta',
+        payload: { type: 'session_meta', session_id: 'rollout-content', cwd: '/tmp/codex-content' },
+      })}\n${JSON.stringify({
+        timestamp: '2026-07-02T00:16:10.000Z',
+        type: 'event_msg',
+        payload: { type: 'user_message', message: 'Fix the login bug' },
+      })}\n${JSON.stringify({
+        timestamp: '2026-07-02T00:16:20.000Z',
+        type: 'event_msg',
+        payload: { type: 'agent_message', message: 'I will patch the auth check' },
+      })}\n${JSON.stringify({
+        timestamp: '2026-07-02T00:16:30.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          turn_id: 'turn-1',
+          cwd: '/tmp/codex-content',
+          model: 'glm-5.2',
+          info: {
+            last_token_usage: { input_tokens: 11, output_tokens: 4, total_tokens: 18 },
+          },
+        },
+      })}\n`
+    );
+
+    const posted: { eventId: string; role: string; content: string; totalTokens?: number }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'codex',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        for (const m of body.messages) {
+          posted.push({
+            eventId: m.eventId,
+            role: m.message.role,
+            content: m.message.content,
+            totalTokens: m.message.usage?.totalTokens,
+          });
+        }
+        return Response.json(
+          {
+            ok: true,
+            uploadId: 'upl_content',
+            status: 'queued',
+            received: body.messages.length,
+            acceptedForProcessing: body.messages.length,
+            rejectedAtReceive: 0,
+          },
+          { status: 202 }
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'codex',
+        conversationUploadEnabled: true,
+        uploadProviders: ['codex'],
+      },
+    });
+
+    expect(result.lastError).toBeUndefined();
+    // user_message + agent_message + token_count = 3 messages, all with real content.
+    expect(posted).toHaveLength(3);
+    const userMsg = posted.find((m) => m.role === 'user');
+    const assistantMsgs = posted.filter((m) => m.role === 'assistant');
+    expect(userMsg?.content).toBe('Fix the login bug');
+    // agent_message text + the token_count usage event (assistant role).
+    expect(assistantMsgs.map((m) => m.content)).toEqual(
+      expect.arrayContaining(['I will patch the auth check', 'Codex token usage event'])
+    );
+    // Usage is only on the token_count event.
+    expect(posted.find((m) => m.totalTokens === 18)).toBeDefined();
   });
 
   it('withUploadLock releases the lock when the locked function throws', async () => {

@@ -47,7 +47,7 @@ async function runUpdate({ onUpdated } = {}) {
       // Files just changed (checkout + install + build): reload the live usage
       // worker so it picks up the new code without waiting for a manual restart.
       await onUpdated?.();
-      console.log(`\n${brandLogPrefix()} Updated to ${latestVersion}. Restart with: ${brandCommand()}\n`);
+      console.log(`\n${brandLogPrefix()} Updated to ${latestVersion}. Restart with: ${brandCommand('restart')}\n`);
     } catch (err) {
       console.error(`${brandLogPrefix()} Update failed:`, err instanceof Error ? err.message : String(err));
       process.exit(1);
@@ -61,7 +61,7 @@ async function runUpdate({ onUpdated } = {}) {
       // Files just changed (global reinstall): reload the live usage worker so
       // it picks up the new code without waiting for a manual restart.
       await onUpdated?.();
-      console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand()}\n`);
+      console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand('restart')}\n`);
     } catch (err) {
       // Platform-aware fallback. `sudo` does not exist on Windows, and the
       // common failure there is EBUSY — a lingering agentcli process holds

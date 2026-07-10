@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createFeishuAssistant,
+  ensureCcConnectRuntime,
   isHermitBridgeInstalled,
   listFeishuAssistants,
 } from '../feishuAssistant.mjs';
@@ -15,6 +16,70 @@ describe('isHermitBridgeInstalled', () => {
   it('returns a boolean', () => {
     const result = isHermitBridgeInstalled();
     expect(typeof result).toBe('boolean');
+  });
+});
+
+describe('feishuAssistant — public runtime surface', () => {
+  it('exports the assistant runtime starter', () => {
+    expect(typeof ensureCcConnectRuntime).toBe('function');
+  });
+
+  it('returns ready once the local server reports cc-connect status', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({ ok: true, data: { running: true } }),
+      };
+    });
+
+    const result = await ensureCcConnectRuntime(5680, { pollMs: 1, fetchImpl });
+
+    expect(result).toMatchObject({ ok: true, message: '渠道连接已就绪' });
+    expect(calls).toBe(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:5680/api/status',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it('polls until the runtime becomes ready', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      if (calls < 3) {
+        const err = new Error('fetch failed');
+        throw err;
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    const result = await ensureCcConnectRuntime(5680, { pollMs: 1, fetchImpl });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(calls).toBe(3);
+  });
+
+  it('returns a clear error when the runtime never becomes ready', async () => {
+    const fetchImpl = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+
+    const result = await ensureCcConnectRuntime(5680, { timeoutMs: 5, pollMs: 1, fetchImpl });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.message).toContain('渠道连接服务未就绪');
+    expect(result.detail).toContain('ECONNREFUSED');
+  });
+
+  it('does not spawn a foreground cc-connect process', async () => {
+    let spawnCalled = false;
+    vi.stubGlobal('__feishuAssistant_test_spawn', () => { spawnCalled = true; return null; });
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
+
+    await ensureCcConnectRuntime(5680, { pollMs: 1, fetchImpl });
+
+    expect(spawnCalled).toBe(false);
+    vi.unstubAllGlobals();
   });
 });
 

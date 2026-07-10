@@ -15,10 +15,13 @@ beforeEach(() => {
   claudeBase = path.join(tmpDir, '.claude');
   fs.mkdirSync(path.join(claudeBase, 'projects'), { recursive: true });
   setClaudeBasePathOverride(claudeBase);
+  // Isolate Codex scanning from the real ~/.codex on the dev machine.
+  process.env.CODEX_HOME = path.join(tmpDir, '.codex');
 });
 
 afterEach(() => {
   setClaudeBasePathOverride(null);
+  delete process.env.CODEX_HOME;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

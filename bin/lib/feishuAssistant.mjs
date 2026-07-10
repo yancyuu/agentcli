@@ -1,52 +1,57 @@
-// feishuAssistant.mjs — create a Feishu personal assistant project via hermit-bridge.
+// feishuAssistant.mjs — create a Feishu personal assistant project via cc-connect.
 //
-// Bridges the CLI layer (hermit.mjs) to hermit-bridge's `create feishu-assistant`
-// subcommand. hermit-bridge is the bundled optionalDependency that ships the
-// `cc-connect` / `hermit-bridge` binary. This module follows the same pattern as
-// feishuBridgeCli.mjs: no import-time side effects, structured results, never throws.
+// Bridges the CLI layer (hermit.mjs) to cc-connect's `create feishu-assistant`
+// subcommand. cc-connect is the bundled optionalDependency that ships the channel
+// binding runtime. This module follows the same pattern as feishuBridgeCli.mjs:
+// no import-time side effects, structured results, never throws.
 //
 // Usage in hermit.mjs:
 //
 //   hermit create-feishu-assistant --name <name> [--ai-key <key>] [--description <desc>]
 //
 // Workflow:
-//   1. Resolve the hermit-bridge binary (bundled or global PATH).
-//   2. Spawn `hermit-bridge create feishu-assistant --name <name> [--ai-key …] [--description …]`.
-//   3. hermit-bridge creates a project with a Feishu engine + embedded AI credentials,
+//   1. Resolve the cc-connect binary (bundled package or global PATH).
+//   2. Spawn `cc-connect create feishu-assistant --name <name> [--ai-key …] [--description …]`.
+//   3. cc-connect creates a project with a Feishu engine + embedded AI credentials,
 //      writes ~/.hermit/teams/<name>/manifest.json, and prints the team slug on success.
 //   4. Return the parsed result (ok, teamSlug, message, detail) to the caller.
 //
-// hermit-bridge must be installed and its management API reachable (it auto-starts on
-// first launch via hermit-bridge install). If the API is down the command will fail
-// with a clear error — callers should direct the user to run `hermit bridge status`.
+// cc-connect must be installed and its management API reachable. If the API is down
+// the command will fail with a clear error.
 //
 // The Feishu personal assistant uses a Claude Code engine with a single-user Feishu bot
 // that sends/receives in personal 1:1 chats. The user provides their own Feishu app
 // credentials (App ID + App Secret) via environment variables or the --app-id / --app-secret
-// flags; hermit-bridge stores them in its per-project config.
+// flags; cc-connect stores them in its per-project config.
 //
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
-const PACKAGE = 'hermit-bridge';
+const PACKAGE_NAME = 'cc-connect';
 const BINARY = process.platform === 'win32' ? 'cc-connect.exe' : 'cc-connect';
 
-const BUNDLED_BIN_BASE = `${PACKAGE}/bin/${BINARY}`;
+function resolvePackageLauncher() {
+  for (const subpath of ['run.js', `bin/${BINARY}`]) {
+    try {
+      const entry = require.resolve(`${PACKAGE_NAME}/${subpath}`);
+      return { cmd: process.execPath, args: [entry], displayPath: entry, via: PACKAGE_NAME };
+    } catch {
+      // Try the next known package entry.
+    }
+  }
+  return null;
+}
 
 /**
- * Resolve how to invoke hermit-bridge. Prefers the bundled optionalDependency
- * (shipped with AgentCli), falls back to a global `hermit-bridge` on PATH.
+ * Resolve how to invoke cc-connect. Prefers the bundled optionalDependency
+ * (shipped with AgentCli), falls back to a global `cc-connect` on PATH.
  * Returns {cmd, args, displayPath, via} or null when not found.
  */
-function resolveHermitBridgeLauncher() {
-  try {
-    const mjs = require.resolve(BUNDLED_BIN_BASE);
-    return { cmd: process.execPath, args: [mjs], displayPath: mjs, via: 'bundled' };
-  } catch {
-    // bundled dep absent → try global PATH.
-  }
+function resolveCcConnectLauncher() {
+  const launcher = resolvePackageLauncher();
+  if (launcher) return launcher;
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   try {
     const r = spawnSync(cmd, [BINARY], { encoding: 'utf-8' });
@@ -58,8 +63,76 @@ function resolveHermitBridgeLauncher() {
   return null;
 }
 
+function spawnCcConnect(args, opts = {}) {
+  const launcher = resolveCcConnectLauncher();
+  if (!launcher) return null;
+  const spawn = globalThis.__feishuAssistant_test_spawn || spawnSync;
+  return spawn(launcher.cmd, [...launcher.args, ...args], {
+    encoding: 'utf-8',
+    shell: launcher.via === 'global' && process.platform === 'win32',
+    ...opts,
+  });
+}
+
+function isAlreadyRunningMessage(text) {
+  return /another cc-connect instance is already running/i.test(text || '');
+}
+
+function compactBridgeResult(r, fallback) {
+  if (!r) {
+    return {
+      ok: false,
+      message: `${BINARY} 未安装（运行 pnpm install 或 npm install -g cc-connect 后重试）`,
+      detail: 'cc-connect optional dependency not found',
+    };
+  }
+  const stdout = (r.stdout || '').trim();
+  const stderr = (r.stderr || '').trim();
+  return {
+    ok: r.status === 0,
+    message: stdout || stderr || fallback || `exit ${r.status}`,
+    detail: stderr && stdout ? stderr : '',
+  };
+}
+
 /**
- * Parse the structured output line hermit-bridge prints on success.
+ * Wait for the cc-connect runtime to be reachable through the local AgentCli
+ * server before channel binding. The server owns cc-connect process lifecycle
+ * (it launches the sidecar on boot); this only polls the proxied status so the
+ * CLI never blocks on a foreground `cc-connect start` process.
+ */
+export async function ensureCcConnectRuntime(port, { timeoutMs = 60_000, pollMs = 500, fetchImpl } = {}) {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const fetchFn = fetchImpl || (globalThis.fetch ? globalThis.fetch.bind(globalThis) : null);
+  if (typeof fetchFn !== 'function') {
+    return { ok: false, message: '渠道连接服务未就绪：当前环境不支持 fetch', detail: 'fetch unavailable' };
+  }
+  const startedAt = Date.now();
+  let lastError = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const res = await fetchFn(`${baseUrl}/api/status`, { signal: AbortSignal.timeout(5_000) });
+      if (res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        if (payload?.ok !== false) return { ok: true, message: '渠道连接已就绪' };
+        lastError = payload?.error || 'runtime status unavailable';
+      } else {
+        lastError = `HTTP ${res.status}`;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return {
+    ok: false,
+    message: '渠道连接服务未就绪，请确认本地工作台已启动并已加载 cc-connect',
+    detail: lastError || 'runtime readiness timeout',
+  };
+}
+
+/**
+ * Parse the structured output line cc-connect prints on success.
  * Looks for a trailing JSON blob like {ok:true,teamSlug:"…"} or {ok:false,error:"…"}
  * appended to the human-readable stdout. Falls back to treating stdout as the message.
  */
@@ -88,34 +161,25 @@ function parseHermitBridgeOutput(stdout, stderr) {
  */
 
 /**
- * Check whether hermit-bridge is available (bundled or on PATH).
+ * Check whether cc-connect is available (bundled or on PATH).
  * @returns {boolean}
  */
 export function isHermitBridgeInstalled() {
-  return resolveHermitBridgeLauncher() !== null;
+  return resolveCcConnectLauncher() !== null;
 }
 
 /**
- * Create a new Feishu personal assistant project via hermit-bridge.
+ * Create a new Feishu personal assistant project via cc-connect.
  *
  * @param {object} opts
  * @param {string} opts.name          - Unique project / team name (slug-safe, will be normalized).
  * @param {string} [opts.aiKey]       - API key for the embedded Claude engine (sk-… or ANTHROPIC_API_KEY value).
  * @param {string} [opts.description] - Human-readable description shown in the UI.
- * @param {string} [opts.appId]       - Feishu App ID (optional; hermit-bridge may prompt or use env).
- * @param {string} [opts.appSecret]   - Feishu App Secret (optional; hermit-bridge may prompt or use env).
+ * @param {string} [opts.appId]       - Feishu App ID (optional; cc-connect may prompt or use env).
+ * @param {string} [opts.appSecret]   - Feishu App Secret (optional; cc-connect may prompt or use env).
  * @returns {CreateFeishuAssistantResult}
  */
 export function createFeishuAssistant({ name, aiKey, description, appId, appSecret } = {}) {
-  const launcher = resolveHermitBridgeLauncher();
-  if (!launcher) {
-    return {
-      ok: false,
-      message: `${BINARY} 未安装（运行 hermit bridge install 或重新安装 Hermit）`,
-      detail: 'hermit-bridge optional dependency not found',
-    };
-  }
-
   if (!name || !name.trim()) {
     return { ok: false, message: '缺少项目名称（--name <名称>）' };
   }
@@ -126,14 +190,10 @@ export function createFeishuAssistant({ name, aiKey, description, appId, appSecr
   if (appId) args.push('--app-id', appId);
   if (appSecret) args.push('--app-secret', appSecret);
 
-  const r = spawnSync(launcher.cmd, [...launcher.args, ...args], {
-    encoding: 'utf-8',
-    // hermit-bridge CLI is interactive when credentials are missing; stdio:inherit lets
-    // it read from TTY so the user can fill in App ID / Secret if not provided.
-    // On non-TTY (piped), hermit-bridge should return a non-zero exit with a clear message.
-    // shell: true only on Windows global-bin PATH (not needed for node <mjs>).
-    shell: launcher.via === 'global' && process.platform === 'win32',
-  });
+  const r = spawnCcConnect(args);
+  if (!r) {
+    return compactBridgeResult(r);
+  }
 
   const stdout = (r.stdout || '').trim();
   const stderr = (r.stderr || '').trim();
@@ -159,22 +219,16 @@ export function createFeishuAssistant({ name, aiKey, description, appId, appSecr
 }
 
 /**
- * List all Feishu-assistant projects known to hermit-bridge.
- * Spawns `hermit-bridge list feishu-assistants` and returns the parsed JSON array.
+ * List all Feishu-assistant projects known to cc-connect.
+ * Spawns `cc-connect list feishu-assistants` and returns the parsed JSON array.
  *
  * @returns {{ ok: boolean; projects: Array<{name: string; teamSlug: string; status: string}>; message: string }}
  */
 export function listFeishuAssistants() {
-  const launcher = resolveHermitBridgeLauncher();
-  if (!launcher) {
-    return { ok: false, projects: [], message: `${BINARY} 未安装` };
+  const r = spawnCcConnect(['list', 'feishu-assistants', '--json']);
+  if (!r) {
+    return { ok: false, projects: [], message: compactBridgeResult(r).message };
   }
-
-  const r = spawnSync(
-    launcher.cmd,
-    [...launcher.args, 'list', 'feishu-assistants', '--json'],
-    { encoding: 'utf-8' }
-  );
 
   if (r.status !== 0) {
     return { ok: false, projects: [], message: (r.stderr || r.stdout || '').trim() || `exit ${r.status}` };
@@ -184,6 +238,6 @@ export function listFeishuAssistants() {
     const parsed = JSON.parse((r.stdout || '').trim());
     return { ok: true, projects: Array.isArray(parsed) ? parsed : [], message: '' };
   } catch {
-    return { ok: false, projects: [], message: '无法解析 hermit-bridge 输出' };
+    return { ok: false, projects: [], message: '无法解析 cc-connect 输出' };
   }
 }

@@ -252,11 +252,19 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 
 ## Hermit Team Context
 
-Current team slug: `hermit`
+Current team slug: `assistant-1783672664880`
 
 Available teams:
+- 23 (测试23)
+- sassasasas
+- sas
+- 22
+- hello
+- team-0b5d7ed5 (测试)
+- temu-1kj5 (temu助手)
 - 1111-1tj9 (测试团1111)
 - hermit-agent-1cce (hermit-agent)
+- hermit (hermit开发)
 - team-4 (产品经理团队)
 - team-2 (汇报)
 - team (爬虫)

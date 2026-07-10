@@ -27,6 +27,23 @@ describe('onlineGuideRows — handoff prompt', () => {
   });
 });
 
+describe('NAV_ACTIONS — token 池 menu wiring', () => {
+  it('orders 认领 / 状态 / 一键恢复 and keeps restore last with no English labels', () => {
+    const pool = NAV_ACTIONS.find((a) => a.id === 'aikey');
+    expect(pool).toBeDefined();
+    const childIds = pool.children.map((c) => c.id);
+    // Restore is last (below Status); English suffixes (Claim/Status/beta) gone.
+    expect(childIds).toEqual(['aikey-claim', 'aikey-status', 'aikey-restore']);
+    expect(pool.children[0].label).toBe('认领');
+    expect(pool.children[1].label).toBe('状态');
+    expect(pool.children[2].label).toBe('一键恢复原始配置');
+    expect(pool.label).toBe('token 池（测试版）');
+    // Claim describes runtime selection; restore points at the snapshot dir.
+    expect(pool.children[0].description).toMatch(/运行时|Claude\/Codex/);
+    expect(pool.children[2].description).toContain('.hermit-env.bak');
+  });
+});
+
 // askMenuAction/renderNavMenu touch process.stdin (raw mode + 'data') and
 // process.stdout (write ANSI frames, read columns). Stub both so the menu loop
 // runs headless.

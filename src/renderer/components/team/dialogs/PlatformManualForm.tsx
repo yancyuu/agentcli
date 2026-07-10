@@ -53,7 +53,7 @@ export default function PlatformManualForm({
       const opts: Record<string, unknown> = { ...(meta.defaultOptions ?? {}) };
       for (const f of meta.fields) {
         const v = values[f.key];
-        if (v !== undefined && v !== '' && v !== false) {
+        if (v !== undefined && v !== '') {
           opts[f.key] = v;
         }
       }

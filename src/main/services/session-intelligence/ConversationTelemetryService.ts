@@ -20,6 +20,7 @@ import {
   type ResolvedConversationIdentity,
 } from './ConversationIdentityResolver';
 import type { ConversationIdentityRecord } from './ConversationIdentityStore';
+import { resolveUsageTotalTokens } from './tokenUsageTotals';
 
 interface ClaudeSessionSummary {
   sessionId: string;
@@ -745,12 +746,18 @@ export class ConversationTelemetryService {
             (usage.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens
         );
         const cacheCreation = toNumber(usage.cache_creation_input_tokens);
+        const total = resolveUsageTotalTokens(usage, {
+          inputTokens: input,
+          outputTokens: output,
+          cacheReadTokens: cacheRead,
+          cacheCreationTokens: cacheCreation,
+        });
         messageUsage = {
           inputTokens: input,
           outputTokens: output,
           cacheReadTokens: cacheRead,
           cacheCreationTokens: cacheCreation,
-          totalTokens: input + output + cacheRead + cacheCreation,
+          totalTokens: total,
         };
         inputTokens += input;
         outputTokens += output;

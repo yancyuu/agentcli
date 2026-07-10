@@ -19,6 +19,7 @@ export const NAV_ACTIONS = [
     children: [
       { id: 'toggle-web', label: '开启/关闭 AgentCli 工作台', toggle: 'web', description: '启动/停止本机 AgentCli Web 工作台；用于本地 CC/Codex session → IM 的配置与管理' },
       { id: 'workbench-status', label: '查看本地工作台状态', description: '查看 AgentCli 工作台运行状态' },
+      { id: 'quick-create-assistant', label: '开通数字员工', description: '进入向导：创建数字员工团队并绑定外部渠道' },
     ],
   },
   {
@@ -45,11 +46,12 @@ export const NAV_ACTIONS = [
   },
   {
     id: 'aikey',
-    label: 'token 池(beta)',
-    description: '回车展开；签发并认领 AI 网关 key，配置到本机 Codex / Claude',
+    label: 'token 池（测试版）',
+    description: '回车展开；签发并认领 AI 网关 key，可选写入 Claude/Codex 配置，支持一键恢复',
     children: [
-      { id: 'aikey-claim', label: '认领 Claim', description: '签发消费者并认领 key，写入本机 Codex / Claude 配置' },
-      { id: 'aikey-status', label: '状态 Status', description: '查看当前 token 池状态' },
+      { id: 'aikey-claim', label: '认领', description: '签发消费者并认领 key；选择运行时（Claude/Codex，默认都写），写入本地配置 + aikey env' },
+      { id: 'aikey-status', label: '状态', description: '查看当前 token 池状态' },
+      { id: 'aikey-restore', label: '一键恢复原始配置', description: '从 ~/.hermit-env.bak 一键还原 token 池介入前的 Claude/Codex 配置' },
     ],
   },
   {

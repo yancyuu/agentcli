@@ -582,7 +582,13 @@ describe('openHermit CLI read-only workspace commands', () => {
 
   it('runs usage status and today without OpenHermit auth', async () => {
     await withHermitHome(async (hermitHome) => {
-      const status = await runCli(hermitHome, ['--port', '5999', 'usage', 'status', '--json']);
+      // usage status/today run a real foreground scan of ~/.claude/projects/ when
+      // scan=true. Isolate HOME to the temp home so the scan reads an empty projects
+      // dir (totalTokens 0) instead of the developer's real sessions — otherwise the
+      // assertion is machine-dependent and scans gigabytes of live data under test.
+      const status = await runCli(hermitHome, ['--port', '5999', 'usage', 'status', '--json'], {
+        HOME: hermitHome,
+      });
       const parsedStatus = JSON.parse(status.stdout);
 
       expect(parsedStatus).toMatchObject({
@@ -603,7 +609,9 @@ describe('openHermit CLI read-only workspace commands', () => {
       const uploadLog = existsSync(uploadLogPath) ? await readFile(uploadLogPath, 'utf-8') : '';
       expect(uploadLog).not.toContain('upload-request');
 
-      const today = await runCli(hermitHome, ['--port', '5999', 'usage', 'today', '--json']);
+      const today = await runCli(hermitHome, ['--port', '5999', 'usage', 'today', '--json'], {
+        HOME: hermitHome,
+      });
       const parsedToday = JSON.parse(today.stdout);
       expect(parsedToday).toMatchObject({
         ok: true,

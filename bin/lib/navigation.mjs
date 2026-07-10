@@ -92,7 +92,7 @@ export function renderNavMenu(
   // Redraw IN PLACE via writeFrameSync (cursor home + per-line clear-to-EOL) —
   // NOT a full-screen clear. Wiping the screen on every arrow press is what made
   // the menu flash ("一闪一闪") whenever ↑/↓ was pressed.
-  const width = Math.min(panelWidth(), 60);
+  const width = Math.min(panelWidth(), 80);
   const lines = [];
   lines.push(ui.dim(glyphs.h.repeat(width)));
   if (title) lines.push(ui.bold(title));

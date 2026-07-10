@@ -88,9 +88,10 @@ function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetry
 function statusFromCollection(collection: UsageCollectionResult): UsageTelemetryStatus {
   const aggregate: UsageAggregate = collection.legacyParseResult.aggregate;
 
-  // Rolling 7-day local volume for the 本地（最近 7 天）row. events7d already
-  // holds the last 7 days of per-message events; sum tokens across the window.
-  const cutoff7d = Math.floor(Date.now() / 1000) - 86_400 * 7;
+  // The parser already applied the 7-day window using a single reference
+  // timestamp (the same instant as collection.computedAt), so events7d is
+  // the definitive recent-window set. Summing here avoids a second Date.now()
+  // that would drift the boundary relative to the scan.
   let recentMessages = 0;
   let recentTokensTotal = 0;
   const recentByProvider = {
@@ -98,7 +99,6 @@ function statusFromCollection(collection: UsageCollectionResult): UsageTelemetry
     codex: emptyProviderMetrics(),
   };
   for (const event of aggregate.events7d) {
-    if (event.ts < cutoff7d) continue;
     recentMessages += 1;
     recentTokensTotal += event.tokensTotal;
     const providerMetrics = recentByProvider[event.provider];
@@ -164,7 +164,10 @@ async function doScan(cfg?: TaskBusConfig): Promise<UsageTelemetryStatus | null>
     lastLocalScan = statusFromCollection(collection);
     if (cfg?.telemetry?.conversationUploadEnabled || cfg?.telemetry?.conversations?.uploadEnabled) {
       try {
-        lastLocalScan.conversationUpload = await uploadConversationMessages(cfg);
+        lastLocalScan.conversationUpload = await uploadConversationMessages(
+          cfg,
+          collection.referenceMs
+        );
       } catch (error) {
         lastLocalScan.conversationUpload = {
           enabled: true,

@@ -148,10 +148,14 @@ function humanizeChannelStatus(status) {
   }
 }
 
-function cursorStatusText(channel) {
+export function cursorStatusText(channel = {}) {
   if (channel.hasCursor) {
     const parts = [`cursor ${String(channel.cursorHash || '').slice(0, 12)}`];
-    if (Number.isFinite(channel.cursorMessageCount)) parts.push(`${formatNumber(channel.cursorMessageCount)} msg`);
+    // Label the count as a per-batch figure (本批), not a running total: this is
+    // the message count of the last uploaded cursor batch (payload.messages.length),
+    // which is far smaller than the cumulative server total and would otherwise
+    // read like "total uploaded = 25" and contradict the 服务端（全量） row.
+    if (Number.isFinite(channel.cursorMessageCount)) parts.push(`本批 ${formatNumber(channel.cursorMessageCount)} msg`);
     if (channel.cursorGeneratedAt) parts.push(new Date(channel.cursorGeneratedAt).toLocaleString('zh-CN'));
     return parts.join(' · ');
   }
@@ -161,7 +165,7 @@ function cursorStatusText(channel) {
   if (channel.status === 'unknown') return '等待服务端确认游标';
   if (channel.status && channel.status !== 'never_reported') return '无服务端游标 · 上报最近 7 天（服务端按 eventId 去重）';
   if (channel.attemptedCursorHash) {
-    return `attempted ${String(channel.attemptedCursorHash).slice(0, 12)}${Number.isFinite(channel.attemptedCursorMessageCount) ? ` · ${formatNumber(channel.attemptedCursorMessageCount)} msg` : ''}`;
+    return `attempted ${String(channel.attemptedCursorHash).slice(0, 12)}${Number.isFinite(channel.attemptedCursorMessageCount) ? ` · 本批 ${formatNumber(channel.attemptedCursorMessageCount)} msg` : ''}`;
   }
   return '尚未提交 cursor';
 }
@@ -614,7 +618,7 @@ export async function stopTelemetryWorker() {
 
 // --- Foreground scan --------------------------------------------------------
 
-async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = false } = {}) {
+async function runTelemetryWorkerScanOnce({ localOnly = false, uploadDisabled = false, scanDisabled = false } = {}) {
   const childArgs = await telemetryWorkerChildArgs(['--scan-once']);
   const child = spawn(process.execPath, childArgs, {
     cwd: repoRoot,
@@ -623,6 +627,7 @@ async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = fa
       HERMIT_HOME: hermitHome,
       HERMIT_USAGE_FOREGROUND_SCAN: '1',
       ...(localOnly ? { HERMIT_USAGE_FORCE_LOCAL_ONLY: '1' } : {}),
+      ...(uploadDisabled ? { HERMIT_USAGE_UPLOAD_DISABLED: '1' } : {}),
       ...(scanDisabled ? { HERMIT_USAGE_SCAN_DISABLED: '1' } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -648,7 +653,7 @@ async function runTelemetryWorkerScanOnce({ localOnly = false, scanDisabled = fa
   return parsed.status?.telemetry ? parsed.status.telemetry : emptyUsageTelemetryStatus();
 }
 
-async function scanUsageTelemetryOnce({ localOnly = false } = {}) {
+async function scanUsageTelemetryOnce({ localOnly = false, uploadDisabled = false } = {}) {
   if (process.env.OPENHERMIT_USAGE_WORKER_MODE === 'test') {
     const { status } = readTelemetryWorkerStatusFile();
     const autostart = await getUsageAutostartStatus();
@@ -659,7 +664,7 @@ async function scanUsageTelemetryOnce({ localOnly = false } = {}) {
       source: 'claude-jsonl',
     };
   }
-  const telemetry = await runTelemetryWorkerScanOnce({ localOnly, scanDisabled: localOnly });
+  const telemetry = await runTelemetryWorkerScanOnce({ localOnly, uploadDisabled });
   const { status } = readTelemetryWorkerStatusFile();
   const autostart = await getUsageAutostartStatus();
   return {
@@ -856,10 +861,15 @@ async function fetchBackendUsageStatus() {
 
 // --- Read usage status --------------------------------------------------------
 
-async function readUsageStatus({ scan = false, localOnly = false } = {}) {
+export async function readUsageStatus({
+  scan = false,
+  localOnly = false,
+  uploadDisabled = false,
+  includeRemote = !localOnly,
+} = {}) {
   let base;
   if (scan) {
-    base = await scanUsageTelemetryOnce({ localOnly });
+    base = await scanUsageTelemetryOnce({ localOnly, uploadDisabled });
   } else {
     const backend = await fetchBackendUsageStatus();
     if (backend) {
@@ -875,7 +885,7 @@ async function readUsageStatus({ scan = false, localOnly = false } = {}) {
       };
     }
   }
-  if (!localOnly) {
+  if (includeRemote) {
     const [remote, authoritative] = await Promise.all([
       fetchRemoteUsageStatus(currentFeatureStates().uploadProviders),
       fetchAuthoritativeUsage(),
@@ -925,7 +935,9 @@ async function printUsageRows(title, data, hint) {
 
 export async function printUsageStatus({ exitOnDone = true } = {}) {
   try {
-    const data = await withCliProgress('正在读取用量状态...', () => readUsageStatus({ scan: false }));
+    const data = await withCliProgress('正在实时扫描本地用量状态...', () =>
+      readUsageStatus({ scan: true, uploadDisabled: true, includeRemote: true })
+    );
     const result = { ok: true, command: 'usage status', hermitHome, ...data };
     if (jsonRequested) printJson(result);
     await printUsageRows('用量上报状态', data, data.daemon.running ? '触发扫描：agentcli usage report' : '启动本地采集：agentcli usage start');

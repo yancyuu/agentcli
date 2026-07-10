@@ -111,6 +111,11 @@ vi.mock('@renderer/components/team/dialogs/PlatformBindingDialog', () => ({
         'button',
         { type: 'button', onClick: () => onComplete() },
         'Complete binding'
+      ),
+      React.createElement(
+        'button',
+        { type: 'button', onClick: () => onComplete({ restartHandled: true }) },
+        'Complete binding without restart'
       )
     ),
 }));
@@ -413,7 +418,7 @@ describe('RuntimeConfigDialog', () => {
     });
   });
 
-  it('restarts after platform binding completes', async () => {
+  it('does not restart after platform binding when the server already handled it', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -435,7 +440,7 @@ describe('RuntimeConfigDialog', () => {
     });
 
     const completeButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Complete binding')
+      button.textContent?.includes('Complete binding without restart')
     );
     expect(completeButton).toBeTruthy();
 
@@ -447,7 +452,7 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
 
-    expect(api.ccSettings.restart).toHaveBeenCalled();
+    expect(api.ccSettings.restart).not.toHaveBeenCalled();
     expect(mockFetchTeams).toHaveBeenCalled();
     expect(mockSelectTeam).toHaveBeenCalledWith('test-team');
     expect(host.querySelector('[data-testid="binding-content"]')).toBeNull();

@@ -243,13 +243,39 @@ async function writeStatus(
   return status;
 }
 
+function isUsageUploadDisabled(): boolean {
+  return (
+    process.env.HERMIT_USAGE_UPLOAD_DISABLED === '1' ||
+    process.env.HERMIT_USAGE_FORCE_LOCAL_ONLY === '1'
+  );
+}
+
+function uploadDisabledTelemetryConfig(cfg: TaskBusConfig | null): TaskBusConfig | null {
+  if (!isUsageUploadDisabled() || !cfg?.telemetry) return cfg;
+  return {
+    ...cfg,
+    telemetry: {
+      ...cfg.telemetry,
+      conversationUploadEnabled: false,
+      conversations: {
+        ...cfg.telemetry.conversations,
+        uploadEnabled: false,
+      },
+    },
+  };
+}
+
+function shouldForceLocalScan(): boolean {
+  return process.env.HERMIT_USAGE_SCAN_DISABLED === '1' || isUsageUploadDisabled();
+}
+
 export async function scanUsageTelemetryWorkerOnce(
   hermitHome = resolveHermitHome()
 ): Promise<{ status: UsageTelemetryWorkerStatus; shouldContinue: boolean }> {
   const paths = getUsageTelemetryWorkerPaths(hermitHome);
-  const cfg = await readTaskBusConfig(paths);
+  const cfg = uploadDisabledTelemetryConfig(await readTaskBusConfig(paths));
   if (!cfg?.telemetry?.enabled) {
-    if (process.env.HERMIT_USAGE_SCAN_DISABLED === '1') {
+    if (shouldForceLocalScan()) {
       await writeStatus(paths, 'scanning', cfg);
       try {
         const telemetry = (await scanTelemetryOnce()) ?? emptyUsageTelemetryStatus();

@@ -10,6 +10,8 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Settings2, Smartphone } from 'lucide-react';
 
+import assistantCreationOptions from '@shared/assistantCreationOptions.json';
+
 import { isQRPlatform, platformMeta } from './platformMeta';
 import PlatformManualForm from './PlatformManualForm';
 import PlatformSetupQR from './PlatformSetupQR';
@@ -21,89 +23,34 @@ interface PlatformOption {
   icon: 'qr' | 'settings';
 }
 
-const PLATFORM_OPTIONS: PlatformOption[] = [
-  {
-    key: 'feishu',
-    label: '飞书 / Lark',
-    color: 'bg-blue-50 dark:bg-blue-900/30 text-indigo-600 dark:text-indigo-400',
-    icon: 'qr',
-  },
-  {
-    key: 'weixin',
-    label: '微信',
-    color: 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400',
-    icon: 'qr',
-  },
-  {
-    key: 'telegram',
-    label: 'Telegram',
-    color: 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400',
-    icon: 'settings',
-  },
-  {
-    key: 'discord',
-    label: 'Discord',
-    color: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
-    icon: 'settings',
-  },
-  {
-    key: 'slack',
-    label: 'Slack',
-    color: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
-    icon: 'settings',
-  },
-  {
-    key: 'dingtalk',
-    label: '钉钉',
-    color: 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
-    icon: 'settings',
-  },
-  {
-    key: 'wecom_im',
-    label: '企业微信 / IM',
-    color: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400',
-    icon: 'settings',
-  },
-  {
-    key: 'qq',
-    label: 'QQ (OneBot)',
-    color: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
-    icon: 'settings',
-  },
-  {
-    key: 'qqbot',
-    label: 'QQ Bot (官方)',
-    color: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
-    icon: 'settings',
-  },
-  {
-    key: 'line',
-    label: 'LINE',
-    color: 'bg-lime-50 dark:bg-lime-900/30 text-lime-600 dark:text-lime-400',
-    icon: 'settings',
-  },
-  {
-    key: 'weibo',
-    label: '微博',
-    color: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-    icon: 'settings',
-  },
-];
+const PLATFORM_COLORS: Record<string, string> = {
+  feishu: 'bg-blue-50 dark:bg-blue-900/30 text-indigo-600 dark:text-indigo-400',
+  weixin: 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400',
+  telegram: 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400',
+  discord: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
+  slack: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
+  dingtalk: 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
+  wecom_im: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400',
+  qq: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
+  qqbot: 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400',
+  line: 'bg-lime-50 dark:bg-lime-900/30 text-lime-600 dark:text-lime-400',
+  weibo: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+};
+
+const PLATFORM_OPTIONS: PlatformOption[] = assistantCreationOptions.platformOptions.map(
+  (option) => ({
+    key: option.key,
+    label: option.label,
+    color:
+      PLATFORM_COLORS[option.key] ??
+      'bg-gray-50 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400',
+    icon: option.icon as PlatformOption['icon'],
+  })
+);
 
 const WECOM_IM_PLATFORM_KEY = 'wecom_im';
 
-const WECOM_MODE_OPTIONS = [
-  {
-    key: 'wecom_ws',
-    label: '企业微信智能机器人',
-    description: '使用 Bot ID / Bot Secret，通过 WebSocket 长连接接入。',
-  },
-  {
-    key: 'wecom',
-    label: '企业微信自建应用（Callback）',
-    description: '使用 Corp ID / Agent ID / Callback Token，通过 HTTPS 回调接入。',
-  },
-] as const;
+const WECOM_MODE_OPTIONS = assistantCreationOptions.wecomModeOptions;
 
 type WeComModeKey = (typeof WECOM_MODE_OPTIONS)[number]['key'];
 

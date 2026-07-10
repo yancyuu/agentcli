@@ -12,6 +12,8 @@ import {
   refreshAccessToken,
 } from '@main/services/auth/OpenHermitAuthClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
+import { resolveUsageTotalTokens } from './tokenUsageTotals';
+import { CodexUsageAccumulator, CodexUsage, codexEventTimestamp } from './codexTokenUsage';
 type ConversationUploadTelemetryConfig = {
   enabled?: boolean;
   platform?: UploadPlatform;
@@ -57,11 +59,15 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 // Unified upload endpoint for local coding (Claude Code / Codex) usage. Each
 // message carries its own project/conversation context; scene is always `coding`.
 const UPLOAD_ENDPOINT = '/api/v1/report/messages';
-// Lane A — usage-only reporting: conversation text is NEVER shipped, only token
-// usage + metadata. The wire contract still requires `message.content`, so it
-// carries this fixed placeholder instead of any user/assistant text. Dropping the
-// field entirely is safe only after confirming the server treats it as optional.
+// Fallback content for turns that carry no readable text (tool-use / tool-result
+// rows that nevertheless hold token usage). The wire contract requires
+// `message.content`, so text-less turns get this fixed placeholder; turns with
+// real user/assistant text ship that text in full.
 const REPORTED_CONTENT_PLACEHOLDER = '[usage only]';
+const SCAN_PROGRESS_FILE_INTERVAL = 25;
+const SCAN_PROGRESS_MIN_INTERVAL_MS = 1_000;
+const SCAN_YIELD_FILE_INTERVAL = 25;
+const SCAN_LINE_YIELD_INTERVAL = 500;
 
 export interface ConversationUploadStatus {
   enabled: boolean;
@@ -517,15 +523,61 @@ function usageFromMessage(
   const cacheCreationTokens = Number(
     usage.cache_creation_input_tokens ?? usage.cacheCreationTokens ?? 0
   );
-  const totalTokens = Number(
-    usage.total_tokens ??
-      usage.totalTokens ??
-      inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
-  );
+  const totalTokens = resolveUsageTotalTokens(usage, {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+  });
   if (!inputTokens && !outputTokens && !cacheReadTokens && !cacheCreationTokens && !totalTokens) {
     return undefined;
   }
   return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens };
+}
+
+function shouldIncludeOccurredAt(
+  occurredAt: string | undefined,
+  sinceMs: number,
+  untilMs: number
+): boolean {
+  const occurredMs = typeof occurredAt === 'string' ? Date.parse(occurredAt) : NaN;
+  if (!Number.isFinite(occurredMs)) return sinceMs <= 0 && untilMs <= 0;
+  if (sinceMs > 0 && occurredMs < sinceMs) return false;
+  if (untilMs > 0 && occurredMs >= untilMs) return false;
+  return true;
+}
+
+function shouldReportScanProgress(filesScanned: number): boolean {
+  return filesScanned === 1 || filesScanned % SCAN_PROGRESS_FILE_INTERVAL === 0;
+}
+
+function shouldYieldDuringScan(filesScanned: number): boolean {
+  return filesScanned > 0 && filesScanned % SCAN_YIELD_FILE_INTERVAL === 0;
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function createScanProgressReporter(platform: UploadPlatform) {
+  let lastReportedAt = 0;
+  let lastReportedMessages = -1;
+  return async (filesScanned: number, messagesCollected: number): Promise<void> => {
+    const now = Date.now();
+    const shouldReport =
+      filesScanned === 1 ||
+      filesScanned % SCAN_PROGRESS_FILE_INTERVAL === 0 ||
+      messagesCollected !== lastReportedMessages ||
+      now - lastReportedAt >= SCAN_PROGRESS_MIN_INTERVAL_MS;
+    if (shouldReport) {
+      lastReportedAt = now;
+      lastReportedMessages = messagesCollected;
+      await appendScanProgress(platform, filesScanned, messagesCollected);
+    }
+    if (shouldYieldDuringScan(filesScanned)) {
+      await yieldToEventLoop();
+    }
+  };
 }
 
 async function* walkJsonl(dir: string): AsyncGenerator<string> {
@@ -747,10 +799,11 @@ function claudeUploadMessage(
   // Keep a message if it has readable text OR token usage. Tool-use / tool-result
   // turns carry no text but hold the bulk of token usage — dropping them made the
   // server undercount tokens, and the cursor advances past them so they would
-  // never be retried. `hasText` only decides whether the line is a real message —
-  // the text itself is never shipped (Lane A, usage-only reporting).
+  // never be retried. The real text is shipped (full content); text-less tool-use
+  // turns fall back to the placeholder so the wire field stays populated.
   if (!hasText && !usage) return null;
-  const reportedContent = REPORTED_CONTENT_PLACEHOLDER;
+  const reportedContent =
+    textFromContent(msg.content ?? obj.content) || REPORTED_CONTENT_PLACEHOLDER;
 
   const sessionId = claudeSessionId(filePath, obj);
   const messageId = claudeMessageId(obj, msg);
@@ -795,12 +848,14 @@ async function collectClaudeCodeMessages(
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string,
-  sinceMs = 0
+  sinceMs = 0,
+  untilMs = 0
 ): Promise<CollectedMessages> {
   const messages: UploadMessage[] = [];
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
+  const reportProgress = createScanProgressReporter('claudecode');
   let filesScanned = 0;
 
   for await (const filePath of walkJsonl(getProjectsBasePath())) {
@@ -822,7 +877,7 @@ async function collectClaudeCodeMessages(
         toOffset: scanEndOffset,
       });
       filesScanned += 1;
-      await appendScanProgress('claudecode', filesScanned, messages.length);
+      await reportProgress(filesScanned, messages.length);
       continue;
     }
 
@@ -834,8 +889,11 @@ async function collectClaudeCodeMessages(
       end: Math.max(fromOffset, scanEndOffset - 1),
     });
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
+    let linesScanned = 0;
     for await (const rawLine of rl) {
       if (maxMessages > 0 && messages.length >= maxMessages) break;
+      linesScanned += 1;
+      if (linesScanned % SCAN_LINE_YIELD_INTERVAL === 0) await yieldToEventLoop();
       consumedOffset += Buffer.byteLength(rawLine, 'utf-8') + 1;
       let obj: Record<string, unknown>;
       try {
@@ -843,8 +901,10 @@ async function collectClaudeCodeMessages(
       } catch {
         continue;
       }
-      const occurredAt = typeof obj.timestamp === 'string' ? obj.timestamp : undefined;
-      if (sinceMs > 0 && occurredAt && Date.parse(occurredAt) < sinceMs) continue;
+      const rawOccurredAt =
+        typeof obj.timestamp === 'string' ? obj.timestamp : objectRecord(obj.message)?.timestamp;
+      const occurredAt = typeof rawOccurredAt === 'string' ? rawOccurredAt : undefined;
+      if (!shouldIncludeOccurredAt(occurredAt, sinceMs, untilMs)) continue;
       startedAt ||= occurredAt;
       const baseMessage = claudeUploadMessage(filePath, obj, generatedAt, startedAt);
       if (!baseMessage) continue;
@@ -864,7 +924,7 @@ async function collectClaudeCodeMessages(
       toOffset,
     });
     filesScanned += 1;
-    await appendScanProgress('claudecode', filesScanned, messages.length);
+    await reportProgress(filesScanned, messages.length);
   }
 
   return {
@@ -882,73 +942,18 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
-function codexUsageRecordFromEvent(obj: Record<string, unknown>): Record<string, unknown> | null {
-  const payload = objectRecord(obj.payload);
-  if (!payload) return null;
-  const info = objectRecord(payload.info);
-  return objectRecord(info?.last_token_usage) ?? objectRecord(info?.total_token_usage);
-}
-
-function codexTokenUsageFromRecord(
-  source: Record<string, unknown>
-): UploadMessage['message']['usage'] | undefined {
-  const inputTokens = Number(
-    source.input_tokens ??
-      source.inputTokens ??
-      source.input ??
-      source.prompt_tokens ??
-      source.promptTokens ??
-      0
-  );
-  const cacheReadTokens = Number(
-    source.cached_input_tokens ??
-      source.cache_read_input_tokens ??
-      source.cacheReadTokens ??
-      source.cachedInputTokens ??
-      0
-  );
-  const outputTokens = Number(
-    source.output_tokens ??
-      source.outputTokens ??
-      source.output ??
-      source.completion_tokens ??
-      source.completionTokens ??
-      0
-  );
-  const reasoningTokens = Number(
-    source.reasoning_output_tokens ?? source.reasoningTokens ?? source.reasoning_tokens ?? 0
-  );
-  const totalTokens = Number(
-    source.total_tokens ??
-      source.totalTokens ??
-      inputTokens + cacheReadTokens + outputTokens + reasoningTokens
-  );
-  if (!inputTokens && !cacheReadTokens && !outputTokens && !reasoningTokens && !totalTokens)
-    return undefined;
-  return {
-    inputTokens,
-    outputTokens: outputTokens + reasoningTokens,
-    cacheReadTokens,
-    cacheCreationTokens: 0,
-    totalTokens,
-  };
-}
-
-function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
-  const payload = objectRecord(record.payload);
-  return String(payload?.type ?? '') === 'token_count';
-}
-
 async function collectCodexMessages(
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string,
-  sinceMs = 0
+  sinceMs = 0,
+  untilMs = 0
 ): Promise<CollectedMessages> {
   const messages: UploadMessage[] = [];
   const files: CursorFileRange[] = [];
   const maxMessages = Math.max(0, limit);
   const offsets = cursorOffsetMap(serverCursor);
+  const reportProgress = createScanProgressReporter('codex');
   let filesScanned = 0;
 
   for (const root of [
@@ -974,7 +979,7 @@ async function collectCodexMessages(
           toOffset: scanEndOffset,
         });
         filesScanned += 1;
-        await appendScanProgress('codex', filesScanned, messages.length);
+        await reportProgress(filesScanned, messages.length);
         continue;
       }
 
@@ -983,14 +988,64 @@ async function collectCodexMessages(
       let startedAt: string | undefined;
       let codexProjectPath = filePath;
       let codexModel: string | undefined;
+      // Per-session accumulator: cumulative `total_token_usage` snapshots are
+      // converted to per-turn deltas so the server never double-counts prior
+      // turns when summing `message.usage.totalTokens`. A fresh scan (offset 0)
+      // may treat the first cumulative snapshot as the first turn's delta; an
+      // incremental continuation cannot, and skips that first record instead.
+      const usageAccumulator = new CodexUsageAccumulator({
+        assumeStartsFromZero: fromOffset === 0,
+      });
+      // Builds the shared UploadMessage shell for Codex records. `token_count`
+      // rows carry usage but no text; `user_message` / `agent_message` rows carry
+      // the real conversation text. `response_item/*` and other record types are
+      // skipped at the call sites to avoid duplicating that text + system noise.
+      const buildCodexMessage = (args: {
+        payload: Record<string, unknown> | null;
+        messageId: string;
+        occurredAt: string;
+        role: 'user' | 'assistant';
+        content: string;
+        contentFormat: 'text' | 'markdown';
+        usage?: UploadMessage['message']['usage'];
+      }): UploadMessage => {
+        const projectPath = String(args.payload?.cwd ?? codexProjectPath);
+        return {
+          kind: 'conversation_message',
+          eventId: `codex:${sessionId}:${args.messageId}`,
+          reportedAt: generatedAt,
+          project: {
+            projectRef: safeRef('codex-project', projectPath),
+            name:
+              typeof args.payload?.project === 'string'
+                ? args.payload.project
+                : path.basename(projectPath) || 'Codex',
+            pathHash: `sha256-${sha(projectPath)}`,
+          },
+          conversation: { conversationId: sessionId, sessionRef: `codex:${sessionId}`, startedAt },
+          message: {
+            messageRef: args.messageId,
+            parentRef: null,
+            role: args.role,
+            occurredAt: args.occurredAt,
+            modelName: typeof args.payload?.model === 'string' ? args.payload.model : codexModel,
+            content: args.content,
+            contentFormat: args.contentFormat,
+            usage: args.usage,
+          },
+        };
+      };
       const stream = createReadStream(filePath, {
         encoding: 'utf-8',
         start: fromOffset,
         end: Math.max(fromOffset, scanEndOffset - 1),
       });
       const rl = createInterface({ input: stream, crlfDelay: Infinity });
+      let linesScanned = 0;
       for await (const rawLine of rl) {
         if (maxMessages > 0 && messages.length >= maxMessages) break;
+        linesScanned += 1;
+        if (linesScanned % SCAN_LINE_YIELD_INTERVAL === 0) await yieldToEventLoop();
         consumedOffset += Buffer.byteLength(rawLine, 'utf-8') + 1;
         let obj: Record<string, unknown>;
         try {
@@ -1014,54 +1069,54 @@ async function collectCodexMessages(
           if (!startedAt && typeof payload.started_at === 'string') startedAt = payload.started_at;
           if (!startedAt && typeof payload.timestamp === 'string') startedAt = payload.timestamp;
         }
-        const record = codexUsageRecordFromEvent(obj);
-        if (!record || !isCodexTokenCountRecord(obj)) continue;
-        const usage = codexTokenUsageFromRecord(record);
-        if (!usage) continue;
-
-        const occurredAt =
-          typeof obj.timestamp === 'string'
-            ? obj.timestamp
-            : typeof payload?.timestamp === 'string'
-              ? payload.timestamp
-              : typeof record.timestamp === 'string'
-                ? record.timestamp
-                : generatedAt;
-        if (sinceMs > 0 && Date.parse(occurredAt) < sinceMs) continue;
-        startedAt ||= occurredAt;
-        const messageId = String(
-          obj.id ??
-            obj.uuid ??
-            payload?.id ??
-            payload?.turn_id ??
-            record.id ??
-            `${sessionId}:${consumedOffset}`
-        );
-        const projectPath = String(payload?.cwd ?? codexProjectPath);
-        messages.push({
-          kind: 'conversation_message',
-          eventId: `codex:${sessionId}:${messageId}`,
-          reportedAt: generatedAt,
-          project: {
-            projectRef: safeRef('codex-project', projectPath),
-            name:
-              typeof payload?.project === 'string'
-                ? payload.project
-                : path.basename(projectPath) || 'Codex',
-            pathHash: `sha256-${sha(projectPath)}`,
-          },
-          conversation: { conversationId: sessionId, sessionRef: `codex:${sessionId}`, startedAt },
-          message: {
-            messageRef: messageId,
-            parentRef: null,
-            role: 'assistant',
-            occurredAt,
-            modelName: typeof payload?.model === 'string' ? payload.model : codexModel,
-            content: 'Codex token usage event',
-            contentFormat: 'text',
-            usage,
-          },
-        });
+        const payloadType = String(payload?.type ?? '');
+        if (payloadType === 'token_count') {
+          const usage: CodexUsage | null = usageAccumulator.consume(obj);
+          if (!usage) continue;
+          const occurredAt = codexEventTimestamp(obj, generatedAt);
+          if (!shouldIncludeOccurredAt(occurredAt, sinceMs, untilMs)) continue;
+          startedAt ||= occurredAt;
+          const messageId = String(
+            obj.id ??
+              obj.uuid ??
+              payload?.id ??
+              payload?.turn_id ??
+              `${sessionId}:${consumedOffset}`
+          );
+          messages.push(
+            buildCodexMessage({
+              payload,
+              messageId,
+              occurredAt,
+              role: 'assistant',
+              content: 'Codex token usage event',
+              contentFormat: 'text',
+              usage,
+            })
+          );
+        } else if (payloadType === 'user_message' || payloadType === 'agent_message') {
+          const text = typeof payload?.message === 'string' ? payload.message : '';
+          if (!text) continue;
+          const occurredAt = codexEventTimestamp(obj, generatedAt);
+          if (!shouldIncludeOccurredAt(occurredAt, sinceMs, untilMs)) continue;
+          startedAt ||= occurredAt;
+          const messageId = String(
+            obj.id ?? obj.uuid ?? payload?.id ?? `${sessionId}:${consumedOffset}`
+          );
+          messages.push(
+            buildCodexMessage({
+              payload,
+              messageId,
+              occurredAt,
+              role: payloadType === 'user_message' ? 'user' : 'assistant',
+              content: text,
+              contentFormat: 'text',
+            })
+          );
+        }
+        // response_item/* and other record types are intentionally skipped:
+        // their `message` content duplicates the user_message/agent_message rows
+        // above, and the rest is system noise with no reporting value.
       }
 
       const toOffset =
@@ -1077,7 +1132,7 @@ async function collectCodexMessages(
         toOffset,
       });
       filesScanned += 1;
-      await appendScanProgress('codex', filesScanned, messages.length);
+      await reportProgress(filesScanned, messages.length);
     }
     if (maxMessages > 0 && messages.length >= maxMessages) break;
   }
@@ -1093,11 +1148,12 @@ async function collectMessagesForPlatform(
   serverCursor: ServerCursor | null | undefined,
   limit: number,
   generatedAt: string,
-  sinceMs = 0
+  sinceMs = 0,
+  untilMs = 0
 ): Promise<CollectedMessages> {
   return platform === 'codex'
-    ? collectCodexMessages(serverCursor, limit, generatedAt, sinceMs)
-    : collectClaudeCodeMessages(serverCursor, limit, generatedAt, sinceMs);
+    ? collectCodexMessages(serverCursor, limit, generatedAt, sinceMs, untilMs)
+    : collectClaudeCodeMessages(serverCursor, limit, generatedAt, sinceMs, untilMs);
 }
 
 function sanitizeDiagnosticText(value: unknown): string {
@@ -1209,27 +1265,30 @@ function batchDelayMs(configured?: number): number {
  * The server dedups by eventId, so re-scanning the overlap never double-counts.
  * Set OPENHERMIT_UPLOAD_SINCE_HOURS to 0 to remove the floor (ops escape hatch only).
  */
-function hoursToMs(hours: number): number {
+function hoursToMs(hours: number, referenceMs: number): number {
   if (!Number.isFinite(hours) || hours <= 0) return 0;
-  return Date.now() - hours * 3_600_000;
+  return referenceMs - hours * 3_600_000;
 }
 
-function incrementalSinceMs(cfg: ConversationUploadConfig | undefined): number {
+function incrementalSinceMs(
+  cfg: ConversationUploadConfig | undefined,
+  referenceMs: number
+): number {
   const hours = Number(
     cfg?.telemetry?.conversations?.uploadSinceHours ??
       process.env.OPENHERMIT_UPLOAD_SINCE_HOURS ??
       24
   );
-  return hoursToMs(hours);
+  return hoursToMs(hours, referenceMs);
 }
 
-function fullRescanSinceMs(cfg: ConversationUploadConfig | undefined): number {
+function fullRescanSinceMs(cfg: ConversationUploadConfig | undefined, referenceMs: number): number {
   const hours = Number(
     cfg?.telemetry?.conversations?.uploadSinceHours ??
       process.env.OPENHERMIT_UPLOAD_SINCE_HOURS ??
       168
   );
-  return hoursToMs(hours);
+  return hoursToMs(hours, referenceMs);
 }
 
 function wait(ms: number): Promise<void> {
@@ -1514,7 +1573,10 @@ async function uploadPlatformMessages(
   const foreground = process.env.HERMIT_USAGE_FOREGROUND_SCAN === '1';
   const inFlightCount = Number(channel?.inFlight?.count ?? 0);
   const isIncremental = !fullRescan && !foreground;
-  const sinceMs = isIncremental ? incrementalSinceMs(cfg) : fullRescanSinceMs(cfg);
+  const referenceMs = Date.parse(generatedAt);
+  const sinceMs = isIncremental
+    ? incrementalSinceMs(cfg, referenceMs)
+    : fullRescanSinceMs(cfg, referenceMs);
   if (inFlightCount > 0 && !(foreground || fullRescan)) {
     const conversationCfgEarly = cfg.telemetry?.conversations;
     const { messages: pendingMessages } = await collectMessagesForPlatform(
@@ -1522,7 +1584,8 @@ async function uploadPlatformMessages(
       channel?.currentCursor,
       conversationCfgEarly?.batchSize ?? 0,
       generatedAt,
-      sinceMs
+      sinceMs,
+      referenceMs
     );
     await appendUploadLog(home, 'server-channel-inflight', {
       platform,
@@ -1578,7 +1641,8 @@ async function uploadPlatformMessages(
       cursorForScan,
       windowSize,
       generatedAt,
-      sinceMs
+      sinceMs,
+      referenceMs
     );
     const discoveredTokens = sumMessageTokens(messages);
     totalDiscovered += messages.length;
@@ -1675,7 +1739,8 @@ async function uploadPlatformMessages(
 }
 
 async function uploadConversationMessagesLocked(
-  cfg: ConversationUploadConfig
+  cfg: ConversationUploadConfig,
+  referenceMs = Date.now()
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
@@ -1703,7 +1768,7 @@ async function uploadConversationMessagesLocked(
     return emptyStatus(true, Boolean(baseUrl), { lastError: authError });
   }
 
-  const generatedAt = new Date().toISOString();
+  const generatedAt = new Date(referenceMs).toISOString();
   const channels = new Map<string, UsageStatusChannel | null>();
   try {
     for (const platform of providers) {
@@ -1750,7 +1815,8 @@ async function uploadConversationMessagesLocked(
 }
 
 export async function uploadConversationMessages(
-  cfg: ConversationUploadConfig
+  cfg: ConversationUploadConfig,
+  referenceMs = Date.now()
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
@@ -1758,7 +1824,9 @@ export async function uploadConversationMessages(
   const baseUrl = resolveConversationUploadBaseUrl(conversationCfg?.baseUrl);
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
   const home = hermitHome();
-  const result = await withUploadLock(home, () => uploadConversationMessagesLocked(cfg));
+  const result = await withUploadLock(home, () =>
+    uploadConversationMessagesLocked(cfg, referenceMs)
+  );
   return (
     result ??
     emptyStatus(true, Boolean(baseUrl), { lastError: '已有消息上报任务正在运行，本轮已跳过' })

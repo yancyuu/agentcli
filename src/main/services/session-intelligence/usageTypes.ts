@@ -6,6 +6,7 @@ import type { DailyMetrics, ParseResult, UsageProviderMetrics } from './SessionU
 
 export interface UsageCollectionResult {
   computedAt: string;
+  referenceMs: number;
   legacyParseResult: ParseResult;
 }
 

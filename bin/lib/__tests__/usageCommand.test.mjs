@@ -54,3 +54,43 @@ describe('enableConversationUploadWithProvider — toggle ON starts the worker',
     expect(settings.taskBus.telemetry.conversationUploadEnabled).toBe(true);
   });
 });
+
+describe('cursorStatusText — disambiguates the cursor batch count from a running total', () => {
+  let cursorStatusText;
+
+  beforeAll(async () => {
+    // Pure function — no env dependency. Dynamic import matches the file's pattern
+    // (the earlier describe mutates module state via resetModules).
+    ({ cursorStatusText } = await import('../usageCommand.mjs'));
+  });
+
+  it('labels the committed-cursor message count as 本批 (per-batch), not a bare total', () => {
+    const text = cursorStatusText({
+      hasCursor: true,
+      cursorHash: 'claudecode-coding-abc123def456',
+      cursorMessageCount: 25,
+      cursorGeneratedAt: '2026-07-10T06:20:05.000Z',
+    });
+    // The 25 is payload.messages.length of the last batch, far smaller than the
+    // cumulative server total. It must read 本批 25 msg, not bare "25 msg" that
+    // reads like "total uploaded = 25" and contradicts the 服务端（全量） row.
+    expect(text).toContain('本批 25 msg');
+    expect(text).not.toContain('· 25 msg');
+    expect(text).toContain('cursor claudecode-');
+  });
+
+  it('omits the count entirely when cursorMessageCount is missing', () => {
+    const text = cursorStatusText({ hasCursor: true, cursorHash: 'h123' });
+    expect(text).not.toContain('msg');
+  });
+
+  it('labels the attempted-cursor batch count the same way', () => {
+    const text = cursorStatusText({
+      hasCursor: false,
+      status: 'never_reported',
+      attemptedCursorHash: 'attabc123def',
+      attemptedCursorMessageCount: 7,
+    });
+    expect(text).toContain('本批 7 msg');
+  });
+});

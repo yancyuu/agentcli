@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline';
 import * as path from 'node:path';
 
 import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
+import { resolveUsageTotalTokens } from './tokenUsageTotals';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +85,7 @@ interface PartialSummary {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  totalTokens: number;
   startTime: string | null;
   endTime: string | null;
   lastRole: string;
@@ -219,6 +221,7 @@ async function scanSummaryLines(
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    totalTokens: 0,
     startTime: null,
     endTime: null,
     lastRole: '',
@@ -292,6 +295,12 @@ async function scanSummaryLines(
         result.outputTokens += Number(usage.output_tokens ?? 0) || 0;
         result.cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0) || 0;
         result.cacheCreationTokens += Number(usage.cache_creation_input_tokens ?? 0) || 0;
+        result.totalTokens += resolveUsageTotalTokens(usage, {
+          inputTokens: Number(usage.input_tokens ?? 0) || 0,
+          outputTokens: Number(usage.output_tokens ?? 0) || 0,
+          cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0) || 0,
+          cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0) || 0,
+        });
       }
     }
   }
@@ -432,11 +441,7 @@ export class LocalSessionScanner {
           outputTokens: partial.outputTokens,
           cacheReadTokens: partial.cacheReadTokens,
           cacheCreationTokens: partial.cacheCreationTokens,
-          totalTokens:
-            partial.inputTokens +
-            partial.outputTokens +
-            partial.cacheReadTokens +
-            partial.cacheCreationTokens,
+          totalTokens: partial.totalTokens,
           model: partial.model,
           active,
           live,
@@ -491,6 +496,7 @@ export class LocalSessionScanner {
     let outputTokens = 0;
     let cacheReadTokens = 0;
     let cacheCreationTokens = 0;
+    let totalTokens = 0;
     let firstTs: string | null = null;
     let lastTs: string | null = null;
 
@@ -548,6 +554,12 @@ export class LocalSessionScanner {
         outputTokens += Number(usage.output_tokens ?? 0) || 0;
         cacheReadTokens += Number(usage.cache_read_input_tokens ?? 0) || 0;
         cacheCreationTokens += Number(usage.cache_creation_input_tokens ?? 0) || 0;
+        totalTokens += resolveUsageTotalTokens(usage, {
+          inputTokens: Number(usage.input_tokens ?? 0) || 0,
+          outputTokens: Number(usage.output_tokens ?? 0) || 0,
+          cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0) || 0,
+          cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0) || 0,
+        });
       }
 
       // Collect messages within the page range
@@ -583,7 +595,7 @@ export class LocalSessionScanner {
       outputTokens,
       cacheReadTokens,
       cacheCreationTokens,
-      totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+      totalTokens,
     };
   }
 

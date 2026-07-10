@@ -210,6 +210,8 @@ const html = `<!DOCTYPE html>
       <a href="#capabilities">能力</a>
       <a href="#commands">命令</a>
       <a href="#config">配置</a>
+      <a href="#usage">上报</a>
+      <a href="#update">更新</a>
       <a href="#faq">FAQ</a>
     </nav>
   </header>
@@ -265,6 +267,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
           <li>本地 Web 工作台：团队、看板、运行时、代码评审</li>
           <li>自动采集本机 AI 运行时用量（token / 会话 / 消息）</li>
           <li>数据默认落 <code>~/.hermit/</code>，单机完整可用，无需注册</li>
+          <li>token 池认领：签发网关 key → 写入 aikey env / shell hook，不默认改 Claude/Codex 配置</li>
           <li>支持自托管、可二次开发</li>
         </ul>
         <p class="tier-cta"><a href="#commands">装好之后从这几条命令开始 →</a></p>
@@ -375,6 +378,47 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <div class="callout">
       <div class="callout-title">隐私</div>
       <p>默认 metadata-only：只上报 token 数、时间戳、维度，不上传消息正文、助手回复、工具输入输出或密钥。具体范围取决于 AgentBus 管理员配置。</p>
+    </div>
+  </section>
+
+  <section id="update" class="prose">
+    <h2>安全更新 AgentCli</h2>
+    <p class="section-sub">更新会替换全局安装目录中的文件。为避免 Windows 的 <code>EBUSY</code>、旧 worker 继续运行旧代码或渠道连接未释放，推荐先停止会加载 AgentCli 包文件的本地进程，再安装新版本。</p>
+
+    <h3>推荐流程（手动更新，最稳妥）</h3>
+    <ol>
+      <li><span class="step-label">停止用量 worker</span> — <code>agentcli usage stop</code>。该命令默认同时关闭用量 worker 的开机自启；更新完成后再显式启动。</li>
+      <li><span class="step-label">停止 Web daemon</span> — <code>agentcli services stop web</code>。由 Web daemon 启动的 cc-connect / hermit-bridge 渠道运行时也会随之退出；协作服务只是配置项，不是本地进程，无需单独停止。</li>
+      <li><span class="step-label">安装最新版</span> — <code>npm install -g @yancyyu/agentcli@latest --prefer-online</code>。不要把裸 <code>agentcli stop</code> 当成停止命令，它只显示指引。</li>
+      <li><span class="step-label">重新启动</span> — 推荐 <code>agentcli init</code>，一次启动 Web 工作台和用量 worker；也可分别运行 <code>agentcli services start web</code> 与 <code>agentcli usage start</code>。</li>
+      <li><span class="step-label">验证</span> — 运行 <code>agentcli --version</code>、<code>agentcli status</code>、<code>agentcli usage status</code> 和 <code>agentcli doctor</code>，确认版本、Web、worker 与本地配置均正常。</li>
+    </ol>
+    <pre><code># 1. 停止会占用安装文件的进程
+agentcli usage stop
+agentcli services stop web
+
+# 2. 安装最新版
+npm install -g @yancyyu/agentcli@latest --prefer-online
+
+# 3. 恢复服务
+agentcli init
+
+# 4. 验证
+agentcli --version
+agentcli status
+agentcli usage status
+agentcli doctor</code></pre>
+
+    <h3>使用内置更新命令</h3>
+    <p><code>agentcli update</code> 会更新当前安装，并在成功后重载原本正在运行的用量 worker。为最大限度避免 Windows 文件锁，仍建议先运行 <code>agentcli services stop web</code>；如果更新报 <code>EBUSY</code>，改用上面的完整手动流程。</p>
+
+    <div class="callout warn">
+      <div class="callout-title">不要漏停这些进程</div>
+      <p><strong>用量 worker</strong> 用 <code>agentcli usage stop</code>；<strong>Web daemon 和它托管的渠道运行时</strong>用 <code>agentcli services stop web</code>。独立运行的第三方 bridge 不属于 AgentCli 包更新范围；如果操作系统仍提示文件被占用，只终止与 agentcli / hermit / cc-connect 明确相关的残留进程，不要批量杀死所有 Node 进程。</p>
+    </div>
+    <div class="callout success">
+      <div class="callout-title">数据不会因更新被删除</div>
+      <p>上述停止和更新命令不会删除 <code>~/.hermit/</code> 中的团队、渠道配置、登录态或用量状态。更新后使用 <code>agentcli init</code> 恢复服务即可。</p>
     </div>
   </section>
 

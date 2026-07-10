@@ -123,7 +123,7 @@ export function localServerRows(telemetry, authoritative) {
       const srvParts = [];
       if (Number.isFinite(srvMsg)) srvParts.push(`消息 ${formatNumber(srvMsg)}`);
       if (Number.isFinite(srvTok)) srvParts.push(`Token ${formatNumber(srvTok)}`);
-      if (srvParts.length) rows.push(['服务端（全量）', srvParts.join(' · '), 'info']);
+      if (srvParts.length) rows.push(['服务端（全量，不限 7 天）', srvParts.join(' · '), 'info']);
       const rejected = hasField(totals, 'rejected') || hasField(authoritative, 'rejected')
         ? finiteNumber(totals.rejected ?? authoritative.rejected)
         : NaN;

@@ -18,7 +18,7 @@ describe('usageRows', () => {
       )
     ).toEqual([
       ['本地', '消息 196.1K · Token 9836.3M', 'info'],
-      ['服务端（全量）', '消息 64.5K · Token 5706.2M', 'info'],
+      ['服务端（全量，不限 7 天）', '消息 64.5K · Token 5706.2M', 'info'],
     ]);
   });
 
@@ -58,7 +58,7 @@ describe('usageRows', () => {
 
     expect([...localServerRows(local, server), ...cursorPendingRows({ pending: 7 })]).toEqual([
       ['本地', '消息 196.1K · Token 9836.3M', 'info'],
-      ['服务端（全量）', '消息 64.5K · Token 5706.2M', 'info'],
+      ['服务端（全量，不限 7 天）', '消息 64.5K · Token 5706.2M', 'info'],
       ['待上报', '消息 7', 'warn'],
     ]);
   });
@@ -71,7 +71,7 @@ describe('usageRows', () => {
       )
     ).toEqual([
       ['本地', '消息 20 · Token 30', 'info'],
-      ['服务端（全量）', '消息 5 · Token 6', 'info'],
+      ['服务端（全量，不限 7 天）', '消息 5 · Token 6', 'info'],
     ]);
   });
 
@@ -81,7 +81,7 @@ describe('usageRows', () => {
     ]);
     expect(localServerRows({ messages: 0, totalTokens: 0 }, { ok: true, totals: { messages: 0 } })).toEqual([
       ['本地', '消息 0 · Token 0', 'info'],
-      ['服务端（全量）', '消息 0', 'info'],
+      ['服务端（全量，不限 7 天）', '消息 0', 'info'],
     ]);
   });
 
@@ -98,7 +98,7 @@ describe('usageRows', () => {
       )
     ).toEqual([
       ['本地（最近 7 天）', '消息 320 · Token 4.0M', 'info'],
-      ['服务端（全量）', '消息 64.5K · Token 5706.2M', 'info'],
+      ['服务端（全量，不限 7 天）', '消息 64.5K · Token 5706.2M', 'info'],
     ]);
   });
 

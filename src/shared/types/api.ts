@@ -1238,8 +1238,8 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
       owner_open_id?: string;
       work_dir?: string;
       agent_type?: string;
-    }) => Promise<{ message: string; restart_required: boolean }>;
-    weixinBegin: (apiUrl?: string) => Promise<{ qr_key: string; qr_url: string }>;
+    }) => Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }>;
+    weixinBegin: (apiUrl?: string) => Promise<{ qr_key: string; qr_url: string; api_url?: string }>;
     weixinPoll: (
       qrKey: string,
       apiUrl?: string
@@ -1258,7 +1258,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
       ilink_user_id?: string;
       work_dir?: string;
       agent_type?: string;
-    }) => Promise<{ message: string; restart_required: boolean }>;
+    }) => Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }>;
     addPlatform: (
       projectName: string,
       body: {

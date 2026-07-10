@@ -371,6 +371,10 @@ function clearTerminal() {
   process.stdout.write('\x1b[2J\x1b[H');
 }
 
+function clearTerminalScrollback() {
+  process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
+}
+
 // Flicker-free full-frame redraw. Used on every menu repaint (arrow keys,
 // expand/collapse, status refresh). The old approach cleared the whole screen
 // (\x1b[H\x1b[3J\x1b[J) on each keypress — the scrollback wipe + blank-then-
@@ -431,5 +435,6 @@ export {
   welcomeLogoLines,
   printWelcomeLogo,
   clearTerminal,
+  clearTerminalScrollback,
   writeFrameSync,
 };

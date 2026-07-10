@@ -13,6 +13,8 @@ import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
+import { CodexUsageAccumulator, isCodexTokenCountRecord } from './codexTokenUsage';
+import { resolveUsageTotalTokens } from './tokenUsageTotals';
 
 export type UsageProvider = 'claudecode' | 'codex';
 
@@ -106,6 +108,30 @@ export interface ParseResult {
 
 const SEG_GAP_MS = 10 * 60 * 1000; // 10 minutes gap threshold
 const RECENT_DAYS = 7;
+const SCAN_YIELD_FILE_INTERVAL = 25;
+const SCAN_LINE_YIELD_INTERVAL = 500;
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function recentWindowStartMs(referenceMs: number): number {
+  const reference = new Date(referenceMs);
+  return Date.UTC(
+    reference.getUTCFullYear(),
+    reference.getUTCMonth(),
+    reference.getUTCDate() - (RECENT_DAYS - 1)
+  );
+}
+
+function recentWindowEndMs(referenceMs: number): number {
+  const reference = new Date(referenceMs);
+  return Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate() + 1);
+}
+
+function shouldYieldAfterFile(filesScanned: number): boolean {
+  return filesScanned > 0 && filesScanned % SCAN_YIELD_FILE_INTERVAL === 0;
+}
 
 function extractFirstUserText(content: unknown): string {
   if (typeof content === 'string') {
@@ -222,7 +248,10 @@ async function parseJsonl(
 
   const rl = createInterface({ input: createReadStream(filePath, 'utf-8'), crlfDelay: Infinity });
 
+  let linesScanned = 0;
   for await (const rawLine of rl) {
+    linesScanned += 1;
+    if (linesScanned % SCAN_LINE_YIELD_INTERVAL === 0) await yieldToEventLoop();
     const line = rawLine.trim();
     if (!line) continue;
 
@@ -277,8 +306,12 @@ async function parseJsonl(
       const out = Number(usage.output_tokens ?? 0) || 0;
       const cread = Number(usage.cache_read_input_tokens ?? 0) || 0;
       const ccreate = Number(usage.cache_creation_input_tokens ?? 0) || 0;
-      const total =
-        Number(usage.total_tokens ?? usage.totalTokens ?? inp + out + cread + ccreate) || 0;
+      const total = resolveUsageTotalTokens(usage, {
+        inputTokens: inp,
+        outputTokens: out,
+        cacheReadTokens: cread,
+        cacheCreationTokens: ccreate,
+      });
 
       tokens.input += inp;
       tokens.output += out;
@@ -361,56 +394,6 @@ function codexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
-function codexUsageRecordFromEvent(obj: Record<string, unknown>): Record<string, unknown> | null {
-  const payload = objectRecord(obj.payload);
-  if (!payload) return null;
-  const info = objectRecord(payload.info);
-  return objectRecord(info?.last_token_usage) ?? objectRecord(info?.total_token_usage);
-}
-
-function isCodexTokenCountRecord(record: Record<string, unknown>): boolean {
-  const payload = objectRecord(record.payload);
-  return String(payload?.type ?? '') === 'token_count';
-}
-
-function codexTokenUsageFromRecord(source: Record<string, unknown>) {
-  const input =
-    Number(
-      source.input_tokens ??
-        source.inputTokens ??
-        source.input ??
-        source.prompt_tokens ??
-        source.promptTokens ??
-        0
-    ) || 0;
-  const cacheRead =
-    Number(
-      source.cached_input_tokens ??
-        source.cache_read_input_tokens ??
-        source.cacheReadTokens ??
-        source.cachedInputTokens ??
-        0
-    ) || 0;
-  const rawOutput =
-    Number(
-      source.output_tokens ??
-        source.outputTokens ??
-        source.output ??
-        source.completion_tokens ??
-        source.completionTokens ??
-        0
-    ) || 0;
-  const reasoning =
-    Number(
-      source.reasoning_output_tokens ?? source.reasoningTokens ?? source.reasoning_tokens ?? 0
-    ) || 0;
-  const output = rawOutput + reasoning;
-  const total =
-    Number(source.total_tokens ?? source.totalTokens ?? input + cacheRead + output) || 0;
-  if (!input && !cacheRead && !output && !total) return null;
-  return { input, output, cacheRead, cacheCreation: 0, total };
-}
-
 async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> {
   let rawCwd = '';
   let model = '';
@@ -422,8 +405,13 @@ async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> 
   const hourly: number[] = new Array(24).fill(0);
   const events: EventEntry[] = [];
   const rl = createInterface({ input: createReadStream(filePath, 'utf-8'), crlfDelay: Infinity });
-
+  let linesScanned = 0;
+  // Per-session accumulator: converts cumulative `total_token_usage` snapshots
+  // into per-turn deltas so the local total never double-counts prior turns.
+  const usageAccumulator = new CodexUsageAccumulator({ assumeStartsFromZero: true });
   for await (const rawLine of rl) {
+    linesScanned += 1;
+    if (linesScanned % SCAN_LINE_YIELD_INTERVAL === 0) await yieldToEventLoop();
     const line = rawLine.trim();
     if (!line) continue;
     let obj: Record<string, unknown>;
@@ -443,26 +431,23 @@ async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> 
       if (!model && typeof payload.model_provider === 'string' && payload.model_provider)
         model = payload.model_provider;
     }
-    const record = codexUsageRecordFromEvent(obj);
-    if (!record || !isCodexTokenCountRecord(obj)) continue;
-    const usage = codexTokenUsageFromRecord(record);
+    if (!isCodexTokenCountRecord(obj)) continue;
+    const usage = usageAccumulator.consume(obj);
     if (!usage) continue;
     const ts =
       typeof obj.timestamp === 'string'
         ? obj.timestamp
         : typeof payload?.timestamp === 'string'
           ? payload.timestamp
-          : typeof record.timestamp === 'string'
-            ? String(record.timestamp)
-            : '';
+          : '';
     if (!ts) continue;
 
     messageCount++;
-    tokens.input += usage.input;
-    tokens.output += usage.output;
-    tokens.cacheRead += usage.cacheRead;
-    tokens.cacheCreation += usage.cacheCreation;
-    tokens.total += usage.total;
+    tokens.input += usage.inputTokens;
+    tokens.output += usage.outputTokens;
+    tokens.cacheRead += usage.cacheReadTokens;
+    tokens.cacheCreation += usage.cacheCreationTokens;
+    tokens.total += usage.totalTokens;
 
     const day = ts.slice(0, 10);
     if (day.length === 10) {
@@ -477,11 +462,11 @@ async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> 
         workSeconds: 0,
       });
       d.messages++;
-      d.tokensIn += usage.input;
-      d.tokensOut += usage.output;
-      d.cacheRead += usage.cacheRead;
-      d.cacheCreation += usage.cacheCreation;
-      d.tokensTotal += usage.total;
+      d.tokensIn += usage.inputTokens;
+      d.tokensOut += usage.outputTokens;
+      d.cacheRead += usage.cacheReadTokens;
+      d.cacheCreation += usage.cacheCreationTokens;
+      d.tokensTotal += usage.totalTokens;
     }
     const hour = Number(ts.slice(11, 13));
     if (hour >= 0 && hour < 24) hourly[hour]++;
@@ -490,11 +475,11 @@ async function parseCodexJsonl(filePath: string): Promise<ParsedSession | null> 
       events.push({
         provider: 'codex',
         ts: tsUnix,
-        tokensIn: usage.input,
-        tokensOut: usage.output,
-        cacheRead: usage.cacheRead,
-        cacheCreation: usage.cacheCreation,
-        tokensTotal: usage.total,
+        tokensIn: usage.inputTokens,
+        tokensOut: usage.outputTokens,
+        cacheRead: usage.cacheReadTokens,
+        cacheCreation: usage.cacheCreationTokens,
+        tokensTotal: usage.totalTokens,
       });
     if (!startTime) startTime = ts;
     endTime = ts;
@@ -617,7 +602,10 @@ export async function scanProjectStats(workDir: string): Promise<ProjectUsageSta
   let latest = '';
 
   for (const jsonlDir of jsonlDirs) {
+    let filesScanned = 0;
     for await (const filePath of walkJsonl(jsonlDir)) {
+      filesScanned += 1;
+      if (shouldYieldAfterFile(filesScanned)) await yieldToEventLoop();
       const parsed = await parseJsonl(filePath);
       if (!parsed) continue;
       if (parsed.projectPath && parsed.projectPath !== normalizedWorkDir) continue;
@@ -669,7 +657,7 @@ function addProviderMetrics(
   metrics.tokensTotal += parsed.tokens.total;
 }
 
-export async function scanSessions(): Promise<ParseResult> {
+export async function scanSessions(referenceMs = Date.now()): Promise<ParseResult> {
   const sessions: SessionEntry[] = [];
   const aggregate: UsageAggregate = {
     sessions: 0,
@@ -693,8 +681,10 @@ export async function scanSessions(): Promise<ParseResult> {
   const allEvents: EventEntry[] = [];
   const projectMap: Record<string, ProjectMetricsEntry> = {};
   const projectsRoot = getProjectsBasePath();
-
+  let claudeFilesScanned = 0;
   for await (const filePath of walkJsonl(projectsRoot)) {
+    claudeFilesScanned += 1;
+    if (shouldYieldAfterFile(claudeFilesScanned)) await yieldToEventLoop();
     let fileStat;
     try {
       fileStat = await stat(filePath);
@@ -789,7 +779,10 @@ export async function scanSessions(): Promise<ParseResult> {
     path.join(codexRoot, 'sessions'),
     path.join(codexRoot, 'archived_sessions'),
   ]) {
+    let codexFilesScanned = 0;
     for await (const filePath of walkJsonl(root)) {
+      codexFilesScanned += 1;
+      if (shouldYieldAfterFile(codexFilesScanned)) await yieldToEventLoop();
       let fileStat;
       try {
         fileStat = await stat(filePath);
@@ -872,9 +865,16 @@ export async function scanSessions(): Promise<ParseResult> {
     }
   }
 
-  // 7-day rolling window events
-  const cutoff = Date.now() / 1000 - RECENT_DAYS * 86400;
-  aggregate.events7d = allEvents.filter((e) => e.ts >= cutoff).sort((a, b) => a.ts - b.ts);
+  // Recent 7-day window aligned with the server UI's date-bucket filter:
+  // include the UTC date containing the scan reference plus the previous six UTC
+  // dates, and end at the next UTC midnight. The server filters on
+  // message.occurredAt in this date range; using the same half-open bucket keeps
+  // the local “最近 7 天” row comparable to the remote dashboard.
+  const windowEnd = recentWindowEndMs(referenceMs) / 1000;
+  const cutoff = recentWindowStartMs(referenceMs) / 1000;
+  aggregate.events7d = allEvents
+    .filter((e) => e.ts >= cutoff && e.ts < windowEnd)
+    .sort((a, b) => a.ts - b.ts);
 
   aggregate.activeDays = activeDaySet.size;
 

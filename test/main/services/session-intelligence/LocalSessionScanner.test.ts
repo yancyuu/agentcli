@@ -35,6 +35,7 @@ function writeSessionJsonl(filePath: string, firstUserText = 'Hello from user'):
           output_tokens: 34,
           cache_read_input_tokens: 56,
           cache_creation_input_tokens: 78,
+          total_tokens: 180,
         },
       },
     },
@@ -60,6 +61,7 @@ function writeTopLevelUsageSessionJsonl(filePath: string, firstUserText = 'Hello
         output_tokens: 34,
         cache_read_input_tokens: 56,
         cache_creation_input_tokens: 78,
+        total_tokens: 180,
       },
     },
   ];
@@ -96,6 +98,47 @@ describe('LocalSessionScanner', () => {
     expect(detail?.id).toBe('session-1');
     expect(detail?.historyCount).toBe(2);
     expect(detail?.history[0]?.content).toBe('Hello from user');
+    expect(summaries[0]).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 34,
+      cacheReadTokens: 56,
+      cacheCreationTokens: 78,
+      totalTokens: 180,
+    });
+    expect(detail).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 34,
+      cacheReadTokens: 56,
+      cacheCreationTokens: 78,
+      totalTokens: 180,
+    });
+  });
+
+  it('uses the upload totalTokens calculation when total_tokens is missing', async () => {
+    const workDir = '/tmp/hermit-project';
+    const filePath = path.join(projectDirFor(workDir), 'nested', 'session-missing-total.jsonl');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: {
+          role: 'assistant',
+          content: 'Assistant response',
+          usage: {
+            input_tokens: 12,
+            output_tokens: 34,
+            cache_read_input_tokens: 56,
+            cache_creation_input_tokens: 78,
+          },
+        },
+      })}\n`
+    );
+
+    const summaries = await scanner.scanSummaries(workDir, 'team-a');
+    const detail = await scanner.readSessionDetail(workDir, 'session-missing-total');
+
     expect(summaries[0]).toMatchObject({
       inputTokens: 12,
       outputTokens: 34,

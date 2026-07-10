@@ -160,12 +160,12 @@ AgentCli 无侵入扫描本地会话日志：
 
 ### 把网关 Key 写进 Claude / Codex（token 池认领）
 
-登录后，在终端菜单 `agentcli` →「**token 池(beta)**」→「**认领**」，会自动签发一个一次性网关 key 并**直写**进本机配置：
+登录后，在终端菜单 `agentcli` →「**token 池(beta)**」→「**认领**」，会自动签发一个一次性网关 key 并**写入 aikey env 文件**：
 
-- **Claude Code** `~/.claude/settings.json`：deep-merge 进 `env`（`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_MODEL`），**保留其它顶层键与 env 键**。
-- **Codex** `~/.codex/auth.json`：写入 `OPENAI_API_KEY`；`~/.codex/config.toml`：surgical 改写 `model_provider` / `model` 与 `[model_providers.*]`，**原样保留 `[projects.*]`**。
+- **默认安全模式** 写入 `~/.hermit/aikey.env`（`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` / `OPENAI_API_KEY`），新开终端或 `source ~/.hermit/aikey.env` 后生效，**不修改 Claude / Codex 配置文件**。
+- **shell hook** 自动向 `~/.zshrc` / `~/.bashrc` 写入 precmd 钩子，新终端自动加载已认领的 key。
 
-> 🔒 认领到的 key 是**即焚明文**，只在本机配置里落地，不落库、不回显明文。写前自动生成 `*.hermit-bak` 备份。该能力需服务端授权开通（部分账户暂未开放）。
+> 🔒 认领到的 key 是**即焚明文**，只落到 `~/.hermit/aikey.env`（0600 权限），不落库、不回显明文。默认不改 `~/.claude` / `~/.codex`；如果未来需要持久写配置，应走高级确认 + 备份。该能力需服务端授权开通（部分账户暂未开放）。
 
 ---
 
@@ -236,6 +236,42 @@ AgentCli 无侵入扫描本地会话日志：
 </table>
 
 </details>
+
+---
+
+## 更新 AgentCli
+
+更新前先停止会加载全局安装目录文件的进程，避免 Windows `EBUSY`，也避免旧 worker 在更新后继续运行旧代码：
+
+```bash
+# 1. 停用量 worker
+agentcli usage stop
+
+# 2. 停 Web daemon；它托管的 cc-connect / hermit-bridge 也会随之退出
+agentcli services stop web
+
+# 3. 安装最新版
+npm install -g @yancyyu/agentcli@latest --prefer-online
+
+# 4. 恢复 Web + 用量 worker
+agentcli init
+
+# 5. 验证
+agentcli --version
+agentcli status
+agentcli usage status
+agentcli doctor
+```
+
+注意：
+
+- 裸 `agentcli stop` **只显示停止指引**，不会停止 Web daemon 或用量 worker。
+- 协作服务是配置项，不是独立本地进程，无需为了更新单独停止。
+- `agentcli update` 可执行内置更新，并会在成功后重载原本正在运行的用量 worker；Windows 若遇到文件锁，使用上面的完整手动流程。
+- 停止服务和更新包不会删除 `~/.hermit/` 中的团队、渠道配置、登录态或用量状态。
+- 若仍提示文件被占用，只终止与 agentcli / hermit / cc-connect 明确相关的残留进程，不要批量结束所有 Node 进程。
+
+完整说明见 [在线指南 · 安全更新 AgentCli](https://yancyuu.github.io/agentcli/#update)。
 
 ---
 

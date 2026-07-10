@@ -22,126 +22,118 @@ vi.mock('@renderer/api', () => ({
         owner_open_id: 'owner-open-id',
       })),
       feishuSave: vi.fn(async () => ({ message: 'saved', restart_required: false })),
-      weixinBegin: vi.fn(),
-      weixinPoll: vi.fn(),
-      weixinSave: vi.fn(),
+      weixinBegin: vi.fn(async () => ({
+        qr_key: 'qr-key',
+        qr_url: 'https://example.com/weixin',
+        api_url: 'https://weixin-api.example.com',
+      })),
+      weixinPoll: vi.fn(async () => ({
+        status: 'confirmed',
+        bot_token: 'bot-token',
+      })),
+      weixinSave: vi.fn(async () => ({ message: 'saved', restart_required: false })),
     },
-    ccSettings: {
-      restart: vi.fn(async () => undefined),
-    },
+    ccSettings: { restart: vi.fn(async () => undefined) },
   },
 }));
 
 import PlatformSetupQR from '@renderer/components/team/dialogs/PlatformSetupQR';
 import { api } from '@renderer/api';
 
+async function renderQr(platformType: 'feishu' | 'lark' | 'weixin', onComplete = vi.fn()) {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(
+      <PlatformSetupQR
+        platformType={platformType}
+        projectName="test-project"
+        workDir="/repo"
+        agentType="claudecode"
+        onComplete={onComplete}
+        onCancel={vi.fn()}
+      />
+    );
+  });
+  const startButton = Array.from(host.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('开始扫码绑定')
+  );
+  await act(async () => {
+    startButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return { host, root, onComplete };
+}
+
 describe('PlatformSetupQR', () => {
   afterEach(() => {
     document.body.innerHTML = '';
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it('shows restarting feedback immediately after clicking restart-and-complete', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const onComplete = vi.fn();
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
+  it('polls Weixin with the API URL returned by begin', async () => {
+    const { root } = await renderQr('weixin');
 
-    await act(async () => {
-      root.render(
-        <PlatformSetupQR
-          platformType="lark"
-          projectName="test-project"
-          workDir="/repo"
-          agentType="claudecode"
-          onComplete={onComplete}
-          onCancel={vi.fn()}
-        />
-      );
-      await Promise.resolve();
-    });
-
-    const startButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('开始扫码绑定')
+    expect(api.ccSetup.weixinPoll).toHaveBeenCalledWith(
+      'qr-key',
+      'https://weixin-api.example.com'
     );
-    expect(startButton).toBeTruthy();
+    await act(async () => root.unmount());
+  });
 
-    await act(async () => {
-      startButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+  it.each([
+    ['feishu', 'feishuSave'],
+    ['weixin', 'weixinSave'],
+  ] as const)('passes restartHandled true without restarting for %s', async (platformType, saveMethod) => {
+    vi.mocked(api.ccSetup[saveMethod]).mockResolvedValueOnce({
+      message: 'saved',
+      restart_required: true,
+      restart_handled: true,
     });
+    const { host, root, onComplete } = await renderQr(platformType);
 
-    expect(api.ccSetup.feishuSave).toHaveBeenCalledWith(
-      expect.objectContaining({ project: 'test-project', platform_type: 'lark' })
-    );
+    expect(api.ccSettings.restart).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('服务已重启并刷新平台长连接');
+
     const completeButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('重启并完成')
+      button.textContent?.includes('完成')
     );
-    expect(completeButton).toBeTruthy();
-
     await act(async () => {
       completeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
+      completeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(host.textContent).toContain('正在重启服务并刷新平台长连接');
-    expect(host.textContent).toContain('正在重启');
-
-    await act(async () => {
-      root.unmount();
-    });
+    expect(onComplete).toHaveBeenCalledWith({ restartHandled: true });
+    expect(api.ccSettings.restart).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
   });
 
-  it('restarts cc-connect immediately when QR save requires restart', async () => {
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.mocked(api.ccSetup.feishuSave).mockResolvedValueOnce({
+  it.each([
+    ['lark', 'feishuSave'],
+    ['weixin', 'weixinSave'],
+  ] as const)('passes restartHandled false and requests parent restart for %s', async (platformType, saveMethod) => {
+    vi.mocked(api.ccSetup[saveMethod]).mockResolvedValueOnce({
       message: 'saved',
       restart_required: true,
+      restart_handled: false,
     });
-    const onComplete = vi.fn();
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
+    const { host, root, onComplete } = await renderQr(platformType);
 
-    await act(async () => {
-      root.render(
-        <PlatformSetupQR
-          platformType="feishu"
-          projectName="my-project"
-          workDir="/repo"
-          agentType="claudecode"
-          onComplete={onComplete}
-          onCancel={vi.fn()}
-        />
-      );
-      await Promise.resolve();
-    });
-
-    const startButton = Array.from(host.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('开始扫码绑定')
+    expect(api.ccSettings.restart).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('下一步将统一重启服务并刷新平台长连接');
+    const completeButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('重启并完成')
     );
-    expect(startButton).toBeTruthy();
+    await act(async () => completeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
-    await act(async () => {
-      startButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(api.ccSetup.feishuSave).toHaveBeenCalledWith(
-      expect.objectContaining({ project: 'my-project', platform_type: 'lark' })
-    );
-    expect(api.ccSettings.restart).toHaveBeenCalledTimes(1);
-    expect(onComplete).toHaveBeenCalledWith({ restartHandled: true });
-
-    await act(async () => {
-      root.unmount();
-    });
+    expect(onComplete).toHaveBeenCalledWith({ restartHandled: false });
+    await act(async () => root.unmount());
   });
 });

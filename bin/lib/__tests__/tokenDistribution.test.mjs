@@ -66,11 +66,21 @@ describe('token distribution v3 client', () => {
       }
     });
     const { provisionRun } = await import('../tokenDistribution.mjs');
-    const res = await provisionRun({ apiName: 'cpamc-openai' });
+    const res = await provisionRun({ apiName: 'cpamc-openai', aliyunModelApiIds: ['h1', 'h2'] });
     expect(res.runId).toBe('run-123');
     expect(posted.api_name).toBe('cpamc-openai');
     expect(posted.region_id).toBe('cn-shenzhen');
     expect(posted.use_default_credentials).toBe(true);
+    expect(posted.model_api_ids).toEqual(['h1', 'h2']);
+  });
+
+  it('provisionRun rejects missing model API IDs before calling auto-provision', async () => {
+    route(() => {
+      throw new Error('distribution API must not be called');
+    });
+    const { provisionRun } = await import('../tokenDistribution.mjs');
+    await expect(provisionRun()).rejects.toThrow(/Model API|模型 API/i);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith(`${API}/aliyun/auto-provision`))).toBe(false);
   });
 
   it('pollRun resolves once the run reaches succeeded and calls onTick each poll', async () => {
@@ -120,17 +130,19 @@ describe('token distribution v3 client', () => {
     await expect(claimSecret('run-123')).rejects.toThrow(/key|claim/i);
   });
 
-  it('discoverCatalog normalizes model_apis into {name, models, wireApis}', async () => {
+  it('discoverCatalog normalizes enveloped model_apis into {name, httpApiId, models, wireApis}', async () => {
     route((u, init) => {
       if (u.endsWith(`${API}/aliyun/discover`) && init?.method === 'POST') {
         return Response.json({
-          default_api_name: 'cpamc-openai',
-          model_apis: [{
-            name: 'cpamc-openai',
-            http_api_id: 'h1',
-            models: [{ model: 'qwen-max' }, { model: 'gpt-4o' }],
-            wire_apis: ['chat', 'responses'],
-          }],
+          data: {
+            default_api_name: 'cpamc-openai',
+            model_apis: [{
+              name: 'cpamc-openai',
+              http_api_id: 'h1',
+              models: [{ model: 'qwen-max' }, { model: 'gpt-4o' }],
+              wire_apis: ['chat', 'responses'],
+            }],
+          },
         });
       }
     });
@@ -138,6 +150,7 @@ describe('token distribution v3 client', () => {
     const cat = await discoverCatalog();
     expect(cat.defaultApiName).toBe('cpamc-openai');
     expect(cat.modelApis[0].name).toBe('cpamc-openai');
+    expect(cat.modelApis[0].httpApiId).toBe('h1');
     expect(cat.modelApis[0].models).toEqual(['qwen-max', 'gpt-4o']);
     expect(cat.modelApis[0].wireApis).toEqual(['chat', 'responses']);
   });
@@ -158,7 +171,7 @@ describe('token distribution v3 client', () => {
       throw new Error('should not hit distribution API when unauthenticated');
     });
     const { provisionRun } = await import('../tokenDistribution.mjs');
-    await expect(provisionRun()).rejects.toThrow(/登录|auth/i);
+    await expect(provisionRun({ aliyunModelApiIds: ['h1'] })).rejects.toThrow(/登录|auth/i);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes(API))).toBe(false);
   });
 });

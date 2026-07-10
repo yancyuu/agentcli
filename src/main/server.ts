@@ -3060,6 +3060,27 @@ app.post<{ Params: { name: string } }>('/api/teams/:name/stop', async (request) 
 // These endpoints proxy to cc-connect /api/v1/setup/* APIs
 // ===========================================================================
 
+async function handleSetupSaveRestart(result: {
+  data?: unknown;
+  error?: unknown;
+}): Promise<unknown> {
+  const resultData =
+    result && typeof result.data === 'object' && result.data !== null ? result.data : result;
+  if (!resultData || typeof resultData !== 'object') return result;
+  const data = resultData as Record<string, unknown>;
+  if ('error' in data || data.restart_handled === true) return result;
+
+  // A successful QR setup creates or updates a channel project. cc-connect must
+  // reload that project before the new long-connection can receive messages, even
+  // when an older upstream reports restart_required=false. AgentCli owns this
+  // restart so CLI and renderer callers cannot leave a freshly-created worker idle.
+  await restartHermitBridgeAndReconnect();
+  const restarted = { ...data, restart_required: false, restart_handled: true };
+  return result.data && typeof result.data === 'object'
+    ? { ...result, data: restarted }
+    : restarted;
+}
+
 // Feishu/Lark setup
 app.post('/api/setup/feishu/begin', async (request, reply) => {
   try {
@@ -3120,7 +3141,7 @@ app.post('/api/setup/feishu/save', async (request, reply) => {
         requestBody
       );
     }
-    return result;
+    return handleSetupSaveRestart(result);
   } catch (err) {
     return reply500(err);
   }
@@ -3186,7 +3207,7 @@ app.post('/api/setup/weixin/save', async (request, reply) => {
         requestBody
       );
     }
-    return result;
+    return handleSetupSaveRestart(result);
   } catch (err) {
     return reply500(err);
   }
@@ -5285,8 +5306,12 @@ app.post<{ Params: { name: string } }>('/api/teams/:name/restore', async (reques
     return reply.code(404).send(reply500(err));
   }
 });
-app.delete<{ Params: { name: string } }>('/api/teams/:name/permanent', async (request, reply) => {
+app.delete<{
+  Params: { name: string };
+  Querystring: { strictExternal?: string };
+}>('/api/teams/:name/permanent', async (request, reply) => {
   const teamName = request.params.name;
+  const strictExternal = request.query.strictExternal === 'true';
   if (isReservedSystemTeamName(teamName)) {
     return reply.code(403).send({ error: 'Helm Loop 不可删除' });
   }
@@ -5306,6 +5331,14 @@ app.delete<{ Params: { name: string } }>('/api/teams/:name/permanent', async (re
           { teamName, ccProjectName },
           'cc-connect project already missing while permanently deleting team'
         );
+      } else if (strictExternal) {
+        request.log.warn(
+          { err, teamName, ccProjectName },
+          'strict cc-connect project deletion failed'
+        );
+        return reply.code(502).send({
+          error: `删除渠道项目失败，本地团队已保留：${err instanceof Error ? err.message : String(err)}`,
+        });
       } else {
         request.log.warn({ err, teamName, ccProjectName }, 'delete cc-connect project failed');
       }

@@ -26,7 +26,7 @@ describe('menus — scan action re-reports the last 24h', () => {
   });
 });
 
-describe('menus — 本地工作台只保留 AgentCli 工作台', () => {
+describe('menus — 本地工作台提供 AgentCli 工作台和数字员工入口', () => {
   const web = NAV_ACTIONS.find((a) => a.id === 'web');
 
   it('keeps a single workbench-status entry', () => {
@@ -38,13 +38,13 @@ describe('menus — 本地工作台只保留 AgentCli 工作台', () => {
 
   it('removes Feishu bridge and lark-cli quick install entries', () => {
     const ids = web.children.map((c) => c.id);
-    expect(ids).toEqual(['toggle-web', 'workbench-status']);
+    expect(ids).toEqual(['toggle-web', 'workbench-status', 'quick-create-assistant']);
     expect(ids).not.toContain('install-lark-cli');
     expect(ids).not.toContain('toggle-feishu-bridge');
   });
 });
 
-describe('menus — 用户菜单提供在线说明书', () => {
+describe('menus — 用户菜单提供在线说明书和数字员工入口', () => {
   it('shows the AgentCli guide as a user-facing handoff link', () => {
     const guide = findMenuAction(ACCOUNT_ACTIONS, 'guide');
 
@@ -52,5 +52,20 @@ describe('menus — 用户菜单提供在线说明书', () => {
     expect(guide.label).toBe('在线说明书');
     expect(guide.description).toContain('https://yancyuu.github.io/agentcli/');
     expect(guide.description).toContain('Claude Code');
+  });
+
+  it('exposes digital worker onboarding from the AgentCli workbench group', () => {
+    const web = NAV_ACTIONS.find((a) => a.id === 'web');
+    const action = findMenuAction(web.children, 'quick-create-assistant');
+
+    expect(action).toBeTruthy();
+    expect(action.label).toBe('开通数字员工');
+  });
+
+  it('does not expose digital worker onboarding from the user account group', () => {
+    const account = NAV_ACTIONS.find((a) => a.id === 'account');
+    const action = findMenuAction(account.children, 'quick-create-assistant');
+
+    expect(action).toBeNull();
   });
 });

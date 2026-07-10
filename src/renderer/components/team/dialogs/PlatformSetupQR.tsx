@@ -37,11 +37,13 @@ export default function PlatformSetupQR({
   const [phase, setPhase] = useState<Phase>('idle');
   const [qrUrl, setQrUrl] = useState('');
   const [error, setError] = useState('');
+  const [restartHandled, setRestartHandled] = useState(false);
   const cancelledRef = useRef(false);
   const pollingRef = useRef(false);
+  const completingRef = useRef(false);
 
   const feishuRef = useRef({ deviceCode: '', baseUrl: '', interval: 5 });
-  const weixinRef = useRef({ qrKey: '' });
+  const weixinRef = useRef({ qrKey: '', apiUrl: '' });
 
   useEffect(() => {
     return () => {
@@ -54,6 +56,8 @@ export default function PlatformSetupQR({
   const startFeishuFlow = useCallback(async () => {
     setPhase('loading');
     setError('');
+    setRestartHandled(false);
+    completingRef.current = false;
     cancelledRef.current = false;
     pollingRef.current = false;
     try {
@@ -99,13 +103,7 @@ export default function PlatformSetupQR({
                 work_dir: workDir,
                 agent_type: agentType,
               });
-              if (saved.restart_required) {
-                setPhase('restarting');
-                await api.ccSettings.restart();
-                onComplete({ restartHandled: true });
-                pollingRef.current = false;
-                return;
-              }
+              setRestartHandled(saved.restart_handled === true);
               setPhase('completed');
               pollingRef.current = false;
               return;
@@ -140,6 +138,8 @@ export default function PlatformSetupQR({
   const startWeixinFlow = useCallback(async () => {
     setPhase('loading');
     setError('');
+    setRestartHandled(false);
+    completingRef.current = false;
     cancelledRef.current = false;
     pollingRef.current = false;
     try {
@@ -149,14 +149,20 @@ export default function PlatformSetupQR({
         setPhase('error');
         return;
       }
-      weixinRef.current.qrKey = res.qr_key;
+      weixinRef.current = {
+        qrKey: res.qr_key,
+        apiUrl: res.api_url ?? '',
+      };
       setQrUrl(res.qr_url);
       setPhase('scanning');
 
       let consecutiveErrors = 0;
       while (!cancelledRef.current) {
         try {
-          const pollRes = await api.ccSetup.weixinPoll(weixinRef.current.qrKey);
+          const pollRes = await api.ccSetup.weixinPoll(
+            weixinRef.current.qrKey,
+            weixinRef.current.apiUrl || undefined
+          );
           consecutiveErrors = 0;
           if (cancelledRef.current) break;
 
@@ -175,12 +181,7 @@ export default function PlatformSetupQR({
                 work_dir: workDir,
                 agent_type: agentType,
               });
-              if (saved.restart_required) {
-                setPhase('restarting');
-                await api.ccSettings.restart();
-                onComplete({ restartHandled: true });
-                return;
-              }
+              setRestartHandled(saved.restart_handled === true);
               setPhase('completed');
               return;
             case 'expired':
@@ -213,10 +214,11 @@ export default function PlatformSetupQR({
   };
 
   const handleComplete = (): void => {
-    if (phase === 'restarting') return;
+    if (completingRef.current) return;
+    completingRef.current = true;
     setError('');
     setPhase('restarting');
-    onComplete();
+    onComplete({ restartHandled });
   };
 
   const platformLabel = isFeishu ? '飞书 / Lark' : '微信 (ilink)';
@@ -280,14 +282,16 @@ export default function PlatformSetupQR({
           )}
           <p className="text-sm font-medium text-green-700 dark:text-green-400">平台绑定成功！</p>
           <p className="text-center text-xs text-gray-500">
-            {phase === 'restarting'
-              ? '正在重启服务并刷新平台长连接...'
-              : '下一步将统一重启服务并刷新平台长连接。'}
+            {restartHandled
+              ? '服务已重启并刷新平台长连接。'
+              : phase === 'restarting'
+                ? '正在重启服务并刷新平台长连接...'
+                : '下一步将统一重启服务并刷新平台长连接。'}
           </p>
           <div className="flex gap-2">
             <Button onClick={handleComplete} disabled={phase === 'restarting'}>
               {phase === 'restarting' && <Loader2 size={14} className="mr-1.5 animate-spin" />}
-              {phase === 'restarting' ? '正在重启...' : '重启并完成'}
+              {phase === 'restarting' ? '正在重启...' : restartHandled ? '完成' : '重启并完成'}
             </Button>
           </div>
         </div>

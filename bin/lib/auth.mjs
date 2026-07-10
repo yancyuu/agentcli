@@ -1044,7 +1044,7 @@ function isAuthCommandAllowedWithoutLogin() {
 }
 
 function isLocalCommandAllowedWithoutLogin() {
-  if (['status', 'doctor', 'services', 'stop'].includes(commandArgs[0])) return true;
+  if (['status', 'doctor', 'services', 'stop', 'lark-credentials'].includes(commandArgs[0])) return true;
   if (commandArgs[0] === 'usage') return ['status', 'today', 'report', 'start', 'stop', 'autostart'].includes(commandArgs[1]);
   if (commandArgs[0] === 'collaboration' && commandArgs[1] === 'start') return true;
   if (commandArgs[0] === 'teams') return ['list', 'create'].includes(commandArgs[1]);

@@ -8,6 +8,7 @@
  *   agentcli --daemon       # start Web UI on default port 5680
  *   agentcli --version      # show version
  *   agentcli update         # check and install updates
+ *   agentcli restart        # restart web + usage worker on current code (after update)
  *
  * Or without global install:
  *   npx @yancyyu/agentcli
@@ -149,6 +150,7 @@ import {
   assertWebPortAvailable,
 } from './lib/runtime.mjs';
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
+import { runRestart } from './lib/restart.mjs';
 import { telemetryWorkerChildArgs } from './lib/telemetryWorker.mjs';
 import { runAikey, runAikeyStatus } from './lib/aikey.mjs';
 import {
@@ -163,12 +165,15 @@ import {
   printUsageStop,
   printUsageAutostart,
   printScanOnceResult,
+  restartUsageWorkerIfRunning,
 } from './lib/usageCommand.mjs';
 import {
   printServicesCommand,
   printServicesStatus,
+  runServiceAction,
 } from './lib/servicesCommand.mjs';
 import { describeUploadToggle, resolveConversationUploadEnabled } from './lib/uploadState.mjs';
+import { createDigitalWorkerCommand, buildDigitalWorkerCommandOptions } from './lib/digitalWorkerCommand.mjs';
 import { createFeishuAssistant, listFeishuAssistants } from './lib/feishuAssistant.mjs';
 import {
   USAGE_UPLOAD_PROVIDER_OPTIONS,
@@ -338,6 +343,8 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
 
 命令:
   ${BRAND.cliCommand}         打开终端导航，选择本地使用、团队协作或用户授权
+  init [--json]
+                     快速初始化：启动 Web daemon + 用量后台 worker（默认开机自启）
   web [--json]       直接启动并打开本地数字员工工作台（Web），跳过终端导航
   status [--json]    查看后台服务状态
   doctor [--json]    运行只读本地诊断
@@ -345,6 +352,8 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
                      查看本地团队，不启动 Web
   teams create [--name <name>] [--bind-project <id>] [--work-dir <path>] [--harness <runtime>] [--json]
                      创建本地团队元数据，不启动 Web、bridge 或 agent
+  create-digital-worker --name <name> [--description <text>] [--bind-project <id>] [--work-dir <path>] [--agent-type <runtime>] [--platform <channel>] [--platform-options <json>] [--json]
+                     开通数字员工；扫码渠道返回二维码链接，手动渠道按 JSON 绑定凭据
   tasks list --team <team> [--json]
                      查看某个本地团队的活跃任务
   usage status [--json]
@@ -375,7 +384,8 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
   auth logout [--json]
                      退出 ${BRAND.authAccountLabel}，不影响本地 runtime 登录
   stop               停止后台服务
-  update             检查并安装更新
+  update             检查并安装更新（完成后请执行 restart）
+  restart            重启 Web 与用量 worker，确保运行最新代码（update 后必跑）
   add <plugin>       安装能力插件到 MCP library
                      例如：${BRAND.cliCommand} add worker-society
 
@@ -383,6 +393,7 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
   npx ${BRAND.npmPackage}             # 不安装直接运行
   npx ${BRAND.npmPackage} --daemon --port 8080
   ${BRAND.cliCommand}                          # 全局安装后打开终端导航
+  ${BRAND.cliCommand} init                     # 快速启动 Web + 用量后台
   ${BRAND.cliCommand} --daemon                 # 后台启动 Web 控制台
   ${BRAND.cliCommand} teams create
   ${BRAND.cliCommand} teams list
@@ -397,6 +408,19 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
 
 await requireOpenHermitAuthForEntry();
 
+if (commandArgs[0] === 'init') {
+  const web = await runServiceAction('start-web');
+  const usage = await runServiceAction('start-usage');
+  const result = { ok: true, command: 'init', hermitHome, web: web.web, usage: usage.usage };
+  if (jsonRequested) printJson(result);
+  printCliRows('AgentCli 已初始化', [
+    ['Web 工作台', web.web?.running ? `运行中 ${web.web.url || `http://127.0.0.1:${port}`}` : '启动中'],
+    ['用量后台', usage.usage?.worker?.running ? `运行中 (pid ${usage.usage.worker.pid})` : '已请求启动'],
+    ['开机自启', usage.usage?.autostart?.enabled ? '已开启' : '未开启/不支持'],
+  ], '后续进入菜单：agentcli；停止 Web：agentcli services stop web；停止用量：agentcli usage stop。');
+  process.exit(0);
+}
+
 if (commandArgs[0] === 'status') {
   await printDaemonStatus();
 }
@@ -406,7 +430,14 @@ if (commandArgs[0] === 'doctor') {
 }
 
 if (commandArgs[0] === 'update') {
-  await runUpdate();
+  await runUpdate({ onUpdated: restartUsageWorkerIfRunning });
+  process.exit(0);
+}
+
+if (commandArgs[0] === 'restart') {
+  const result = await runRestart({ quiet: jsonRequested });
+  if (jsonRequested) printJson(result);
+  process.exit(0);
 }
 
 if (commandArgs[0] === 'usage' && commandArgs[1] === 'status') {
@@ -503,6 +534,34 @@ if (commandArgs[0] === 'teams' && commandArgs[1] === 'list') {
 
 if (commandArgs[0] === 'teams' && commandArgs[1] === 'create') {
   await printTeamsCreate();
+}
+
+if (commandArgs[0] === 'create-digital-worker') {
+  const options = buildDigitalWorkerCommandOptions(commandArgs, findArg);
+  const result = options.ok
+    ? await createDigitalWorkerCommand(port, options, {
+        onQrCode({ qrUrl }) {
+          if (qrUrl) console.error(`扫码链接：${qrUrl}`);
+        },
+        onQrStatus(status) {
+          console.error(`扫码状态：${status}`);
+        },
+      })
+    : options;
+  if (jsonRequested) printJson(result, result.ok ? 0 : 1);
+  if (!jsonRequested) {
+    if (result.ok) {
+      console.log(result.message);
+      console.log(`数字员工：${result.name}`);
+      console.log(`团队/项目：${result.teamSlug}`);
+      console.log(`运行时：${result.agentTypeLabel || result.agentType}`);
+      console.log(`渠道：${result.platformLabel || result.platform}`);
+      if (result.binding?.qrUrl) console.log(`扫码链接：${result.binding.qrUrl}`);
+    } else {
+      console.error(result.message);
+    }
+  }
+  process.exit(result.ok ? 0 : 1);
 }
 
 if (commandArgs[0] === 'tasks' && commandArgs[1] === 'list') {
@@ -604,7 +663,7 @@ if (commandArgs.length > 0 && !daemonRequested && !daemonChild) {
   const result = { ok: false, command, error: `Unknown command: ${command}` };
   if (jsonRequested) printJson(result, 1);
   console.error(`${brandLogPrefix()} 未知命令：${command}`);
-  console.error(`${brandLogPrefix()} 可用命令：web | status | doctor | services | services start/stop | teams list/create | tasks list | usage status/today/report/start/stop/autostart | auth status/login/logout | stop`);
+  console.error(`${brandLogPrefix()} 可用命令：init | web | status | doctor | update | restart | services | services start/stop | teams list/create | tasks list | usage status/today/report/start/stop/autostart | auth status/login/logout | stop`);
   process.exit(1);
 }
 

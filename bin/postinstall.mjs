@@ -30,7 +30,7 @@ try {
 
 let runtimeVersion = 'bundled';
 try {
-  runtimeVersion = JSON.parse(readFileSync(require.resolve('hermit-bridge/package.json'), 'utf-8')).version;
+  runtimeVersion = JSON.parse(readFileSync(require.resolve('cc-connect/package.json'), 'utf-8')).version;
 } catch {
   // Keep install non-blocking.
 }

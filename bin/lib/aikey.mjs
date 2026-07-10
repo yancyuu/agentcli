@@ -226,13 +226,29 @@ async function installShellHook({ noHook, envPath }) {
   return `shell hook 已写入 ${hook.rcFile}`;
 }
 
+export async function activateAikeyBundle({ bundle, home = hermitHome, noHook = false } = {}) {
+  if (!bundle) throw new Error('activateAikeyBundle: 缺少 bundle');
+  const envPath = path.join(home, 'aikey.env');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(envPath, renderActiveEnv(bundle), { mode: 0o600 });
+  chmodBestEffort(envPath, 0o600);
+
+  const providerRows = Object.entries(bundle.providers || {}).map(([code, creds]) => {
+    const [apiKeyVar] = providerEnvVars(code) || [code];
+    const masked = maskKey(creds?.apiKey);
+    return [apiKeyVar, creds?.baseUrl ? `${masked}  →  ${creds.baseUrl}` : masked, 'ok'];
+  });
+
+  const hookStatus = await installShellHook({ noHook, envPath });
+  return { ok: true, envPath, hookStatus, providerRows, providers: Object.keys(bundle.providers || {}) };
+}
+
 // --- Command entry -----------------------------------------------------------
 // `exitOnDone` mirrors runAuthLogin/printServicesStatus: the CLI subcommand path
 // exits on completion, the interactive-menu path passes false so control returns
 // to the menu loop.
 export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
   const home = hermitHome;
-  const envPath = path.join(home, 'aikey.env');
   const bundle = await resolveApiKeyBundle({ home });
 
   if (!bundle) {
@@ -249,16 +265,7 @@ export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
     return { ok: false };
   }
 
-  mkdirSync(home, { recursive: true });
-  writeFileSync(envPath, renderActiveEnv(bundle), { mode: 0o600 });
-
-  const providerRows = Object.entries(bundle.providers).map(([code, creds]) => {
-    const [apiKeyVar] = providerEnvVars(code);
-    const masked = maskKey(creds.apiKey);
-    return [apiKeyVar, creds.baseUrl ? `${masked}  →  ${creds.baseUrl}` : masked, 'ok'];
-  });
-
-  const hookStatus = await installShellHook({ noHook, envPath });
+  const activation = await activateAikeyBundle({ bundle, home, noHook });
   const sourceLabel = bundle.source === 'server' ? `服务端 (${resolveConversationUploadBaseUrl()})` : `本地 mock (${path.join(home, 'aikey-mock.json')})`;
 
   if (jsonRequested) {
@@ -266,20 +273,20 @@ export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
       ok: true,
       command: 'aikey',
       source: bundle.source,
-      envPath,
-      providers: Object.keys(bundle.providers),
-      hook: hookStatus,
+      envPath: activation.envPath,
+      providers: activation.providers,
+      hook: activation.hookStatus,
     });
   }
 
   printCliRows('认领 aikey', [
     ['来源', sourceLabel, 'info'],
-    ...providerRows,
-    ['写入', envPath, 'ok'],
-    ['shell', hookStatus, 'ok'],
-  ], `新开一个终端即可生效，或立即执行：source ${envPath}`);
+    ...activation.providerRows,
+    ['写入', activation.envPath, 'ok'],
+    ['shell', activation.hookStatus, 'ok'],
+  ], `新开一个终端即可生效，或立即执行：source ${activation.envPath}`);
 
-  const result = { ok: true, source: bundle.source, envPath, providers: Object.keys(bundle.providers) };
+  const result = { ok: true, source: bundle.source, envPath: activation.envPath, providers: activation.providers };
   if (exitOnDone) process.exit(0);
   return result;
 }
@@ -386,6 +393,13 @@ function tomlQuoted(value) {
   return `"${escapeTomlPath(String(value ?? ''))}"`;
 }
 
+// TOML bare keys allow A–Z a–z 0–9 _ -. Sanitize provider names so the
+// [model_providers.<name>] header always lines up with the quoted
+// `model_provider = "<name>"` value and Codex's parser accepts both.
+function tomlBareKey(name) {
+  return String(name ?? '').replace(/[^A-Za-z0-9_-]/g, '-');
+}
+
 // Split raw TOML into the leading top-level key/value lines (before the first
 // [section]) and a list of { header, body: [lines] }. Everything outside the keys
 // we explicitly rewrite is returned verbatim, so [projects.*] and friends survive.
@@ -447,7 +461,7 @@ function setTopLevelTomlKey(head, key, value) {
 // right after the last existing [model_providers.*] block (keeps related sections
 // together); else appended at the end.
 function setModelProviderSection(sections, name, { endpoint, wireApi }) {
-  const header = `[model_providers.${name.replace(/[\]\\]/g, '')}]`;
+  const header = `[model_providers.${tomlBareKey(name)}]`;
   const body = [
     `name = ${tomlQuoted(name)}`,
     `base_url = ${tomlQuoted(endpoint)}`,
@@ -533,6 +547,90 @@ export function applyToConfigs({
     results.push(applyCodexConfig({ endpoint, model, wireApi, home, backup }));
   }
   return { ok: true, runtimes: results };
+}
+
+// --- Claim orchestration layer ------------------------------------------------
+// Sits above applyToConfigs: turns a claimed token-pool secret into the correct
+// per-runtime endpoint + writes. configEnvBackup.mjs owns the original snapshot,
+// so these always write with backup:false (no stray .hermit-bak files).
+
+// Claude Code points straight at the gateway endpoint the pool returned — no
+// proxy-path remapping. Matches observed local configs (e.g.
+// https://ai.skg.com/cpamc-cc) and bundleFromClaimedSecret's existing behavior.
+export function resolveClaudeBaseUrl(secret) {
+  return String(secret?.endpoint || '').trim();
+}
+
+const CODEX_PROXY_KEYS = { chat: 'openai_chat', responses: 'openai_responses' };
+function codexProxyPathKey(wireApi) {
+  return wireApi === 'responses' ? CODEX_PROXY_KEYS.responses : CODEX_PROXY_KEYS.chat;
+}
+
+// Codex base_url = the chat/responses proxy route from proxyPaths, with the
+// /chat/completions or /responses suffix Codex appends itself stripped off. Falls
+// back to the raw endpoint when no proxy route is declared. Throws an /endpoint/
+// error when the gateway endpoint is missing or unparseable so the CLI renders a
+// friendly message instead of a bare URL TypeError.
+export function resolveCodexBaseUrl(secret, wireApi = 'chat') {
+  const endpoint = String(secret?.endpoint || '').trim();
+  if (!endpoint) throw new Error('resolveCodexBaseUrl: 缺少 endpoint');
+  const proxyRoute = String(secret?.proxyPaths?.[codexProxyPathKey(wireApi)] || '').trim();
+  if (!proxyRoute) return endpoint;
+  let routeUrl;
+  try {
+    routeUrl = new URL(proxyRoute, endpoint);
+  } catch {
+    throw new Error('resolveCodexBaseUrl: endpoint 非法，无法解析代理路由');
+  }
+  routeUrl.pathname = routeUrl.pathname.replace(
+    wireApi === 'responses' ? /\/responses\/?$/ : /\/chat\/completions\/?$/,
+    '',
+  );
+  routeUrl.search = '';
+  routeUrl.hash = '';
+  return routeUrl.toString().replace(/\/$/, '');
+}
+
+// Apply a claimed secret to ONLY the chosen runtimes. Claude gets the gateway
+// endpoint with no fixed model; Codex gets the resolved proxy base_url + model +
+// wire_api. backup:false — configEnvBackup.mjs owns the snapshot/restore story.
+// choices: { model?, wireApi? }.
+export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude', 'codex'], home } = {}) {
+  const key = String(secret?.key || secret?.api_key || secret?.plaintext_key || '').trim();
+  if (!key) throw new Error('applyClaimedSecret: 缺少 key');
+  const wanted = Array.isArray(runtimes) ? runtimes : [runtimes];
+  const results = [];
+  const endpoints = {};
+  if (wanted.includes('claude')) {
+    const claudeEndpoint = resolveClaudeBaseUrl(secret);
+    endpoints.claude = claudeEndpoint;
+    results.push(
+      ...applyToConfigs({
+        key,
+        endpoint: claudeEndpoint,
+        runtimes: ['claude'],
+        backup: false,
+        ...(home ? { home } : {}),
+      }).runtimes,
+    );
+  }
+  if (wanted.includes('codex')) {
+    const wireApi = choices.wireApi || 'chat';
+    const codexEndpoint = resolveCodexBaseUrl(secret, wireApi);
+    endpoints.codex = codexEndpoint;
+    results.push(
+      ...applyToConfigs({
+        key,
+        endpoint: codexEndpoint,
+        model: choices.model,
+        wireApi,
+        runtimes: ['codex'],
+        backup: false,
+        ...(home ? { home } : {}),
+      }).runtimes,
+    );
+  }
+  return { ok: true, runtimes: results, endpoints };
 }
 
 export function maskKey(key) {

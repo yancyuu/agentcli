@@ -67,13 +67,26 @@ export async function provisionRun({
   regionId = DEFAULT_REGION_ID,
   apiName = DEFAULT_API_NAME,
   useDefaultCredentials = true,
+  aliyunModelApiIds,
 } = {}) {
+  const selectedIds = Array.isArray(aliyunModelApiIds)
+    ? aliyunModelApiIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (selectedIds.length === 0) {
+    throw new Error('请至少选择一个阿里云 Model API。');
+  }
   const ctx = await requireAuthedContext();
   const body = await send(ctx, 'POST', '/aliyun/auto-provision', {
     body: {
       region_id: regionId,
       api_name: apiName,
       use_default_credentials: useDefaultCredentials,
+      // Wire field is `model_api_ids` (verified against a historical succeeded
+      // provisioning run's recorded request). The server's 422
+      // `aliyun_model_api_ids_required` is misleadingly named — the body model
+      // key is `model_api_ids`; sending `aliyun_model_api_ids` is silently
+      // ignored and the validator then reports the field as empty.
+      model_api_ids: selectedIds,
     },
   });
   const runId = body?.run_id || body?.runId || body?.id;
@@ -149,7 +162,8 @@ function normalizeModelApis(body) {
 // 4. Discover the available model catalog for the gateway.
 export async function discoverCatalog({ regionId = DEFAULT_REGION_ID } = {}) {
   const ctx = await requireAuthedContext();
-  const body = await send(ctx, 'POST', '/aliyun/discover', { body: { region_id: regionId } });
+  const payload = await send(ctx, 'POST', '/aliyun/discover', { body: { region_id: regionId } });
+  const body = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
   const modelApis = normalizeModelApis(body);
   const defaultApiName = body?.default_api_name || body?.defaultApiName || modelApis[0]?.name || null;
   return { modelApis, defaultApiName, raw: body };

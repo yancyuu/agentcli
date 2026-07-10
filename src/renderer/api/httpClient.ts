@@ -485,19 +485,25 @@ export class HttpAPIClient implements ElectronAPI {
       owner_open_id?: string;
       work_dir?: string;
       agent_type?: string;
-    }): Promise<{ message: string; restart_required: boolean }> => {
+    }): Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }> => {
       const res = await this.post<{
         ok: boolean;
-        data: { message: string; restart_required: boolean };
+        data: { message: string; restart_required: boolean; restart_handled?: boolean };
       }>('/api/setup/feishu/save', params);
       return res.data;
     },
 
-    weixinBegin: async (apiUrl?: string): Promise<{ qr_key: string; qr_url: string }> => {
-      const res = await this.post<{ ok: boolean; data: { qr_key: string; qr_url: string } }>(
-        '/api/setup/weixin/begin',
-        { api_url: apiUrl }
-      );
+    weixinBegin: async (
+      apiUrl?: string
+    ): Promise<{
+      qr_key: string;
+      qr_url: string;
+      api_url?: string;
+    }> => {
+      const res = await this.post<{
+        ok: boolean;
+        data: { qr_key: string; qr_url: string; api_url?: string };
+      }>('/api/setup/weixin/begin', { api_url: apiUrl });
       return res.data;
     },
     weixinPoll: async (
@@ -530,10 +536,10 @@ export class HttpAPIClient implements ElectronAPI {
       ilink_user_id?: string;
       work_dir?: string;
       agent_type?: string;
-    }): Promise<{ message: string; restart_required: boolean }> => {
+    }): Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }> => {
       const res = await this.post<{
         ok: boolean;
-        data: { message: string; restart_required: boolean };
+        data: { message: string; restart_required: boolean; restart_handled?: boolean };
       }>('/api/setup/weixin/save', params);
       return res.data;
     },
