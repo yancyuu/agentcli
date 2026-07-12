@@ -221,7 +221,7 @@ describe('ConversationMessageUploadService', () => {
     // Conversation text is now transmitted in full (not content-stripped). The
     // real user/assistant text populates `message.content`; usage + metadata
     // (eventId, model, project hash) are still uploaded so token attribution and
-    // eventId dedup are unchanged. Text-less tool-use turns keep the placeholder.
+    // eventId dedup are unchanged. Text-less tool-use turns report the tool name.
     process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '0';
     const projectDir = path.join(claudeBase, 'projects', '-tmp-novault');
     await mkdir(projectDir, { recursive: true });
@@ -289,6 +289,87 @@ describe('ConversationMessageUploadService', () => {
     // The real prompt text IS shipped in full, verbatim.
     expect(posted[0].eventId).toBe('claudecode:session-novault:message-novault');
     expect(posted[0].message?.content).toBe(secret);
+  });
+
+  it('reports the invoked tool name(s) as content for text-less tool-use turns', async () => {
+    // A tool-use turn has no readable text but carries the tool name(s). The
+    // analytics side is better served by "Bash, Read" than the generic
+    // [usage only] placeholder, so text-less tool-use turns now surface the
+    // invoked tool name(s); the placeholder only survives for usage-bearing
+    // turns with neither text nor a tool_use block.
+    process.env.OPENHERMIT_UPLOAD_SINCE_HOURS = '0';
+    const projectDir = path.join(claudeBase, 'projects', '-tmp-tooluse');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, 'session-tooluse.jsonl'),
+      `${JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-tooluse',
+        uuid: 'message-tooluse',
+        cwd: '/tmp/project',
+        timestamp: '2026-06-24T08:21:00.000Z',
+        message: {
+          role: 'assistant',
+          model: 'claude-test-model',
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } },
+            { type: 'tool_use', id: 'toolu_2', name: 'Read', input: { file_path: 'a.txt' } },
+          ],
+          usage: { input_tokens: 5, output_tokens: 7 },
+        },
+      })}\n`
+    );
+
+    const posted: { eventId?: string; message?: { content?: string } }[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({
+          authenticated: true,
+          status: 'ok',
+          scopes: ['upload:read', 'upload:write'],
+        });
+      }
+      if (url.includes('/api/v1/report/usage/status')) {
+        return Response.json({
+          channels: [
+            {
+              reporter: 'agentcli',
+              client: 'claudecode',
+              scene: 'coding',
+              status: 'never_reported',
+              inFlight: { count: 0, uploadIds: [] },
+              currentCursor: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/api/v1/report/messages')) {
+        const body = JSON.parse(String(init?.body));
+        posted.push(...body.messages);
+        return Response.json({
+          ok: true,
+          uploadId: 'u-tooluse',
+          status: 'queued',
+          received: body.messages.length,
+          acceptedForProcessing: body.messages.length,
+          rejectedAtReceive: 0,
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await uploadConversationMessages({
+      telemetry: {
+        enabled: true,
+        platform: 'claudecode',
+        conversationUploadEnabled: true,
+        uploadProviders: ['claudecode'],
+      },
+    });
+
+    expect(posted).toHaveLength(1);
+    // Text-less tool-use turn reports the invoked tool name(s), not the placeholder.
+    expect(posted[0].message?.content).toBe('Bash, Read');
   });
 
   it('uses the shared totalTokens calculation when total_tokens is missing', async () => {

@@ -39,6 +39,7 @@ import {
 import { BRAND, brandLogPrefix } from '../branding.mjs';
 import {
   askMenuAction,
+  askMenuMultiSelect,
   renderBusyScreen,
   waitForContinue,
   parseMenuKeys,
@@ -72,11 +73,8 @@ import {
 } from './auth.mjs';
 import {
   runAikeyStatus,
-  activateAikeyBundle,
   maskKey,
   applyClaimedSecret,
-  resolveClaudeBaseUrl,
-  resolveCodexBaseUrl,
 } from './aikey.mjs';
 import {
   snapshotOriginals,
@@ -96,7 +94,8 @@ import {
 } from './assistantCreationOptions.mjs';
 import { ensureLarkCliDigitalWorkerAuth } from './larkCli.mjs';
 import { provisionDigitalWorker } from './digitalWorkerCommand.mjs';
-import { provisionRun, pollRun, claimSecret, discoverCatalog } from './tokenDistribution.mjs';
+import { fetchDefaults, provisionRun, pollRun, claimSecret, discoverCatalog, pickHighestVersionModel, selectModelApiIds, mapTierModels } from './tokenDistribution.mjs';
+import { DEFAULT_WIRE_API, runAikeyManual } from './aikey.mjs';
 import {
   printDoctor,
   printTeamsList,
@@ -412,68 +411,25 @@ async function promptBoolean(label) {
   return actionId === 'true';
 }
 
-function collectModelChoices(catalog) {
-  const choices = [];
-  for (const api of catalog?.modelApis || []) {
-    if (!api?.httpApiId) continue;
-    for (const model of api.models || []) {
-      if (model) choices.push({ model, apiName: api.name, httpApiId: api.httpApiId });
-    }
-  }
-  return choices;
-}
+// No pre-claim model picker: auto-provision authorizes every model_api the
+// catalog exposed, and the Codex config model is derived from the receipt's
+// model_ids (highest version) via pickHighestVersionModel after the claim.
+// Surfacing/picking models before the key exists was both fragile (discover's
+// model list lives in a sibling top-level array, easy to mis-parse) and
+// unnecessary — the receipt is the authoritative source of what the key got.
 
-function bundleFromClaimedSecret({ secret, choices }) {
-  // Per-runtime endpoints: Claude = gateway endpoint, Codex = resolved proxy
-  // route for the chosen wire_api. Fixes the old "same endpoint for both" bug.
-  const claudeBaseUrl = resolveClaudeBaseUrl(secret);
-  const codexBaseUrl = resolveCodexBaseUrl(secret, choices.wireApi);
-  const anthropic = { apiKey: secret.key, ...(claudeBaseUrl ? { baseUrl: claudeBaseUrl } : {}) };
-  const openai = { apiKey: secret.key, ...(codexBaseUrl ? { baseUrl: codexBaseUrl } : {}) };
-  return {
-    displayName: choices.model ? `agentcli-token-pool:${choices.model}` : 'agentcli-token-pool',
-    providers: { anthropic, openai },
-  };
-}
-
-// Select a model while retaining the owning Aliyun Model API ID required by
-// /aliyun/auto-provision. Returns null if the user cancels.
-async function pickModelApi(catalog) {
-  const choices = collectModelChoices(catalog);
-  if (choices.length === 0) {
-    printCliRows('认领 token 失败', [
-      ['错误', '未获取到可用的阿里云 Model API', 'error'],
-    ], '服务端签发消费者前要求选择 Model API，请稍后重试。');
-    return null;
-  }
-  const actionId = await askMenuAction({
-    title: '认领 token · 选择模型',
-    subtitle: '选择要授权给消费者的阿里云 Model API',
-    actions: choices.map((choice, index) => ({
-      id: `model::${index}`,
-      label: choice.model,
-      detail: choice.apiName,
-    })),
-    escapeAction: 'back',
-    statusItems: currentMenuStatusItems(),
-    hasDeveloperModeEnabled,
-  });
-  if (actionId === 'back') return null;
-  const index = Number(actionId.slice('model::'.length));
-  return Number.isInteger(index) ? choices[index] || null : null;
-}
-
-// wire_api governs only Codex; Claude always uses the anthropic protocol.
-async function pickWireApi(secret) {
-  const proxy = secret.proxyPaths || {};
-  const wireOptions = [];
-  if (proxy.openai_chat) wireOptions.push({ id: 'wire::chat', label: 'OpenAI Chat (openai-chat)' });
-  if (proxy.openai_responses) wireOptions.push({ id: 'wire::responses', label: 'OpenAI Responses (openai-responses)' });
-  if (wireOptions.length === 0) {
-    wireOptions.push({ id: 'wire::chat', label: 'OpenAI Chat（默认）' });
-    wireOptions.push({ id: 'wire::responses', label: 'OpenAI Responses' });
-  }
-  wireOptions.push({ id: 'wire::manual', label: '✍  手动输入 wire_api' });
+// wire_api governs only Codex; Claude always uses the anthropic protocol. The v3
+// receipt exposes a single ready-to-use OpenAI endpoint, so both protocols are
+// offered (the gateway answers whichever Codex is configured to call).
+async function pickWireApi() {
+  // Codex dropped "chat" wire_api support (openai/codex#7782) — it rejects
+  // wire_api="chat" on boot. So "responses" is the only supported option; "manual"
+  // stays as an escape hatch for future/custom protocols. Claude is unaffected
+  // (it always uses the anthropic Messages API, never wire_api).
+  const wireOptions = [
+    { id: 'wire::responses', label: 'OpenAI Responses (openai-responses)', recommended: true },
+    { id: 'wire::manual', label: '✍  手动输入 wire_api' },
+  ];
   const wirePick = await askMenuAction({
     title: '认领 token · 选择协议',
     subtitle: 'Codex 与网关通信的 wire_api（Claude 固定走 anthropic）',
@@ -483,32 +439,70 @@ async function pickWireApi(secret) {
     hasDeveloperModeEnabled,
   });
   if (wirePick === 'back') return null;
-  if (wirePick === 'wire::manual') return (await promptText('wire_api', 'chat')) || 'chat';
-  return wirePick === 'wire::responses' ? 'responses' : 'chat';
+  if (wirePick === 'wire::manual') {
+    return (await promptText('wire_api', DEFAULT_WIRE_API)) || DEFAULT_WIRE_API;
+  }
+  return 'responses';
 }
 
-function renderClaimResult({ activation, apply, secret, choices, runtimes, snapshot }) {
+// Single-select model picker — Codex only holds one model in config.toml.
+// The recommended default is pickHighestVersionModel (highest version).
+// Empty modelIds → manual text input (like pickWireApi's wire::manual path).
+async function pickModel(modelIds) {
+  const ids = (Array.isArray(modelIds) ? modelIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (ids.length === 0) {
+    // No authorized models from receipt — let user type one manually.
+    return (await promptText('model', '')) || null;
+  }
+  const recommended = pickHighestVersionModel(ids);
+  const actions = ids.map((id) => ({
+    id: `model::${id}`,
+    label: id,
+    ...(id === recommended ? { recommended: true } : {}),
+  }));
+  const pick = await askMenuAction({
+    title: '认领 token · 选择模型',
+    subtitle: '选一个模型，Claude/Codex 都写同一个',
+    actions,
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  if (pick === 'back') return null;
+  // Extract model id from the action id (model::glm-5.2 → glm-5.2).
+  return pick.replace(/^model::/, '');
+}
+
+function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
   const runtimeLabel = runtimes
     .map((r) => (r === 'claude' ? 'Claude Code' : 'Codex'))
     .join(' + ');
-  const rows = [...activation.providerRows, ['写入运行时', runtimeLabel, 'ok']];
+  const rows = [['写入运行时', runtimeLabel, 'ok']];
   if (apply.endpoints.claude) rows.push(['Claude endpoint', apply.endpoints.claude, 'info']);
   if (apply.endpoints.codex) rows.push(['Codex endpoint', apply.endpoints.codex, 'info']);
+  if (choices.model) {
+    rows.push(['Codex model', choices.model, 'info']);
+  } else {
+    rows.push(['Codex model', 'receipt 未返回 model_ids，Codex 模型未写入，请手动指定', 'warn']);
+  }
+  // Claude tier vars — all three tiers use the same selected model.
+  const tier = apply.tierModels || {};
+  if (tier.opus) rows.push(['Claude tier 模型', `${tier.opus}（haiku/sonnet/opus 通用）`, 'ok']);
   rows.push(
-    ['aikey env', activation.envPath, 'ok'],
-    ['shell hook', activation.hookStatus, 'ok'],
-    ['model', choices.model, 'info'],
+    ['aikey.env', `${path.join(hermitHome, 'aikey.env')}（已写入，外部 agent 可 source）`, 'info'],
     [
       '原始配置快照',
       snapshot?.created ? `${originalEnvBackupRoot()}（本次新建）` : `${originalEnvBackupRoot()}（已存在，未覆盖）`,
       'info',
     ],
-    ['key', `${maskKey(secret.key)}  (即焚，已写入配置/env，不会再显示)`, 'warn'],
+    ['key', `${maskKey(secret.key)}  (即焚，已写入配置，不会再显示)`, 'warn'],
   );
   printCliRows('认领 token 完成', rows, [
-    '已按所选运行时写入 Claude/Codex 配置；aikey env + shell hook 同步更新。',
-    '原始配置已快照到 ~/.hermit-env.bak，可在「token 池 → 恢复原始配置」一键还原。',
-    `新开终端即可生效，或立即执行：source ${activation.envPath}`,
+    '已按所选运行时直接写入 Claude/Codex 配置文件，新开终端即可生效。',
+    '原始配置已快照到 ~/.hermit/agentcli.env.bak，可在「token 池 → 恢复原始配置」一键还原。',
+    '环境变量已写入 ~/.hermit/aikey.env，外部 agent 执行 source ~/.hermit/aikey.env 即可获取 key + base_url。',
   ].join('\n'));
 }
 
@@ -519,25 +513,34 @@ function printClaimError(err) {
 }
 
 async function runTokenClaimFlow() {
-  // 1. Discover and select the Aliyun Model API required by auto-provision.
+  // 1. Resolve server defaults (region + gateway), then discover the catalog.
+  //    fetchDefaults is best-effort: a failed/missing call falls back to the
+  //    documented cn-shenzhen region so discover still runs.
   let catalog;
   try {
-    renderBusyScreen('认领 token', '正在拉取可用模型列表…');
-    catalog = await discoverCatalog();
+    renderBusyScreen('认领 token', '正在下发 token…');
+    const defaults = await fetchDefaults().catch(() => null);
+    catalog = await discoverCatalog({
+      regionId: defaults?.regionId || 'cn-shenzhen',
+      gatewayId: defaults?.gatewayId || null,
+    });
   } catch (err) {
     printClaimError(err);
     return;
   }
-  const modelChoice = await pickModelApi(catalog);
-  if (!modelChoice) return;
-
-  // 2. Provision the selected Model API consumer.
+  // 2. Provision the consumer. Authorize ONLY the server-curated model_apis
+  //    (default_model_api_ids) — the catalog also exposes monitoring/test
+  //    endpoints with no data-plane domain, and provisioning those makes the
+  //    server reject the whole run (aliyun_model_api_domain_missing).
+  //    auto-provision keys off discovery_id + model_api_ids; v3 dropped api_name.
   let runId;
   try {
     renderBusyScreen('认领 token', '正在签发消费者（auto-provision）…');
     const provision = await provisionRun({
-      apiName: modelChoice.apiName || catalog.defaultApiName,
-      aliyunModelApiIds: [modelChoice.httpApiId],
+      discoveryId: catalog.discoveryId,
+      regionId: catalog.regionId,
+      gatewayId: catalog.gatewayId,
+      aliyunModelApiIds: selectModelApiIds(catalog.defaultModelApiIds),
     });
     runId = provision.runId;
   } catch (err) {
@@ -574,16 +577,20 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 6. Codex wire protocol — only relevant when Codex is selected.
-  let wireApi = 'chat';
+  // 6. Codex model — single-select from receipt modelIds (Codex only holds one).
+  // 6. Codex model — single-select from receipt modelIds. The chosen model is
+  //     written to both Codex config.toml and all three Claude tier vars.
+  //     wire_api is always "responses" (Codex dropped "chat" support) — no picker needed.
+  const wireApi = DEFAULT_WIRE_API;
+  let model = null;
   if (runtimes.includes('codex')) {
-    wireApi = await pickWireApi(secret);
-    if (!wireApi) {
+    model = await pickModel(secret.modelIds);
+    if (!model) {
       printCliRows('认领 token', [['状态', '已取消', 'warn']], '未写入任何配置。');
       return;
     }
   }
-  const choices = { model: modelChoice.model, wireApi };
+  const choices = { model, wireApi };
 
   // 7. Snapshot originals (create-once) BEFORE any write, so one-click restore
   //    always returns to the pre-token-pool state regardless of future claims.
@@ -607,38 +614,28 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 9. Also refresh aikey env + shell hook (keeps Status accurate + propagates
-  //    the key to new shells / env-reading tools). Same key, no divergence.
-  let activation;
-  try {
-    activation = await activateAikeyBundle({ bundle: bundleFromClaimedSecret({ secret, choices }) });
-  } catch (err) {
-    printClaimError(err);
-    return;
-  }
-
-  renderClaimResult({ activation, apply, secret, choices, runtimes, snapshot });
+  renderClaimResult({ apply, secret, choices, runtimes, snapshot });
 }
 
-// pickRuntimes — askMenuAction single-select mirroring pickModelApi/pickWireApi.
-// Returns ['claude','codex'] | ['claude'] | ['codex'], or null on cancel.
+// pickRuntimes — real multi-select (Space toggles, Enter confirms). Default
+// both runtimes pre-checked. Adding a future runtime (e.g. an image-gen target)
+// is just appending an action here — no N-combo explosion. Returns the selected
+// id list, or null on cancel / nothing selected.
 async function pickRuntimes() {
-  const actionId = await askMenuAction({
+  const sel = await askMenuMultiSelect({
     title: '认领 token · 选择运行时',
-    subtitle: '选择要写入的本地运行时（默认两者都写）',
+    subtitle: '空格 切换 / 回车确认（默认两者都写）',
     actions: [
-      { id: 'runtime::both', label: 'Claude Code + Codex（默认）', recommended: true },
-      { id: 'runtime::claude', label: '仅 Claude Code' },
-      { id: 'runtime::codex', label: '仅 Codex' },
+      { id: 'claude', label: 'Claude Code' },
+      { id: 'codex', label: 'Codex' },
     ],
+    defaultSelectedIds: ['claude', 'codex'],
     escapeAction: 'back',
     statusItems: currentMenuStatusItems(),
     hasDeveloperModeEnabled,
   });
-  if (actionId === 'back') return null;
-  if (actionId === 'runtime::claude') return ['claude'];
-  if (actionId === 'runtime::codex') return ['codex'];
-  return ['claude', 'codex'];
+  if (!Array.isArray(sel) || sel.length === 0) return null;
+  return sel;
 }
 
 // One-click restore of the original Claude/Codex configs from the create-once
@@ -663,7 +660,7 @@ async function runRestoreOriginalsFlow() {
   });
   printCliRows('恢复原始配置完成', rows, [
     '已回到 token 池介入前的本地配置。',
-    '快照保留在 ~/.hermit-env.bak，可再次恢复或在下次认领时复用。',
+    '快照保留在 ~/.hermit/agentcli.env.bak，可再次恢复或在下次认领时复用。',
   ].join('\n'));
   console.log('');
   return waitForContinue(ACTION_DONE_MSG);
@@ -1264,6 +1261,7 @@ export async function runNavigationAction(action) {
   if (action.id === 'quick-create-assistant') { await runQuickCreateAssistantFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-claim') { await runTokenClaimFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-status') { await runAikeyStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
+  if (action.id === 'aikey-manual') { await runAikeyManual({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-restore') { return runRestoreOriginalsFlow(); }
   // Dedicated submenu pages (reached from nested menus, not home navigation).
   if (action.id === 'local-use') { return runLocalUseAction(); }

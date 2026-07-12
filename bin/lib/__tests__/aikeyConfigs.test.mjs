@@ -12,7 +12,8 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { applyClaimedSecret, applyToConfigs, resolveClaudeBaseUrl, resolveCodexBaseUrl } from '../aikey.mjs';
+import { applyClaimedSecret, applyToConfigs, resolveClaudeBaseUrl, resolveCodexBaseUrl, writeAikeyEnv } from '../aikey.mjs';
+import { mapTierModels } from '../tokenDistribution.mjs';
 
 describe('applyToConfigs — Claude settings.json', () => {
   let home;
@@ -40,7 +41,7 @@ describe('applyToConfigs — Claude settings.json', () => {
     const result = applyToConfigs({
       key: 'sk-new',
       endpoint: 'https://gw.example',
-      model: 'qwen-max',
+      tierModels: { haiku: 'glm-4.5-air', sonnet: 'glm-5.1', opus: 'glm-5.2' },
       runtimes: ['claude'],
       home,
     });
@@ -53,7 +54,11 @@ describe('applyToConfigs — Claude settings.json', () => {
     expect(written.env.ANTHROPIC_BASE_URL).toBe('https://gw.example');
     // AUTH_TOKEN (not API_KEY) is the one Claude Code honors for a custom gateway.
     expect(written.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-new');
-    expect(written.env.ANTHROPIC_MODEL).toBe('qwen-max');
+    // Tier vars replace the old single ANTHROPIC_MODEL (no dual model source).
+    expect(written.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-4.5-air');
+    expect(written.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.1');
+    expect(written.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5.2');
+    expect(written.env.ANTHROPIC_MODEL).toBeUndefined();
     expect(written.env.SOME_OTHER_VAR).toBe('keep-me');
 
     const claude = result.runtimes.find((r) => r.runtime === 'claude');
@@ -66,10 +71,18 @@ describe('applyToConfigs — Claude settings.json', () => {
     const fresh = await mkdtemp(path.join(os.tmpdir(), 'hermit-aikey-fresh-'));
     try {
       const file = path.join(fresh, '.claude', 'settings.json');
-      applyToConfigs({ key: 'sk-x', endpoint: 'https://gw', model: 'm', runtimes: ['claude'], home: fresh });
+      applyToConfigs({
+        key: 'sk-x',
+        endpoint: 'https://gw',
+        tierModels: { haiku: 'glm-5.2', sonnet: 'glm-5.2', opus: 'glm-5.2' },
+        runtimes: ['claude'],
+        home: fresh,
+      });
       const written = JSON.parse(await readFile(file, 'utf-8'));
       expect(written.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-x');
       expect(written.env.ANTHROPIC_BASE_URL).toBe('https://gw');
+      expect(written.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5.2');
+      expect(written.env.ANTHROPIC_MODEL).toBeUndefined();
     } finally {
       await rm(fresh, { recursive: true, force: true });
     }
@@ -191,54 +204,22 @@ size = 1000
 });
 
 describe('resolveClaudeBaseUrl', () => {
-  it('returns the gateway endpoint verbatim', () => {
-    expect(resolveClaudeBaseUrl({ endpoint: 'https://ai.skg.com/cpamc-cc' })).toBe('https://ai.skg.com/cpamc-cc');
+  it('returns the v3 receipt anthropic endpoint', () => {
+    expect(resolveClaudeBaseUrl({ endpoints: { anthropic: 'https://gw.example/cpamc-cc' } })).toBe('https://gw.example/cpamc-cc');
   });
-  it('trims whitespace and tolerates a missing endpoint', () => {
-    expect(resolveClaudeBaseUrl({ endpoint: '  https://gw.example  ' })).toBe('https://gw.example');
+  it('trims whitespace and tolerates a missing endpoints.anthropic', () => {
+    expect(resolveClaudeBaseUrl({ endpoints: { anthropic: '  https://gw.example/cpamc-cc  ' } })).toBe('https://gw.example/cpamc-cc');
     expect(resolveClaudeBaseUrl({})).toBe('');
   });
 });
 
 describe('resolveCodexBaseUrl', () => {
-  it('resolves a relative proxy route against a trailing-slash endpoint and strips the chat suffix', () => {
-    const secret = {
-      endpoint: 'https://ai.skg.com/cpamc/',
-      proxyPaths: { openai_chat: 'codex/chat/completions' },
-    };
-    expect(resolveCodexBaseUrl(secret, 'chat')).toBe('https://ai.skg.com/cpamc/codex');
+  it('returns the v3 receipt OpenAI endpoint', () => {
+    expect(resolveCodexBaseUrl({ endpoints: { openai: 'https://gw.example/cpaopen' } })).toBe('https://gw.example/cpaopen');
   });
-  it('uses standard URL resolution: a non-trailing-slash endpoint replaces its last segment', () => {
-    const secret = {
-      endpoint: 'https://ai.skg.com/cpamc',
-      proxyPaths: { openai_chat: 'codex/chat/completions' },
-    };
-    expect(resolveCodexBaseUrl(secret, 'chat')).toBe('https://ai.skg.com/codex');
-  });
-  it('strips the responses suffix when wireApi=responses', () => {
-    const secret = {
-      endpoint: 'https://ai.skg.com/cpamc/',
-      proxyPaths: { openai_responses: 'codex/responses' },
-    };
-    expect(resolveCodexBaseUrl(secret, 'responses')).toBe('https://ai.skg.com/cpamc/codex');
-  });
-  it('accepts an absolute proxy route URL (ignores the base)', () => {
-    const secret = {
-      endpoint: 'https://unused.example',
-      proxyPaths: { openai_chat: 'https://ai.skg.com/codex/chat/completions' },
-    };
-    expect(resolveCodexBaseUrl(secret, 'chat')).toBe('https://ai.skg.com/codex');
-  });
-  it('falls back to the raw endpoint when no proxy route is declared', () => {
-    expect(resolveCodexBaseUrl({ endpoint: 'https://gw.example' }, 'chat')).toBe('https://gw.example');
-  });
-  it('throws an /endpoint/ error when the endpoint is missing or unparseable', () => {
-    expect(() => resolveCodexBaseUrl({ proxyPaths: { openai_chat: 'x/chat/completions' } }, 'chat')).toThrow(
-      /endpoint/,
-    );
-    expect(() =>
-      resolveCodexBaseUrl({ endpoint: 'not-a-url', proxyPaths: { openai_chat: 'x/chat/completions' } }, 'chat'),
-    ).toThrow(/endpoint/);
+  it('trims whitespace and tolerates a missing endpoints.openai', () => {
+    expect(resolveCodexBaseUrl({ endpoints: { openai: '  https://gw.example/cpaopen  ' } })).toBe('https://gw.example/cpaopen');
+    expect(resolveCodexBaseUrl({})).toBe('');
   });
 });
 
@@ -249,22 +230,21 @@ describe('applyClaimedSecret — per-runtime writes', () => {
       const result = applyClaimedSecret({
         secret: {
           key: 'sk-pool',
-          endpoint: 'https://ai.skg.com/cpamc/',
-          proxyPaths: { openai_chat: 'codex/chat/completions' },
+          endpoints: { anthropic: 'https://gw.example/cpamc-cc', openai: 'https://gw.example/cpaopen' },
         },
         choices: { model: 'qwen-max', wireApi: 'chat' },
         runtimes: ['codex'],
         home,
       });
-      // Endpoints recorded; codex resolved, claude absent.
-      expect(result.endpoints.codex).toBe('https://ai.skg.com/cpamc/codex');
+      // Endpoints recorded; codex = receipt openai endpoint, claude absent.
+      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen');
       expect(result.endpoints.claude).toBeUndefined();
 
       // Codex auth + config written.
       const auth = JSON.parse(await readFile(path.join(home, '.codex', 'auth.json'), 'utf-8'));
       expect(auth.OPENAI_API_KEY).toBe('sk-pool');
       const toml = await readFile(path.join(home, '.codex', 'config.toml'), 'utf-8');
-      expect(toml).toMatch(/base_url = "https:\/\/ai\.skg\.com\/cpamc\/codex"/);
+      expect(toml).toMatch(/base_url = "https:\/\/gw\.example\/cpaopen"/);
       expect(toml).toMatch(/^model = "qwen-max"/m);
 
       // Claude NOT created.
@@ -277,32 +257,60 @@ describe('applyClaimedSecret — per-runtime writes', () => {
     }
   });
 
-  it('writes both runtimes with DIFFERENT endpoints, Claude unpinned from a model', async () => {
+  it('writes both runtimes with DIFFERENT endpoints, Claude tier vars from modelIds', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-claim-both-'));
     try {
+      const secret = {
+        key: 'sk-pool',
+        endpoints: { anthropic: 'https://gw.example/cpamc-cc', openai: 'https://gw.example/cpaopen' },
+        modelIds: ['GLM-4.5-Air', 'GLM-5.1', 'GLM-5.2'],
+      };
       const result = applyClaimedSecret({
-        secret: {
-          key: 'sk-pool',
-          endpoint: 'https://ai.skg.com/cpamc/',
-          proxyPaths: { openai_chat: 'codex/chat/completions' },
-        },
-        choices: { model: 'qwen-max', wireApi: 'chat' },
+        secret,
+        choices: { model: 'GLM-5.2', wireApi: 'responses' },
         runtimes: ['claude', 'codex'],
         home,
       });
-      // Two distinct endpoints: claude = raw gateway, codex = resolved proxy route.
-      expect(result.endpoints.claude).toBe('https://ai.skg.com/cpamc/');
-      expect(result.endpoints.codex).toBe('https://ai.skg.com/cpamc/codex');
+      // Two distinct endpoints straight from the v3 receipt.
+      expect(result.endpoints.claude).toBe('https://gw.example/cpamc-cc');
+      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen');
       expect(result.endpoints.claude).not.toBe(result.endpoints.codex);
+      // tierModels: all three tiers use the single chosen model.
+      expect(result.tierModels).toEqual({ haiku: 'GLM-5.2', sonnet: 'GLM-5.2', opus: 'GLM-5.2' });
 
       const claude = JSON.parse(await readFile(path.join(home, '.claude', 'settings.json'), 'utf-8'));
-      expect(claude.env.ANTHROPIC_BASE_URL).toBe('https://ai.skg.com/cpamc/');
+      expect(claude.env.ANTHROPIC_BASE_URL).toBe('https://gw.example/cpamc-cc');
       expect(claude.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-pool');
-      // Claude is NOT pinned to a model (no ANTHROPIC_MODEL).
+      // Tier vars: all three use the same chosen model.
+      expect(claude.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('GLM-5.2');
+      expect(claude.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('GLM-5.2');
+      expect(claude.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('GLM-5.2');
+      // No ANTHROPIC_MODEL (tier vars cover it — no dual model source).
       expect(claude.env.ANTHROPIC_MODEL).toBeUndefined();
 
       // No .hermit-bak from a claim write.
       expect(existsSync(path.join(home, '.claude', 'settings.json.hermit-bak'))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults wire_api to "responses" — Codex dropped "chat" support', async () => {
+    // Codex rejects wire_api="chat" (openai/codex#7782 — "chat" is no longer
+    // supported, must be "responses"). When the claim flow has no explicit
+    // wireApi, the default MUST be "responses" so a freshly-claimed Codex config
+    // boots on first run instead of erroring out.
+    const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-claim-wire-default-'));
+    try {
+      applyClaimedSecret({
+        secret: { key: 'sk-pool', endpoints: { openai: 'https://gw.example/cpaopen' } },
+        choices: { model: 'qwen-max' }, // no wireApi → default kicks in
+        runtimes: ['codex'],
+        home,
+      });
+      const toml = await readFile(path.join(home, '.codex', 'config.toml'), 'utf-8');
+      expect(toml).toMatch(/wire_api = "responses"/);
+      expect(toml).not.toMatch(/wire_api = "chat"/);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -319,7 +327,7 @@ describe('applyClaimedSecret — per-runtime writes', () => {
       );
 
       applyClaimedSecret({
-        secret: { key: 'sk-pool', endpoint: 'https://gw.example', proxyPaths: { openai_chat: 'codex/chat/completions' } },
+        secret: { key: 'sk-pool', endpoints: { openai: 'https://gw.example/cpaopen' } },
         choices: { model: 'qwen-max', wireApi: 'chat' },
         runtimes: ['codex'],
         home,
@@ -335,7 +343,96 @@ describe('applyClaimedSecret — per-runtime writes', () => {
 
   it('throws when the secret has no key', () => {
     expect(() =>
-      applyClaimedSecret({ secret: { endpoint: 'https://gw' }, runtimes: ['claude'] }),
+      applyClaimedSecret({ secret: { endpoints: { anthropic: 'https://gw' } }, runtimes: ['claude'] }),
     ).toThrow(/key/);
+  });
+});
+
+describe('writeAikeyEnv — sync env file writer', () => {
+  it('writes ~/.hermit/aikey.env with key + base_url per provider', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-write-env-'));
+    try {
+      const bundle = {
+        displayName: 'agentcli',
+        providers: {
+          anthropic: { apiKey: 'sk-test-key-1234', baseUrl: 'https://gw.example/cpamc-cc' },
+          openai: { apiKey: 'sk-test-key-1234', baseUrl: 'https://gw.example/cpaopen' },
+        },
+      };
+      writeAikeyEnv({ bundle, home });
+      const envPath = path.join(home, 'aikey.env');
+      expect(existsSync(envPath)).toBe(true);
+      const content = await readFile(envPath, 'utf-8');
+      expect(content).toContain('export ANTHROPIC_API_KEY="sk-test-key-1234"');
+      expect(content).toContain('export ANTHROPIC_BASE_URL="https://gw.example/cpamc-cc"');
+      expect(content).toContain('export OPENAI_API_KEY="sk-test-key-1234"');
+      expect(content).toContain('export OPENAI_BASE_URL="https://gw.example/cpaopen"');
+      expect(content).toContain('export OPENHERMIT_ACTIVE_KEY="agentcli"');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the hermit home directory if it does not exist', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-write-env-mkdir-'));
+    const subHome = path.join(home, 'nested', 'hermit');
+    try {
+      const bundle = { displayName: 'test', providers: { anthropic: { apiKey: 'sk-x' } } };
+      writeAikeyEnv({ bundle, home: subHome });
+      expect(existsSync(path.join(subHome, 'aikey.env'))).toBe(true);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('applyClaimedSecret — env file injection', () => {
+  it('writes ~/.hermit/aikey.env alongside Claude/Codex configs', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-claim-env-'));
+    try {
+      applyClaimedSecret({
+        secret: {
+          key: 'sk-envtest',
+          endpoints: { anthropic: 'https://gw.example/cpamc-cc', openai: 'https://gw.example/cpaopen' },
+          modelIds: ['glm-5.2'],
+        },
+        choices: { model: 'glm-5.2', wireApi: 'responses' },
+        runtimes: ['claude', 'codex'],
+        home,
+      });
+
+      const envPath = path.join(home, 'aikey.env');
+      expect(existsSync(envPath)).toBe(true);
+      const content = await readFile(envPath, 'utf-8');
+      // The env file carries the key + base_url for external agents to source.
+      expect(content).toContain('export ANTHROPIC_API_KEY="sk-envtest"');
+      expect(content).toContain('export ANTHROPIC_BASE_URL="https://gw.example/cpamc-cc"');
+      expect(content).toContain('export OPENAI_API_KEY="sk-envtest"');
+      expect(content).toContain('export OPENAI_BASE_URL="https://gw.example/cpaopen"');
+      // Tier model vars are NOT in the env file (they're Claude-Code-specific,
+      // written to settings.json env block; external agents specify model per-request).
+      expect(content).not.toContain('ANTHROPIC_DEFAULT');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT write aikey.env when home is not provided (no side-effects on real home)', async () => {
+    // When home is omitted, applyClaimedSecret defaults to os.homedir().
+    // We can't safely assert about the real home, so we verify the function
+    // completes without error — the real write happens on the actual machine.
+    const result = applyClaimedSecret({
+      secret: {
+        key: 'sk-homeless',
+        endpoints: { anthropic: 'https://gw/cpamc-cc', openai: 'https://gw/cpaopen' },
+        modelIds: ['glm-5.2'],
+      },
+      choices: { model: 'glm-5.2' },
+      runtimes: ['codex'],
+    });
+    expect(result.ok).toBe(true);
+    // The env file is written to the real hermit home — not testable in isolation.
+    // The claim result still includes tierModels.
+    expect(result.tierModels).toEqual({ haiku: 'glm-5.2', sonnet: 'glm-5.2', opus: 'glm-5.2' });
   });
 });

@@ -3,7 +3,7 @@
 // (safeReadJson), teams, services, and usage.
 
 import path from 'node:path';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 import { hermitSettingsPath } from './env.mjs';
 
@@ -13,6 +13,25 @@ function chmodBestEffort(filePath, mode) {
   } catch {
     // Permission hardening is best-effort across platforms.
   }
+}
+
+// Atomic write that also works on Windows. POSIX rename() atomically replaces
+// an existing destination; Windows fs.rename() throws EPERM over an existing
+// file, so there we copyFileSync (which overwrites) then drop the temp. Every
+// file holding a live key — auth store, Claude/Codex configs, env snapshots —
+// goes through this, so a second claim or re-login doesn't crash on Windows.
+function atomicWriteFile(target, content, { mode = 0o600 } = {}) {
+  mkdirSync(path.dirname(target), { recursive: true });
+  const tempPath = `${target}.${process.pid}.tmp`;
+  writeFileSync(tempPath, content, { encoding: 'utf-8', mode });
+  chmodBestEffort(tempPath, mode);
+  if (process.platform === 'win32') {
+    copyFileSync(tempPath, target);
+    rmSync(tempPath, { force: true });
+  } else {
+    renameSync(tempPath, target);
+  }
+  chmodBestEffort(target, mode);
 }
 
 function safeReadJson(filePath) {
@@ -70,6 +89,7 @@ function enableTeamCollaborationDefaults() {
 
 
 export {
+atomicWriteFile,
 chmodBestEffort,
 safeReadJson,
 readHermitSettings,

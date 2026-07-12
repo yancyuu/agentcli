@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 
 import {
   repoRoot,
@@ -20,7 +20,7 @@ import {
 } from './env.mjs';
 import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { isInteractiveCli, printCliRows, printJson } from './terminal.mjs';
-import { chmodBestEffort, safeReadJson, readHermitSettings } from './settings.mjs';
+import { atomicWriteFile, chmodBestEffort, safeReadJson, readHermitSettings } from './settings.mjs';
 
 const AUTH_CALLBACK_PATH = '/oauth/openhermit/callback';
 const AUTH_STORE_SCHEMA_VERSION = 1;
@@ -172,12 +172,7 @@ function readOpenHermitAuthStatus() {
 
 function writeOpenHermitAuthStore(store) {
   ensureAuthStoreDir();
-  const filePath = getAuthStorePath();
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(store, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
-  chmodBestEffort(tempPath, 0o600);
-  renameSync(tempPath, filePath);
-  chmodBestEffort(filePath, 0o600);
+  atomicWriteFile(getAuthStorePath(), `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
 }
 
 function deleteOpenHermitAuthStore() {

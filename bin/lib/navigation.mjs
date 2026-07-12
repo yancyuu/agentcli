@@ -20,6 +20,7 @@ export function parseMenuKey(input) {
   const key = Buffer.isBuffer(input) ? input.toString('utf8') : String(input || '');
   if (key === '\x1b') return { type: 'escape-start' };
   if (key === '\r' || key === '\n') return { type: 'choose' };
+  if (key === ' ') return { type: 'toggle' }; // multi-select checkbox toggle
   if (/^[1-9]$/u.test(key)) return { type: 'quick-select', index: Number.parseInt(key, 10) - 1 };
   return { type: 'unknown' };
 }
@@ -88,6 +89,7 @@ export function renderNavMenu(
   isDeveloperModeEnabled = () => false,
   actionStateLabel = () => ({ text: '', state: 'info' }),
   statusItems = [],
+  multi = false,
 ) {
   // Redraw IN PLACE via writeFrameSync (cursor home + per-line clear-to-EOL) —
   // NOT a full-screen clear. Wiping the screen on every arrow press is what made
@@ -117,8 +119,8 @@ export function renderNavMenu(
     const marker = selected ? ui.success(glyphs.checked) : ' ';
     const label = selected ? ui.success(action.label) : focused ? ui.accent(action.label) : action.label;
     const left = depth === 0
-      ? `${pointer} ${caret} ${label}`
-      : `${pointer}   ${marker} ${label}`;
+      ? (multi && action.toggle ? `${pointer} ${marker} ${label}` : `${pointer} ${caret} ${label}`)
+      : (action.toggle ? `${pointer}   ${marker} ${label}` : `${pointer}   ${caret} ${label}`);
     const right = state.text && !action.comingSoon && (depth === 0 || Boolean(action.toggle))
       ? `${ui.dim(glyphs.v)} ${state.text}`
       : '';
@@ -132,16 +134,53 @@ export function renderNavMenu(
   const maxRight = parts.reduce((max, { right }) => Math.max(max, displayWidth(right)), 0);
   const chipCol = Math.max(maxLeft + 6, width - maxRight);
 
-  rows.forEach((row, index) => {
+  // Viewport clipping: when rows overflow the terminal height, only render a
+  // window of rows centered on selectedIndex so the cursor never leaves the
+  // visible area.  The header (title, subtitle, status, etc.) and footer
+  // (separator + hint line) take fixed slots; remaining slots go to row lines.
+  const terminalRows = Number(process.stdout.rows) || 24;
+  const headerLines = lines.length; // lines already pushed above
+  const footerLines = 2; // separator + hint
+  const maxVisibleRows = Math.max(4, terminalRows - headerLines - footerLines - 2); // -2 for possible h-rules
+
+  let viewportStart = 0;
+  let viewportEnd = rows.length;
+  if (rows.length > maxVisibleRows) {
+    // Center selectedIndex in the viewport; clamp so neither end overflows.
+    const half = Math.floor(maxVisibleRows / 2);
+    viewportStart = Math.max(0, selectedIndex - half);
+    viewportEnd = Math.min(rows.length, viewportStart + maxVisibleRows);
+    // If clamping shifted the window too far right, re-center.
+    if (viewportEnd - viewportStart < maxVisibleRows) {
+      viewportStart = Math.max(0, viewportEnd - maxVisibleRows);
+    }
+  }
+
+  // Render the clipped row slice.
+  for (let index = viewportStart; index < viewportEnd; index++) {
     const { left, right } = parts[index];
-    if (row.action.id === escapeAction && index > 0) {
+    // Horizontal rule before the first control row (submit or escape).
+    if ((rows[index].action.id === SUBMIT_ID || rows[index].action.id === escapeAction) && index > 0) {
       lines.push(ui.dim(glyphs.h.repeat(width)));
     }
     lines.push(menuColumnsLine(left, right, chipCol));
-  });
+  }
+  // If rows were clipped, show a dim indicator above/below the viewport.
+  if (viewportStart > 0) {
+    const insertAt = headerLines; // right after header, before first rendered row
+    lines.splice(insertAt, 0, ui.dim(`  ··· ${viewportStart} rows above ···`));
+  }
+  if (viewportEnd < rows.length) {
+    const belowCount = rows.length - viewportEnd;
+    lines.push(ui.dim(`  ··· ${belowCount} rows below ···`));
+  }
 
   lines.push(ui.dim(glyphs.h.repeat(width)));
-  lines.push(ui.dim('  ← 返回  |  ↑↓ 选择  |  Enter 进入/确认  |  Esc/Ctrl+C 退出'));
+  lines.push(ui.dim(
+    multi
+      ? '  ← 返回  |  ↑↓ 选择  |  Space/Enter 切换  |  Enter 提交确认  |  Esc/Ctrl+C 退出'
+      : '  ← 返回  |  ↑↓ 选择  |  Enter 进入/确认  |  Esc/Ctrl+C 退出',
+  ));
   writeFrameSync(lines);
 }
 
@@ -287,6 +326,141 @@ export async function askMenuAction({
       for (const key of parseMenuKeys(chunk)) {
         if (busy) break;
         await handleKey(key);
+      }
+    }
+
+    process.stdout.write('\x1b[?25l');
+    repaint();
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
+}
+
+// --- Multi-select menu ------------------------------------------------------
+
+// askMenuMultiSelect — checkbox rows toggled by Space or Enter, plus a separate
+// "提交" (submit) action row that resolves the selected set and a "← 返回" escape
+// row.  Enter on a selectable row toggles its checkbox (same as Space); Enter on
+// the submit row confirms the selection (resolving the promise).  This avoids the
+// UX pitfall where a single Enter keystroke prematurely confirms the entire set.
+export const SUBMIT_ID = '__submit__';
+
+export async function askMenuMultiSelect({
+  title,
+  subtitle,
+  actions,
+  defaultSelectedIds = [],
+  escapeAction = 'back',
+  statusItems = [],
+  hasDeveloperModeEnabled: isDeveloperModeEnabled = () => false,
+}) {
+  return new Promise((resolve) => {
+    let selectedIndex = 0;
+    // Shallow-copy each action with toggle:true so renderNavMenu's
+    // `action.toggle && state.state==='ok'` checkbox logic fires for every row.
+    const selectable = actions.map((a) => ({ ...a, toggle: true }));
+    // Append a submit action and an escape action as non-selectable control rows.
+    // These sit below the checkbox rows and are not toggled — Enter on submit
+    // confirms, Enter on escape resolves the escapeAction.
+    const controlRows = [
+      { id: SUBMIT_ID, label: '确认提交', description: '确认当前勾选并继续下一步' },
+      { id: escapeAction, label: '← 返回', description: '取消选择并返回上一级' },
+    ];
+    const allRows = [...selectable, ...controlRows];
+    const selectedIds = new Set(defaultSelectedIds);
+    const stdin = process.stdin;
+
+    function cleanup() {
+      stdin.off('data', onData);
+      if (stdin.isTTY) stdin.setRawMode(false);
+      stdin.pause();
+      process.stdout.write('\x1b[?25h');
+    }
+    function actionStateLabel(action) {
+      // Control rows (submit/escape) never show a checkbox state.
+      if (action.id === SUBMIT_ID) return { state: '', text: '' };
+      if (action.id === escapeAction) return { state: '', text: '' };
+      return selectedIds.has(action.id) ? { state: 'ok', text: '' } : { state: '', text: '' };
+    }
+    function repaint() {
+      const items = typeof statusItems === 'function' ? statusItems() : statusItems;
+      renderNavMenu(
+        title,
+        subtitle,
+        allRows,
+        selectedIndex,
+        escapeAction,
+        new Set(),
+        '',
+        isDeveloperModeEnabled,
+        actionStateLabel,
+        items,
+        true, // multi → checkbox marker at top level
+      );
+    }
+    function visibleRows() {
+      return visibleMenuRows(allRows, new Set(), isDeveloperModeEnabled());
+    }
+    function toggleCurrent() {
+      const row = visibleRows()[selectedIndex];
+      if (!row) return;
+      // Only toggle selectable rows — never toggle submit/escape.
+      if (row.action.id === SUBMIT_ID || row.action.id === escapeAction) return;
+      if (selectedIds.has(row.action.id)) selectedIds.delete(row.action.id);
+      else selectedIds.add(row.action.id);
+      repaint();
+    }
+    function move(delta) {
+      const rows = visibleRows();
+      selectedIndex = (selectedIndex + delta + rows.length) % rows.length;
+      repaint();
+    }
+    function confirm() {
+      cleanup();
+      process.stdout.write('\n');
+      // Preserve the actions' declaration order, not Set insertion order, so the
+      // caller gets a stable sequence regardless of toggle order.
+      const ordered = selectable.map((a) => a.id).filter((id) => selectedIds.has(id));
+      resolve(ordered);
+    }
+    function onData(chunk) {
+      for (const key of parseMenuKeys(chunk)) {
+        if (key.type === 'exit' || key.type === 'escape-start') {
+          cleanup();
+          cancelCli();
+          return;
+        }
+        if (key.type === 'back') {
+          cleanup();
+          resolve(escapeAction);
+          return;
+        }
+        if (key.type === 'toggle') {
+          toggleCurrent();
+          continue;
+        }
+        if (key.type === 'choose') {
+          const row = visibleRows()[selectedIndex];
+          // Enter on submit → confirm the selection.
+          if (row?.action.id === SUBMIT_ID) {
+            confirm();
+            return;
+          }
+          // Enter on escape → resolve escapeAction (same as ←).
+          if (row?.action.id === escapeAction) {
+            cleanup();
+            resolve(escapeAction);
+            return;
+          }
+          // Enter on a selectable row → toggle (same as Space).
+          toggleCurrent();
+          continue;
+        }
+        if (key.type === 'move') {
+          move(key.delta);
+          continue;
+        }
       }
     }
 

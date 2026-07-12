@@ -8,7 +8,9 @@ import type { TaskBusConfig } from '@shared/types/team';
 
 import { scanTelemetryOnce } from '@main/services/session-intelligence/UsageTelemetryService';
 import { sweepStaleUploadLock } from '@main/services/session-intelligence/ConversationMessageUploadService';
+import { getValidBearerToken } from '@main/services/auth/OpenHermitAuthClient';
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
+import { reportLarkCredentialsOnce, type LarkCredentialsReportStatus } from './larkCredentials';
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
@@ -38,11 +40,72 @@ export interface UsageTelemetryWorkerStatus {
   telemetryEnabled: boolean;
   telemetry: UsageTelemetryStatus;
   lastError?: string;
+  /**
+   * Latest lark / feishu credential report. Runs serial after `telemetry` every
+   * scan cycle; worker writes this alongside status so the renderer can show
+   * "上报成功 / 未登录 / 未配置" without a separate request.
+   */
+  larkCredentials?: LarkCredentialsReportStatus;
 }
 
 interface SavedSettings {
   taskBus?: TaskBusConfig;
 }
+
+type LarkAuthedResolver = (
+  hermitHome: string
+) => Promise<{ baseUrl: string; token: string } | null>;
+
+/**
+ * Auth resolver injected into the lark credentials reporter. The default wires
+ * `getValidBearerToken` (which proactively refreshes the access token when it
+ * is near/expired) plus the same OPENHERMIT_* base URL overrides the upload
+ * pipeline uses. Tests can swap this with a stub to exercise both branches.
+ */
+let larkAuthedResolver: LarkAuthedResolver = defaultLarkAuthedResolver;
+
+export function setLarkAuthedResolver(resolver: LarkAuthedResolver | null): void {
+  larkAuthedResolver = resolver ?? defaultLarkAuthedResolver;
+}
+
+async function defaultLarkAuthedResolver(
+  hermitHome: string
+): Promise<{ baseUrl: string; token: string } | null> {
+  const envBaseUrl =
+    normalizeCloudBaseUrl(
+      process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL,
+      'OPENHERMIT_CLOUD_UPLOAD_BASE_URL'
+    ) ||
+    normalizeCloudBaseUrl(
+      process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL,
+      'OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL'
+    );
+  const baseUrl =
+    envBaseUrl ||
+    `${DEFAULT_OPENHERMIT_CLOUD_SCHEME}://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}`;
+  const token = await getValidBearerToken(hermitHome, baseUrl);
+  if (!token) return null;
+  return { baseUrl, token };
+}
+
+function normalizeCloudBaseUrl(value: string | undefined, optionName: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error(`${optionName} 必须是 http(s)://`);
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch (err) {
+    throw new Error(`${optionName} 无法解析：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
+const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
+const DEFAULT_OPENHERMIT_CLOUD_SCHEME = 'http';
 
 let stopping = false;
 let startedAt = new Date().toISOString();
@@ -217,6 +280,7 @@ async function writeStatus(
     telemetry?: UsageTelemetryStatus;
     error?: string;
     startedAt?: string | null;
+    larkCredentials?: LarkCredentialsReportStatus;
   } = {}
 ): Promise<UsageTelemetryWorkerStatus> {
   const telemetry = await resolveStatusTelemetry(paths, options.telemetry);
@@ -233,6 +297,7 @@ async function writeStatus(
     source: 'local-jsonl',
     telemetryEnabled: Boolean(cfg?.telemetry?.enabled),
     telemetry,
+    ...(options.larkCredentials ? { larkCredentials: options.larkCredentials } : {}),
     ...(options.error ? { lastError: options.error } : {}),
   };
   await mkdir(paths.telemetryDir, { recursive: true, mode: 0o700 });
@@ -279,25 +344,31 @@ export async function scanUsageTelemetryWorkerOnce(
       await writeStatus(paths, 'scanning', cfg);
       try {
         const telemetry = (await scanTelemetryOnce()) ?? emptyUsageTelemetryStatus();
+        const larkCredentials = await safeScanLarkCredentials(hermitHome);
         const status = await writeStatus(paths, 'idle', cfg, {
           running: false,
           telemetry,
           startedAt: null,
+          larkCredentials,
         });
         return { status, shouldContinue: false };
       } catch (err) {
+        const larkCredentials = await safeScanLarkCredentials(hermitHome);
         const status = await writeStatus(paths, 'error', cfg, {
           running: false,
           error: err instanceof Error ? err.message : String(err),
           startedAt: null,
+          larkCredentials,
         });
         return { status, shouldContinue: false };
       }
     }
+    const larkCredentials = await safeScanLarkCredentials(hermitHome);
     const status = await writeStatus(paths, 'disabled', cfg, {
       running: false,
       telemetry: lastTelemetry,
       startedAt: null,
+      larkCredentials,
     });
     await removePid(paths);
     return { status, shouldContinue: false };
@@ -306,13 +377,41 @@ export async function scanUsageTelemetryWorkerOnce(
   await writeStatus(paths, 'scanning', cfg);
   try {
     const telemetry = (await scanTelemetryOnce(cfg)) ?? emptyUsageTelemetryStatus();
-    const status = await writeStatus(paths, 'idle', cfg, { telemetry });
+    const larkCredentials = await safeScanLarkCredentials(hermitHome);
+    const status = await writeStatus(paths, 'idle', cfg, { telemetry, larkCredentials });
     return { status, shouldContinue: true };
   } catch (err) {
+    const larkCredentials = await safeScanLarkCredentials(hermitHome);
     const status = await writeStatus(paths, 'error', cfg, {
       error: err instanceof Error ? err.message : String(err),
+      larkCredentials,
     });
     return { status, shouldContinue: true };
+  }
+}
+
+/**
+ * Same-shape wrapper: never throws, never blocks the scan loop. A failure here
+ * must NEVER escalate to a worker exit — it just lives in status.json as the
+ * last `larkCredentials` snapshot, visible to the renderer with the reason.
+ */
+async function safeScanLarkCredentials(
+  hermitHome: string
+): Promise<LarkCredentialsReportStatus | undefined> {
+  try {
+    return await reportLarkCredentialsOnce({
+      hermitHome,
+      resolveAuthedContext: larkAuthedResolver,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'fetch-failed',
+      message: err instanceof Error ? err.message : String(err),
+      lastAttemptAt: new Date().toISOString(),
+      lastErrorAt: new Date().toISOString(),
+    };
   }
 }
 

@@ -4,23 +4,46 @@
 // Semantics (deliberately NOT a per-write *.hermit-bak):
 //   • snapshotOriginals() is CREATE-ONCE. The first time the token pool is about
 //     to touch ~/.claude|~/.codex, it captures the user's PRE-token-pool originals
-//     into ~/.hermit-env.bak. Subsequent claims never overwrite it — the snapshot
-//     always means "what the machine looked like before the token pool intervened".
+//     into ~/.hermit/agentcli.env.bak. Subsequent claims never overwrite it — the
+//     snapshot always means "what the machine looked like before the token pool intervened".
 //   • restoreOriginals() replays that snapshot: existed files are copied back,
 //     files the token pool CREATED (originally absent) are deleted, so the machine
 //     returns to its pre-token-pool state with no leftover residue.
 //
 // The snapshot files hold live API keys, so they are written mode 0o600.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { chmodBestEffort } from './settings.mjs';
 
 const SCHEMA_VERSION = 1;
+const BACKUP_DIR_NAME = 'agentcli.env.bak';
+const LEGACY_BACKUP_DIR_NAME = '.hermit-env.bak'; // pre-rename sibling of ~/.hermit
 
 export function originalEnvBackupRoot(home = os.homedir()) {
-  return path.join(home, '.hermit-env.bak');
+  return path.join(home, '.hermit', BACKUP_DIR_NAME);
+}
+
+// One-time relocation of a legacy snapshot. Snapshots used to live at
+// ~/.hermit-env.bak (a sibling of ~/.hermit); they now live INSIDE ~/.hermit as
+// agentcli.env.bak. If a legacy snapshot exists and the new location has no
+// manifest yet, move it verbatim so the user's pre-token-pool originals survive
+// (otherwise the next snapshotOriginals would re-capture the now pool-overwritten
+// live files as "original"). Idempotent: a no-op once the new manifest exists.
+function migrateLegacyRootIfNeeded(home) {
+  const legacy = path.join(home, LEGACY_BACKUP_DIR_NAME);
+  if (!existsSync(legacy)) return;
+  const next = originalEnvBackupRoot(home);
+  if (existsSync(path.join(next, 'manifest.json'))) return; // new location already populated — don't clobber
+  try {
+    mkdirSync(path.dirname(next), { recursive: true });
+    renameSync(legacy, next); // same-filesystem rename under ~ → atomic, no cross-device risk
+  } catch {
+    // Leave the legacy dir in place on unexpected failure rather than risk
+    // losing the snapshot; the user can restore once and the legacy dir becomes
+    // harmless. Not worth a cross-device copy shim for a one-time migration.
+  }
 }
 
 // The three files the claim flow can mutate, keyed by a stable runtime tag used
@@ -42,6 +65,7 @@ function backupPathFor(target, home) {
 }
 
 export function hasSnapshot({ home = os.homedir() } = {}) {
+  migrateLegacyRootIfNeeded(home);
   return existsSync(manifestPath(home));
 }
 
@@ -51,6 +75,7 @@ export function hasSnapshot({ home = os.homedir() } = {}) {
  * describing whether the snapshot was created this call and what it captured.
  */
 export function snapshotOriginals({ home = os.homedir() } = {}) {
+  migrateLegacyRootIfNeeded(home);
   const root = originalEnvBackupRoot(home);
   const manifest = manifestPath(home);
   if (existsSync(manifest)) {

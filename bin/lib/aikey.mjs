@@ -23,14 +23,14 @@
 // ~/.hermit/aikey-mock.json — letting ops exercise the full pipeline today.
 import os from 'node:os';
 import path from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, copyFileSync, renameSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, copyFileSync } from 'node:fs';
 
 import { hermitHome, jsonRequested } from './env.mjs';
 import {
   resolveConversationUploadBaseUrl,
   resolveAuthedServerContext,
 } from './auth.mjs';
-import { safeReadJson, chmodBestEffort } from './settings.mjs';
+import { safeReadJson, chmodBestEffort, atomicWriteFile } from './settings.mjs';
 import { escapeTomlPath } from './runtime.mjs';
 import { printCliRows, printJson, isInteractiveCli, createPromptInterface } from './terminal.mjs';
 
@@ -226,12 +226,22 @@ async function installShellHook({ noHook, envPath }) {
   return `shell hook 已写入 ${hook.rcFile}`;
 }
 
-export async function activateAikeyBundle({ bundle, home = hermitHome, noHook = false } = {}) {
-  if (!bundle) throw new Error('activateAikeyBundle: 缺少 bundle');
+// --- Sync env-file writer (extracted from activateAikeyBundle for DRY reuse) -----
+// Writes ~/.hermit/aikey.env with the bundle's key+base_url exports, mode 0o600.
+// Both the v3 claim path (applyClaimedSecret) and the old bundle path
+// (activateAikeyBundle) call this — no duplicate write-file logic.
+export function writeAikeyEnv({ bundle, home = hermitHome }) {
+  if (!bundle) throw new Error('writeAikeyEnv: 缺少 bundle');
   const envPath = path.join(home, 'aikey.env');
   mkdirSync(home, { recursive: true });
   writeFileSync(envPath, renderActiveEnv(bundle), { mode: 0o600 });
   chmodBestEffort(envPath, 0o600);
+  return envPath;
+}
+
+export async function activateAikeyBundle({ bundle, home = hermitHome, noHook = false } = {}) {
+  if (!bundle) throw new Error('activateAikeyBundle: 缺少 bundle');
+  const envPath = writeAikeyEnv({ bundle, home });
 
   const providerRows = Object.entries(bundle.providers || {}).map(([code, creds]) => {
     const [apiKeyVar] = providerEnvVars(code) || [code];
@@ -344,6 +354,100 @@ export async function runAikeyStatus({ exitOnDone = true } = {}) {
   return { ok: true, claimed: true, label, providers: keyNames };
 }
 
+// --- Agent-facing manual: lists env var names + base_url + models, no plaintext key ---
+// The manual is for external agents that need to know what variables are available,
+// what base_url to call, and which models the gateway serves. It reads local config
+// files (aikey.env, settings.json, config.toml) and optionally the discover catalog.
+// CRITICAL: it NEVER outputs plaintext keys (ANTHROPIC_AUTH_TOKEN, *_API_KEY values).
+export async function runAikeyManual({ exitOnDone = true, home = os.homedir(), hermitHome: envHome = hermitHome } = {}) {
+  // 1. Read ~/.hermit/aikey.env — variable names + base_url values (key values omitted).
+  let envVars = [];
+  let baseUrls = {};
+  let envLabel = null;
+  try {
+    const envPath = path.join(envHome, 'aikey.env');
+    const content = readFileSync(envPath, 'utf-8');
+    const parsed = parseActiveEnv(content);
+    envLabel = parsed.label;
+    // List variable NAMES only; base_url values are non-secret.
+    envVars = Object.keys(parsed.vars);
+    for (const [provider, [, baseUrlVar]] of Object.entries(PROVIDER_ENV_VARS)) {
+      if (parsed.vars[baseUrlVar]) baseUrls[provider] = parsed.vars[baseUrlVar];
+    }
+  } catch {
+    // env file doesn't exist — graceful
+  }
+
+  // 2. Read ~/.claude/settings.json — tier vars + base_url ONLY (NOT AUTH_TOKEN).
+  let claude = {};
+  try {
+    const filePath = path.join(home, '.claude', 'settings.json');
+    const { value } = safeReadJson(filePath);
+    const env = value?.env && typeof value.env === 'object' ? value.env : {};
+    const tierVars = {};
+    if (env.ANTHROPIC_DEFAULT_HAIKU_MODEL) tierVars.haiku = env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    if (env.ANTHROPIC_DEFAULT_SONNET_MODEL) tierVars.sonnet = env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+    if (env.ANTHROPIC_DEFAULT_OPUS_MODEL) tierVars.opus = env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+    if (Object.keys(tierVars).length > 0) claude.tierVars = tierVars;
+    if (env.ANTHROPIC_BASE_URL) claude.baseUrl = env.ANTHROPIC_BASE_URL;
+  } catch {
+    // settings.json doesn't exist — graceful
+  }
+
+  // 3. Read ~/.codex/config.toml — model + wire_api + provider base_url (all non-secret).
+  let codex = {};
+  try {
+    const filePath = path.join(home, '.codex', 'config.toml');
+    const raw = readFileSync(filePath, 'utf-8');
+    const { head, sections } = splitTomlSections(raw);
+    const model = readTopLevelTomlValue(head, 'model');
+    if (model) codex.model = model;
+    // wire_api + base_url live in [model_providers.X] — extract from sections.
+    for (const section of sections) {
+      if (/^\s*\[model_providers\./.test(section.header)) {
+        for (const line of section.body) {
+          const bm = line.match(/^\s*base_url\s*=\s*"(.+)"\s*$/);
+          if (bm) codex.baseUrl = bm[1];
+          const wm = line.match(/^\s*wire_api\s*=\s*"(.+)"\s*$/);
+          if (wm) codex.wireApi = wm[1];
+        }
+      }
+    }
+  } catch {
+    // config.toml doesn't exist — graceful
+  }
+
+  // No catalog fetch — the manual is a static local reference (variable names,
+  // base_url, tier models). Catalog discovery is used in the claim flow, not here.
+
+  const result = { envFile: path.join(envHome, 'aikey.env'), envLabel, envVars, baseUrls, claude, codex };
+
+  if (jsonRequested) {
+    printJson(result);
+  } else {
+    const rows = [];
+    rows.push(['环境变量文件', result.envFile, 'info']);
+    if (envLabel) rows.push(['标签', envLabel, 'info']);
+    rows.push(['变量名', result.envVars.join(', '), 'info']);
+    for (const [k, v] of Object.entries(result.baseUrls)) {
+      rows.push([`${k} base_url`, v, 'info']);
+    }
+    if (result.claude.tierVars) {
+      rows.push(['Claude tier · haiku', result.claude.tierVars.haiku, 'ok']);
+      rows.push(['Claude tier · sonnet', result.claude.tierVars.sonnet, 'ok']);
+      rows.push(['Claude tier · opus', result.claude.tierVars.opus, 'ok']);
+    }
+    if (result.claude.baseUrl) rows.push(['Claude base_url', result.claude.baseUrl, 'info']);
+    if (result.codex.model) rows.push(['Codex model', result.codex.model, 'ok']);
+    if (result.codex.wireApi) rows.push(['Codex wire_api', result.codex.wireApi, 'info']);
+    if (result.codex.baseUrl) rows.push(['Codex base_url', result.codex.baseUrl, 'info']);
+    printCliRows('AgentCli 说明书', rows, '外部 agent：source ~/.hermit/aikey.env 获取 key + base_url，按说明书指定模型调用。');
+  }
+
+  if (exitOnDone) process.exit(0);
+  return result;
+}
+
 // --- applyToConfigs: write a claimed gateway key into the LOCAL runtime configs --
 //
 // The other half of token distribution: provision/claim lands a one-time key in
@@ -364,6 +468,10 @@ export async function runAikeyStatus({ exitOnDone = true } = {}) {
 const CLAUDE_DIR = '.claude';
 const CODEX_DIR = '.codex';
 const DEFAULT_PROVIDER_NAME = 'hermit';
+// Codex dropped "chat" wire_api support (openai/codex#7782) — a freshly-claimed
+// Codex config must default to "responses" or Codex refuses to boot. Exported so
+// the claim-flow menu reuses the same source of truth instead of re-literalizing.
+export const DEFAULT_WIRE_API = 'responses';
 
 function backupFile(filePath, enabled) {
   if (!enabled || !existsSync(filePath)) return null;
@@ -376,12 +484,7 @@ function backupFile(filePath, enabled) {
 // a live API key.
 function atomicWrite(filePath, content, { backup = true } = {}) {
   const backupPath = backupFile(filePath, backup);
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  writeFileSync(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
-  chmodBestEffort(tempPath, 0o600);
-  renameSync(tempPath, filePath);
-  chmodBestEffort(filePath, 0o600);
+  atomicWriteFile(filePath, content, { mode: 0o600 });
   return backupPath;
 }
 
@@ -481,7 +584,7 @@ function setModelProviderSection(sections, name, { endpoint, wireApi }) {
   sections.splice(insertAt, 0, { header, body });
 }
 
-function applyClaudeConfig({ key, endpoint, model, home, backup }) {
+function applyClaudeConfig({ key, endpoint, tierModels, home, backup }) {
   const filePath = path.join(home, CLAUDE_DIR, 'settings.json');
   const { value } = safeReadJson(filePath);
   const settings = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -493,7 +596,11 @@ function applyClaudeConfig({ key, endpoint, model, home, backup }) {
     // custom-gateway/base-url setup, matching the user's existing config style.
     ANTHROPIC_AUTH_TOKEN: key,
   };
-  if (model) env.ANTHROPIC_MODEL = model;
+  // Tier vars (ANTHROPIC_DEFAULT_*_MODEL) replace the old single ANTHROPIC_MODEL.
+  // Two model sources is technical debt; tier vars cover all three tiers.
+  if (tierModels?.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = tierModels.haiku;
+  if (tierModels?.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = tierModels.sonnet;
+  if (tierModels?.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = tierModels.opus;
   const backupPath = atomicWriteJson(filePath, { ...settings, env }, { backup });
   return { runtime: 'claude', path: filePath, changed: true, backupPath };
 }
@@ -532,7 +639,8 @@ export function applyToConfigs({
   key,
   endpoint,
   model,
-  wireApi = 'chat',
+  tierModels,
+  wireApi = DEFAULT_WIRE_API,
   runtimes = ['codex', 'claude'],
   backup = true,
   home = os.homedir(),
@@ -541,7 +649,7 @@ export function applyToConfigs({
   if (!endpoint) throw new Error('applyToConfigs: 缺少 endpoint');
   const wanted = new Set(runtimes);
   const results = [];
-  if (wanted.has('claude')) results.push(applyClaudeConfig({ key, endpoint, model, home, backup }));
+  if (wanted.has('claude')) results.push(applyClaudeConfig({ key, endpoint, tierModels, home, backup }));
   if (wanted.has('codex')) {
     results.push(applyCodexAuth({ key, home, backup }));
     results.push(applyCodexConfig({ endpoint, model, wireApi, home, backup }));
@@ -554,53 +662,30 @@ export function applyToConfigs({
 // per-runtime endpoint + writes. configEnvBackup.mjs owns the original snapshot,
 // so these always write with backup:false (no stray .hermit-bak files).
 
-// Claude Code points straight at the gateway endpoint the pool returned — no
-// proxy-path remapping. Matches observed local configs (e.g.
-// https://ai.skg.com/cpamc-cc) and bundleFromClaimedSecret's existing behavior.
+// Claude Code base_url — the v3 receipt's ready-to-use anthropic endpoint.
 export function resolveClaudeBaseUrl(secret) {
-  return String(secret?.endpoint || '').trim();
+  return String(secret?.endpoints?.anthropic || '').trim();
 }
 
-const CODEX_PROXY_KEYS = { chat: 'openai_chat', responses: 'openai_responses' };
-function codexProxyPathKey(wireApi) {
-  return wireApi === 'responses' ? CODEX_PROXY_KEYS.responses : CODEX_PROXY_KEYS.chat;
-}
-
-// Codex base_url = the chat/responses proxy route from proxyPaths, with the
-// /chat/completions or /responses suffix Codex appends itself stripped off. Falls
-// back to the raw endpoint when no proxy route is declared. Throws an /endpoint/
-// error when the gateway endpoint is missing or unparseable so the CLI renders a
-// friendly message instead of a bare URL TypeError.
-export function resolveCodexBaseUrl(secret, wireApi = 'chat') {
-  const endpoint = String(secret?.endpoint || '').trim();
-  if (!endpoint) throw new Error('resolveCodexBaseUrl: 缺少 endpoint');
-  const proxyRoute = String(secret?.proxyPaths?.[codexProxyPathKey(wireApi)] || '').trim();
-  if (!proxyRoute) return endpoint;
-  let routeUrl;
-  try {
-    routeUrl = new URL(proxyRoute, endpoint);
-  } catch {
-    throw new Error('resolveCodexBaseUrl: endpoint 非法，无法解析代理路由');
-  }
-  routeUrl.pathname = routeUrl.pathname.replace(
-    wireApi === 'responses' ? /\/responses\/?$/ : /\/chat\/completions\/?$/,
-    '',
-  );
-  routeUrl.search = '';
-  routeUrl.hash = '';
-  return routeUrl.toString().replace(/\/$/, '');
+// Codex base_url — the v3 receipt's ready-to-use OpenAI endpoint.
+export function resolveCodexBaseUrl(secret) {
+  return String(secret?.endpoints?.openai || '').trim();
 }
 
 // Apply a claimed secret to ONLY the chosen runtimes. Claude gets the gateway
-// endpoint with no fixed model; Codex gets the resolved proxy base_url + model +
-// wire_api. backup:false — configEnvBackup.mjs owns the snapshot/restore story.
-// choices: { model?, wireApi? }.
+// endpoint with tier model vars (auto-mapped from receipt modelIds); Codex gets
+// the resolved proxy base_url + model + wire_api. backup:false — configEnvBackup.mjs
+// owns the snapshot/restore story. choices: { model?, wireApi? }.
 export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude', 'codex'], home } = {}) {
   const key = String(secret?.key || secret?.api_key || secret?.plaintext_key || '').trim();
   if (!key) throw new Error('applyClaimedSecret: 缺少 key');
   const wanted = Array.isArray(runtimes) ? runtimes : [runtimes];
   const results = [];
   const endpoints = {};
+  // The user picks ONE model for Codex; Claude tier vars all use that same model.
+  // No version-based splitting — one model, three tiers.
+  const singleModel = choices?.model || (Array.isArray(secret?.modelIds) ? secret.modelIds[0] : null);
+  const tierModels = singleModel ? { haiku: singleModel, sonnet: singleModel, opus: singleModel } : {};
   if (wanted.includes('claude')) {
     const claudeEndpoint = resolveClaudeBaseUrl(secret);
     endpoints.claude = claudeEndpoint;
@@ -608,6 +693,7 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
       ...applyToConfigs({
         key,
         endpoint: claudeEndpoint,
+        tierModels,
         runtimes: ['claude'],
         backup: false,
         ...(home ? { home } : {}),
@@ -615,8 +701,8 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
     );
   }
   if (wanted.includes('codex')) {
-    const wireApi = choices.wireApi || 'chat';
-    const codexEndpoint = resolveCodexBaseUrl(secret, wireApi);
+    const wireApi = choices.wireApi || DEFAULT_WIRE_API;
+    const codexEndpoint = resolveCodexBaseUrl(secret);
     endpoints.codex = codexEndpoint;
     results.push(
       ...applyToConfigs({
@@ -630,7 +716,23 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
       }).runtimes,
     );
   }
-  return { ok: true, runtimes: results, endpoints };
+  // Env-file injection: write ~/.hermit/aikey.env so external agents can source
+  // the key + base_url directly (no plaintext in the manual — it just names the vars).
+  // The env file carries ANTHROPIC_API_KEY/OPENAI_API_KEY + their BASE_URLs;
+  // tier model vars (ANTHROPIC_DEFAULT_*_MODEL) are Claude-Code-specific and live
+  // in settings.json env block — not in the sourced env file.
+  const envHome = home || hermitHome;
+  writeAikeyEnv({
+    bundle: {
+      displayName: 'agentcli',
+      providers: {
+        anthropic: { apiKey: key, baseUrl: endpoints.claude || '' },
+        openai: { apiKey: key, baseUrl: endpoints.codex || '' },
+      },
+    },
+    home: envHome,
+  });
+  return { ok: true, runtimes: results, endpoints, tierModels };
 }
 
 export function maskKey(key) {

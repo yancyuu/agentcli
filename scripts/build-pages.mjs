@@ -358,7 +358,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     </ul>
     <div class="callout warn">
       <div class="callout-title">注意</div>
-      <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit-env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
+      <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit/agentcli.env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
     </div>
   </section>
 

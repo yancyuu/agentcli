@@ -59,10 +59,10 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 // Unified upload endpoint for local coding (Claude Code / Codex) usage. Each
 // message carries its own project/conversation context; scene is always `coding`.
 const UPLOAD_ENDPOINT = '/api/v1/report/messages';
-// Fallback content for turns that carry no readable text (tool-use / tool-result
-// rows that nevertheless hold token usage). The wire contract requires
-// `message.content`, so text-less turns get this fixed placeholder; turns with
-// real user/assistant text ship that text in full.
+// Fallback content for usage-bearing turns that carry neither readable text nor
+// a tool_use name (e.g. tool-result rows, thinking-only turns). The wire
+// contract requires `message.content`, so those turns get this fixed
+// placeholder; text turns ship full text and tool-use turns ship the tool name.
 const REPORTED_CONTENT_PLACEHOLDER = '[usage only]';
 const SCAN_PROGRESS_FILE_INTERVAL = 25;
 const SCAN_PROGRESS_MIN_INTERVAL_MS = 1_000;
@@ -512,6 +512,22 @@ function textFromContent(content: unknown): string {
   return parts.join('\n').trim();
 }
 
+// Text-less tool-use turns carry no readable text but DO carry an invoked tool
+// name. Surfacing that name ("Bash", "Bash, Read") as `content` is far more
+// useful to the analytics side than the generic [usage only] placeholder.
+function toolNamesFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  const names: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue;
+    const block = item as Record<string, unknown>;
+    if (block.type === 'tool_use' && typeof block.name === 'string' && block.name) {
+      names.push(block.name);
+    }
+  }
+  return names.join(', ').trim();
+}
+
 function usageFromMessage(
   message: Record<string, unknown>
 ): UploadMessage['message']['usage'] | undefined {
@@ -800,10 +816,13 @@ function claudeUploadMessage(
   // turns carry no text but hold the bulk of token usage — dropping them made the
   // server undercount tokens, and the cursor advances past them so they would
   // never be retried. The real text is shipped (full content); text-less tool-use
-  // turns fall back to the placeholder so the wire field stays populated.
+  // turns report the invoked tool name(s); other text-less turns fall back to the
+  // placeholder so the wire field stays populated.
   if (!hasText && !usage) return null;
   const reportedContent =
-    textFromContent(msg.content ?? obj.content) || REPORTED_CONTENT_PLACEHOLDER;
+    textFromContent(msg.content ?? obj.content) ||
+    toolNamesFromContent(msg.content ?? obj.content) ||
+    REPORTED_CONTENT_PLACEHOLDER;
 
   const sessionId = claudeSessionId(filePath, obj);
   const messageId = claudeMessageId(obj, msg);

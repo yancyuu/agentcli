@@ -50,6 +50,49 @@ describe('listOriginalTargets', () => {
   });
 });
 
+describe('originalEnvBackupRoot', () => {
+  it('lives inside ~/.hermit as agentcli.env.bak (not a sibling of ~/.hermit)', () => {
+    // The snapshot used to sit at ~/.hermit-env.bak (a sibling of ~/.hermit). It
+    // now lives INSIDE the .hermit folder, renamed, so the token pool keeps all
+    // its data under one root.
+    expect(originalEnvBackupRoot('/tmp/fake-home')).toBe(
+      path.join('/tmp/fake-home', '.hermit', 'agentcli.env.bak'),
+    );
+  });
+});
+
+describe('legacy snapshot migration', () => {
+  it('moves a legacy ~/.hermit-env.bak snapshot into ~/.hermit/agentcli.env.bak, preserving content', async () => {
+    // A prior install captured originals at the legacy path. After upgrade the
+    // snapshot must relocate to the new path WITHOUT losing the captured content
+    // or re-snapshotting the (now pool-overwritten) live files as "original".
+    const home = await freshHome();
+    try {
+      const legacyRoot = path.join(home, '.hermit-env.bak');
+      const legacyManifest = path.join(legacyRoot, 'manifest.json');
+      await mkdir(path.dirname(legacyManifest), { recursive: true });
+      const legacyContent = JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        files: { claude: { existed: true, livePath: 'x', backupPath: 'y' } },
+      });
+      await writeFile(legacyManifest, legacyContent);
+
+      // Trigger migration via hasSnapshot (read entry point — migration is idempotent).
+      expect(hasSnapshot({ home })).toBe(true);
+      // Legacy root is gone; new root holds the manifest verbatim.
+      expect(existsSync(legacyRoot)).toBe(false);
+      const moved = JSON.parse(await readFile(path.join(originalEnvBackupRoot(home), 'manifest.json'), 'utf-8'));
+      expect(moved.files.claude.existed).toBe(true);
+      // snapshotOriginals must NOT re-snapshot now that the (migrated) manifest exists.
+      const snap = snapshotOriginals({ home });
+      expect(snap.created).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('snapshotOriginals — create-once', () => {
   let home;
   afterAll(async () => {

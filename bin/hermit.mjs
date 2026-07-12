@@ -152,7 +152,7 @@ import {
 import { runUpdate, runAddPlugin } from './lib/update.mjs';
 import { runRestart } from './lib/restart.mjs';
 import { telemetryWorkerChildArgs } from './lib/telemetryWorker.mjs';
-import { runAikey, runAikeyStatus } from './lib/aikey.mjs';
+import { runAikey, runAikeyStatus, runAikeyManual } from './lib/aikey.mjs';
 import {
   printNavigation,
   runNavigationAction,
@@ -438,6 +438,10 @@ if (commandArgs[0] === 'restart') {
   const result = await runRestart({ quiet: jsonRequested });
   if (jsonRequested) printJson(result);
   process.exit(0);
+}
+
+if (commandArgs[0] === 'aikey' && commandArgs[1] === 'manual') {
+  await runAikeyManual();
 }
 
 if (commandArgs[0] === 'usage' && commandArgs[1] === 'status') {

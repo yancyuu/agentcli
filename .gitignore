@@ -58,5 +58,3 @@ remotion/*
 .home/
 .gstack/
 
-# local-only: lark-cli credential helper, never ship to npm or commit
-bin/lib/larkSecrets.mjs
