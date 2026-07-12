@@ -31,6 +31,10 @@ export function originalEnvBackupRoot(home = os.homedir()) {
 // manifest yet, move it verbatim so the user's pre-token-pool originals survive
 // (otherwise the next snapshotOriginals would re-capture the now pool-overwritten
 // live files as "original"). Idempotent: a no-op once the new manifest exists.
+//
+// CRITICAL: when moving, the manifest's `backupPath` fields still point at the
+// OLD legacy dir. We rewrite them to the new location, otherwise restoreOriginals
+// looks for files at the (now-gone) legacy path and reports `backup-missing`.
 function migrateLegacyRootIfNeeded(home) {
   const legacy = path.join(home, LEGACY_BACKUP_DIR_NAME);
   if (!existsSync(legacy)) return;
@@ -39,10 +43,46 @@ function migrateLegacyRootIfNeeded(home) {
   try {
     mkdirSync(path.dirname(next), { recursive: true });
     renameSync(legacy, next); // same-filesystem rename under ~ → atomic, no cross-device risk
+    rewriteManifestBackupPaths(next, home); // fix the now-stale legacy paths in-place
   } catch {
     // Leave the legacy dir in place on unexpected failure rather than risk
     // losing the snapshot; the user can restore once and the legacy dir becomes
     // harmless. Not worth a cross-device copy shim for a one-time migration.
+  }
+}
+
+// Rewrite every `files[*].backupPath` in a manifest to the CURRENT canonical
+// backup path for its runtime, regardless of what was recorded at snapshot time.
+// This makes restore resilient to: (a) legacy-path migration leaving stale paths
+// in the manifest, and (b) home-dir moves. Falls back to the recorded path only
+// if the runtime tag is unknown.
+function rewriteManifestBackupPaths(root, home) {
+  const manifestFile = path.join(root, 'manifest.json');
+  if (!existsSync(manifestFile)) return;
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestFile, 'utf-8'));
+  } catch {
+    return;
+  }
+  if (!manifest || typeof manifest !== 'object' || !manifest.files) return;
+  const byRuntime = new Map(listOriginalTargets(home).map((t) => [t.runtime, t]));
+  let changed = false;
+  for (const [runtime, entry] of Object.entries(manifest.files)) {
+    const target = byRuntime.get(runtime);
+    if (!target || !entry) continue;
+    const canonical = backupPathFor(target, home);
+    if (entry.backupPath !== canonical) {
+      entry.backupPath = canonical;
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
+    chmodBestEffort(manifestFile, 0o600);
   }
 }
 
@@ -122,15 +162,21 @@ export function restoreOriginals({ home = os.homedir() } = {}) {
   if (!manifest) {
     return { ok: false, reason: 'no-snapshot', results: [] };
   }
+  // Resolve the CURRENT canonical backup path per runtime, ignoring any stale
+  // path recorded in the manifest (legacy migration / home moves can leave it
+  // pointing at a dir that no longer exists → bogus `backup-missing`).
+  const byRuntime = new Map(listOriginalTargets(home).map((t) => [t.runtime, t]));
   const results = [];
   for (const [runtime, entry] of Object.entries(manifest.files || {})) {
+    const target = byRuntime.get(runtime);
     if (entry.existed) {
-      if (!existsSync(entry.backupPath)) {
+      const backupPath = target ? backupPathFor(target, home) : entry.backupPath;
+      if (!backupPath || !existsSync(backupPath)) {
         results.push({ runtime, action: 'skipped', reason: 'backup-missing' });
         continue;
       }
       mkdirSync(path.dirname(entry.livePath), { recursive: true });
-      copyFileSync(entry.backupPath, entry.livePath);
+      copyFileSync(backupPath, entry.livePath);
       chmodBestEffort(entry.livePath, 0o600);
       results.push({ runtime, action: 'restored', path: entry.livePath });
     } else {

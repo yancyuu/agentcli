@@ -201,4 +201,89 @@ describe('restoreOriginals', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it('restores even when manifest.backupPath points at a stale legacy location', async () => {
+    // Reproduces the real 1.9.8→1.9.9 regression: the snapshot dir moved from
+    // ~/.hermit-env.bak to ~/.hermit/agentcli.env.bak, but an already-written
+    // manifest still records `backupPath` under the OLD legacy root. restore
+    // must resolve the CURRENT canonical path (not the stale one) and succeed.
+    const home = await freshHome();
+    try {
+      const paths = livePaths(home);
+      await mkdir(path.dirname(paths.claude), { recursive: true });
+      await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'ORIGINAL' } }));
+      await mkdir(path.dirname(paths.codexConfig), { recursive: true });
+      await writeFile(paths.codexConfig, '# ORIGINAL\nmodel = "gpt-4o"\n');
+
+      // Build the snapshot normally (creates canonical paths).
+      snapshotOriginals({ home });
+      // Simulate the bug: rewrite manifest.backupPath to the legacy root.
+      const manifestFile = path.join(originalEnvBackupRoot(home), 'manifest.json');
+      const manifest = JSON.parse(await readFile(manifestFile, 'utf-8'));
+      for (const entry of Object.values(manifest.files)) {
+        if (entry.backupPath) {
+          entry.backupPath = entry.backupPath.replace(
+            originalEnvBackupRoot(home),
+            path.join(home, '.hermit-env.bak'),
+          );
+        }
+      }
+      await writeFile(manifestFile, JSON.stringify(manifest, null, 2));
+
+      // Mutate live files (simulate token pool write).
+      await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'POOL-KEY' } }));
+      await writeFile(paths.codexConfig, '# POOL\nmodel = "qwen-max"\n');
+
+      // restoreOriginals must NOT trust the stale backupPath — it resolves the
+      // current canonical path and restores successfully.
+      const result = restoreOriginals({ home });
+      expect(result.ok).toBe(true);
+      const byRuntime = Object.fromEntries(result.results.map((r) => [r.runtime, r]));
+      expect(byRuntime.claude.action).toBe('restored');
+      expect(byRuntime['codex-config'].action).toBe('restored');
+      expect(JSON.parse(await readFile(paths.claude, 'utf-8')).env.ANTHROPIC_AUTH_TOKEN).toBe('ORIGINAL');
+      expect(await readFile(paths.codexConfig, 'utf-8')).toContain('gpt-4o');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('migration rewrites stale legacy backupPaths in the manifest to the new root', async () => {
+    // A legacy snapshot's manifest records backupPath under the old
+    // ~/.hermit-env.bak root. After migration to ~/.hermit/agentcli.env.bak,
+    // the manifest's backupPaths must be rewritten so restore can find the files.
+    const home = await freshHome();
+    try {
+      const legacyRoot = path.join(home, '.hermit-env.bak');
+      const legacyClaudeBackup = path.join(legacyRoot, 'claude', 'settings.json');
+      const legacyManifest = path.join(legacyRoot, 'manifest.json');
+      await mkdir(path.dirname(legacyClaudeBackup), { recursive: true });
+      await writeFile(legacyClaudeBackup, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'ORIGINAL' } }));
+      // Manifest's backupPath still points at the legacy root (pre-rename).
+      await writeFile(
+        legacyManifest,
+        JSON.stringify({
+          schemaVersion: 1,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          files: {
+            claude: { existed: true, livePath: path.join(home, '.claude', 'settings.json'), backupPath: legacyClaudeBackup },
+          },
+        }),
+      );
+
+      // hasSnapshot triggers migration (dir rename + manifest path rewrite).
+      expect(hasSnapshot({ home })).toBe(true);
+      const moved = JSON.parse(await readFile(path.join(originalEnvBackupRoot(home), 'manifest.json'), 'utf-8'));
+      expect(moved.files.claude.backupPath).toBe(path.join(originalEnvBackupRoot(home), 'claude', 'settings.json'));
+      // And restore now works end-to-end against the rewritten path.
+      const paths = livePaths(home);
+      await mkdir(path.dirname(paths.claude), { recursive: true });
+      await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'POOL-KEY' } }));
+      const result = restoreOriginals({ home });
+      expect(result.results[0].action).toBe('restored');
+      expect(JSON.parse(await readFile(paths.claude, 'utf-8')).env.ANTHROPIC_AUTH_TOKEN).toBe('ORIGINAL');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });
