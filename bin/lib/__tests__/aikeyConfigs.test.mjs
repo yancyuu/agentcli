@@ -214,11 +214,14 @@ describe('resolveClaudeBaseUrl', () => {
 });
 
 describe('resolveCodexBaseUrl', () => {
-  it('returns the v3 receipt OpenAI endpoint', () => {
-    expect(resolveCodexBaseUrl({ endpoints: { openai: 'https://gw.example/cpaopen' } })).toBe('https://gw.example/cpaopen');
+  it('appends /v1 to the v3 receipt OpenAI endpoint', () => {
+    expect(resolveCodexBaseUrl({ endpoints: { openai: 'https://ai.skg.com/cpamc-openai' } })).toBe('https://ai.skg.com/cpamc-openai/v1');
+  });
+  it('does not duplicate an existing /v1 suffix', () => {
+    expect(resolveCodexBaseUrl({ endpoints: { openai: 'https://ai.skg.com/cpamc-openai/v1' } })).toBe('https://ai.skg.com/cpamc-openai/v1');
   });
   it('trims whitespace and tolerates a missing endpoints.openai', () => {
-    expect(resolveCodexBaseUrl({ endpoints: { openai: '  https://gw.example/cpaopen  ' } })).toBe('https://gw.example/cpaopen');
+    expect(resolveCodexBaseUrl({ endpoints: { openai: '  https://gw.example/cpaopen  ' } })).toBe('https://gw.example/cpaopen/v1');
     expect(resolveCodexBaseUrl({})).toBe('');
   });
 });
@@ -237,14 +240,14 @@ describe('applyClaimedSecret — per-runtime writes', () => {
         home,
       });
       // Endpoints recorded; codex = receipt openai endpoint, claude absent.
-      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen');
+      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen/v1');
       expect(result.endpoints.claude).toBeUndefined();
 
       // Codex auth + config written.
       const auth = JSON.parse(await readFile(path.join(home, '.codex', 'auth.json'), 'utf-8'));
       expect(auth.OPENAI_API_KEY).toBe('sk-pool');
       const toml = await readFile(path.join(home, '.codex', 'config.toml'), 'utf-8');
-      expect(toml).toMatch(/base_url = "https:\/\/gw\.example\/cpaopen"/);
+      expect(toml).toMatch(/base_url = "https:\/\/gw\.example\/cpaopen\/v1"/);
       expect(toml).toMatch(/^model = "qwen-max"/m);
 
       // Claude NOT created.
@@ -273,7 +276,7 @@ describe('applyClaimedSecret — per-runtime writes', () => {
       });
       // Two distinct endpoints straight from the v3 receipt.
       expect(result.endpoints.claude).toBe('https://gw.example/cpamc-cc');
-      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen');
+      expect(result.endpoints.codex).toBe('https://gw.example/cpaopen/v1');
       expect(result.endpoints.claude).not.toBe(result.endpoints.codex);
       // tierModels: all three tiers use the single chosen model.
       expect(result.tierModels).toEqual({ haiku: 'GLM-5.2', sonnet: 'GLM-5.2', opus: 'GLM-5.2' });
@@ -408,7 +411,7 @@ describe('applyClaimedSecret — env file injection', () => {
       expect(content).toContain('export ANTHROPIC_API_KEY="sk-envtest"');
       expect(content).toContain('export ANTHROPIC_BASE_URL="https://gw.example/cpamc-cc"');
       expect(content).toContain('export OPENAI_API_KEY="sk-envtest"');
-      expect(content).toContain('export OPENAI_BASE_URL="https://gw.example/cpaopen"');
+      expect(content).toContain('export OPENAI_BASE_URL="https://gw.example/cpaopen/v1"');
       // Tier model vars are NOT in the env file (they're Claude-Code-specific,
       // written to settings.json env block; external agents specify model per-request).
       expect(content).not.toContain('ANTHROPIC_DEFAULT');

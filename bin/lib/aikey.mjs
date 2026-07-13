@@ -586,9 +586,11 @@ export function resolveClaudeBaseUrl(secret) {
   return String(secret?.endpoints?.anthropic || '').trim();
 }
 
-// Codex base_url — the v3 receipt's ready-to-use OpenAI endpoint.
+// Codex base_url — OpenAI-compatible APIs require the /v1 prefix.
 export function resolveCodexBaseUrl(secret) {
-  return String(secret?.endpoints?.openai || '').trim();
+  const endpoint = String(secret?.endpoints?.openai || '').trim().replace(/\/+$/, '');
+  if (!endpoint) return '';
+  return endpoint.endsWith('/v1') ? endpoint : `${endpoint}/v1`;
 }
 
 // Apply a claimed secret to ONLY the chosen runtimes. Claude gets the gateway
