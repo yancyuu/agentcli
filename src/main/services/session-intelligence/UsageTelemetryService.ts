@@ -57,11 +57,34 @@ function emptyProviderMetrics(): UsageProviderMetrics {
   };
 }
 
-function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetryRow[] {
-  return sessions
-    .filter((session) => session.tokens.total > 0 || session.messageCount > 0)
-    .map((session) => ({
-      key: `local:${session.provider}:${session.relPath}`,
+export function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetryRow[] {
+  // One row per (provider × projectPath) identity, NOT per session file. Every
+  // identity field is derived from projectPath, so sessions that share provider +
+  // projectPath are the same logical "local user" and must be folded together.
+  // The previous per-session map keyed on relPath (which embeds the session uuid),
+  // so status.json grew without bound — one row per .jsonl — and every 10-min scan
+  // re-serialised/re-read megabytes. Group key is stable and uuid-free.
+  const grouped = new Map<string, UserUsageTelemetryRow>();
+  for (const session of sessions) {
+    if (!(session.tokens.total > 0 || session.messageCount > 0)) continue;
+    const groupKey = `local:${session.provider}:${session.projectPath}`;
+    const lastActiveAt = session.endTime || session.startTime || undefined;
+    const existing = grouped.get(groupKey);
+    if (existing) {
+      existing.sessions += 1;
+      existing.messages += session.messageCount;
+      existing.tokensIn += session.tokens.input;
+      existing.tokensOut += session.tokens.output;
+      existing.cacheRead += session.tokens.cacheRead;
+      existing.cacheCreation += session.tokens.cacheCreation;
+      existing.tokensTotal += session.tokens.total;
+      if (lastActiveAt && (!existing.lastActiveAt || lastActiveAt > existing.lastActiveAt)) {
+        existing.lastActiveAt = lastActiveAt;
+      }
+      continue;
+    }
+    grouped.set(groupKey, {
+      key: groupKey,
       kind: 'local' as const,
       identity: {
         platform: 'local',
@@ -81,8 +104,10 @@ function localUserRowsFromSessions(sessions: SessionEntry[]): UserUsageTelemetry
       cacheRead: session.tokens.cacheRead,
       cacheCreation: session.tokens.cacheCreation,
       tokensTotal: session.tokens.total,
-      lastActiveAt: session.endTime || session.startTime || undefined,
-    }));
+      lastActiveAt,
+    });
+  }
+  return [...grouped.values()];
 }
 
 function statusFromCollection(collection: UsageCollectionResult): UsageTelemetryStatus {
