@@ -71,11 +71,17 @@ function removeDaemonPidFile() {
 
 function signalDaemon(pid, signal) {
   if (!pid) return false;
-  try {
-    process.kill(-pid, signal);
-    return true;
-  } catch {
-    // Fall back to direct process signal.
+  // Process-group signaling (negative pid) is a Unix concept; on Windows
+  // process.kill(-pid) always throws EINVAL. Skip it on win32 and go straight
+  // to the direct signal, avoiding a guaranteed exception every call. The
+  // Unix path (group first → direct fallback) is unchanged.
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-pid, signal);
+      return true;
+    } catch {
+      // Fall back to direct process signal.
+    }
   }
   try {
     process.kill(pid, signal);
