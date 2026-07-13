@@ -173,6 +173,17 @@ describe('restoreOriginals', () => {
       expect(await readFile(paths.codexConfig, 'utf-8')).toContain('gpt-4o');
       // Token-pool-created file is GONE, no residue.
       expect(existsSync(paths.codexAuth)).toBe(false);
+
+      // A successful restore closes this claim cycle. The old snapshot must be
+      // removed so a later claim captures the then-current user configuration.
+      expect(hasSnapshot({ home })).toBe(false);
+      expect(existsSync(originalEnvBackupRoot(home))).toBe(false);
+
+      await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'NEXT-ORIGINAL' } }));
+      const next = snapshotOriginals({ home });
+      expect(next.created).toBe(true);
+      const nextManifest = JSON.parse(await readFile(path.join(originalEnvBackupRoot(home), 'manifest.json'), 'utf-8'));
+      expect(await readFile(nextManifest.files.claude.backupPath, 'utf-8')).toContain('NEXT-ORIGINAL');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

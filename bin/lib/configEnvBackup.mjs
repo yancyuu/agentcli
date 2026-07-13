@@ -8,7 +8,8 @@
 //     snapshot always means "what the machine looked like before the token pool intervened".
 //   • restoreOriginals() replays that snapshot: existed files are copied back,
 //     files the token pool CREATED (originally absent) are deleted, so the machine
-//     returns to its pre-token-pool state with no leftover residue.
+//     returns to its pre-token-pool state with no leftover residue. After a complete
+//     restore, the snapshot is removed so the next claim starts a fresh cycle.
 //
 // The snapshot files hold live API keys, so they are written mode 0o600.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -198,5 +199,9 @@ export function restoreOriginals({ home = os.homedir() } = {}) {
       }
     }
   }
-  return { ok: true, results };
+  const complete = results.every((result) => result.reason !== 'backup-missing');
+  if (complete) {
+    rmSync(originalEnvBackupRoot(home), { recursive: true, force: true });
+  }
+  return { ok: complete, ...(complete ? {} : { reason: 'incomplete' }), results };
 }
