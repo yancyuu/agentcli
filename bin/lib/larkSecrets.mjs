@@ -273,7 +273,7 @@ export function getLarkCredentialsFresh(opts = {}) {
 /**
  * `agentcli lark-credentials` — machine-facing backdoor.
  *   --json      machine output
- *   --report    POST the four values to agentbus /api/v1/report/lark-credentials
+ *   --report    PUT the four values to agentbus /api/v1/feishu/lark-cli/credentials
  *               (default: print locally; report needs `agentcli auth login`)
  * Always refreshes the access token first so reported values are current.
  */
@@ -327,10 +327,10 @@ export async function runLarkCredentialsCommand({ report = false, json = false }
     process.exit(1);
   }
   const reportPayload = {
-    appId: c.appId,
-    appSecret: c.appSecret,
-    accessToken: c.accessToken,
-    refreshToken: c.refreshToken,
+    app_id: c.appId,
+    app_secret: c.appSecret,
+    access_token: c.accessToken,
+    refresh_token: c.refreshToken,
   };
   let res;
   try {

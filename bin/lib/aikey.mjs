@@ -1,12 +1,15 @@
-// aikey.mjs — CLI "认领 aikey" command.
+// aikey.mjs — CLI "认领 aikey" command + token-distribution config writer.
 //
-// Faithful JS port of aikey-cli's key-distribution mechanism
-// (aikey-cli/src/commands_account.rs: provider_env_vars / write_active_env /
-// ensure_shell_hook). aikey-cli distributes a key by:
-//   1. mapping each provider to its SDK env vars (ANTHROPIC_API_KEY/_BASE_URL, …),
-//   2. writing those exports into an `active.env` file,
-//   3. installing an idempotent shell precmd/PROMPT_COMMAND hook that sources it,
-//      so every harness (Claude Code, Codex, …) started in that shell picks the key.
+// Two distribution surfaces, both fed by the same provider→SDK-env-var map:
+//   • applyToConfigs / applyClaimedSecret — the LIVE path: writes the gateway key
+//     straight into ~/.claude/settings.json (env.ANTHROPIC_AUTH_TOKEN/BASE_URL +
+//     tier model vars) and ~/.codex/{auth.json,config.toml}. Claude Code / Codex
+//     read their key from their own config, so NO shell-env injection is needed.
+//   • ~/.hermit/aikey.env — a sourced env file kept as the "claimed" marker and as
+//     a convenience for external agents (see runAikeyManual). It is never auto-
+//     sourced: the old precmd/PROMPT_COMMAND shell hook was REMOVED because the
+//     config-file injection above makes per-shell env exports redundant. Do not
+//     re-add it.
 //
 // Three adaptations to hermit's reality (no local aikey-proxy; key sourced from a
 // server endpoint that is NOT supported yet → mocked locally):
@@ -15,15 +18,13 @@
 //   • the written value is the REAL key, not a proxy sentinel token — aikey's own
 //     `--direct` mode (handle_run_direct) does exactly this when there is no proxy;
 //   • *_BASE_URL is written only when a base url is actually provided.
-// The distribution mechanism itself (provider map, env file, shell hook, marker,
-// --no-hook skip, [Y/n] confirm) is copied verbatim.
 //
 // Key source resolution tries the real server endpoint first (so it "just works"
 // the moment the server ships the route), then falls back to a local mock file at
 // ~/.hermit/aikey-mock.json — letting ops exercise the full pipeline today.
 import os from 'node:os';
 import path from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, copyFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 
 import { hermitHome, jsonRequested } from './env.mjs';
 import {
@@ -32,7 +33,7 @@ import {
 } from './auth.mjs';
 import { safeReadJson, chmodBestEffort, atomicWriteFile } from './settings.mjs';
 import { escapeTomlPath } from './runtime.mjs';
-import { printCliRows, printJson, isInteractiveCli, createPromptInterface } from './terminal.mjs';
+import { printCliRows, printJson } from './terminal.mjs';
 
 // --- Provider → SDK env-var map (aikey commands_account.rs:1491) -------------
 // Canonical code → [apiKeyVar, baseUrlVar]. Brand aliases resolve via
@@ -103,34 +104,6 @@ export function parseActiveEnv(content) {
   return { label, vars };
 }
 
-// --- buildShellHook (aikey ensure_shell_hook:1820) --------------------------
-// Pure: returns { rcFile, block } for zsh/bash, or null for unsupported shells.
-// `marker` makes the hook idempotent (installer skips if rcFile already has it).
-const SHELL_HOOK_MARKER = '# openhermit shell hook';
-
-export function buildShellHook({ shell, envPath, marker = SHELL_HOOK_MARKER }) {
-  const sh = String(shell || '');
-  const isZsh = sh.includes('zsh');
-  const isBash = sh.includes('bash');
-  if (!isZsh && !isBash) return null;
-
-  const home = os.homedir();
-  let rcFile;
-  if (isZsh) {
-    rcFile = path.join(home, '.zshrc');
-  } else {
-    // aikey: write to the first candidate that exists, else the first (.bashrc).
-    const candidates = [path.join(home, '.bashrc'), path.join(home, '.bash_profile')];
-    rcFile = candidates.find((c) => existsSync(c)) || candidates[0];
-  }
-
-  const block = isZsh
-    ? `\n${marker}\n_openhermit_precmd() { [[ -f ${envPath} ]] && source ${envPath}; }\nprecmd_functions+=(_openhermit_precmd)\n`
-    : `\n${marker}\nPROMPT_COMMAND='[[ -f ${envPath} ]] && source ${envPath}'\n`;
-
-  return { rcFile, block };
-}
-
 // --- Key source: server (real, not-yet-supported) → mock fallback ------------
 
 // Expected server response: { displayName?, providers: { <code|alias>: { apiKey, baseUrl? } } }.
@@ -189,43 +162,6 @@ export async function resolveApiKeyBundle({ home }) {
   return mock ? { source: 'mock', ...mock } : null;
 }
 
-// --- Shell-hook installer (IO; mirrors aikey ensure_shell_hook side effects) --
-// Returns a short human status string. Idempotent via the marker. Prompts [Y/n]
-// in an interactive terminal (never in --json mode); honors --no-hook and
-// OPENHERMIT_NO_HOOK=1.
-async function installShellHook({ noHook, envPath }) {
-  if (noHook || process.env.OPENHERMIT_NO_HOOK === '1') {
-    return `已跳过 shell hook（--no-hook）。手动生效请执行：source ${envPath}`;
-  }
-  const hook = buildShellHook({ shell: process.env.SHELL || '', envPath });
-  if (!hook) {
-    return `未识别 SHELL，请手动添加到 shell 配置：source ${envPath}`;
-  }
-  let existing = '';
-  try {
-    existing = readFileSync(hook.rcFile, 'utf-8');
-  } catch {
-    // rcFile may not exist yet — append will create it.
-  }
-  if (existing.includes(SHELL_HOOK_MARKER)) {
-    return `shell hook 已安装于 ${hook.rcFile}（无需重复安装）`;
-  }
-  if (isInteractiveCli() && !jsonRequested) {
-    const rl = createPromptInterface();
-    let answer = 'y';
-    try {
-      answer = await rl.question(`将向 ${hook.rcFile} 写入 precmd hook，是否继续？ [Y/n] `);
-    } finally {
-      rl.close();
-    }
-    if (['n', 'no'].includes(answer.trim().toLowerCase())) {
-      return `已跳过 shell hook。手动生效请执行：source ${envPath}`;
-    }
-  }
-  appendFileSync(hook.rcFile, hook.block);
-  return `shell hook 已写入 ${hook.rcFile}`;
-}
-
 // --- Sync env-file writer (extracted from activateAikeyBundle for DRY reuse) -----
 // Writes ~/.hermit/aikey.env with the bundle's key+base_url exports, mode 0o600.
 // Both the v3 claim path (applyClaimedSecret) and the old bundle path
@@ -239,7 +175,7 @@ export function writeAikeyEnv({ bundle, home = hermitHome }) {
   return envPath;
 }
 
-export async function activateAikeyBundle({ bundle, home = hermitHome, noHook = false } = {}) {
+export async function activateAikeyBundle({ bundle, home = hermitHome } = {}) {
   if (!bundle) throw new Error('activateAikeyBundle: 缺少 bundle');
   const envPath = writeAikeyEnv({ bundle, home });
 
@@ -249,15 +185,14 @@ export async function activateAikeyBundle({ bundle, home = hermitHome, noHook = 
     return [apiKeyVar, creds?.baseUrl ? `${masked}  →  ${creds.baseUrl}` : masked, 'ok'];
   });
 
-  const hookStatus = await installShellHook({ noHook, envPath });
-  return { ok: true, envPath, hookStatus, providerRows, providers: Object.keys(bundle.providers || {}) };
+  return { ok: true, envPath, providerRows, providers: Object.keys(bundle.providers || {}) };
 }
 
 // --- Command entry -----------------------------------------------------------
 // `exitOnDone` mirrors runAuthLogin/printServicesStatus: the CLI subcommand path
 // exits on completion, the interactive-menu path passes false so control returns
 // to the menu loop.
-export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
+export async function runAikey({ exitOnDone = true } = {}) {
   const home = hermitHome;
   const bundle = await resolveApiKeyBundle({ home });
 
@@ -275,7 +210,7 @@ export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
     return { ok: false };
   }
 
-  const activation = await activateAikeyBundle({ bundle, home, noHook });
+  const activation = await activateAikeyBundle({ bundle, home });
   const sourceLabel = bundle.source === 'server' ? `服务端 (${resolveConversationUploadBaseUrl()})` : `本地 mock (${path.join(home, 'aikey-mock.json')})`;
 
   if (jsonRequested) {
@@ -285,7 +220,6 @@ export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
       source: bundle.source,
       envPath: activation.envPath,
       providers: activation.providers,
-      hook: activation.hookStatus,
     });
   }
 
@@ -293,8 +227,7 @@ export async function runAikey({ noHook = false, exitOnDone = true } = {}) {
     ['来源', sourceLabel, 'info'],
     ...activation.providerRows,
     ['写入', activation.envPath, 'ok'],
-    ['shell', activation.hookStatus, 'ok'],
-  ], `新开一个终端即可生效，或立即执行：source ${activation.envPath}`);
+  ], `立即执行：source ${activation.envPath} 获取 key + base_url（或供外部 agent source）。`);
 
   const result = { ok: true, source: bundle.source, envPath: activation.envPath, providers: activation.providers };
   if (exitOnDone) process.exit(0);
@@ -314,16 +247,6 @@ export async function runAikeyStatus({ exitOnDone = true } = {}) {
     exists = false;
   }
 
-  const hook = buildShellHook({ shell: process.env.SHELL || '', envPath });
-  let hookInstalled = false;
-  if (hook) {
-    try {
-      hookInstalled = readFileSync(hook.rcFile, 'utf-8').includes(SHELL_HOOK_MARKER);
-    } catch {
-      hookInstalled = false;
-    }
-  }
-
   if (!exists) {
     if (jsonRequested) printJson({ ok: true, command: 'aikey-status', claimed: false, envPath });
     printCliRows('aikey 状态', [
@@ -336,20 +259,16 @@ export async function runAikeyStatus({ exitOnDone = true } = {}) {
 
   const { label, vars } = parseActiveEnv(content);
   const keyNames = Object.keys(vars).filter((name) => name.endsWith('_API_KEY'));
-  const hookText = !hook ? '未识别 SHELL' : hookInstalled ? `已安装 (${hook.rcFile})` : '未安装';
 
   if (jsonRequested) {
-    printJson({ ok: true, command: 'aikey-status', claimed: true, label, providers: keyNames, envPath, hookInstalled });
+    printJson({ ok: true, command: 'aikey-status', claimed: true, label, providers: keyNames, envPath });
   }
   printCliRows('aikey 状态', [
     ['状态', '已认领', 'ok'],
     ['身份', label || '—', 'info'],
     ...keyNames.map((name) => [name, maskKey(vars[name]), 'ok']),
     ['文件', envPath, 'info'],
-    ['shell hook', hookText, hookInstalled ? 'ok' : 'warn'],
-  ], hookInstalled
-    ? '新终端会自动加载已认领的 key。'
-    : `未装 shell hook：新终端需手动 source ${envPath}（或在「认领」时安装）。`);
+  ], 'key 已写入 Claude / Codex 配置，下次启动即生效；外部 agent 可 source 上面的 env 文件。');
   if (exitOnDone) process.exit(0);
   return { ok: true, claimed: true, label, providers: keyNames };
 }

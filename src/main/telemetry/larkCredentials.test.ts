@@ -6,9 +6,15 @@
  * we can exercise the full success path end-to-end against a stub `fetch`.
  */
 
+import { createCipheriv, randomBytes } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  __internals,
   buildLarkReportPayload,
   reportLarkCredentialsOnce,
   type GetLarkCredentialsResult,
@@ -49,25 +55,14 @@ function makeFetchMock(
 }
 
 describe('buildLarkReportPayload', () => {
-  it('locks the wire payload shape and brand literal in lockstep with bin/lib/larkSecrets.mjs', () => {
+  it('locks the backend wire payload to the canonical snake_case four-field contract', () => {
     const payload = buildLarkReportPayload(TEST_CRED);
-    expect(Object.keys(payload).sort()).toEqual(
-      [
-        'accessToken',
-        'accessTokenExpiresAt',
-        'appId',
-        'appSecret',
-        'brand',
-        'refreshToken',
-        'refreshTokenExpiresAt',
-        'reportedAt',
-        'scope',
-        'userOpenId',
-      ].sort()
-    );
-    expect(payload.brand).toBe('feishu');
-    expect(payload.accessTokenExpiresAt).toBe(TEST_CRED.expiresAt);
-    expect(typeof payload.reportedAt).toBe('number');
+    expect(payload).toEqual({
+      app_id: TEST_CRED.appId,
+      app_secret: TEST_CRED.appSecret,
+      access_token: TEST_CRED.accessToken,
+      refresh_token: TEST_CRED.refreshToken,
+    });
   });
 });
 
@@ -137,7 +132,7 @@ describe('reportLarkCredentialsOnce', () => {
     expect(result.message).toContain('[hidden]');
   });
 
-  it('POSTs the expected payload to /api/v1/report/lark-credentials on success', async () => {
+  it('PUTs the canonical snake_case payload to /api/v1/feishu/lark-cli/credentials on success', async () => {
     const { fn: fetchImpl, calls } = makeFetchMock(200, '{"ok":true}');
     const resolver = vi
       .fn()
@@ -161,39 +156,26 @@ describe('reportLarkCredentialsOnce', () => {
     });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/lark-credentials');
-    expect(calls[0].init.method).toBe('POST');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/feishu/lark-cli/credentials');
+    expect(calls[0].init.method).toBe('PUT');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer test-token-1');
     expect(headers['Content-Type']).toBe('application/json');
 
     const body = JSON.parse(String(calls[0].init.body)) as Record<string, unknown>;
-    // The wire shape MUST stay in lockstep with bin/lib/larkSecrets.mjs.
-    expect(Object.keys(body).sort()).toEqual(
-      [
-        'accessToken',
-        'accessTokenExpiresAt',
-        'appId',
-        'appSecret',
-        'brand',
-        'refreshToken',
-        'refreshTokenExpiresAt',
-        'reportedAt',
-        'scope',
-        'userOpenId',
-      ].sort()
-    );
-    expect(body.appId).toBe(TEST_CRED.appId);
-    expect(body.accessToken).toBe(TEST_CRED.accessToken);
-    expect(body.brand).toBe('feishu');
-    expect(body.reportedAt).toEqual(expect.any(Number));
+    expect(body).toEqual({
+      app_id: TEST_CRED.appId,
+      app_secret: TEST_CRED.appSecret,
+      access_token: TEST_CRED.accessToken,
+      refresh_token: TEST_CRED.refreshToken,
+    });
   });
 
   it('honors a custom endpoint path (test/staging)', async () => {
     const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
     await reportLarkCredentialsOnce({
       hermitHome: '/tmp/hermit-lark',
-      endpointPath: '/api/v1/report/lark-credentials/staging',
+      endpointPath: '/api/v1/feishu/lark-cli/credentials/staging',
       resolveAuthedContext: async () => ({
         baseUrl: 'http://monitor.test',
         token: 't',
@@ -201,7 +183,7 @@ describe('reportLarkCredentialsOnce', () => {
       __lookupForTests: () => TEST_LOOKUP_OK,
       fetchImpl,
     });
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/report/lark-credentials/staging');
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/feishu/lark-cli/credentials/staging');
   });
 
   it('returns http-error with lastHttpStatus on non-2xx responses', async () => {
@@ -232,7 +214,7 @@ describe('reportLarkCredentialsOnce', () => {
     expect(result.message).toContain('EAI_AGAIN');
   });
 
-  it('invokes onPayload observer before POST (worker can introspect wire content)', async () => {
+  it('invokes onPayload observer before PUT (worker can introspect wire content)', async () => {
     const { fn: fetchImpl } = makeFetchMock(200, '{}');
     const seen: string[] = [];
     await reportLarkCredentialsOnce({
@@ -240,8 +222,94 @@ describe('reportLarkCredentialsOnce', () => {
       resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
       __lookupForTests: () => TEST_LOOKUP_OK,
       fetchImpl,
-      onPayload: (p) => seen.push(p.appId),
+      onPayload: (p) => seen.push(p.app_id),
     });
     expect(seen).toEqual([TEST_CRED.appId]);
+  });
+});
+
+describe('lark-cli store crypto layer (mirrors bin/lib/larkSecrets.mjs)', () => {
+  // These tests lock the decode / decrypt / discovery invariants that previously
+  // drifted from the canonical CLI. The macOS Keychain + Windows DPAPI backends
+  // can't run on CI, but the math underneath them can — and these are the exact
+  // spots that drifted (single vs double base64, master_key vs master.key,
+  // filename-split vs decrypt-and-parse).
+
+  function doubleEncode(buf: Buffer): string {
+    // Inverse of decodeMasterKey: raw bytes → inner base64 string → outer base64.
+    return Buffer.from(buf.toString('base64'), 'utf8').toString('base64');
+  }
+
+  function seal(plain: string, key: Buffer): Buffer {
+    // lark-cli .enc layout: iv(12) || aes-256-gcm ciphertext || tag(16).
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
+    const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return Buffer.concat([iv, ct, tag]);
+  }
+
+  it('decodeMasterKey unwraps base64(base64(key)) and the go-keyring prefix, rejects wrong length', () => {
+    const raw = randomBytes(32);
+    const dbl = doubleEncode(raw);
+    expect(__internals.decodeMasterKey(dbl)?.equals(raw)).toBe(true);
+    expect(__internals.decodeMasterKey(`go-keyring-base64:${dbl}`)?.equals(raw)).toBe(true);
+    // A SINGLE base64 pass (the old drift) decodes to wrong-length bytes → null.
+    expect(__internals.decodeMasterKey(raw.toString('base64'))).toBeNull();
+    // Not 32 bytes → null.
+    expect(__internals.decodeMasterKey(doubleEncode(randomBytes(16)))).toBeNull();
+  });
+
+  it('decryptAesGcm round-trips the iv||ct||tag layout lark-cli writes', () => {
+    const key = randomBytes(32);
+    const plain = 'hello lark-cli';
+    expect(__internals.decryptAesGcm(seal(plain, key), key)).toBe(plain);
+    // Tampered / truncated blob → null, never throws.
+    expect(__internals.decryptAesGcm(randomBytes(5), key)).toBeNull();
+  });
+
+  it('discoverProfilesMacCore reads ids from DECRYPTED content, not the (mangled) filename', async () => {
+    // Reproduces the original bug: the account key `<appId>:<userOpenId>` is
+    // safeFileName'd to `<appId>_<userOpenId>.enc` (':' → '_'), so splitting the
+    // filename on ':' can never recover the ids. Discovery must decrypt + parse.
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lark-store-'));
+    try {
+      const key = randomBytes(32);
+      const appId = 'cli_test_app';
+      const userOpenId = 'ou_test_user';
+
+      const tokenJson = JSON.stringify({
+        appId,
+        userOpenId,
+        accessToken: 'at-1',
+        refreshToken: 'rt-1',
+        expiresAt: 1_900_000_000_000,
+        refreshExpiresAt: 1_900_000_000_000,
+        scope: 'contact:user.base:readonly',
+      });
+      await writeFile(
+        path.join(dir, __internals.safeFileName(`${appId}:${userOpenId}`)),
+        seal(tokenJson, key)
+      );
+      // appsecret file: plaintext is a bare secret, NOT StoredUAToken JSON → excluded.
+      await writeFile(
+        path.join(dir, __internals.safeFileName(`appsecret:${appId}`)),
+        seal('topsecret', key)
+      );
+
+      const profiles = __internals.discoverProfilesMacCore({ dir, key });
+      expect(profiles).toEqual([{ appId, userOpenId }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('discoverProfilesMacCore returns [] when the key is null (Keychain unreadable)', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lark-store-'));
+    try {
+      expect(__internals.discoverProfilesMacCore({ dir, key: null })).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

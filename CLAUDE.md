@@ -252,9 +252,10 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 
 ## Hermit Team Context
 
-Current team slug: `assistant-1783672664880`
+Current team slug: `assistant-1783914291518`
 
 Available teams:
+- assistant-1783672664880 (测测): 1
 - 23 (测试23)
 - sassasasas
 - sas

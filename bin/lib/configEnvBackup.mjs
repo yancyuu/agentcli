@@ -106,6 +106,16 @@ function backupPathFor(target, home) {
 
 export function hasSnapshot({ home = os.homedir() } = {}) {
   migrateLegacyRootIfNeeded(home);
+  // Self-heal stale backupPath entries. A manifest can carry legacy-root paths if
+  // it was created before the dir rename and migration short-circuited (canonical
+  // manifest already existed, so the rename path — the only place that rewrote
+  // paths — never ran), or after a home-dir move. restoreOriginals resolves the
+  // canonical path at read time regardless, but normalize here so the on-disk
+  // manifest stays truthful for anyone inspecting it. Idempotent no-op when the
+  // paths are already canonical.
+  if (existsSync(manifestPath(home))) {
+    rewriteManifestBackupPaths(originalEnvBackupRoot(home), home);
+  }
   return existsSync(manifestPath(home));
 }
 

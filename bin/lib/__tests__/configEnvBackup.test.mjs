@@ -248,6 +248,46 @@ describe('restoreOriginals', () => {
     }
   });
 
+  it('hasSnapshot self-heals stale backupPaths in an already-canonical manifest', async () => {
+    // The real 1.9.8→1.9.9 leftover on disk: the snapshot dir moved to the
+    // canonical root, but a manifest already living there still records legacy-
+    // root backupPaths AND there is no legacy dir left to trigger the rename-
+    // and-rewrite migration (migrateLegacyRootIfNeeded short-circuits when the
+    // canonical manifest exists). hasSnapshot must rewrite those paths on read
+    // so the on-disk manifest stays truthful — restore is already immune, but a
+    // stale manifest misleads anyone inspecting it.
+    const home = await freshHome();
+    try {
+      const paths = livePaths(home);
+      await mkdir(path.dirname(paths.claude), { recursive: true });
+      await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'ORIGINAL' } }));
+      await mkdir(path.dirname(paths.codexConfig), { recursive: true });
+      await writeFile(paths.codexConfig, '# ORIGINAL\nmodel = "gpt-4o"\n');
+
+      snapshotOriginals({ home }); // writes canonical paths
+      // Corrupt: rewrite every backupPath to the legacy root, with NO legacy dir.
+      const manifestFile = path.join(originalEnvBackupRoot(home), 'manifest.json');
+      const manifest = JSON.parse(await readFile(manifestFile, 'utf-8'));
+      for (const entry of Object.values(manifest.files)) {
+        if (entry.backupPath) {
+          entry.backupPath = entry.backupPath.replace(
+            originalEnvBackupRoot(home),
+            path.join(home, '.hermit-env.bak'),
+          );
+        }
+      }
+      await writeFile(manifestFile, JSON.stringify(manifest, null, 2));
+
+      expect(hasSnapshot({ home })).toBe(true);
+
+      const healed = JSON.parse(await readFile(manifestFile, 'utf-8'));
+      expect(healed.files.claude.backupPath).toBe(path.join(originalEnvBackupRoot(home), 'claude', 'settings.json'));
+      expect(healed.files['codex-config'].backupPath).toBe(path.join(originalEnvBackupRoot(home), 'codex', 'config.toml'));
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('migration rewrites stale legacy backupPaths in the manifest to the new root', async () => {
     // A legacy snapshot's manifest records backupPath under the old
     // ~/.hermit-env.bak root. After migration to ~/.hermit/agentcli.env.bak,

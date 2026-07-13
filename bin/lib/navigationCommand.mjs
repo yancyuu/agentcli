@@ -502,7 +502,6 @@ function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
   printCliRows('认领 token 完成', rows, [
     '已按所选运行时直接写入 Claude/Codex 配置文件，新开终端即可生效。',
     '原始配置已快照到 ~/.hermit/agentcli.env.bak，可在「token 池 → 恢复原始配置」一键还原。',
-    '环境变量已写入 ~/.hermit/aikey.env，外部 agent 执行 source ~/.hermit/aikey.env 即可获取 key + base_url。',
   ].join('\n'));
 }
 
@@ -673,13 +672,13 @@ function assistantStageRow(label, result, successText) {
 }
 
 async function confirmAssistantWizardStart() {
-  printCliRows('开通数字员工向导', [
+  printCliRows('快速创建数字员工', [
     ['1', '填写数字员工名称和描述', 'info'],
     ['2', '绑定渠道', 'info'],
-    ['3', '配置 lark-cli 个人授权（飞书/Lark）', 'info'],
+    ['3', '配置 lark-cli 全量个人授权（飞书/Lark）', 'info'],
     ['4', '返回团队 ID、绑定状态和下一步', 'info'],
-  ], '按 Enter 开始；按 ← / Esc 取消。');
-  return (await waitForContinue('按 Enter 开始创建数字员工 | ←/Esc 取消')) === 'continue';
+  ], '本向导只做最小化快速开通；复杂配置（成员、权限、高级参数等）建议在 Web 工作台修改。');
+  return (await waitForContinue('按 Enter 开始快速创建数字员工 | ←/Esc 取消')) === 'continue';
 }
 
 async function pickAssistantAgentType() {
@@ -724,13 +723,16 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
     const title = hasUser ? '补充 lark-cli 个人权限' : '授权 lark-cli 使用本次飞书应用';
     console.log(ui.accent(ui.bold(title)));
     console.log('');
+    const rendered = renderTerminalQr(url);
+    console.log('');
     const browser = await openExternalUrl(url).catch(() => ({ opened: false }));
     printCliRows(title, [
+      ...(rendered ? [] : [['二维码', '当前终端无法渲染，请用浏览器或下方链接', 'warn']]),
       ['应用来源', '本次渠道绑定的飞书应用', 'ok'],
       ['授权对象', '创建者个人飞书身份', 'info'],
       ...(authInit?.user_code ? [['验证码', authInit.user_code, 'ok']] : []),
       ['浏览器', browser.opened ? '已自动打开授权页面' : '未自动打开，请复制下方完整链接', browser.opened ? 'ok' : 'warn'],
-    ], '请在浏览器完成授权；CLI 会在下方等待确认。');
+    ], '请扫码或在浏览器完成授权；CLI 会在下方等待确认。');
     console.log('');
     console.log(ui.dim('完整授权链接：'));
     console.log(url);

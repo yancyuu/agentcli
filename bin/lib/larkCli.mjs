@@ -199,10 +199,14 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   const current = checkLarkCliDigitalWorkerAuth(runOpts);
   if (current.ok) return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
 
-  // Step 1: initiate device flow — returns verification URL + device code immediately.
+  // Step 1: initiate device flow for every user scope lark-cli currently knows.
+  // `--domain all` is maintained by lark-cli itself (and brand-filtered), avoiding
+  // a duplicated static scope list that drifts as Feishu/Lark adds permissions.
+  // Keep DIGITAL_WORKER_LARK_SCOPES only for the post-login minimum-capability
+  // check: `auth check` supports explicit --scope but not --domain.
   const init = runLarkCli([
     'auth', 'login', '--no-wait', '--json',
-    '--scope', DIGITAL_WORKER_LARK_SCOPES.join(' '),
+    '--domain', 'all',
   ], runOpts);
   const initResult = parseJsonOutput(typeof init === 'object' && init !== null && 'then' in init ? await init : init);
   if (!initResult?.verification_url || !initResult?.device_code) {

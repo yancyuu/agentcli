@@ -1,6 +1,6 @@
 # openHermit 文档索引
 
-本目录记录 openHermit 当前产品、架构和发布流程。当前版本以 `@yancyyu/agentcli` v1.8.8 为准。
+本目录记录 openHermit 当前产品、架构和发布流程。当前版本以 `@yancyyu/agentcli` v1.9.11 为准。
 
 ## 当前产品事实
 

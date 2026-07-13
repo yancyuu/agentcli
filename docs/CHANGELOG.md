@@ -6,14 +6,20 @@
 
 ### Changed
 
+- token 池认领改为直接写入所选 Claude Code / Codex 配置；不再修改 shell 启动文件或安装 `precmd` / `PROMPT_COMMAND` hook，`~/.hermit/aikey.env` 仅供外部 agent 按需手动加载。
+- 「工作台 → 开通数字员工」升级为最小化快速创建流程：飞书/Lark 请求 lark-cli 当前支持的全量个人授权，并在终端显示二维码、同时尝试打开浏览器。
 - 重写 README 与公开站点为「开源 + 企业版」双产品说明书：AgentCli 开源免费（AGPL-3.0），AgentBus 定位为付费企业增值服务；合并首页与使用指南为单页，补齐 token 池认领（直写 Claude/Codex 配置）与用量上报三要素说明。
-- 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/agentcli` v1.8.8 包事实。
+- 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/agentcli` 当前包事实。
 - 统一 README、文档索引、团队架构、跨团队协作和发布指南中的 Loop Engineering 叙述。
 - 明确 cc-connect Bridge 边界：Hermit 负责团队路由、渠道绑定、白名单和审计；平台 Bot 适配由 cc-connect 承载。
 - 明确团队工作区由 team、task、message 和 project workspace 组成，并记录 worktree 隔离是当前并行协作能力。
 - 明确跨团队协作当前是 Redis-backed dispatch，完整 offer / bid / lease / event Task Bus 是目标模型。
 - 更新 Feature Architecture Standard，使新功能默认面向 Fastify/Vite/Web 工作台，而不是 Electron 桌面假设。
 - 更新 Release Guide，聚焦 npm CLI package、GitHub Release，以及当前 Docker/GHCR workflow 对 `docker/Dockerfile` 的前置要求。
+
+### Fixed
+
+- 自动修复旧版本遗留的配置备份清单路径，确保备份状态与当前 `~/.hermit/agentcli.env.bak` 位置一致。
 
 ### Added
 

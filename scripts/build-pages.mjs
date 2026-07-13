@@ -217,7 +217,7 @@ const html = `<!DOCTYPE html>
   </header>
 
   <section class="hero">
-    <span class="hero-badge">Local-first · 本地控制面 · v1.9.8</span>
+    <span class="hero-badge">Local-first · 本地控制面 · v1.9.11</span>
     <h1>AgentCli</h1>
     <p class="lede">本地优先的 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
     <p class="oss-line">AgentCli 管本地运行时与工作台，数据默认落在本机 <code>~/.hermit/</code>；AgentBus 负责消息路由、团队协作与组织级用量汇总。</p>
@@ -267,7 +267,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
           <li>本地 Web 工作台：团队、看板、运行时、代码评审</li>
           <li>自动采集本机 AI 运行时用量（token / 会话 / 消息）</li>
           <li>数据默认落 <code>~/.hermit/</code>，单机完整可用，无需注册</li>
-          <li>token 池认领：签发网关 key → 写入 aikey env / shell hook，不默认改 Claude/Codex 配置</li>
+          <li>token 池认领：签发网关 key → 直接写入所选 Claude Code / Codex 配置；不修改 shell 启动文件、不安装 shell hook</li>
           <li>支持自托管、可二次开发</li>
         </ul>
         <p class="tier-cta"><a href="#commands">装好之后从这几条命令开始 →</a></p>
@@ -310,7 +310,8 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <p class="section-sub">装好之后从这几条开始。命令统一为 <code>agentcli</code>，所有命令支持 <code>--json</code> 输出机器可读结果（适合 agent / 脚本调用）。也可以直接把本说明书链接 <code>https://yancyuu.github.io/agentcli/</code> 丢给 Claude Code / Codex，让 agent 按步骤安装、登录、上报和自检。</p>
     <div class="commands-list">
       <div class="command-group-title">启动与状态</div>
-      <div class="command-row"><code class="cmd">agentcli</code><span class="cmd-desc">打开终端导航（控制面菜单）：用量、工作台、用户、token 池(beta)</span></div>
+      <div class="command-row"><code class="cmd">agentcli</code><span class="cmd-desc">打开终端导航（控制面菜单）：工作台、用量同步、用户、token 池(beta)</span></div>
+      <div class="command-row"><code class="cmd">工作台 → 开通数字员工</code><span class="cmd-desc">快速创建并绑定渠道；飞书/Lark 申请当前支持的全量个人授权，终端显示二维码并同时尝试打开浏览器</span></div>
       <div class="command-row"><code class="cmd">agentcli init</code><span class="cmd-desc">快速初始化：默认启动 Web 工作台 + 用量后台 worker（默认开机自启）</span></div>
       <div class="command-row"><code class="cmd">agentcli web</code><span class="cmd-desc">直接启动 Web 工作台（默认 127.0.0.1:5680）；加 <code>--daemon</code> 后台运行</span></div>
       <div class="command-row"><code class="cmd">agentcli status · doctor</code><span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span></div>
@@ -335,6 +336,10 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <div class="command-row"><code class="cmd">agentcli update</code><span class="cmd-desc">检查并自更新到最新版本</span></div>
       <div class="command-row"><code class="cmd">agentcli add &lt;plugin&gt;</code><span class="cmd-desc">安装能力插件到 MCP library</span></div>
     </div>
+    <div class="callout">
+      <div class="callout-title">快速创建数字员工</div>
+      <p>运行 <code>agentcli</code>，进入「工作台 → 开通数字员工」：填写名称与描述、绑定渠道；飞书/Lark 会通过 <code>lark-cli</code> 请求当前支持的全量个人授权域。CLI 优先在终端显示二维码，并同时尝试打开默认浏览器；无法渲染二维码或自动打开浏览器时，仍会显示完整授权链接。快速创建只负责最小可用配置，成员、权限与高级参数可随后在 Web 工作台调整。</p>
+    </div>
   </section>
 
   <section id="config" class="prose">
@@ -356,9 +361,10 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <li><strong>Claude Code</strong> <code>~/.claude/settings.json</code>：写入网关 endpoint（<code>ANTHROPIC_BASE_URL</code>）+ <code>ANTHROPIC_AUTH_TOKEN</code>，deep-merge 保留其它键，<strong>不固定模型</strong>。</li>
       <li><strong>Codex</strong> <code>~/.codex/auth.json</code>（<code>OPENAI_API_KEY</code>）+ <code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> / wire_api 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。Codex base_url 由网关 <code>proxyPaths</code> 按所选 wire_api 解析，与 Claude endpoint 不同。</li>
     </ul>
+    <p>配置文件是 Claude Code / Codex 的常规生效路径：AgentCli 不再修改 <code>.zshrc</code> / <code>.bashrc</code>，也不安装 <code>precmd</code> / <code>PROMPT_COMMAND</code> shell hook；重新启动所选运行时即可读取新配置。<code>~/.hermit/aikey.env</code> 仍以 0600 权限保留为认领标记，外部 agent 需要时可手动 <code>source</code>。</p>
     <div class="callout warn">
       <div class="callout-title">注意</div>
-      <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit/agentcli.env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
+      <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit/agentcli.env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。检查快照时会自动修正旧版本遗留的备份路径记录。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
     </div>
   </section>
 

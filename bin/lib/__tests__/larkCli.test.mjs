@@ -135,7 +135,9 @@ describe('larkCli — digital worker authorization', () => {
     // Step 1: --no-wait init was called
     const init = calls.find(([, args]) => args.includes('--no-wait'));
     expect(init).toBeTruthy();
-    expect(init[1]).not.toContain('--domain');
+    expect(init[1]).toContain('--domain');
+    expect(init[1][init[1].indexOf('--domain') + 1]).toBe('all');
+    expect(init[1]).not.toContain('--scope');
     expect(init[1]).not.toContain('docs,drive,im,contact');
 
     // renderQr was called with verification URL

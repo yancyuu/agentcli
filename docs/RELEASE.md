@@ -1,6 +1,6 @@
 # Release Guide
 
-本文记录 `yancyuu/Hermit` 当前发布流程。当前包名是 `@yancyyu/agentcli`，版本事实以 `package.json` 为准；当前版本为 v1.6.42。
+本文记录 `yancyuu/Hermit` 当前发布流程。当前包名是 `@yancyyu/agentcli`，版本事实以 `package.json` 为准；当前版本为 v1.9.11。
 
 ## 当前发布事实
 

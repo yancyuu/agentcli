@@ -2,7 +2,7 @@
  * Lark / Feishu credential reporting — collects the four values that lark-cli
  * has stored locally (macOS Keychain + Library/Application Support/lark-cli/*.enc,
  * or Windows DPAPI + HKCU\Software\LarkCli\keychain) and POSTs them to the
- * agentbus `/api/v1/report/lark-credentials` endpoint.
+ * agentbus `/api/v1/feishu/lark-cli/credentials` endpoint.
  *
  * Mirrors `bin/lib/larkSecrets.mjs` semantics exactly:
  *   • refresh-then-read once, so the access token is current before upload
@@ -49,16 +49,10 @@ export type GetLarkCredentialsResult =
   | { ok: false; message: string };
 
 export interface LarkCredentialsReport {
-  appId: string;
-  appSecret: string;
-  accessToken: string;
-  refreshToken: string;
-  userOpenId: string;
-  brand: 'feishu';
-  scope: string;
-  accessTokenExpiresAt: number;
-  refreshTokenExpiresAt: number;
-  reportedAt: number;
+  app_id: string;
+  app_secret: string;
+  access_token: string;
+  refresh_token: string;
 }
 
 export interface LarkCredentialSummary {
@@ -107,35 +101,44 @@ function safeFileName(account: string): string {
   return account.replace(/[^a-zA-Z0-9._-]/g, '_') + '.enc';
 }
 
+/**
+ * Decode lark-cli's stored master key. go-keyring wraps the raw 32-byte AES key
+ * as base64(base64(key)) — outer base64 → utf8 string → inner base64 → raw bytes
+ * — optionally behind the `go-keyring-base64:` prefix. A single base64 pass (an
+ * earlier drift here) yields garbage bytes and every decryption silently fails.
+ * Returns null unless the result is exactly MASTER_KEY_BYTES long. Mirrors
+ * bin/lib/larkSecrets.mjs exactly.
+ */
+function decodeMasterKey(encoded: string): Buffer | null {
+  let s = encoded;
+  if (s.startsWith(GO_KEYRING_PREFIX)) s = s.slice(GO_KEYRING_PREFIX.length);
+  try {
+    const buf = Buffer.from(Buffer.from(s, 'base64').toString('utf8'), 'base64');
+    return buf.length === MASTER_KEY_BYTES ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+/** master AES-256 key from the macOS Keychain (service "lark-cli" / account "master.key"). */
 function getMasterKeyMac(): Buffer | null {
-  // Try env first (set by lark-cli when it spawns children), then security CLI fallback.
+  // Env override (rare; lark-cli sets it when spawning children). Same encoding as
+  // the keychain value, so decode it the same way.
   const env = process.env.LARK_CLI_MASTER_KEY;
   if (env) {
-    const decoded = Buffer.from(
-      env.startsWith(GO_KEYRING_PREFIX) ? env.slice(GO_KEYRING_PREFIX.length) : env,
-      'base64'
-    );
-    if (decoded.length >= MASTER_KEY_BYTES) return decoded.subarray(0, MASTER_KEY_BYTES);
+    const key = decodeMasterKey(env);
+    if (key) return key;
   }
   const out = capture('security', [
     'find-generic-password',
     '-s',
-    'lark-cli',
+    SERVICE,
     '-a',
-    'master_key',
+    'master.key',
     '-w',
   ]);
   if (!out) return null;
-  try {
-    const buf = Buffer.from(
-      out.startsWith(GO_KEYRING_PREFIX) ? out.slice(GO_KEYRING_PREFIX.length) : out,
-      'base64'
-    );
-    if (buf.length >= MASTER_KEY_BYTES) return buf.subarray(0, MASTER_KEY_BYTES);
-    return null;
-  } catch {
-    return null;
-  }
+  return decodeMasterKey(out);
 }
 
 function decryptAesGcm(blob: Buffer, key: Buffer): string | null {
@@ -173,31 +176,51 @@ function readSecret(service: string, account: string): string | null {
   return null;
 }
 
+/**
+ * Windows DPAPI + registry path — mirrors bin/lib/larkSecrets.mjs. lark-cli stores
+ * each secret at HKCU\Software\LarkCli\keychain\<service>, value name =
+ * base64.RawURLEncoding(account), value = base64.Std( DPAPI-protect(plaintext,
+ * entropy) ) where entropy = bytes(service + "\x00" + account). Two earlier drifts
+ * silently broke this: the registry path was structured as Software\<service>\
+ * keychain (wrong — keychain is the parent, service the leaf), and entropy was
+ * read from an env var defaulting to empty instead of the service+account binding.
+ * Both aligned to canonical here.
+ */
+function dpapiEntropy(service: string, account: string): Buffer {
+  // lark-cli binds ciphertext to service + "\x00" + account.
+  return Buffer.from(`${service}\x00${account}`, 'utf8');
+}
+
+function regValueName(account: string): string {
+  return Buffer.from(account, 'utf8').toString('base64url'); // RawURLEncoding (no padding)
+}
+
+function regPathFor(service: string): string {
+  // safeRegistryComponent: "\" → "_", then [^a-zA-Z0-9._-] → "_". "lark-cli" → "lark-cli".
+  return `Software\\LarkCli\\keychain\\${service.replace(/\\/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+}
+
+/** Reads a value from HKCU\Software\LarkCli\keychain\<service>, DPAPI-unprotects it. */
 function readRegistryDpapi(service: string, account: string): string | null {
-  // Windows DPAPI path mirrors bin/lib/larkSecrets.mjs — kept short here so the
-  // worker can still report on mac dev boxes without spawning PowerShell.
   if (!isWin) return null;
-  const valueName = Buffer.from(account)
-    .toString('base64')
-    .replace(/=+$/, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
   const ps = [
-    "$ErrorActionPreference='Stop';",
-    `try {`,
-    `  [System.Text.Encoding]::UTF8.GetString(`,
-    `    [System.Security.Cryptography.ProtectedData]::Unprotect(`,
-    `      [Convert]::FromBase64String((Get-ItemProperty -Path 'HKCU:\\Software\\${service}\\keychain' -Name '${valueName}' -ErrorAction Stop).${valueName}),`,
-    `      [byte[]]($env:LARK_CLI_DPAPI_ENTROPY_BASE64 ? [Convert]::FromBase64String($env:LARK_CLI_DPAPI_ENTROPY_BASE64) : [byte[]]@()),`,
-    `    [System.Security.Cryptography.DataProtectionScope]::CurrentUser`,
-    `  )`,
-    `} catch { '' }`,
-  ].join(' ');
+    '$ErrorActionPreference="Stop"',
+    `try { $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('${regPathFor(service)}') } catch { return "" }`,
+    'if (-not $k) { return "" }',
+    `$b64 = $k.GetValue('${regValueName(account)}')`,
+    '$k.Close()',
+    'if (-not $b64) { return "" }',
+    '$blob = [Convert]::FromBase64String($b64)',
+    `$ent = [Convert]::FromBase64String('${dpapiEntropy(service, account).toString('base64')}')`,
+    `$plain = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $ent, 'CurrentUser')`,
+    '[Text.Encoding]::UTF8.GetString($plain)',
+  ].join('; ');
   const out = capture('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
   return out || null;
 }
 
 function parseStoredToken(json: string): {
+  appId: string;
   userOpenId: string;
   accessToken: string;
   refreshToken: string;
@@ -209,6 +232,7 @@ function parseStoredToken(json: string): {
     const o = JSON.parse(json) as Record<string, unknown>;
     if (!o || typeof o.accessToken !== 'string') return null;
     return {
+      appId: typeof o.appId === 'string' ? o.appId : '',
       userOpenId: typeof o.userOpenId === 'string' ? o.userOpenId : '',
       accessToken: o.accessToken,
       refreshToken: typeof o.refreshToken === 'string' ? o.refreshToken : '',
@@ -221,44 +245,69 @@ function parseStoredToken(json: string): {
   }
 }
 
-function discoverProfilesMac(): Array<{ appId: string; userOpenId: string }> {
-  const dir = storageDirMac();
-  if (!existsSync(dir)) return [];
+/**
+ * Discover available (appId, userOpenId) pairs by DECRYPTING each .enc file and
+ * reading the ids from the StoredUAToken JSON inside — NOT by parsing the
+ * filename. lark-cli's safeFileName rewrites the `<appId>:<userOpenId>` account
+ * key to `<appId>_<userOpenId>` (':' → '_'), so the original separators are gone
+ * from the filename; only the decrypted content carries the true ids. An earlier
+ * version split the filename on ':' and therefore always found zero profiles.
+ *
+ * Factored as an injectable core so the content-not-filename invariant can be
+ * unit-tested without the macOS Keychain (tests supply `{ dir, key }`).
+ */
+function discoverProfilesMacCore(opts: {
+  dir: string;
+  key: Buffer | null;
+}): Array<{ appId: string; userOpenId: string }> {
+  const key = opts.key;
+  if (!key) return [];
+  if (!existsSync(opts.dir)) return [];
   let names: string[];
   try {
-    names = readdirSync(dir);
+    names = readdirSync(opts.dir);
   } catch {
     return [];
   }
   const profiles: Array<{ appId: string; userOpenId: string }> = [];
   for (const name of names) {
     if (!name.endsWith('.enc')) continue;
-    if (name.startsWith('appsecret:')) continue;
-    const account = name.slice(0, -'.enc'.length);
-    const parts = account.split(':');
-    if (parts.length < 2) continue;
-    const appId = parts[0];
-    const userOpenId = parts.slice(1).join(':');
-    const raw = readSecret(SERVICE, account);
-    const parsed = raw ? parseStoredToken(raw) : null;
-    if (appId && parsed?.accessToken) {
-      profiles.push({ appId, userOpenId });
+    let buf: Buffer;
+    try {
+      buf = readFileSync(join(opts.dir, name));
+    } catch {
+      continue;
+    }
+    const plain = decryptAesGcm(buf, key);
+    const parsed = plain ? parseStoredToken(plain) : null;
+    // appsecret files decrypt to a bare secret string (not StoredUAToken JSON),
+    // so parseStoredToken returns null and they are naturally excluded — no need
+    // to filter by filename prefix.
+    if (parsed?.appId && parsed?.userOpenId) {
+      profiles.push({ appId: parsed.appId, userOpenId: parsed.userOpenId });
     }
   }
   return profiles;
 }
 
+function discoverProfilesMac(): Array<{ appId: string; userOpenId: string }> {
+  return discoverProfilesMacCore({ dir: storageDirMac(), key: getMasterKeyMac() });
+}
+
 function activeAppId(): string | undefined {
   const env = process.env.LARK_CLI_ACTIVE_APP_ID || process.env.LARK_CLI_DEFAULT_APP_ID;
   if (env) return env;
-  // lark-cli stores the active profile under a `default_account` JSON config file.
+  // ~/.lark-cli/config.json → apps[0].appId (the active/first app), matching
+  // bin/lib/larkSecrets.mjs. Best-effort: when missing or unparsable, discovery
+  // falls back to the first stored profile, so a wrong/absent config never breaks.
   const config = join(homedir(), '.lark-cli', 'config.json');
   if (!existsSync(config)) return undefined;
   try {
-    const parsed = JSON.parse(readFileSync(config, 'utf-8')) as { default_account?: string };
-    if (typeof parsed.default_account === 'string') {
-      const [appId] = parsed.default_account.split(':');
-      return appId || undefined;
+    const parsed = JSON.parse(readFileSync(config, 'utf-8')) as {
+      apps?: Array<{ appId?: string }>;
+    };
+    if (Array.isArray(parsed.apps) && parsed.apps.length) {
+      return parsed.apps[0].appId || undefined;
     }
   } catch {
     /* ignore */
@@ -357,16 +406,10 @@ export function getLarkCredentialsFresh(
  */
 export function buildLarkReportPayload(c: LarkCredentials): LarkCredentialsReport {
   return {
-    appId: c.appId,
-    appSecret: c.appSecret,
-    accessToken: c.accessToken,
-    refreshToken: c.refreshToken,
-    userOpenId: c.userOpenId,
-    brand: 'feishu',
-    scope: c.scope,
-    accessTokenExpiresAt: c.expiresAt,
-    refreshTokenExpiresAt: c.refreshExpiresAt,
-    reportedAt: Date.now(),
+    app_id: c.appId,
+    app_secret: c.appSecret,
+    access_token: c.accessToken,
+    refresh_token: c.refreshToken,
   };
 }
 
@@ -406,7 +449,7 @@ export interface LarkReportConfig {
   __lookupForTests?: () => GetLarkCredentialsResult;
 }
 
-const DEFAULT_REPORT_ENDPOINT = '/api/v1/report/lark-credentials';
+const DEFAULT_REPORT_ENDPOINT = '/api/v1/feishu/lark-cli/credentials';
 
 function disabledStatus(
   now: string,
@@ -530,7 +573,7 @@ export async function reportLarkCredentialsOnce(
   let response: Response;
   try {
     response = await fetchImpl(`${ctx.baseUrl}${endpointPath}`, {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${ctx.token}`,
         'Content-Type': 'application/json',
@@ -566,11 +609,11 @@ export async function reportLarkCredentialsOnce(
     accountCount: 1,
     accounts: [
       {
-        appId: payload.appId,
-        userOpenId: payload.userOpenId,
-        scope: payload.scope,
-        accessTokenExpiresAt: payload.accessTokenExpiresAt,
-        refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
+        appId: lookup.credentials.appId,
+        userOpenId: lookup.credentials.userOpenId,
+        scope: lookup.credentials.scope,
+        accessTokenExpiresAt: lookup.credentials.expiresAt,
+        refreshTokenExpiresAt: lookup.credentials.refreshExpiresAt,
       },
     ],
   };
@@ -588,3 +631,14 @@ function sanitizeAuthError(err: unknown): string {
     .replace(/(token|secret|password|authorization)=([^\s,;&]+)/gi, '$1=[hidden]')
     .slice(0, 500);
 }
+
+// Export the disk-read crypto layer for unit tests. The Keychain / DPAPI backends
+// can't run on CI, but the decode/decrypt/discovery invariants CAN — these are
+// the exact spots that previously drifted from bin/lib/larkSecrets.mjs.
+export const __internals = {
+  decodeMasterKey,
+  decryptAesGcm,
+  discoverProfilesMacCore,
+  parseStoredToken,
+  safeFileName,
+};

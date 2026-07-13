@@ -40,6 +40,7 @@ yarn-error.log*
 
 # TypeScript
 *.tsbuildinfo
+vitest.config.ts.timestamp-*.mjs
 
 .pnpm-store/
 /package-lock.json

@@ -1,15 +1,16 @@
-// Tests for bin/lib/aikey.mjs — the CLI's "认领 aikey" command.
+// Tests for bin/lib/aikey.mjs — the CLI's "认领 aikey" command + config writer.
 //
-// This is a faithful JS port of aikey-cli's distribution mechanism
-// (commands_account.rs: provider_env_vars / write_active_env / ensure_shell_hook).
-// The port adapts three things to hermit's reality (no local aikey-proxy, and the
-// key comes from a server endpoint that is not supported yet → mocked locally):
+// Covers the provider→SDK-env-var map, the ~/.hermit/aikey.env marker file, and
+// the applyToConfigs surgical writes into Claude / Codex config. The legacy
+// precmd/PROMPT_COMMAND shell hook is gone (config-file injection replaced it),
+// so it has no tests here.
+//
+// Adaptations to hermit's reality (no local aikey-proxy; server endpoint with a
+// local mock fallback):
 //   1. file path is hermit-scoped (~/.hermit/aikey.env) instead of ~/.aikey/active.env,
 //   2. the written value is the REAL key (aikey's own `--direct` mode does this when
 //      there is no proxy), not a proxy sentinel token,
 //   3. *_BASE_URL is written only when a base url is actually provided.
-// The mechanism — provider→env-var map, an `active.env`-style file, an idempotent
-// shell precmd/PROMPT_COMMAND hook with a marker — is copied verbatim.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  buildShellHook,
   canonicalProvider,
   parseActiveEnv,
   providerEnvVars,
@@ -117,31 +117,7 @@ describe('aikey parseActiveEnv (inverse of renderActiveEnv)', () => {
   });
 });
 
-describe('aikey buildShellHook (ported from ensure_shell_hook)', () => {
-  const envPath = '/home/u/.hermit/aikey.env';
 
-  it('builds a zsh precmd hook that sources the env file, marked idempotent', () => {
-    const hook = buildShellHook({ shell: '/bin/zsh', envPath });
-    expect(hook).not.toBeNull();
-    expect(hook.rcFile).toBe(path.join(os.homedir(), '.zshrc'));
-    expect(hook.block).toContain('# openhermit shell hook');
-    expect(hook.block).toContain('precmd_functions+=(_openhermit_precmd)');
-    expect(hook.block).toContain(envPath);
-  });
-
-  it('builds a bash PROMPT_COMMAND hook that sources the env file', () => {
-    const hook = buildShellHook({ shell: '/usr/local/bin/bash', envPath });
-    expect(hook).not.toBeNull();
-    expect(hook.rcFile).toMatch(/\.bashrc$/);
-    expect(hook.block).toContain('PROMPT_COMMAND');
-    expect(hook.block).toContain(envPath);
-  });
-
-  it('returns null for shells it does not auto-hook (fish, empty)', () => {
-    expect(buildShellHook({ shell: '/usr/bin/fish', envPath })).toBeNull();
-    expect(buildShellHook({ shell: '', envPath })).toBeNull();
-  });
-});
 
 describe('aikey mock key source', () => {
   let tmpHome;

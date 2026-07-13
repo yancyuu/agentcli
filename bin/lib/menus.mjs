@@ -18,8 +18,8 @@ export const NAV_ACTIONS = [
     recommended: true,
     children: [
       { id: 'toggle-web', label: '开启/关闭 AgentCli 工作台', toggle: 'web', description: '启动/停止本机 AgentCli Web 工作台；用于本地 CC/Codex session → IM 的配置与管理' },
-      { id: 'workbench-status', label: '查看本地工作台状态', description: '查看 AgentCli 工作台运行状态' },
       { id: 'quick-create-assistant', label: '开通数字员工', description: '进入向导：创建数字员工团队并绑定外部渠道' },
+      { id: 'workbench-status', label: '查看本地工作台状态', description: '查看 AgentCli 工作台运行状态' },
     ],
   },
   {
@@ -28,9 +28,9 @@ export const NAV_ACTIONS = [
     description: '回车展开；消息上报启动后台增量扫描，只上报最近 7 天；可手动重报最近 7 天',
     children: [
       { id: 'toggle-message-upload', label: '开启/关闭 消息上报', toggle: 'conversation-upload' },
-      { id: 'overview', label: '查看同步状态' },
       { id: 'scan', label: '重报最近 7 天', description: '忽略游标重扫最近 7 天并补传；服务端按 eventId 自动去重' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
+      { id: 'overview', label: '查看同步状态' },
     ],
   },
   {
@@ -39,9 +39,9 @@ export const NAV_ACTIONS = [
     description: '回车展开；登录、查看登录状态、退出登录',
     children: [
       { id: 'login', label: '飞书登录' },
-      { id: 'status', label: '查看登录状态' },
       { id: 'guide', label: '在线说明书', description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex' },
       { id: 'logout', label: '退出登录' },
+      { id: 'status', label: '查看登录状态' },
     ],
   },
   {
@@ -50,9 +50,9 @@ export const NAV_ACTIONS = [
     description: '回车展开；签发并认领 AI 网关 key，可选写入 Claude/Codex 配置，支持一键恢复',
     children: [
       { id: 'aikey-claim', label: '认领', description: '签发消费者并认领 key；选择运行时（Claude/Codex，默认都写），写入本地配置 + aikey env' },
-      { id: 'aikey-status', label: '状态', description: '查看当前 token 池状态' },
       { id: 'aikey-manual', label: '说明书', description: '列出本地认领的变量名 + 端点 + 可用模型（给 agent 用，不含明文 key）' },
       { id: 'aikey-restore', label: '一键恢复原始配置', description: '从 ~/.hermit/agentcli.env.bak 一键还原 token 池介入前的 Claude/Codex 配置' },
+      { id: 'aikey-status', label: '状态', description: '查看当前 token 池状态' },
     ],
   },
   {
