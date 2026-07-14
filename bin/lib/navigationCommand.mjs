@@ -802,17 +802,16 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
     ], '请更新 lark-cli，并在飞书应用与租户后台启用/审批上述权限后重试；仅有 basic_profile 不能创建数字员工。');
     return null;
   }
-  const credentialReport = await reportLarkCredentials({ appId: options.appId }).catch(() => ({
-    ok: false,
-    reason: 'unexpected-error',
-    message: '飞书凭证上报未完成',
-  }));
+  const userOpenId = result.auth?.user?.userOpenId;
+  // Deliberately detached: credential synchronization is silent and must never
+  // delay or change a successful local Digital Worker authorization.
+  void reportLarkCredentials({ appId: options.appId, userOpenId }).catch(() => {});
   printCliRows('飞书个人身份已绑定', [
     ['lark-cli', result.installed?.message || '已安装', 'ok'],
     ['个人身份', result.message || '已完成', 'ok'],
     ['能力', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'ok'],
   ], '接下来绑定飞书应用渠道。');
-  return { ...result, credentialReport };
+  return result;
 }
 
 async function collectAssistantManualOptions(meta) {
@@ -919,7 +918,7 @@ async function runQuickCreateAssistantFlow() {
           brand: binding.platformType === 'lark' ? 'lark' : 'feishu',
         });
         return auth
-          ? { ok: true, profile: auth.profile || profile, auth, credentialReport: auth.credentialReport }
+          ? { ok: true, profile: auth.profile || profile, auth }
           : { ok: false, message: '飞书个人身份授权未完成' };
       },
     }

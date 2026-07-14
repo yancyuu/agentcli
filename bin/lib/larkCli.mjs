@@ -78,7 +78,8 @@ function getLarkUserIdentity(statusResult) {
   const parsed = parseJsonOutput(statusResult);
   const user = parsed?.identities?.user;
   if (!user || user.available !== true || user.verified !== true) return null;
-  return user;
+  const userOpenId = user.userOpenId || user.user_open_id || user.openId || user.open_id || '';
+  return { ...user, userOpenId };
 }
 
 function parseScopeCheck(result) {
@@ -217,14 +218,12 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
     return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
   }
 
-  // Step 1: initiate device flow for every user scope lark-cli currently knows.
-  // `--domain all` is maintained by lark-cli itself (and brand-filtered), avoiding
-  // a duplicated static scope list that drifts as Feishu/Lark adds permissions.
-  // Keep DIGITAL_WORKER_LARK_SCOPES only for the post-login minimum-capability
-  // check: `auth check` supports explicit --scope but not --domain.
+  // Request only the capabilities this digital worker needs. Broad `--domain all`
+  // can surface application scopes that the tenant has not enabled, then make a
+  // valid personal authorization look incomplete during the post-login check.
   const init = runLarkCli([
     'auth', 'login', '--no-wait', '--json',
-    '--domain', 'all',
+    '--scope', DIGITAL_WORKER_LARK_SCOPES.join(' '),
   ], runOpts);
   const initResult = parseJsonOutput(typeof init === 'object' && init !== null && 'then' in init ? await init : init);
   if (!initResult?.verification_url || !initResult?.device_code) {
@@ -286,16 +285,14 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
  */
 export async function installLarkCli() {
   const existing = findBinary();
-  if (existing) {
-    return { ok: true, alreadyInstalled: true, binPath: existing, message: `已安装：${existing}` };
-  }
-
   const npmCheck = spawnLarkCli('npm', ['--version'], { encoding: 'utf-8', shell: true });
   if (npmCheck.status !== 0 || !(npmCheck.stdout || '').trim()) {
     return { ok: false, alreadyInstalled: false, message: '未检测到 npm，请先安装 Node.js / npm' };
   }
 
-  // shell: true so npm.cmd resolves on Windows (spawn without shell → ENOENT).
+  // Always install the current official release. This upgrades an existing
+  // lark-cli too, so AgentCli can rely on the CLI flags used by the digital
+  // worker authorization flow instead of carrying compatibility fallbacks.
   const install = spawnLarkCli('npm', ['install', '-g', PACKAGE], { encoding: 'utf-8', shell: true });
   if (install.status !== 0) {
     return {
@@ -309,8 +306,10 @@ export async function installLarkCli() {
   const installed = findBinary() || `${npmGlobalBin()}/${BINARY}`;
   return {
     ok: true,
-    alreadyInstalled: false,
+    alreadyInstalled: Boolean(existing),
     binPath: installed,
-    message: installed ? `已安装：${installed}` : '安装完成，但未在 PATH 找到 lark-cli（重开终端后再试）',
+    message: existing
+      ? `已更新：${installed || existing}`
+      : installed ? `已安装：${installed}` : '安装完成，但未在 PATH 找到 lark-cli（重开终端后再试）',
   };
 }

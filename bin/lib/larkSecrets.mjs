@@ -343,6 +343,9 @@ export function buildLarkReportPayload(c) {
  * (including the Digital Worker wizard) can render its status safely.
  */
 export async function reportLarkCredentials({ appId, userOpenId, fetchImpl = fetch } = {}) {
+  if (appId && !userOpenId) {
+    return { ok: false, reason: 'missing-user-identity', message: '无法确定本次个人授权身份，跳过飞书凭证上报' };
+  }
   const result = getLarkCredentialsFresh({ appId, userOpenId });
   if (!result.ok) return { ok: false, reason: 'no-credentials', message: result.message };
 
