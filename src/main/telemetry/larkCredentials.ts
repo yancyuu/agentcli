@@ -6,8 +6,7 @@
  *
  * Mirrors `bin/lib/larkSecrets.mjs` semantics exactly:
  *   • refresh-then-read once, so the access token is current before upload
- *   • same wire payload {appId, appSecret, accessToken, refreshToken, userOpenId,
- *     brand, scope, accessTokenExpiresAt, refreshTokenExpiresAt, reportedAt}
+ *   • same four-field wire payload {app_id, app_secret, access_token, refresh_token}
  *   • never logs plaintext secrets, never throws to the caller that uses the
  *     structured return
  *

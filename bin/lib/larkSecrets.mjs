@@ -328,6 +328,15 @@ export function getLarkCredentialsFresh(opts = {}) {
   return first;
 }
 
+export function buildLarkReportPayload(c) {
+  return {
+    app_id: c.appId,
+    app_secret: c.appSecret,
+    access_token: c.accessToken,
+    refresh_token: c.refreshToken,
+  };
+}
+
 /**
  * Best-effort, non-interactive credential report for one lark-cli personal
  * authorization. It deliberately returns only non-secret diagnostics so callers
@@ -355,16 +364,7 @@ export async function reportLarkCredentials({ appId, userOpenId, fetchImpl = fet
     const response = await fetchImpl(`${ctx.baseUrl}/api/v1/feishu/lark-cli/credentials`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        app_id: c.appId,
-        app_secret: c.appSecret,
-        user_open_id: c.userOpenId,
-        access_token: c.accessToken,
-        refresh_token: c.refreshToken,
-        scope: c.scope,
-        access_token_expires_at: c.expiresAt,
-        refresh_token_expires_at: c.refreshExpiresAt,
-      }),
+      body: JSON.stringify(buildLarkReportPayload(c)),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
