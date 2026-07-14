@@ -19,10 +19,10 @@ describe('agentcli update dispatch', () => {
   });
 });
 
-function releaseResponse(latest) {
+function latestPackageResponse(latest) {
   return {
     ok: true,
-    json: async () => ({ tag_name: `v${latest}` }),
+    json: async () => ({ version: latest }),
   };
 }
 
@@ -31,7 +31,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
     const logs = [];
     const exec = vi.fn();
     const onUpdated = vi.fn();
-    const fetchImpl = vi.fn(async () => releaseResponse('2.1.209'));
+    const fetchImpl = vi.fn(async () => latestPackageResponse('2.1.209'));
 
     await runUpdate({
       currentVersion: '2.1.197',
@@ -61,7 +61,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
     const logs = [];
     const calls = [];
     const exec = vi.fn((cmd) => calls.push(cmd));
-    const fetchImpl = vi.fn(async () => releaseResponse('2.1.209'));
+    const fetchImpl = vi.fn(async () => latestPackageResponse('2.1.209'));
 
     await runUpdate({
       currentVersion: '2.1.197',
@@ -92,7 +92,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
     const logs = [];
     const exec = vi.fn();
     const onUpdated = vi.fn();
-    const fetchImpl = vi.fn(async () => releaseResponse('2.1.197'));
+    const fetchImpl = vi.fn(async () => latestPackageResponse('2.1.197'));
 
     await runUpdate({
       currentVersion: '2.1.197',
@@ -122,7 +122,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
     await runUpdate({
       currentVersion: '1.0.0',
       isGitRepo: false,
-      fetchImpl: vi.fn(async () => releaseResponse('1.0.1')),
+      fetchImpl: vi.fn(async () => latestPackageResponse('1.0.1')),
       exec,
       migrate: vi.fn(),
       onUpdated,
@@ -146,7 +146,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
       runUpdate({
         currentVersion: '1.0.0',
         isGitRepo: false,
-        fetchImpl: vi.fn(async () => releaseResponse('1.0.1')),
+        fetchImpl: vi.fn(async () => latestPackageResponse('1.0.1')),
         exec,
         migrate: vi.fn(),
         onUpdated: vi.fn(),

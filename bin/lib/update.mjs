@@ -10,17 +10,19 @@ import { BRAND, brandLogPrefix } from '../branding.mjs';
 import { migrateLegacyHermitBridgeConfigIfNeeded as defaultMigrate } from './runtime.mjs';
 
 /**
- * Resolve the latest published version from GitHub releases. Throws a human
- * message on HTTP / parse failure so the caller can surface a single error.
+ * Resolve the latest published version from npm's official registry. This is the
+ * same source that the global-install update path uses, so `agentcli update`
+ * remains available when GitHub Releases/API is blocked by a network or proxy.
  */
 async function fetchLatestRelease(fetchImpl) {
-  const res = await fetchImpl(`https://api.github.com/repos/${BRAND.githubRepo}/releases/latest`, {
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`Failed to check GitHub releases (HTTP ${res.status})`);
+  const res = await fetchImpl(
+    `https://registry.npmjs.org/${encodeURIComponent(BRAND.npmPackage)}/latest`,
+    { signal: AbortSignal.timeout(10000) }
+  );
+  if (!res.ok) throw new Error(`Failed to check npm registry (HTTP ${res.status})`);
   const data = await res.json();
-  const latestVersion = data?.tag_name?.replace(/^v/, '');
-  if (!latestVersion) throw new Error('No release found on GitHub');
+  const latestVersion = String(data?.version || '').trim();
+  if (!latestVersion) throw new Error('No latest version found in npm registry');
   return latestVersion;
 }
 
