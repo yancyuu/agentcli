@@ -6,6 +6,8 @@ import {
   assistantPlatformMeta,
   assistantWecomModeActions,
   isAssistantQrPlatform,
+  isSupportedAssistantAgentType,
+  isSupportedAssistantPlatform,
   labelForAssistantAgentType,
   labelForAssistantPlatform,
   mergeAssistantPlatformOptions,
@@ -14,35 +16,25 @@ import {
 } from '../assistantCreationOptions.mjs';
 
 describe('assistantCreationOptions — shared CLI assistant wizard options', () => {
-  it('uses the external runtime choices for the CLI wizard', () => {
+  it('offers only Claude Code and Codex runtimes for the claim/create wizard', () => {
     const actions = assistantAgentTypeActions();
 
-    expect(actions.map((action) => action.id)).toContain('claudecode');
-    expect(actions.map((action) => action.id)).toContain('codex');
+    expect(actions.map((action) => action.id)).toEqual(['claudecode', 'codex']);
     expect(labelForAssistantAgentType('claudecode')).toBe('Claude Code');
     expect(labelForAssistantAgentType('codex')).toBe('Codex');
+    expect(isSupportedAssistantAgentType('claudecode')).toBe(true);
+    expect(isSupportedAssistantAgentType('codex')).toBe(true);
+    expect(isSupportedAssistantAgentType('cursor')).toBe(false);
   });
 
-  it('uses the external platform choices for the CLI wizard', () => {
+  it('offers only Feishu as a channel for the claim/create wizard', () => {
     const actions = assistantPlatformActions();
 
-    expect(actions.map((action) => action.id)).toEqual([
-      'feishu',
-      'weixin',
-      'telegram',
-      'discord',
-      'slack',
-      'dingtalk',
-      'wecom_im',
-      'qq',
-      'qqbot',
-      'line',
-      'weibo',
-    ]);
+    expect(actions.map((action) => action.id)).toEqual(['feishu']);
     expect(labelForAssistantPlatform('feishu')).toBe('飞书 / Lark');
     expect(isAssistantQrPlatform('feishu')).toBe(true);
-    expect(isAssistantQrPlatform('weixin')).toBe(true);
-    expect(isAssistantQrPlatform('telegram')).toBe(false);
+    expect(isSupportedAssistantPlatform('feishu')).toBe(true);
+    expect(isSupportedAssistantPlatform('slack')).toBe(false);
   });
 
   it('keeps Enterprise WeChat sub-modes available to the CLI wizard', () => {

@@ -7,6 +7,33 @@ const optionsPath = path.join(repoRoot, 'src/shared/assistantCreationOptions.jso
 
 let cachedOptions = null;
 
+/**
+ * Digital-worker claim/create (认领 · 创建数字员工) only supports these runtimes
+ * and channels. The shared JSON keeps the full set for the renderer's general
+ * team-management UI; the CLI wizard offers this restricted subset, and the
+ * provisioning layer rejects anything else before side effects. Single source
+ * of truth for the restriction — both the wizard menu and the CLI flag parser
+ * read these, so adding/removing a supported option is a one-line change.
+ */
+const SUPPORTED_AGENT_TYPES = ['claudecode', 'codex'];
+const SUPPORTED_PLATFORMS = ['feishu'];
+
+export function supportedAssistantAgentTypeKeys() {
+  return SUPPORTED_AGENT_TYPES;
+}
+
+export function supportedAssistantPlatformKeys() {
+  return SUPPORTED_PLATFORMS;
+}
+
+export function isSupportedAssistantAgentType(agentType) {
+  return SUPPORTED_AGENT_TYPES.includes(String(agentType || '').trim());
+}
+
+export function isSupportedAssistantPlatform(platform) {
+  return SUPPORTED_PLATFORMS.includes(String(platform || '').trim());
+}
+
 export function normalizeAssistantBindProject(value) {
   const normalized = String(value || '')
     .trim()
@@ -25,19 +52,23 @@ export function assistantCreationOptions() {
 }
 
 export function assistantAgentTypeActions() {
-  return assistantCreationOptions().agentTypes.map((option) => ({
-    id: option.key,
-    label: option.label,
-    description: option.key,
-  }));
+  return assistantCreationOptions()
+    .agentTypes.filter((option) => isSupportedAssistantAgentType(option.key))
+    .map((option) => ({
+      id: option.key,
+      label: option.label,
+      description: option.key,
+    }));
 }
 
 export function assistantPlatformActions() {
-  return assistantCreationOptions().platformOptions.map((option) => ({
-    id: option.key,
-    label: option.label,
-    description: option.icon === 'qr' ? '扫码绑定' : '手动配置绑定',
-  }));
+  return assistantCreationOptions()
+    .platformOptions.filter((option) => isSupportedAssistantPlatform(option.key))
+    .map((option) => ({
+      id: option.key,
+      label: option.label,
+      description: option.icon === 'qr' ? '扫码绑定' : '手动配置绑定',
+    }));
 }
 
 export function assistantWecomModeActions() {

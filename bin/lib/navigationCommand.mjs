@@ -92,7 +92,8 @@ import {
   labelForAssistantPlatform,
   normalizeAssistantBindProject,
 } from './assistantCreationOptions.mjs';
-import { ensureLarkCliDigitalWorkerAuth } from './larkCli.mjs';
+import { ensureLarkCliDigitalWorkerAuth, personalLarkProfileName } from './larkCli.mjs';
+import { reportLarkCredentials } from './larkSecrets.mjs';
 import { provisionDigitalWorker } from './digitalWorkerCommand.mjs';
 import { fetchDefaults, provisionRun, pollRun, claimSecret, discoverCatalog, pickHighestVersionModel, selectModelApiIds, mapTierModels } from './tokenDistribution.mjs';
 import { DEFAULT_WIRE_API, runAikeyManual } from './aikey.mjs';
@@ -491,6 +492,20 @@ export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, ba
     .map((r) => (r === 'claude' ? 'Claude Code' : 'Codex'))
     .join(' + ');
   const rows = [['写入运行时', runtimeLabel, 'ok']];
+  // List each config file that was actually written (its absolute path), so the
+  // user can verify on any platform — applyClaimedSecret returns one result per
+  // file with a `path` field. Without these rows the panel claimed "已写入" but
+  // never showed where, making a silent Windows write failure invisible.
+  const RUNTIME_FILE_LABELS = {
+    claude: 'Claude 配置',
+    'codex-auth': 'Codex 认证',
+    'codex-config': 'Codex 配置',
+  };
+  for (const result of apply.runtimes || []) {
+    if (!result?.path) continue;
+    const label = RUNTIME_FILE_LABELS[result.runtime] || result.runtime;
+    rows.push([label, `${result.path}（已写入）`, 'ok']);
+  }
   if (apply.endpoints.claude) rows.push(['Claude endpoint', apply.endpoints.claude, 'info']);
   if (apply.endpoints.codex) rows.push(['Codex endpoint', apply.endpoints.codex, 'info']);
   // Codex model row is meaningful only when Codex was selected. A Claude-only
@@ -643,19 +658,19 @@ async function runTokenClaimFlow() {
   renderClaimResult({ apply, secret, choices, runtimes, snapshot });
 }
 
-// pickRuntimes — real multi-select (Space toggles, Enter confirms). Default
-// both runtimes pre-checked. Adding a future runtime (e.g. an image-gen target)
-// is just appending an action here — no N-combo explosion. Returns the selected
-// id list, or null on cancel / nothing selected.
+// pickRuntimes — real multi-select (Space toggles, Enter confirms). Default is
+// Codex only (Claude Code is commented out for now — re-add by uncommenting its
+// action). Adding a future runtime is just appending an action here — no
+// N-combo explosion. Returns the selected id list, or null on cancel / nothing.
 async function pickRuntimes() {
   const sel = await askMenuMultiSelect({
     title: '认领 token · 选择运行时',
-    subtitle: '空格 切换 / 回车确认（默认两者都写）',
+    subtitle: '空格 切换 / 回车确认（默认只写 Codex）',
     actions: [
-      { id: 'claude', label: 'Claude Code' },
+      // { id: 'claude', label: 'Claude Code' }, // 暂时下掉，默认只认领 Codex；后续如需再加回取消注释即可
       { id: 'codex', label: 'Codex' },
     ],
-    defaultSelectedIds: ['claude', 'codex'],
+    defaultSelectedIds: ['codex'],
     escapeAction: 'back',
     statusItems: currentMenuStatusItems(),
     hasDeveloperModeEnabled,
@@ -771,23 +786,33 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
       console.log(ui.dim(`等待 lark-cli 授权确认中... 当前状态：${status}`));
     };
   };
-  const result = await ensureLarkCliDigitalWorkerAuth(renderAuthQr, options);
+  // force:true — the creator must re-authorize (refresh) their personal Feishu
+  // identity on every provisioning, not silently reuse a prior grant. Without it
+  // the last step short-circuits when any auth exists, skipping the authorization
+  // screen the user expects to see.
+  const result = await ensureLarkCliDigitalWorkerAuth(renderAuthQr, { ...options, force: true });
   if (!result.ok) {
-    printCliRows('飞书个人身份未绑定', [
+    const missingScopes = Array.isArray(result.auth?.missingScopes) ? result.auth.missingScopes : [];
+    printCliRows('飞书个人身份授权不完整', [
       ['lark-cli', result.installed?.message || result.message || '未就绪', result.installed?.ok ? 'ok' : 'error'],
       ['绑定对象', '创建数字员工的飞书个人身份', 'info'],
-      ['授权范围', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'info'],
       ['原因', result.message || '授权失败', 'error'],
+      ...(missingScopes.length > 0 ? [['缺少权限', missingScopes.join('\n'), 'warn']] : []),
       ...(result.detail ? [['详情', result.detail, 'warn']] : []),
-    ], '请按 lark-cli 打开的页面或二维码完成个人身份授权后，再重新进入”开通数字员工”。');
+    ], '请更新 lark-cli，并在飞书应用与租户后台启用/审批上述权限后重试；仅有 basic_profile 不能创建数字员工。');
     return null;
   }
+  const credentialReport = await reportLarkCredentials({ appId: options.appId }).catch(() => ({
+    ok: false,
+    reason: 'unexpected-error',
+    message: '飞书凭证上报未完成',
+  }));
   printCliRows('飞书个人身份已绑定', [
     ['lark-cli', result.installed?.message || '已安装', 'ok'],
     ['个人身份', result.message || '已完成', 'ok'],
     ['能力', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'ok'],
   ], '接下来绑定飞书应用渠道。');
-  return result;
+  return { ...result, credentialReport };
 }
 
 async function collectAssistantManualOptions(meta) {
@@ -886,14 +911,15 @@ async function runQuickCreateAssistantFlow() {
       },
       async afterPlatformBound({ binding }) {
         if (platform !== 'feishu' && platform !== 'lark') return null;
+        const profile = personalLarkProfileName(binding.appId);
         const auth = await ensureFeishuDigitalWorkerPrerequisites({
-          profile: bindProject,
+          profile,
           appId: binding.appId,
           appSecret: binding.appSecret,
           brand: binding.platformType === 'lark' ? 'lark' : 'feishu',
         });
         return auth
-          ? { ok: true, profile: auth.profile || bindProject, auth }
+          ? { ok: true, profile: auth.profile || profile, auth, credentialReport: auth.credentialReport }
           : { ok: false, message: '飞书个人身份授权未完成' };
       },
     }

@@ -90,23 +90,27 @@ describe('applyToConfigs — Claude settings.json', () => {
 });
 
 describe('applyToConfigs — Codex auth.json', () => {
-  it('overwrites OPENAI_API_KEY and preserves sibling keys', async () => {
+  it('fully replaces auth.json, dropping stale OAuth tokens and sibling keys', async () => {
+    // Regression: a prior `codex login` (OAuth) leaves a `tokens` object here, and
+    // Codex prefers those OAuth tokens over OPENAI_API_KEY. The old merge write
+    // ({ ...auth, OPENAI_API_KEY }) kept `tokens`, so the claimed gateway key was
+    // ignored. The fix is a full replace — only OPENAI_API_KEY survives.
     const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-aikey-codex-auth-'));
     try {
       const file = path.join(home, '.codex', 'auth.json');
       await mkdir(path.dirname(file), { recursive: true });
       await writeFile(file, JSON.stringify({
         OPENAI_API_KEY: 'sk-old',
-        tokens: { id_token: 'xxx', access_token: 'yyy' },
+        tokens: { id_token: 'xxx', access_token: 'yyy', refresh_token: 'zzz' },
         custom_marker: 'preserve',
       }, null, 2));
 
       applyToConfigs({ key: 'sk-new', endpoint: 'https://gw', model: 'm', runtimes: ['codex'], home });
 
       const written = JSON.parse(await readFile(file, 'utf-8'));
-      expect(written.OPENAI_API_KEY).toBe('sk-new');
-      expect(written.tokens.id_token).toBe('xxx');
-      expect(written.custom_marker).toBe('preserve');
+      expect(written).toEqual({ OPENAI_API_KEY: 'sk-new' });
+      expect(written.tokens).toBeUndefined();
+      expect(written.custom_marker).toBeUndefined();
     } finally {
       await rm(home, { recursive: true, force: true });
     }

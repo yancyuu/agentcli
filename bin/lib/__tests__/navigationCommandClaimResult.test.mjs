@@ -53,3 +53,38 @@ describe('buildClaimResultRows — Codex model row', () => {
     ]);
   });
 });
+
+describe('buildClaimResultRows — written config file paths', () => {
+  // Regression: the panel claimed "已写入 Claude/Codex 配置" but never showed the
+  // file paths, so a silent write failure (notably on Windows) was invisible.
+  // applyClaimedSecret returns one result per file with a `path` field; the panel
+  // must surface each absolute path so the user can verify the write landed.
+  function rowsWith(runtimesResults) {
+    return buildClaimResultRows({
+      apply: { ...baseApply, runtimes: runtimesResults },
+      choices: { model: 'glm-5.2', wireApi: 'responses' },
+      runtimes: ['claude', 'codex'],
+      envFilePath: '/home/x/.hermit/aikey.env',
+      backupRootPath: '/home/x/.hermit/agentcli.env.bak',
+      backupCreated: false,
+      maskedKey: 'aim_…GyP8',
+    });
+  }
+
+  it('lists every written config file with its absolute path', () => {
+    const rows = rowsWith([
+      { runtime: 'claude', path: '/home/x/.claude/settings.json', changed: true },
+      { runtime: 'codex-auth', path: '/home/x/.codex/auth.json', changed: true },
+      { runtime: 'codex-config', path: '/home/x/.codex/config.toml', changed: true },
+    ]);
+
+    expect(rows).toContainEqual(['Claude 配置', '/home/x/.claude/settings.json（已写入）', 'ok']);
+    expect(rows).toContainEqual(['Codex 认证', '/home/x/.codex/auth.json（已写入）', 'ok']);
+    expect(rows).toContainEqual(['Codex 配置', '/home/x/.codex/config.toml（已写入）', 'ok']);
+  });
+
+  it('emits no config-path rows when apply.runtimes is absent', () => {
+    const rows = rowsFor({ runtimes: ['claude'], model: 'glm-5.2' });
+    expect(rows.some(([label]) => label === 'Claude 配置')).toBe(false);
+  });
+});

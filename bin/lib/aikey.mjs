@@ -526,9 +526,13 @@ function applyClaudeConfig({ key, endpoint, tierModels, home, backup }) {
 
 function applyCodexAuth({ key, home, backup }) {
   const filePath = path.join(home, CODEX_DIR, 'auth.json');
-  const { value } = safeReadJson(filePath);
-  const auth = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const backupPath = atomicWriteJson(filePath, { ...auth, OPENAI_API_KEY: key }, { backup });
+  // FULL REPLACE, not merge. A prior `codex login` (OAuth) leaves a `tokens`
+  // object (id_token / access_token / refresh_token) plus other keys here, and
+  // Codex prefers those OAuth tokens over OPENAI_API_KEY — so a merged write left
+  // the claimed gateway key ignored (and the stale OAuth login winning). Overwrite
+  // the whole file with just the API key. The snapshot in configEnvBackup.mjs
+  // still owns the one-click restore to the pre-claim state.
+  const backupPath = atomicWriteJson(filePath, { OPENAI_API_KEY: key }, { backup });
   return { runtime: 'codex-auth', path: filePath, changed: true, backupPath };
 }
 

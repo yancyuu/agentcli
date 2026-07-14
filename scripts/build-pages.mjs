@@ -311,7 +311,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <div class="commands-list">
       <div class="command-group-title">启动与状态</div>
       <div class="command-row"><code class="cmd">agentcli</code><span class="cmd-desc">打开终端导航（控制面菜单）：工作台、用量同步、用户、token 池(beta)</span></div>
-      <div class="command-row"><code class="cmd">工作台 → 开通数字员工</code><span class="cmd-desc">快速创建并绑定渠道；飞书/Lark 申请当前支持的全量个人授权，终端显示二维码并同时尝试打开浏览器</span></div>
+      <div class="command-row"><code class="cmd">工作台 → 开通数字员工</code><span class="cmd-desc">快速创建并绑定飞书；仅支持 Claude Code / Codex。以 lark-cli 的个人 as user 身份校验数字员工必需权限，成功后静默尝试一次凭证上报</span></div>
       <div class="command-row"><code class="cmd">agentcli init</code><span class="cmd-desc">快速初始化：默认启动 Web 工作台 + 用量后台 worker（默认开机自启）</span></div>
       <div class="command-row"><code class="cmd">agentcli web</code><span class="cmd-desc">直接启动 Web 工作台（默认 127.0.0.1:5680）；加 <code>--daemon</code> 后台运行</span></div>
       <div class="command-row"><code class="cmd">agentcli status · doctor</code><span class="cmd-desc">查看后台运行状态 / 只读本地诊断</span></div>
@@ -338,7 +338,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     </div>
     <div class="callout">
       <div class="callout-title">快速创建数字员工</div>
-      <p>运行 <code>agentcli</code>，进入「工作台 → 开通数字员工」：填写名称与描述、绑定渠道；飞书/Lark 会通过 <code>lark-cli</code> 请求当前支持的全量个人授权域。CLI 优先在终端显示二维码，并同时尝试打开默认浏览器；无法渲染二维码或自动打开浏览器时，仍会显示完整授权链接。快速创建只负责最小可用配置，成员、权限与高级参数可随后在 Web 工作台调整。</p>
+      <p>运行 <code>agentcli</code>，进入「工作台 → 开通数字员工」：填写名称与描述，选择 Claude Code 或 Codex，并绑定飞书。系统以本次飞书应用对应的 <code>lark-cli</code> profile 为创建者申请个人 <code>as user</code> 授权（新 profile 固定为 <code>agentcli-user-&lt;appId&gt;</code>）。<code>--domain all</code> 只能请求 lark-cli、飞书应用与租户允许授予的权限，完成后仍必须通过文档、云盘、消息收发、通讯录与用户信息的权限校验；仅有 <code>contact:user.basic_profile:readonly</code> 不会通过。CLI 优先在终端显示二维码，并同时尝试打开默认浏览器；无法渲染二维码或自动打开浏览器时，仍会显示完整授权链接。校验成功后会静默尝试一次凭证上报到 AgentBus；上报失败不影响本地授权和数字员工创建，也不会打印凭证。若仍缺权限，请更新 <code>lark-cli</code>，再在飞书应用和租户后台启用/审批缺失权限后重试。成员、权限与高级参数可随后在 Web 工作台调整。</p>
     </div>
   </section>
 
@@ -356,7 +356,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     </table>
 
     <h3>把网关 Key 写进 Claude / Codex（token 池认领）</h3>
-    <p>登录后，在终端菜单 <code>agentcli</code> →「token 池(测试版)」→「认领」，会自动签发一个一次性网关 key，让你<strong>选择写入哪些运行时</strong>（Claude Code / Codex，默认两者都写），然后直写进所选运行时的本地配置：</p>
+    <p>登录后，在终端菜单 <code>agentcli</code> →「token 池(测试版)」→「认领」，会自动签发一个一次性网关 key，当前默认且唯一写入目标是 <strong>Codex</strong>（Claude Code 保留为后续可恢复选项），然后直写进本地配置：</p>
     <ul>
       <li><strong>Claude Code</strong> <code>~/.claude/settings.json</code>：写入网关 endpoint（<code>ANTHROPIC_BASE_URL</code>）+ <code>ANTHROPIC_AUTH_TOKEN</code>，deep-merge 保留其它键，<strong>不固定模型</strong>。</li>
       <li><strong>Codex</strong> <code>~/.codex/auth.json</code>（<code>OPENAI_API_KEY</code>）+ <code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> / wire_api 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。Codex base_url 由网关 <code>proxyPaths</code> 按所选 wire_api 解析，与 Claude endpoint 不同。</li>

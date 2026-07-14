@@ -304,10 +304,14 @@ export class HermitBridgeConnection extends EventEmitter {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
-      }
+      // 先置空再 close：undici 的 WebSocket.close() 会同步派发 close/error 事件，
+      // 监听器会回调 handleDisconnect()→cleanup()。先置空让监听器里的
+      // `if (this.ws !== ws) return` 守卫命中，避免重入导致的栈溢出。
+      const ws = this.ws;
       this.ws = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
     }
   }
 

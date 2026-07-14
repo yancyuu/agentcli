@@ -20,24 +20,25 @@ import { describe, expect, it } from 'vitest';
 import { describeUploadToggle, resolveConversationUploadEnabled } from '../uploadState.mjs';
 
 describe('resolveConversationUploadEnabled — canonical boolean matching the worker gate', () => {
-  it('returns false for empty / missing telemetry', () => {
-    expect(resolveConversationUploadEnabled(undefined)).toBe(false);
-    expect(resolveConversationUploadEnabled(null)).toBe(false);
-    expect(resolveConversationUploadEnabled({})).toBe(false);
-    expect(resolveConversationUploadEnabled('nope')).toBe(false);
+  it('defaults to ON for empty / missing telemetry (消息总线 default-on)', () => {
+    expect(resolveConversationUploadEnabled(undefined)).toBe(true);
+    expect(resolveConversationUploadEnabled(null)).toBe(true);
+    expect(resolveConversationUploadEnabled({})).toBe(true);
+    expect(resolveConversationUploadEnabled('nope')).toBe(true);
   });
 
   it('reads the canonical conversationUploadEnabled field', () => {
     expect(resolveConversationUploadEnabled({ conversationUploadEnabled: true })).toBe(true);
+    // Explicit opt-out must be honored so the toggle's OFF write sticks.
     expect(resolveConversationUploadEnabled({ conversationUploadEnabled: false })).toBe(false);
   });
 
-  it('falls back to legacy conversations.uploadEnabled so old settings still report on', () => {
+  it('honors legacy conversations.uploadEnabled (true keeps on, false opts out)', () => {
     expect(resolveConversationUploadEnabled({ conversations: { uploadEnabled: true } })).toBe(true);
+    expect(resolveConversationUploadEnabled({ conversations: { uploadEnabled: false } })).toBe(false);
   });
 
-  it('ORs canonical + legacy (matches the worker gate exactly)', () => {
-    // canonical false, legacy true → worker uploads, CLI must say enabled too
+  it('explicit opt-in wins over opt-out (canonical false + legacy true → on)', () => {
     expect(
       resolveConversationUploadEnabled({ conversationUploadEnabled: false, conversations: { uploadEnabled: true } }),
     ).toBe(true);
@@ -48,9 +49,12 @@ describe('resolveConversationUploadEnabled — canonical boolean matching the wo
   });
 
   it('ignores the dead top-level uploadEnabled field (worker never reads it)', () => {
-    // If this were true, the worker would STILL not upload (it ignores the
-    // field), so the display must not claim enabled either.
-    expect(resolveConversationUploadEnabled({ uploadEnabled: true })).toBe(false);
+    // The dead field must not be what flips the result. Under default-on both
+    // {uploadEnabled:true} and {uploadEnabled:false} resolve to ON — proving the
+    // default (not the dead field) is the cause. Only an explicit
+    // conversationUploadEnabled:false opts out.
+    expect(resolveConversationUploadEnabled({ uploadEnabled: true })).toBe(true);
+    expect(resolveConversationUploadEnabled({ uploadEnabled: false })).toBe(true);
     expect(
       resolveConversationUploadEnabled({ uploadEnabled: true, conversationUploadEnabled: false, conversations: {} }),
     ).toBe(false);

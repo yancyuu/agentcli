@@ -16,10 +16,17 @@ vi.mock('@main/telemetry/larkCredentials', () => ({
 }));
 
 import {
+  DEFAULT_SCAN_INTERVAL_MS,
   emptyUsageTelemetryStatus,
   getUsageTelemetryWorkerPaths,
   scanUsageTelemetryWorkerOnce,
 } from '@main/telemetry/worker';
+
+describe('usage telemetry worker cadence', () => {
+  it('defaults to a 5-minute scan interval so credentials stay fresh between reports', () => {
+    expect(DEFAULT_SCAN_INTERVAL_MS).toBe(5 * 60 * 1000);
+  });
+});
 
 describe('usage telemetry worker status snapshots', () => {
   let home: string;

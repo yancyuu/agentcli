@@ -324,17 +324,54 @@ function findLarkBinary(): string | null {
   return found || null;
 }
 
+/**
+ * List lark-cli profiles. `profile list` does NOT accept --json (v1.0.53) but
+ * already prints a JSON array to stdout, so parse that directly. Returns [] on
+ * any failure so callers fall back gracefully.
+ */
+function listLarkProfiles(): Array<{ appId?: string; name?: string }> {
+  const binary = findLarkBinary();
+  if (!binary) return [];
+  try {
+    const r = spawnSync(binary, ['profile', 'list'], { encoding: 'utf-8', shell: isWin });
+    if (r.status !== 0) return [];
+    const parsed = JSON.parse((r.stdout || '').trim());
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Pure: resolve the lark-cli profile NAME for an appId. `auth check --profile`
+ * takes a profile name, but a profile created per-worker is named after the
+ * worker — not its appId — so blindly passing `--profile <appId>` misses those
+ * and the refresh silently no-ops. Falls back to appId (correct only when a
+ * profile happens to share its appId as name, e.g. the default app profile).
+ */
+export function pickProfileNameByAppId(
+  profiles: Array<{ appId?: string; name?: string }>,
+  appId: string
+): string {
+  const hit = profiles.find((p) => p && p.appId === appId);
+  return hit?.name || appId;
+}
+
 function triggerLarkRefresh(appId: string, scope: string): boolean {
   const binary = findLarkBinary();
   if (!binary) return false;
-  const scopeArg =
-    String(scope || '')
-      .split(/\s+/)
-      .find(Boolean) || 'contact:user.base:readonly';
+  // `auth check --scope` accepts a single space-separated scope string. Pass the
+  // complete personal grant instead of checking only its first scope: the initial
+  // digital-worker login uses `--domain all`, and a refresh must keep validating
+  // the full scope set rather than silently degrading it.
+  const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
+  // Resolve the real profile name so the refresh always targets the right
+  // account, even when the profile is named after a worker rather than its appId.
+  const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
     const r = spawnSync(
       binary,
-      ['auth', 'check', '--json', '--scope', scopeArg, '--profile', appId],
+      ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName],
       {
         encoding: 'utf-8',
         shell: isWin,
@@ -394,12 +431,37 @@ export function getLarkCredentials(
   };
 }
 
+/**
+ * A personal refresh token can only rotate the access token while it is still
+ * alive. Once `refreshExpiresAt` has passed, `lark-cli auth check` cannot
+ * succeed and the user must re-authorize — so there is no point spawning it.
+ * Pure predicate (default clock injectable) so the eligibility rule is unit-
+ * tested without the macOS Keychain / Windows DPAPI backends.
+ */
+export function shouldRefreshLarkCredentials(
+  credentials: LarkCredentials | undefined,
+  now: number = Date.now()
+): boolean {
+  return Boolean(
+    credentials &&
+    typeof credentials.refreshExpiresAt === 'number' &&
+    Number.isFinite(credentials.refreshExpiresAt) &&
+    credentials.refreshExpiresAt > now
+  );
+}
+
 export function getLarkCredentialsFresh(
   opts: { appId?: string; userOpenId?: string } = {}
 ): GetLarkCredentialsResult {
   const first = getLarkCredentials(opts);
-  if (first.ok) triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
-  return getLarkCredentials(opts);
+  // Refresh exactly once per call, and only when the personal refresh token is
+  // still valid. When it is expired/missing we keep the on-disk snapshot and let
+  // the caller report it gracefully (the server decides what to do with it).
+  if (first.ok && shouldRefreshLarkCredentials(first.credentials)) {
+    triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
+    return getLarkCredentials(opts);
+  }
+  return first;
 }
 
 /**
@@ -652,4 +714,5 @@ export const __internals = {
   discoverProfilesMacCore,
   parseStoredToken,
   safeFileName,
+  pickProfileNameByAppId,
 };

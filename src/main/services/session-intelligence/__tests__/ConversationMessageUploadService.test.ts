@@ -47,6 +47,27 @@ describe('ConversationMessageUploadService', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
+  it('defaults message upload to enabled when telemetry has no explicit upload setting', async () => {
+    // Regression: UsageTelemetryService treated a fresh config as default-on, but
+    // this uploader's old Boolean(...) gate returned disabled before even probing
+    // auth. A config with no upload fields must now proceed into the upload path.
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/v1/auth/me')) {
+        return Response.json({ authenticated: true, status: 'ok', feishu_authorized: true });
+      }
+      if (url.includes('/api/v1/report/usage/status')) return Response.json({ channels: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const result = await uploadConversationMessages({ telemetry: {} });
+
+    expect(result.enabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/v1\/auth\/me$/),
+      expect.anything()
+    );
+  });
+
   it('bounds the first periodic scan to recent messages when no cursor exists (no full-history backfill)', async () => {
     // Regression for the 776s hang: a channel that has never reported used to
     // scan ALL history on its first cycle. The periodic worker now skips messages

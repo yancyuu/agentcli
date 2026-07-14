@@ -47,6 +47,24 @@ When running build/typecheck/test commands, pipe through `tail -20` to avoid flo
 - `pnpm fix` - Lint fix + format
 - `pnpm quality` - Full check + format check + knip
 
+## Lark Personal Authorization (`as user`)
+
+The Feishu authorization created from the **Create Digital Worker** flow is the
+lark-cli **personal user identity** (`as user`), not a bot/application identity
+and not the separate AgentCli / AgentBus `auth login` token.
+
+This invariant applies to both paths:
+- **Manual trigger:** Create Digital Worker opens/refreshes lark-cli's personal
+  `as user` authorization with the full scope domain (`--domain all`).
+- **Automatic trigger:** every usage/credential reporting cycle refreshes and
+  uploads the same lark-cli personal `as user` credential, only while its
+  `refreshExpiresAt` remains valid.
+
+When changing either flow, preserve the identity and scope invariant: resolve
+and target the real lark-cli profile for the personal user, never substitute a
+bot/app token or AgentCli auth token, and retain the complete personal scope
+set.
+
 ## Test-First Workflow
 For any new requirement or change, **first** check whether existing tests cover the affected code path (find the relevant `*.test.*` file, or confirm none exists). If coverage is missing, add tests for the behavior BEFORE making the change — do not blindly edit code without test backing. This is how regressions like duplicate messages, broken dedup, and silent restarts slipped through: the message pipeline (`teamMessageKey`, `mergeTeamMessages`, `teamMessageFiltering`, server-side `appendMessage` ID propagation) had zero tests. When a bug surfaces, write a failing test that reproduces it, then fix until green.
 
@@ -252,9 +270,13 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 
 ## Hermit Team Context
 
-Current team slug: `assistant-1783940809409`
+Current team slug: `2222`
 
 Available teams:
+- assistant-1784021484579 (牛你牛你)
+- assistant-1784021349302 (测试)
+- assistant-1784004848710 (测试)
+- assistant-1783940809409 (测试)
 - assistant-1783914291518 (测试)
 - assistant-1783672664880 (测测): 1
 - 23 (测试23)

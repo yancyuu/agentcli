@@ -5,81 +5,110 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
-import { currentVersion, repoRoot } from './env.mjs';
-import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
-import { migrateLegacyHermitBridgeConfigIfNeeded } from './runtime.mjs';
+import { currentVersion as defaultCurrentVersion, repoRoot as defaultRepoRoot } from './env.mjs';
+import { BRAND, brandLogPrefix } from '../branding.mjs';
+import { migrateLegacyHermitBridgeConfigIfNeeded as defaultMigrate } from './runtime.mjs';
 
-async function runUpdate({ onUpdated } = {}) {
-  const isGitRepo = existsSync(path.join(repoRoot, '.git'));
+/**
+ * Resolve the latest published version from GitHub releases. Throws a human
+ * message on HTTP / parse failure so the caller can surface a single error.
+ */
+async function fetchLatestRelease(fetchImpl) {
+  const res = await fetchImpl(`https://api.github.com/repos/${BRAND.githubRepo}/releases/latest`, {
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Failed to check GitHub releases (HTTP ${res.status})`);
+  const data = await res.json();
+  const latestVersion = data?.tag_name?.replace(/^v/, '');
+  if (!latestVersion) throw new Error('No release found on GitHub');
+  return latestVersion;
+}
+
+/**
+ * Self-update. Emits the Claude-CLI-style transcript:
+ *   Current version: <v>
+ *   Checking for updates to latest version...
+ *   New version available: <v> (current: <v>)   ← only when an update exists
+ *   Installing update...
+ *   Using <git|global> installation update method...
+ *   Successfully updated from <old> to version <new>
+ *
+ * Every side-effecting dependency (fetch, exec, migration, output, version,
+ * install method) is injectable so the transcript can be unit-tested without
+ * network or subprocesses. Production callers pass only `onUpdated`.
+ */
+async function runUpdate({
+  onUpdated,
+  currentVersion = defaultCurrentVersion,
+  repoRoot = defaultRepoRoot,
+  isGitRepo = existsSync(path.join(defaultRepoRoot, '.git')),
+  fetchImpl = fetch,
+  exec = execSync,
+  migrate = defaultMigrate,
+  log = (msg) => console.log(msg),
+  error = (msg) => console.error(msg),
+} = {}) {
+  log(`Current version: ${currentVersion}`);
+  log('Checking for updates to latest version...');
+
+  let latestVersion;
+  try {
+    latestVersion = await fetchLatestRelease(fetchImpl);
+  } catch (err) {
+    error(`${brandLogPrefix()} Update failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+
+  if (latestVersion === currentVersion) {
+    migrate();
+    log(`Already on latest version (${currentVersion})`);
+    return;
+  }
+
+  log(`New version available: ${latestVersion} (current: ${currentVersion})`);
+  log('Installing update...');
 
   if (isGitRepo) {
-    // Git repo: check GitHub releases and checkout latest tag
-    console.log(`${brandLogPrefix()} Checking for updates...`);
+    log('Using git installation update method...');
     try {
-      const res = await fetch(`https://api.github.com/repos/${BRAND.githubRepo}/releases/latest`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!res.ok) {
-        console.error(`${brandLogPrefix()} Failed to check GitHub releases (HTTP ${res.status})`);
-        process.exit(1);
-      }
-      const data = await res.json();
-      const latestVersion = data.tag_name?.replace(/^v/, '');
-      if (!latestVersion) {
-        console.error(`${brandLogPrefix()} No release found on GitHub`);
-        process.exit(1);
-      }
-      if (latestVersion === currentVersion) {
-        migrateLegacyHermitBridgeConfigIfNeeded();
-        console.log(`${brandLogPrefix()} Already on latest version (${currentVersion})`);
-        process.exit(0);
-      }
-      console.log(`${brandLogPrefix()} Current: ${currentVersion} → Latest: ${latestVersion}`);
-      console.log(`${brandLogPrefix()} Fetching latest changes...`);
-      execSync('git fetch --tags', { cwd: repoRoot, stdio: 'inherit' });
-      console.log(`${brandLogPrefix()} Checking out v${latestVersion}...`);
-      execSync(`git checkout v${latestVersion}`, { cwd: repoRoot, stdio: 'inherit' });
-      console.log(`${brandLogPrefix()} Installing dependencies...`);
-      execSync('npm install', { cwd: repoRoot, stdio: 'inherit' });
-      console.log(`${brandLogPrefix()} Building frontend...`);
-      execSync('npm run build:web', { cwd: repoRoot, stdio: 'inherit' });
-      migrateLegacyHermitBridgeConfigIfNeeded();
-      // Files just changed (checkout + install + build): reload the live usage
-      // worker so it picks up the new code without waiting for a manual restart.
-      await onUpdated?.();
-      console.log(`\n${brandLogPrefix()} Updated to ${latestVersion}. Restart with: ${brandCommand('restart')}\n`);
+      exec('git fetch --tags', { cwd: repoRoot, stdio: 'inherit' });
+      exec(`git checkout v${latestVersion}`, { cwd: repoRoot, stdio: 'inherit' });
+      exec('npm install', { cwd: repoRoot, stdio: 'inherit' });
+      exec('npm run build:web', { cwd: repoRoot, stdio: 'inherit' });
     } catch (err) {
-      console.error(`${brandLogPrefix()} Update failed:`, err instanceof Error ? err.message : String(err));
+      error(`${brandLogPrefix()} Update failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   } else {
-    // npm install: directly update to latest
-    console.log(`${brandLogPrefix()} Updating via npm...`);
+    log('Using global installation update method...');
+    // Pin the official registry: a user's default registry (e.g. npmmirror)
+    // can lag behind registry.npmjs.org, so @latest resolved there may be
+    // stale or missing → silent staleness or ETARGET. Self-update always pulls
+    // the true latest from the authoritative source.
     try {
-      // Pin the official registry: a user's default registry (e.g. npmmirror)
-      // can lag behind registry.npmjs.org, so @latest resolved there may be
-      // stale or missing → silent staleness or ETARGET. Self-update always
-      // pulls the true latest from the authoritative source.
-      execSync(`npm install -g ${BRAND.npmPackage}@latest --registry=https://registry.npmjs.org/`, { stdio: 'inherit' });
-      migrateLegacyHermitBridgeConfigIfNeeded();
-      // Files just changed (global reinstall): reload the live usage worker so
-      // it picks up the new code without waiting for a manual restart.
-      await onUpdated?.();
-      console.log(`\n${brandLogPrefix()} Updated successfully. Restart with: ${brandCommand('restart')}\n`);
+      exec(`npm install -g ${BRAND.npmPackage}@latest --registry=https://registry.npmjs.org/`, {
+        stdio: 'inherit',
+      });
     } catch (err) {
       // Platform-aware fallback. `sudo` does not exist on Windows, and the
-      // common failure there is EBUSY — a lingering agentcli process holds
-      // the package files (not a permissions issue) — so steer Windows users to
+      // common failure there is EBUSY — a lingering agentcli process holds the
+      // package files (not a permissions issue) — so steer Windows users to
       // release the lock. macOS/Linux may genuinely need sudo for a root-owned
       // global prefix.
       const hint =
         process.platform === 'win32'
           ? `先关闭所有运行中的 agentcli 进程（或重启电脑）再重试：npm install -g ${BRAND.npmPackage}@latest --prefer-online`
           : `Try: sudo npm install -g ${BRAND.npmPackage}@latest`;
-      console.error(`${brandLogPrefix()} npm update failed. ${hint}`);
+      error(`${brandLogPrefix()} npm update failed. ${hint}`);
       process.exit(1);
     }
   }
+
+  migrate();
+  // Files just changed (checkout + install + build, or global reinstall): reload
+  // the live usage worker so it picks up the new code without a manual restart.
+  await onUpdated?.();
+  log(`Successfully updated from ${currentVersion} to version ${latestVersion}`);
 }
 
 // ---------------------------------------------------------------------------

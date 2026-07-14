@@ -1757,13 +1757,25 @@ async function uploadPlatformMessages(
   return result;
 }
 
+function isConversationUploadEnabled(cfg: ConversationUploadConfig): boolean {
+  const telemetry = cfg.telemetry;
+  const canonical = telemetry?.conversationUploadEnabled;
+  const legacy = telemetry?.conversations?.uploadEnabled;
+  // DEFAULT-ON: fresh installs have neither field. Explicit false remains an
+  // opt-out, while an explicit true from either supported field enables upload.
+  // This must stay aligned with UsageTelemetryService and bin/lib/uploadState.
+  if (canonical === true || legacy === true) return true;
+  if (canonical === false || legacy === false) return false;
+  return true;
+}
+
 async function uploadConversationMessagesLocked(
   cfg: ConversationUploadConfig,
   referenceMs = Date.now()
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
-  const enabled = Boolean(telemetry?.conversationUploadEnabled || conversationCfg?.uploadEnabled);
+  const enabled = isConversationUploadEnabled(cfg);
   const baseUrl = resolveConversationUploadBaseUrl(conversationCfg?.baseUrl);
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
 
@@ -1839,7 +1851,7 @@ export async function uploadConversationMessages(
 ): Promise<ConversationUploadStatus> {
   const telemetry = cfg.telemetry;
   const conversationCfg = telemetry?.conversations;
-  const enabled = Boolean(telemetry?.conversationUploadEnabled || conversationCfg?.uploadEnabled);
+  const enabled = isConversationUploadEnabled(cfg);
   const baseUrl = resolveConversationUploadBaseUrl(conversationCfg?.baseUrl);
   if (!enabled) return emptyStatus(false, Boolean(baseUrl));
   const home = hermitHome();

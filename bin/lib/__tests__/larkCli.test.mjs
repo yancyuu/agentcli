@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { checkLarkCliDigitalWorkerAuth, ensureLarkCliDigitalWorkerAuth, ensureLarkCliProfile } from '../larkCli.mjs';
+import {
+  checkLarkCliDigitalWorkerAuth,
+  ensureLarkCliDigitalWorkerAuth,
+  ensureLarkCliProfile,
+  personalLarkProfileName,
+} from '../larkCli.mjs';
 
 const MOCK_DEVICE_CODE = 'test-device-code-abc123';
 const MOCK_VERIFICATION_URL = 'https://open.feishu.cn/device-verify?code=abc123';
@@ -8,6 +13,11 @@ const MOCK_VERIFICATION_URL = 'https://open.feishu.cn/device-verify?code=abc123'
 describe('ensureLarkCliProfile — reuse by app_id', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('derives one stable personal profile name per app_id', () => {
+    expect(personalLarkProfileName('cli_worker')).toBe('agentcli-user-cli_worker');
+    expect(personalLarkProfileName('')).toBe('');
   });
 
   it('reuses the existing profile for the same app_id instead of adding a new one', () => {
@@ -78,6 +88,32 @@ describe('ensureLarkCliProfile — reuse by app_id', () => {
 describe('larkCli — digital worker authorization', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('reports missing Digital Worker scopes without accepting a profile-only authorization', () => {
+    const calls = [];
+    vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
+      // Use includes() instead of args[0/1] so the --profile prefix is tolerated.
+      if (args.includes('auth') && args.includes('status')) {
+        return { status: 0, stdout: '{"identities":{"user":{"available":true,"verified":true}}}', stderr: '' };
+      }
+      if (args.includes('auth') && args.includes('check')) {
+        return { status: 0, stdout: '{"ok":false,"granted":["contact:user.basic_profile:readonly"],"missing":["docs:document.content:read","drive:drive:readonly","im:message.send_as_user"]}', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    });
+
+    const result = checkLarkCliDigitalWorkerAuth({ profile: 'agentcli-user-cli_worker' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      missingScopes: ['docs:document.content:read', 'drive:drive:readonly', 'im:message.send_as_user'],
+    });
+    const check = calls.find(([, args]) => args.includes('auth') && args.includes('check'));
+    expect(check[1][check[1].indexOf('--scope') + 1]).toContain('docs:document.content:read');
+    expect(check[1][check[1].indexOf('--scope') + 1]).toContain('im:message.send_as_user');
   });
 
   it('initiates two-step device flow when auth is missing', async () => {
@@ -217,6 +253,46 @@ describe('larkCli — digital worker authorization', () => {
     expect(result.ok).toBe(true);
     expect(result.authReady).toBe(true);
     expect(calls.some(([, args]) => args[0] === 'auth' && args[1] === 'login')).toBe(false);
+  });
+
+  it('force:true re-runs the device flow even when auth is already granted', async () => {
+    // Regression: the digital-worker provisioning flow must always let the creator
+    // refresh their personal authorization. Without force, the existing-auth check
+    // short-circuits and skips the authorization screen the user expects.
+    const calls = [];
+    vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
+      if (args[0] === 'auth' && args[1] === 'status')
+        return { status: 0, stdout: '{"identities":{"user":{"available":true,"verified":true,"userName":"测试"}}}', stderr: '' };
+      // Existing auth is ALREADY ok — the short-circuit path the bug used to take.
+      if (args[0] === 'auth' && args[1] === 'check')
+        return { status: 0, stdout: '{"ok":true,"granted":["docs:document.content:read"],"missing":null}', stderr: '' };
+      if (args.includes('--no-wait'))
+        return {
+          status: 0,
+          stdout: JSON.stringify({ verification_url: MOCK_VERIFICATION_URL, device_code: MOCK_DEVICE_CODE }),
+          stderr: '',
+        };
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    });
+    vi.stubGlobal('__larkCli_test_spawn_async', (cmd, args) => {
+      calls.push([cmd, args, 'async']);
+      const isPoll = args.includes('--device-code');
+      const mkStream = (payload) => ({ on: (ev, cb) => { if (ev === 'data') cb(payload); } });
+      return {
+        stdout: mkStream(isPoll ? '{"ok":true}' : ''),
+        stderr: mkStream(''),
+        on: (ev, cb) => { if (ev === 'close') cb(0); },
+      };
+    });
+
+    const result = await ensureLarkCliDigitalWorkerAuth(async () => () => {}, { force: true });
+
+    // The device flow MUST run despite existing auth being valid.
+    expect(calls.some(([, args]) => args.includes('--no-wait'))).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.authReady).toBe(true);
   });
 
   it('returns error when init step fails to produce verification_url', async () => {

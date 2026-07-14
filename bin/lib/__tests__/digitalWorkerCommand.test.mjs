@@ -43,7 +43,7 @@ describe('digitalWorkerCommand — command option parsing', () => {
     const options = buildDigitalWorkerCommandOptions([
       'create-digital-worker', '--name', '客服员工', '--description=接待用户',
       '--bind-project', 'support-worker', '--work-dir', '/repo/app', '--agent-type', 'codex',
-      '--platform', 'slack', '--platform-options', '{"bot_token":"xoxb","app_token":"xapp"}',
+      '--platform', 'feishu',
     ], findArg);
 
     expect(options).toMatchObject({
@@ -53,8 +53,8 @@ describe('digitalWorkerCommand — command option parsing', () => {
       bindProject: 'support-worker',
       workDir: '/repo/app',
       agentType: 'codex',
-      platform: 'slack',
-      platformOptions: { bot_token: 'xoxb', app_token: 'xapp' },
+      platform: 'feishu',
+      platformOptions: {},
     });
   });
 
@@ -70,8 +70,8 @@ describe('digitalWorkerCommand — command option parsing', () => {
   });
 });
 
-describe('provisionDigitalWorker', () => {
-  it('validates manual credentials before any side effect', async () => {
+describe('provisionDigitalWorker — claim/create restriction to Feishu + Claude Code/Codex', () => {
+  it('rejects an unsupported channel before any side effect', async () => {
     const deps = dependencies();
     const result = await provisionDigitalWorker(5680, {
       ...base,
@@ -80,9 +80,45 @@ describe('provisionDigitalWorker', () => {
     }, {}, deps);
 
     expect(result.ok).toBe(false);
-    expect(result.message).toContain('bot_token');
+    expect(result.message).toContain('feishu');
     expect(deps.ensureLocalServer).not.toHaveBeenCalled();
     expect(deps.createTeam).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported runtime before any side effect', async () => {
+    const deps = dependencies();
+    const result = await provisionDigitalWorker(5680, {
+      ...base,
+      agentType: 'cursor',
+    }, {}, deps);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('claudecode');
+    expect(deps.ensureLocalServer).not.toHaveBeenCalled();
+  });
+});
+
+describe('provisionDigitalWorker', () => {
+
+  it('refuses creation before any side effect when the workbench is not running', async () => {
+    const deps = dependencies({
+      ensureLocalServer: vi.fn(async () => {
+        throw new Error('AgentCli 工作台未启动：请先运行 agentcli web 或在菜单中开启 AgentCli 工作台，再创建数字员工。');
+      }),
+    });
+
+    const result = await provisionDigitalWorker(5680, base, {}, deps);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failedStage: '启动本地工作台 API',
+      message: expect.stringContaining('AgentCli 工作台未启动'),
+      rollback: { attempted: false },
+    });
+    expect(deps.createTeam).not.toHaveBeenCalled();
+    expect(deps.ensureRuntime).not.toHaveBeenCalled();
+    expect(deps.beginQr).not.toHaveBeenCalled();
+    expect(deps.bindManual).not.toHaveBeenCalled();
   });
 
   it('rolls back when the runtime never becomes ready', async () => {

@@ -14,7 +14,10 @@ import { reportLarkCredentialsOnce, type LarkCredentialsReportStatus } from './l
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
-const DEFAULT_SCAN_INTERVAL_MS = 10 * 60 * 1000;
+// Personal Feishu credentials are refreshed-then-reported once per cycle, so the
+// cadence is what keeps the access token alive between user re-authorizations.
+// 5 minutes mirrors the documented "每 5 分钟增量扫描" promise.
+export const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 
 type WorkerState = 'starting' | 'scanning' | 'idle' | 'disabled' | 'stopped' | 'error';
 

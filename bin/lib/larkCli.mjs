@@ -54,6 +54,11 @@ const DIGITAL_WORKER_LARK_SCOPES = [
   'im:message.send_as_user',
 ];
 
+export function personalLarkProfileName(appId) {
+  const normalizedAppId = String(appId || '').trim();
+  return normalizedAppId ? `agentcli-user-${normalizedAppId}` : '';
+}
+
 function runLarkCli(args, { profile, input } = {}) {
   const binary = findBinary();
   if (!binary) return null;
@@ -76,10 +81,15 @@ function getLarkUserIdentity(statusResult) {
   return user;
 }
 
-function hasMissingScopes(result) {
+function parseScopeCheck(result) {
   const parsed = parseJsonOutput(result);
-  if (!parsed || parsed.ok !== true) return true;
-  return Array.isArray(parsed.missing) && parsed.missing.length > 0;
+  const missingScopes = Array.isArray(parsed?.missing)
+    ? parsed.missing.filter((scope) => typeof scope === 'string' && scope.trim())
+    : [];
+  return {
+    ok: Boolean(parsed?.ok === true && missingScopes.length === 0),
+    missingScopes,
+  };
 }
 
 function listLarkCliProfiles() {
@@ -140,12 +150,14 @@ export function checkLarkCliDigitalWorkerAuth({ profile } = {}) {
     };
   }
   const check = runLarkCli(['auth', 'check', '--json', '--scope', DIGITAL_WORKER_LARK_SCOPES.join(' ')], { profile });
-  if (!check || check.status !== 0 || hasMissingScopes(check)) {
+  const scopeCheck = parseScopeCheck(check);
+  if (!check || check.status !== 0 || !scopeCheck.ok) {
     return {
       ok: false,
-      message: '需要授权飞书文档、消息和用户信息权限',
+      message: '个人授权缺少数字员工所需权限',
       detail: (check?.stdout || check?.stderr || '').trim(),
       scopes: DIGITAL_WORKER_LARK_SCOPES,
+      missingScopes: scopeCheck.missingScopes,
       user: userIdentity,
     };
   }
@@ -197,7 +209,13 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   const runOpts = { profile };
 
   const current = checkLarkCliDigitalWorkerAuth(runOpts);
-  if (current.ok) return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
+  // Short-circuit ONLY when not forced. The digital-worker provisioning flow
+  // passes options.force so the creator always re-authorizes (refreshes) their
+  // personal Feishu identity instead of silently reusing a prior grant — a stale
+  // or partial grant would otherwise let the last provisioning step skip auth.
+  if (current.ok && !options.force) {
+    return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
+  }
 
   // Step 1: initiate device flow for every user scope lark-cli currently knows.
   // `--domain all` is maintained by lark-cli itself (and brand-filtered), avoiding

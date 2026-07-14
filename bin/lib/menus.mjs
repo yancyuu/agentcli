@@ -24,10 +24,10 @@ export const NAV_ACTIONS = [
   },
   {
     id: 'data-sync',
-    label: '用量同步',
+    label: '消息总线',
     description: '回车展开；消息上报启动后台增量扫描，只上报最近 7 天；可手动重报最近 7 天',
     children: [
-      { id: 'toggle-message-upload', label: '开启/关闭 消息上报', toggle: 'conversation-upload' },
+      { id: 'toggle-message-upload', label: '开启/关闭 用量上报', toggle: 'conversation-upload' },
       { id: 'scan', label: '重报最近 7 天', description: '忽略游标重扫最近 7 天并补传；服务端按 eventId 自动去重' },
       { id: 'upload-logs', label: '查看上报日志', developerOnly: true },
       { id: 'overview', label: '查看同步状态' },

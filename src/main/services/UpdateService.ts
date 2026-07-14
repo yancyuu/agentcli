@@ -95,25 +95,25 @@ export class UpdateService {
 
   private async updateViaNpm(onProgress?: (progress: UpdateProgress) => void): Promise<boolean> {
     try {
-      onProgress?.({ phase: 'checking', message: 'Checking for updates...' });
+      onProgress?.({ phase: 'checking', message: 'Checking for updates to latest version...' });
 
       const versionInfo = await this.checkForUpdates();
-      if (!versionInfo.updateAvailable) {
+      if (!versionInfo.updateAvailable || !versionInfo.latestVersion) {
         onProgress?.({ phase: 'completed', message: 'Already on latest version' });
         return false;
       }
 
       onProgress?.({
         phase: 'downloading',
-        message: `Downloading Hermit ${versionInfo.latestVersion}...`,
+        message: `New version available: ${versionInfo.latestVersion} (current: ${this.currentVersion})`,
       });
-
       onProgress?.({ phase: 'installing', message: 'Installing update...' });
+      onProgress?.({ phase: 'installing', message: 'Using global installation update method...' });
       execSync('npm update -g hermit', { cwd: REPO_ROOT, stdio: 'pipe' });
 
       onProgress?.({
         phase: 'completed',
-        message: `Updated to Hermit ${versionInfo.latestVersion}`,
+        message: `Successfully updated from ${this.currentVersion} to version ${versionInfo.latestVersion}`,
       });
       return true;
     } catch (err: unknown) {
@@ -125,29 +125,28 @@ export class UpdateService {
 
   private async updateViaGit(onProgress?: (progress: UpdateProgress) => void): Promise<boolean> {
     try {
-      onProgress?.({ phase: 'checking', message: 'Checking for updates...' });
+      onProgress?.({ phase: 'checking', message: 'Checking for updates to latest version...' });
 
       const versionInfo = await this.checkForUpdates();
-      if (!versionInfo.updateAvailable) {
+      if (!versionInfo.updateAvailable || !versionInfo.latestVersion) {
         onProgress?.({ phase: 'completed', message: 'Already on latest version' });
         return false;
       }
 
-      onProgress?.({ phase: 'downloading', message: 'Fetching latest changes...' });
+      onProgress?.({
+        phase: 'downloading',
+        message: `New version available: ${versionInfo.latestVersion} (current: ${this.currentVersion})`,
+      });
+      onProgress?.({ phase: 'installing', message: 'Installing update...' });
+      onProgress?.({ phase: 'installing', message: 'Using git installation update method...' });
       execSync('git fetch --tags', { cwd: REPO_ROOT, stdio: 'pipe' });
-
-      onProgress?.({ phase: 'installing', message: 'Updating source code...' });
       execSync(`git checkout v${versionInfo.latestVersion}`, { cwd: REPO_ROOT, stdio: 'pipe' });
-
-      onProgress?.({ phase: 'installing', message: 'Installing dependencies...' });
       execSync('npm install', { cwd: REPO_ROOT, stdio: 'pipe' });
-
-      onProgress?.({ phase: 'installing', message: 'Building frontend...' });
       execSync('npm run build:web', { cwd: REPO_ROOT, stdio: 'pipe' });
 
       onProgress?.({
         phase: 'completed',
-        message: `Updated to Hermit ${versionInfo.latestVersion}. Please restart the server.`,
+        message: `Successfully updated from ${this.currentVersion} to version ${versionInfo.latestVersion}`,
       });
       return true;
     } catch (err: unknown) {

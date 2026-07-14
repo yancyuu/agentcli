@@ -191,15 +191,16 @@ export function getLarkCredentials(opts = {}) {
     return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
   }
 
-  // Resolve target (appId, userOpenId).
+  const profiles = isMac ? discoverProfilesMac() : [];
   let { appId, userOpenId } = opts;
   if (!appId) {
-    const profiles = isMac ? discoverProfilesMac() : [];
     const want = activeAppId();
     const hit = profiles.find((p) => !want || p.appId === want) || profiles[0];
     if (!hit) return { ok: false, message: '未找到 lark-cli 存储的 token (请先 `lark-cli auth login`)' };
     appId = hit.appId;
     userOpenId = userOpenId || hit.userOpenId;
+  } else if (!userOpenId) {
+    userOpenId = profiles.find((p) => p.appId === appId)?.userOpenId;
   }
 
   // appSecret: account "appsecret:<appId>"
@@ -239,6 +240,35 @@ function findLarkBinary() {
 }
 
 /**
+ * List lark-cli profiles. `profile list` does NOT accept --json (v1.0.53) but
+ * prints a JSON array to stdout, so parse that directly. Returns [] on failure.
+ */
+function listLarkProfiles() {
+  const binary = findLarkBinary();
+  if (!binary) return [];
+  try {
+    const r = spawnSync(binary, ['profile', 'list'], { encoding: 'utf-8', shell: isWin });
+    if (r.status !== 0) return [];
+    const parsed = JSON.parse((r.stdout || '').trim());
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Pure: resolve the lark-cli profile NAME for an appId. `auth check --profile`
+ * takes a profile name, but a per-worker profile is named after the worker, not
+ * its appId — so `--profile <appId>` misses those and the refresh silently
+ * no-ops. Falls back to appId (correct only when profile name == appId). Mirrors
+ * the TS path exactly.
+ */
+export function pickProfileNameByAppId(profiles, appId) {
+  const hit = (profiles || []).find((p) => p && p.appId === appId);
+  return hit?.name || appId;
+}
+
+/**
  * Force lark-cli to refresh+persist its stored user access token before we read
  * it. `auth check` verifies against the server and rewrites the .enc store when
  * the token is near/expired — `auth status --verify` does NOT reliably persist
@@ -247,9 +277,16 @@ function findLarkBinary() {
 function triggerLarkRefresh(appId, scope) {
   const binary = findLarkBinary();
   if (!binary) return false;
-  const scopeArg = String(scope || '').split(/\s+/).find(Boolean) || 'contact:user.base:readonly';
+  // `auth check --scope` accepts a single space-separated scope string. Pass the
+  // complete personal grant instead of checking only its first scope: the initial
+  // digital-worker login uses `--domain all`, and a refresh must keep validating
+  // the full scope set rather than silently degrading it.
+  const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
+  // Resolve the real profile name so the refresh always targets the right
+  // account, even when the profile is named after a worker rather than its appId.
+  const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
-    const r = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', appId], {
+    const r = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName], {
       encoding: 'utf-8',
       shell: isWin,
     });
@@ -260,14 +297,88 @@ function triggerLarkRefresh(appId, scope) {
 }
 
 /**
+ * A personal refresh token can only rotate the access token while it is still
+ * alive. Once `refreshExpiresAt` has passed, `lark-cli auth check` cannot
+ * succeed and the user must re-authorize, so spawning it is wasted work.
+ * Pure predicate (default clock injectable); mirrors the TS path exactly.
+ */
+export function shouldRefreshLarkCredentials(credentials, now = Date.now()) {
+  return Boolean(
+    credentials &&
+      typeof credentials.refreshExpiresAt === 'number' &&
+      Number.isFinite(credentials.refreshExpiresAt) &&
+      credentials.refreshExpiresAt > now
+  );
+}
+
+/**
  * Collect credentials with a fresh access token. Reads once (to learn appId +
- * scope), triggers lark-cli to refresh, then re-reads the now-fresh store.
+ * scope), triggers lark-cli to refresh at most once — only when the personal
+ * refresh token is still valid — then re-reads the now-fresh store. When the
+ * refresh token is expired/missing, returns the on-disk snapshot as-is so the
+ * caller can still report gracefully.
  * @param {{appId?:string, userOpenId?:string}} [opts]
  */
 export function getLarkCredentialsFresh(opts = {}) {
   const first = getLarkCredentials(opts);
-  if (first.ok) triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
-  return getLarkCredentials(opts);
+  if (first.ok && shouldRefreshLarkCredentials(first.credentials)) {
+    triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
+    return getLarkCredentials(opts);
+  }
+  return first;
+}
+
+/**
+ * Best-effort, non-interactive credential report for one lark-cli personal
+ * authorization. It deliberately returns only non-secret diagnostics so callers
+ * (including the Digital Worker wizard) can render its status safely.
+ */
+export async function reportLarkCredentials({ appId, userOpenId, fetchImpl = fetch } = {}) {
+  const result = getLarkCredentialsFresh({ appId, userOpenId });
+  if (!result.ok) return { ok: false, reason: 'no-credentials', message: result.message };
+
+  const c = result.credentials;
+  if (!c.appId || !c.appSecret || !c.accessToken || !c.refreshToken || !c.userOpenId) {
+    return { ok: false, reason: 'incomplete-credentials', message: '飞书个人授权凭证不完整，未执行上报' };
+  }
+
+  let ctx;
+  try {
+    const { resolveAuthedServerContext } = await import('./auth.mjs');
+    ctx = await resolveAuthedServerContext();
+  } catch {
+    return { ok: false, reason: 'config-not-authorized', message: '无法读取 AgentBus 授权状态' };
+  }
+  if (!ctx) return { ok: false, reason: 'not-authorized', message: '未登录 AgentBus，跳过飞书凭证上报' };
+
+  try {
+    const response = await fetchImpl(`${ctx.baseUrl}/api/v1/feishu/lark-cli/credentials`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: c.appId,
+        app_secret: c.appSecret,
+        user_open_id: c.userOpenId,
+        access_token: c.accessToken,
+        refresh_token: c.refreshToken,
+        scope: c.scope,
+        access_token_expires_at: c.expiresAt,
+        refresh_token_expires_at: c.refreshExpiresAt,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      return { ok: false, reason: 'http-error', status: response.status, message: `飞书凭证上报失败（HTTP ${response.status}）` };
+    }
+    return { ok: true, status: response.status, appId: c.appId };
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return {
+      ok: false,
+      reason: timedOut ? 'timeout' : 'fetch-failed',
+      message: timedOut ? '飞书凭证上报超时' : '飞书凭证上报请求失败',
+    };
+  }
 }
 
 /**
@@ -318,44 +429,20 @@ export async function runLarkCredentialsCommand({ report = false, json = false }
     process.exit(0);
   }
 
-  // --report: PUT to /api/v1/feishu/lark-cli/credentials
-  // Auth: admin Feishu session OR aim_xxx AI Monitor API Key via Bearer token.
-  // Use the same agentbus auth context we already have (aim_xxx key or user session).
-  const { resolveAuthedServerContext } = await import('./auth.mjs');
-  const ctx = await resolveAuthedServerContext();
-  if (!ctx) {
-    process.stderr.write('✗ 未登录 agentbus，请先 `agentcli auth login`\n');
-    process.exit(1);
-  }
-  const reportPayload = {
-    app_id: c.appId,
-    app_secret: c.appSecret,
-    user_open_id: c.userOpenId,
-    access_token: c.accessToken,
-    refresh_token: c.refreshToken,
-    scope: c.scope,
-    access_token_expires_at: c.expiresAt,
-    refresh_token_expires_at: c.refreshExpiresAt,
-  };
-  let res;
-  try {
-    res = await fetch(`${ctx.baseUrl}/api/v1/feishu/lark-cli/credentials`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(reportPayload),
-    });
-  } catch (e) {
-    process.stderr.write(`✗ 上报请求失败：${e.message}\n`);
-    process.exit(1);
-  }
-  const body = await res.text();
-  const responseSummary = res.ok ? body.slice(0, 500) : res.statusText;
+  const reportResult = await reportLarkCredentials({ appId: c.appId, userOpenId: c.userOpenId });
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: res.ok, status: res.status, body: responseSummary })}\n`);
+    process.stdout.write(`${JSON.stringify({
+      ok: reportResult.ok,
+      status: reportResult.status,
+      reason: reportResult.reason,
+      message: reportResult.message,
+    })}\n`);
   } else {
-    process.stdout.write(res.ok ? `✓ 已上报到 agentbus (HTTP ${res.status})\n` : `✗ 上报失败 (HTTP ${res.status})${res.statusText ? `：${res.statusText}` : ''}\n`);
+    process.stdout.write(reportResult.ok
+      ? `✓ 已上报到 agentbus (HTTP ${reportResult.status})\n`
+      : `✗ ${reportResult.message || '上报失败'}\n`);
   }
-  process.exit(res.ok ? 0 : 1);
+  process.exit(reportResult.ok ? 0 : 1);
 }
 
 // export internals for tests

@@ -17,6 +17,7 @@ import {
   __internals,
   buildLarkReportPayload,
   reportLarkCredentialsOnce,
+  shouldRefreshLarkCredentials,
   type GetLarkCredentialsResult,
   type LarkCredentials,
 } from './larkCredentials';
@@ -53,6 +54,51 @@ function makeFetchMock(
   }) as unknown as typeof fetch;
   return { fn, calls };
 }
+
+describe('lark-cli profile selection', () => {
+  it('uses the profile name for an app instead of assuming it equals the appId', () => {
+    expect(
+      __internals.pickProfileNameByAppId(
+        [
+          { appId: 'cli_default', name: 'cli_default' },
+          { appId: 'cli_worker', name: 'support-worker' },
+        ],
+        'cli_worker'
+      )
+    ).toBe('support-worker');
+  });
+
+  it('falls back to the appId when its profile cannot be listed', () => {
+    expect(__internals.pickProfileNameByAppId([], 'cli_default')).toBe('cli_default');
+  });
+});
+
+describe('shouldRefreshLarkCredentials', () => {
+  const NOW = 1_700_000_000_000;
+  const cred = (refreshExpiresAt: number): LarkCredentials => ({ ...TEST_CRED, refreshExpiresAt });
+
+  it('refreshes when the personal refresh token expires in the future', () => {
+    expect(shouldRefreshLarkCredentials(cred(NOW + 60_000), NOW)).toBe(true);
+  });
+
+  it('skips refresh when the refresh token is already expired', () => {
+    expect(shouldRefreshLarkCredentials(cred(NOW - 1), NOW)).toBe(false);
+  });
+
+  it('treats the exact expiry moment as expired (strictly greater-than)', () => {
+    expect(shouldRefreshLarkCredentials(cred(NOW), NOW)).toBe(false);
+  });
+
+  it('skips refresh when refreshExpiresAt is missing/zero', () => {
+    expect(shouldRefreshLarkCredentials(cred(0), NOW)).toBe(false);
+    expect(shouldRefreshLarkCredentials(undefined, NOW)).toBe(false);
+  });
+
+  it('skips refresh for non-finite (corrupt) expiry values', () => {
+    expect(shouldRefreshLarkCredentials(cred(Number.NaN), NOW)).toBe(false);
+    expect(shouldRefreshLarkCredentials(cred(Number.POSITIVE_INFINITY), NOW)).toBe(false);
+  });
+});
 
 describe('buildLarkReportPayload', () => {
   it('includes the complete personal user authorization in the snake_case wire payload', () => {

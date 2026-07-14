@@ -8,23 +8,34 @@
 /**
  * Reconcile a persisted telemetry object into the single canonical boolean that
  * means "conversation upload is on". This MUST agree with the worker gate
- * (UsageTelemetryService / ConversationMessageUploadService), which ORs
- * `conversationUploadEnabled || conversations.uploadEnabled`. The top-level
+ * (UsageTelemetryService / ConversationMessageUploadService). The top-level
  * `uploadEnabled` is a legacy dead field — written by old code paths but never
  * read for upload behavior — so it is deliberately ignored here; honoring it
  * would make the CLI claim "enabled" while the worker refuses to upload.
+ *
+ * DEFAULT-ON semantics: conversation upload is ON unless the user explicitly
+ * opted out. An absent config (fresh install, never toggled) resolves to ON so
+ * the 消息总线 is active without forcing the user through the toggle first. The
+ * toggle's OFF path writes `conversationUploadEnabled: false` (see
+ * setConversationUploadEnabled), which is honored as an explicit opt-out and is
+ * not resurrected by the default. Resolution rule:
+ *   • canonical `true` OR legacy `true` → ON (explicit opt-in wins over opt-out)
+ *   • canonical `false` OR legacy `false` → OFF
+ *   • both absent → ON (default)
  *
  * @param {unknown} telemetry
  * @returns {boolean}
  */
 export function resolveConversationUploadEnabled(telemetry) {
-  if (!telemetry || typeof telemetry !== 'object') return false;
+  if (!telemetry || typeof telemetry !== 'object') return true;
   const t = /** @type {Record<string, unknown>} */ (telemetry);
-  const canonical = Boolean(t.conversationUploadEnabled);
+  const canonical = t.conversationUploadEnabled;
   const legacy = t.conversations && typeof t.conversations === 'object'
-    ? Boolean(/** @type {Record<string, unknown>} */ (t.conversations).uploadEnabled)
-    : false;
-  return canonical || legacy;
+    ? (/** @type {Record<string, unknown>} */ (t.conversations).uploadEnabled)
+    : undefined;
+  if (canonical === true || legacy === true) return true;
+  if (canonical === false || legacy === false) return false;
+  return true;
 }
 
 /**

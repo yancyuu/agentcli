@@ -1,7 +1,9 @@
-import { startDaemon, waitForOpenHermitServerReady } from './daemon.mjs';
+import { waitForOpenHermitServerReady } from './daemon.mjs';
 import {
   assistantPlatformMeta,
   isAssistantQrPlatform,
+  isSupportedAssistantAgentType,
+  isSupportedAssistantPlatform,
   labelForAssistantAgentType,
   labelForAssistantPlatform,
   mergeAssistantPlatformOptions,
@@ -30,12 +32,17 @@ function parsePlatformOptions(value) {
 }
 
 async function ensureDigitalWorkerLocalServer() {
+  // Creating a digital worker is available only from an already-running AgentCli
+  // workbench. `waitForOpenHermitServerReady` probes /api/version, which is the
+  // canonical readiness signal — it rejects a dead daemon, a merely bound port,
+  // and a server still booting. Do NOT auto-start here: an explicit workbench
+  // launch gives the user a visible, working control plane before we create any
+  // team, channel, or personal authorization state.
   const existing = await waitForOpenHermitServerReady(null, 3_000);
   if (existing.ready) return existing;
-  const daemon = startDaemon({ exitOnDone: false, quiet: true });
-  const ready = await waitForOpenHermitServerReady(daemon.pid, 60_000);
-  if (!ready.ready) throw new Error(ready.reason || '本地 Web 服务未启动');
-  return ready;
+  throw new Error(
+    'AgentCli 工作台未启动或尚未就绪：请先运行 agentcli web 或在菜单中开启 AgentCli 工作台，再创建数字员工。'
+  );
 }
 
 const defaultDependencies = {
@@ -57,6 +64,16 @@ function normalizedRequest(options) {
   const agentType = String(options.agentType || 'claudecode').trim();
   const workDir = String(options.workDir || process.cwd()).trim() || process.cwd();
   const bindProject = normalizeAssistantBindProject(options.bindProject || name);
+
+  // Digital-worker claim/create only supports Claude Code / Codex on Feishu.
+  // Reject anything else before any platform lookup or provisioning side effect.
+  if (!isSupportedAssistantAgentType(agentType)) {
+    return { ok: false, message: `不支持的运行时：${agentType}（仅支持 claudecode / codex）` };
+  }
+  if (!isSupportedAssistantPlatform(platform)) {
+    return { ok: false, message: `不支持的渠道：${platform}（仅支持 feishu）` };
+  }
+
   let platformMeta = null;
   let platformOptions = {};
 
