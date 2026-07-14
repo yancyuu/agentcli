@@ -101,17 +101,13 @@ describe('shouldRefreshLarkCredentials', () => {
 });
 
 describe('buildLarkReportPayload', () => {
-  it('includes the complete personal user authorization in the snake_case wire payload', () => {
+  it('uses only the backend-supported four-field snake_case wire payload', () => {
     const payload = buildLarkReportPayload(TEST_CRED);
     expect(payload).toEqual({
       app_id: TEST_CRED.appId,
       app_secret: TEST_CRED.appSecret,
       access_token: TEST_CRED.accessToken,
       refresh_token: TEST_CRED.refreshToken,
-      user_open_id: TEST_CRED.userOpenId,
-      scope: TEST_CRED.scope,
-      access_token_expires_at: TEST_CRED.expiresAt,
-      refresh_token_expires_at: TEST_CRED.refreshExpiresAt,
     });
   });
 });
@@ -218,10 +214,6 @@ describe('reportLarkCredentialsOnce', () => {
       app_secret: TEST_CRED.appSecret,
       access_token: TEST_CRED.accessToken,
       refresh_token: TEST_CRED.refreshToken,
-      user_open_id: TEST_CRED.userOpenId,
-      scope: TEST_CRED.scope,
-      access_token_expires_at: TEST_CRED.expiresAt,
-      refresh_token_expires_at: TEST_CRED.refreshExpiresAt,
     });
   });
 
