@@ -910,8 +910,8 @@ export class TaskDispatchService {
     let redis: Redis | null = null;
     let redisSub: Redis | null = null;
     try {
-      // @ts-expect-error TS2307: Redis collaboration is optional and delegated to agentbus.
-      const ioredis = await import('ioredis');
+      const redisModuleName = 'ioredis';
+      const ioredis = await import(redisModuleName);
       const { port, password, db } = this.config.redis;
       const opts = {
         host: normalizeRedisHost(this.config.redis.host),

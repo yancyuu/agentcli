@@ -156,6 +156,7 @@ import { runAikey, runAikeyStatus, runAikeyManual } from './lib/aikey.mjs';
 import {
   printNavigation,
   runNavigationAction,
+  printCollaborationStart,
 } from './lib/navigationCommand.mjs';
 import {
   printUsageStatus,

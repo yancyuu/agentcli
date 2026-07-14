@@ -4,10 +4,14 @@
 
 ## [Unreleased]
 
+## [1.9.13] - 2026-07-14
+
 ### Changed
 
 - token 池认领改为直接写入所选 Claude Code / Codex 配置；不再修改 shell 启动文件或安装 `precmd` / `PROMPT_COMMAND` hook，`~/.hermit/aikey.env` 仅供外部 agent 按需手动加载。
+- token 池选择运行时后统一要求选择模型：仅写入 Claude Code 时也不再静默使用 receipt 中的首个模型，所选模型同时用于 Claude 的 haiku / sonnet / opus tier，并在选择 Codex 时写入 Codex 配置。
 - 「工作台 → 开通数字员工」升级为最小化快速创建流程：飞书/Lark 请求 lark-cli 当前支持的全量个人授权，并在终端显示二维码、同时尝试打开浏览器。
+- Lark 凭证上报扩展为完整个人授权信息，除 app/token 外同步用户 open_id、scope 与 access/refresh token 过期时间，便于服务端准确判断授权主体和有效期。
 - 重写 README 与公开站点为「开源 + 企业版」双产品说明书：AgentCli 开源免费（AGPL-3.0），AgentBus 定位为付费企业增值服务；合并首页与使用指南为单页，补齐 token 池认领（直写 Claude/Codex 配置）与用量上报三要素说明。
 - 将公开文档更新为当前 openHermit 产品面：Fastify API、Vite Web UI、默认 `/teams` 工作台、`~/.hermit/` 本地优先存储，以及 `@yancyyu/agentcli` 当前包事实。
 - 统一 README、文档索引、团队架构、跨团队协作和发布指南中的 Loop Engineering 叙述。
@@ -19,6 +23,7 @@
 
 ### Fixed
 
+- 修复 token 池仅选择 Claude Code 时仍显示 Codex model 缺失警告的问题；未选择的运行时不再产生误导性告警。
 - 自动修复旧版本遗留的配置备份清单路径，确保备份状态与当前 `~/.hermit/agentcli.env.bak` 位置一致。
 
 ### Added

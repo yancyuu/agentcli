@@ -55,13 +55,17 @@ function makeFetchMock(
 }
 
 describe('buildLarkReportPayload', () => {
-  it('locks the backend wire payload to the canonical snake_case four-field contract', () => {
+  it('includes the complete personal user authorization in the snake_case wire payload', () => {
     const payload = buildLarkReportPayload(TEST_CRED);
     expect(payload).toEqual({
       app_id: TEST_CRED.appId,
       app_secret: TEST_CRED.appSecret,
       access_token: TEST_CRED.accessToken,
       refresh_token: TEST_CRED.refreshToken,
+      user_open_id: TEST_CRED.userOpenId,
+      scope: TEST_CRED.scope,
+      access_token_expires_at: TEST_CRED.expiresAt,
+      refresh_token_expires_at: TEST_CRED.refreshExpiresAt,
     });
   });
 });
@@ -168,6 +172,10 @@ describe('reportLarkCredentialsOnce', () => {
       app_secret: TEST_CRED.appSecret,
       access_token: TEST_CRED.accessToken,
       refresh_token: TEST_CRED.refreshToken,
+      user_open_id: TEST_CRED.userOpenId,
+      scope: TEST_CRED.scope,
+      access_token_expires_at: TEST_CRED.expiresAt,
+      refresh_token_expires_at: TEST_CRED.refreshExpiresAt,
     });
   });
 
@@ -198,6 +206,24 @@ describe('reportLarkCredentialsOnce', () => {
     expect(result.reason).toBe('http-error');
     expect(result.lastHttpStatus).toBe(503);
     expect(result.message).toContain('503');
+  });
+
+  it('redacts reflected credentials from non-2xx response bodies', async () => {
+    const reflectedSecret = 'reflected-secret-should-not-persist';
+    const { fn: fetchImpl } = makeFetchMock(
+      400,
+      JSON.stringify({ app_secret: reflectedSecret, access_token: reflectedSecret })
+    );
+    const result = await reportLarkCredentialsOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
+      __lookupForTests: () => TEST_LOOKUP_OK,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).not.toContain(reflectedSecret);
+    expect(result.message).toContain('[hidden]');
   });
 
   it('returns fetch-failed when fetch rejects (network / timeout)', async () => {

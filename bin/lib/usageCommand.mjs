@@ -1211,7 +1211,7 @@ export async function printUsageAutostart({ exitOnDone = true } = {}) {
   const action = commandArgs[2] || 'status';
   if (action === 'status') {
     const status = await getUsageAutostartStatus();
-    const result = { ok: true, command: 'usage autostart status', hermitHome, ...status };
+    const result = { ok: true, command: 'usage autostart status', hermitHome, autostart: status };
     if (jsonRequested) printJson(result);
     printCliRows('usage autostart 状态', [
       ['平台支持', status.supported ? '支持' : '不支持（仅 macOS）', status.supported ? 'ok' : 'warn'],
@@ -1225,7 +1225,7 @@ export async function printUsageAutostart({ exitOnDone = true } = {}) {
   }
   if (action === 'enable') {
     const status = await enableUsageAutostart();
-    const result = { ok: true, command: 'usage autostart enable', hermitHome, ...status };
+    const result = { ok: true, command: 'usage autostart enable', hermitHome, autostart: status };
     if (jsonRequested) printJson(result);
     printCliRows('usage autostart 已开启', [
       ['launchd', `已安装 (${status.label})`, 'ok'],
@@ -1236,7 +1236,7 @@ export async function printUsageAutostart({ exitOnDone = true } = {}) {
   }
   if (action === 'disable') {
     const status = await disableUsageAutostart();
-    const result = { ok: true, command: 'usage autostart disable', hermitHome, ...status };
+    const result = { ok: true, command: 'usage autostart disable', hermitHome, autostart: status };
     if (jsonRequested) printJson(result);
     printCliRows('usage autostart 已关闭', [
       ['launchd', '已移除', 'off'],

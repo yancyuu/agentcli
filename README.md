@@ -4,7 +4,7 @@
 
 <h1 align="center">AgentCli</h1>
 
-<p align="center"><strong>当前版本：v1.9.11</strong></p>
+<p align="center"><strong>当前版本：v1.9.13</strong></p>
 
 <p align="center">
   <strong>本地优先的 AI 数字员工工作台</strong><br/>

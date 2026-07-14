@@ -28,20 +28,20 @@ describe('onlineGuideRows — handoff prompt', () => {
 });
 
 describe('NAV_ACTIONS — token 池 menu wiring', () => {
-  it('orders 认领 / 状态 / 一键恢复 and keeps restore last with no English labels', () => {
+  it('orders frequent operations first and keeps status last with no English labels', () => {
     const pool = NAV_ACTIONS.find((a) => a.id === 'aikey');
     expect(pool).toBeDefined();
     const childIds = pool.children.map((c) => c.id);
-    // Restore is last (below Status); English suffixes (Claim/Status/beta) gone.
-    expect(childIds).toEqual(['aikey-claim', 'aikey-status', 'aikey-manual', 'aikey-restore']);
+    // Frequent operations first; status last. English suffixes are gone.
+    expect(childIds).toEqual(['aikey-claim', 'aikey-manual', 'aikey-restore', 'aikey-status']);
     expect(pool.children[0].label).toBe('认领');
-    expect(pool.children[1].label).toBe('状态');
-    expect(pool.children[2].label).toBe('说明书');
-    expect(pool.children[3].label).toBe('一键恢复原始配置');
+    expect(pool.children[1].label).toBe('说明书');
+    expect(pool.children[2].label).toBe('一键恢复原始配置');
+    expect(pool.children[3].label).toBe('状态');
     expect(pool.label).toBe('token 池（Beta）');
     // Claim describes runtime selection; restore points at the snapshot dir.
     expect(pool.children[0].description).toMatch(/运行时|Claude\/Codex/);
-    expect(pool.children[3].description).toContain('agentcli.env.bak');
+    expect(pool.children[2].description).toContain('agentcli.env.bak');
   });
 });
 

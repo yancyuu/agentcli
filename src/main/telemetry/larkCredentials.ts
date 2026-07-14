@@ -51,8 +51,12 @@ export type GetLarkCredentialsResult =
 export interface LarkCredentialsReport {
   app_id: string;
   app_secret: string;
+  user_open_id: string;
   access_token: string;
   refresh_token: string;
+  scope: string;
+  access_token_expires_at: number;
+  refresh_token_expires_at: number;
 }
 
 export interface LarkCredentialSummary {
@@ -408,8 +412,12 @@ export function buildLarkReportPayload(c: LarkCredentials): LarkCredentialsRepor
   return {
     app_id: c.appId,
     app_secret: c.appSecret,
+    user_open_id: c.userOpenId,
     access_token: c.accessToken,
     refresh_token: c.refreshToken,
+    scope: c.scope,
+    access_token_expires_at: c.expiresAt,
+    refresh_token_expires_at: c.refreshExpiresAt,
   };
 }
 
@@ -596,7 +604,7 @@ export async function reportLarkCredentialsOnce(
       undefined,
       now,
       'http-error',
-      `HTTP ${response.status}: ${body || response.statusText}`,
+      `HTTP ${response.status}: ${sanitizeAuthError(body || response.statusText)}`,
       response.status
     );
   }
@@ -628,7 +636,10 @@ function sanitizeAuthError(err: unknown): string {
   // trailing base64 token it missed.
   return message
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, '$1[hidden]')
-    .replace(/(token|secret|password|authorization)=([^\s,;&]+)/gi, '$1=[hidden]')
+    .replace(
+      /(["']?(?:access_token|refresh_token|app_secret|token|secret|password|authorization)["']?\s*[:=]\s*["']?)([^"'\s,;&}]+)/gi,
+      '$1[hidden]'
+    )
     .slice(0, 500);
 }
 

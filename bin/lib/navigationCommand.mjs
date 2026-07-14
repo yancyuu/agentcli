@@ -445,9 +445,10 @@ async function pickWireApi() {
   return 'responses';
 }
 
-// Single-select model picker — Codex only holds one model in config.toml.
-// The recommended default is pickHighestVersionModel (highest version).
-// Empty modelIds → manual text input (like pickWireApi's wire::manual path).
+// Single-select model picker — ONE model is written to Codex config.toml AND
+// reused as all three Claude tier vars (haiku/sonnet/opus). The recommended
+// default is pickHighestVersionModel (highest version). Empty modelIds → manual
+// text input (like pickWireApi's wire::manual path).
 async function pickModel(modelIds) {
   const ids = (Array.isArray(modelIds) ? modelIds : [])
     .map((id) => String(id || '').trim())
@@ -475,30 +476,57 @@ async function pickModel(modelIds) {
   return pick.replace(/^model::/, '');
 }
 
-function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
+/**
+ * Pure builder for the "认领 token 完成" panel rows. Factored out of
+ * `renderClaimResult` so the Codex-model-row condition is testable without
+ * spawning the terminal. The Codex model row appears ONLY when Codex was
+ * selected — "no model" is a real warning then, but a Claude-only claim must
+ * not surface a misleading "receipt 未返回 model_ids" warning.
+ *
+ * `envFilePath` / `backupRootPath` / `maskedKey` are pre-resolved strings so
+ * this function touches no fs/env; the caller resolves them.
+ */
+export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, backupRootPath, backupCreated, maskedKey }) {
   const runtimeLabel = runtimes
     .map((r) => (r === 'claude' ? 'Claude Code' : 'Codex'))
     .join(' + ');
   const rows = [['写入运行时', runtimeLabel, 'ok']];
   if (apply.endpoints.claude) rows.push(['Claude endpoint', apply.endpoints.claude, 'info']);
   if (apply.endpoints.codex) rows.push(['Codex endpoint', apply.endpoints.codex, 'info']);
-  if (choices.model) {
-    rows.push(['Codex model', choices.model, 'info']);
-  } else {
-    rows.push(['Codex model', 'receipt 未返回 model_ids，Codex 模型未写入，请手动指定', 'warn']);
+  // Codex model row is meaningful only when Codex was selected. A Claude-only
+  // claim never picked a Codex model, so it must not report "未返回 model_ids".
+  if (runtimes.includes('codex')) {
+    if (choices.model) {
+      rows.push(['Codex model', choices.model, 'info']);
+    } else {
+      rows.push(['Codex model', 'receipt 未返回 model_ids，Codex 模型未写入，请手动指定', 'warn']);
+    }
   }
   // Claude tier vars — all three tiers use the same selected model.
   const tier = apply.tierModels || {};
   if (tier.opus) rows.push(['Claude tier 模型', `${tier.opus}（haiku/sonnet/opus 通用）`, 'ok']);
   rows.push(
-    ['aikey.env', `${path.join(hermitHome, 'aikey.env')}（已写入，外部 agent 可 source）`, 'info'],
+    ['aikey.env', `${envFilePath}（已写入，外部 agent 可 source）`, 'info'],
     [
       '原始配置快照',
-      snapshot?.created ? `${originalEnvBackupRoot()}（本次新建）` : `${originalEnvBackupRoot()}（已存在，未覆盖）`,
+      backupCreated ? `${backupRootPath}（本次新建）` : `${backupRootPath}（已存在，未覆盖）`,
       'info',
     ],
-    ['key', `${maskKey(secret.key)}  (即焚，已写入配置，不会再显示)`, 'warn'],
+    ['key', `${maskedKey}  (即焚，已写入配置，不会再显示)`, 'warn'],
   );
+  return rows;
+}
+
+function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
+  const rows = buildClaimResultRows({
+    apply,
+    choices,
+    runtimes,
+    envFilePath: path.join(hermitHome, 'aikey.env'),
+    backupRootPath: originalEnvBackupRoot(),
+    backupCreated: Boolean(snapshot?.created),
+    maskedKey: maskKey(secret.key),
+  });
   printCliRows('认领 token 完成', rows, [
     '已按所选运行时直接写入 Claude/Codex 配置文件，新开终端即可生效。',
     '原始配置已快照到 ~/.hermit/agentcli.env.bak，可在「token 池 → 恢复原始配置」一键还原。',
@@ -576,18 +604,17 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 6. Codex model — single-select from receipt modelIds (Codex only holds one).
-  // 6. Codex model — single-select from receipt modelIds. The chosen model is
-  //     written to both Codex config.toml and all three Claude tier vars.
+  // 6. Model — single-select from receipt modelIds. The chosen model is written
+  //     to Codex config.toml (when Codex is selected) AND to all three Claude
+  //     tier vars (when Claude is selected). It is picked unconditionally after
+  //     runtime selection so a Claude-only claim still asks for the model instead
+  //     of silently auto-picking one from the receipt.
   //     wire_api is always "responses" (Codex dropped "chat" support) — no picker needed.
   const wireApi = DEFAULT_WIRE_API;
-  let model = null;
-  if (runtimes.includes('codex')) {
-    model = await pickModel(secret.modelIds);
-    if (!model) {
-      printCliRows('认领 token', [['状态', '已取消', 'warn']], '未写入任何配置。');
-      return;
-    }
+  const model = await pickModel(secret.modelIds);
+  if (!model) {
+    printCliRows('认领 token', [['状态', '已取消', 'warn']], '未写入任何配置。');
+    return;
   }
   const choices = { model, wireApi };
 

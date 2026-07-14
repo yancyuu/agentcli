@@ -148,8 +148,8 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
 
-    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement | null;
-    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
+    const allowFromInput = host.querySelector('input[placeholder*="user_id"]') as HTMLInputElement | null;
+    const allowChatInput = host.querySelector('input[placeholder*="chat_id"]') as HTMLInputElement | null;
     expect(allowFromInput?.value).toBe('');
     expect(allowChatInput?.value).toBe('');
     // managedSources is now an editable input in the Loop 动态设置 section (#21).
@@ -187,8 +187,8 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
 
-    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement | null;
-    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
+    const allowFromInput = host.querySelector('input[placeholder*="user_id"]') as HTMLInputElement | null;
+    const allowChatInput = host.querySelector('input[placeholder*="chat_id"]') as HTMLInputElement | null;
     expect(allowFromInput?.value).toBe('ou_A,ou_B');
     expect(allowChatInput?.value).toBe('chat_A');
 
@@ -221,8 +221,8 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
 
-    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement | null;
-    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement | null;
+    const allowFromInput = host.querySelector('input[placeholder*="user_id"]') as HTMLInputElement | null;
+    const allowChatInput = host.querySelector('input[placeholder*="chat_id"]') as HTMLInputElement | null;
     expect(allowFromInput?.value).toBe('ou_lark');
     expect(allowChatInput?.value).toBe('chat_lark');
 
@@ -478,8 +478,11 @@ describe('RuntimeConfigDialog', () => {
       await Promise.resolve();
     });
 
-    const allowFromInput = host.querySelector('input[placeholder*="允许所有用户"]') as HTMLInputElement;
-    const allowChatInput = host.querySelector('input[placeholder*="允许所有群聊"]') as HTMLInputElement;
+    const allowFromInput = host.querySelector('input[placeholder*="user_id"]') as HTMLInputElement;
+    const allowChatInput = host.querySelector('input[placeholder*="chat_id"]') as HTMLInputElement;
+
+    expect(allowFromInput).toBeTruthy();
+    expect(allowChatInput).toBeTruthy();
 
     await act(async () => {
       const inputSetValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;

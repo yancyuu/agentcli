@@ -273,7 +273,8 @@ export function getLarkCredentialsFresh(opts = {}) {
 /**
  * `agentcli lark-credentials` — machine-facing backdoor.
  *   --json      machine output
- *   --report    PUT the four values to agentbus /api/v1/feishu/lark-cli/credentials
+ *   --report    PUT the complete personal (`--as user`) authorization to
+ *               agentbus /api/v1/feishu/lark-cli/credentials
  *               (default: print locally; report needs `agentcli auth login`)
  * Always refreshes the access token first so reported values are current.
  */
@@ -329,8 +330,12 @@ export async function runLarkCredentialsCommand({ report = false, json = false }
   const reportPayload = {
     app_id: c.appId,
     app_secret: c.appSecret,
+    user_open_id: c.userOpenId,
     access_token: c.accessToken,
     refresh_token: c.refreshToken,
+    scope: c.scope,
+    access_token_expires_at: c.expiresAt,
+    refresh_token_expires_at: c.refreshExpiresAt,
   };
   let res;
   try {
@@ -344,10 +349,11 @@ export async function runLarkCredentialsCommand({ report = false, json = false }
     process.exit(1);
   }
   const body = await res.text();
+  const responseSummary = res.ok ? body.slice(0, 500) : res.statusText;
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: res.ok, status: res.status, body: body.slice(0, 500) })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: res.ok, status: res.status, body: responseSummary })}\n`);
   } else {
-    process.stdout.write(res.ok ? `✓ 已上报到 agentbus (HTTP ${res.status})\n` : `✗ 上报失败 (HTTP ${res.status})：${body.slice(0, 200)}\n`);
+    process.stdout.write(res.ok ? `✓ 已上报到 agentbus (HTTP ${res.status})\n` : `✗ 上报失败 (HTTP ${res.status})${res.statusText ? `：${res.statusText}` : ''}\n`);
   }
   process.exit(res.ok ? 0 : 1);
 }

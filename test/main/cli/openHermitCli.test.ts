@@ -111,7 +111,7 @@ async function startFakeDeviceAuthServer() {
   const server = createServer((req, res) => {
     const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
     requests.push({ path: requestUrl.pathname, query: requestUrl.searchParams });
-    if (requestUrl.pathname === '/api/v1/auth/hermit/start' || requestUrl.pathname === '/api/cli-auth/start') {
+    if (requestUrl.pathname === '/api/v1/auth/start' || requestUrl.pathname === '/api/cli-auth/start') {
       let body = '';
       req.setEncoding('utf8');
       req.on('data', (chunk) => {
@@ -182,7 +182,7 @@ async function startFakeDeviceAuthServer() {
       res.end('feishu approved');
       return;
     }
-    if (requestUrl.pathname === '/api/v1/auth/hermit/poll' || requestUrl.pathname === '/api/cli-auth/token') {
+    if (requestUrl.pathname === '/api/v1/auth/poll' || requestUrl.pathname === '/api/cli-auth/token') {
       let body = '';
       req.setEncoding('utf8');
       req.on('data', (chunk) => {
@@ -209,14 +209,14 @@ async function startFakeDeviceAuthServer() {
       });
       return;
     }
-    if (requestUrl.pathname === '/api/v1/auth/hermit/refresh') {
+    if (requestUrl.pathname === '/api/v1/auth/refresh') {
       let body = '';
       req.setEncoding('utf8');
       req.on('data', (chunk) => {
         body += chunk;
       });
       req.on('end', () => {
-        requests.push({ path: '/api/v1/auth/hermit/refresh-body', body });
+        requests.push({ path: '/api/v1/auth/refresh-body', body });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -231,7 +231,7 @@ async function startFakeDeviceAuthServer() {
       });
       return;
     }
-    if (requestUrl.pathname === '/api/v1/auth/hermit/me') {
+    if (requestUrl.pathname === '/api/v1/auth/me') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ identity: { id: 'device-union-id-123', name: 'Profile User' } }));
       return;
@@ -394,14 +394,14 @@ describe('openHermit CLI read-only workspace commands', () => {
       expect(parsed.command).toBe('navigate');
       expect(parsed.defaultAction).toBe('services');
       expect(parsed.actions.map((action: { id: string }) => action.id)).toEqual([
-        'data-sync',
         'web',
+        'data-sync',
         'account',
         'aikey',
         'exit',
       ]);
-      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'web')?.label).toBe('工作台 Workspace');
-      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('用量 Usage Sync');
+      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'web')?.label).toBe('本地工作台');
+      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('用量同步');
       expect(parsed.actions.find((action: { id: string; description: string }) => action.id === 'data-sync')?.description).toContain('消息上报');
       expect(parsed.message).toContain('本地使用');
       expect(parsed.message).toContain('本地/自托管团队协作无需登录');
@@ -951,8 +951,8 @@ describe('openHermit CLI read-only workspace commands', () => {
         expect(parsed.auth.account.name).toBe('Profile User');
         expect(authFile.token.accessToken).toBe('refreshed-device-access-token-should-not-print');
         expect(authFile.token.refreshToken).toBe('refreshed-device-refresh-token-should-not-print');
-        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/hermit/refresh')).toBe(true);
-        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/hermit/me')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/refresh')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/me')).toBe(true);
         expect(`${stdout}${stderr}`).not.toContain('expired-access-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('expired-refresh-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('refreshed-device-access-token-should-not-print');
@@ -1032,8 +1032,8 @@ describe('openHermit CLI read-only workspace commands', () => {
         expect(authFile.token.refreshToken).toBe('device-refresh-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('device-access-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('device-refresh-token-should-not-print');
-        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/hermit/start')).toBe(true);
-        expect(oauth.requests.some((request) => request.path === '/api/cli-auth/token')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/start')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/poll')).toBe(true);
         expect(authStat.mode & 0o777).toBe(0o600);
         expect(existsSync(path.join(hermitHome, 'hermit-bridge'))).toBe(false);
       } finally {
@@ -1088,8 +1088,8 @@ describe('openHermit CLI read-only workspace commands', () => {
         expect(authFile.issuer).toBe(oauth.baseUrl);
         expect(`${stdout}${stderr}`).not.toContain('device-access-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('device-refresh-token-should-not-print');
-        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/hermit/start')).toBe(true);
-        expect(oauth.requests.some((request) => request.path === '/api/cli-auth/token')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/start')).toBe(true);
+        expect(oauth.requests.some((request) => request.path === '/api/v1/auth/poll')).toBe(true);
       } finally {
         await oauth.close();
       }
@@ -1107,7 +1107,7 @@ describe('openHermit CLI read-only workspace commands', () => {
         );
 
         expect(stdout).toContain('飞书授权');
-        expect(stdout).toContain('openHermit');
+        expect(stdout).toContain('AgentCli');
         expect(stdout).toContain('不会保存飞书 app secret');
         expect(`${stdout}${stderr}`).not.toContain('device-access-token-should-not-print');
         expect(`${stdout}${stderr}`).not.toContain('device-refresh-token-should-not-print');

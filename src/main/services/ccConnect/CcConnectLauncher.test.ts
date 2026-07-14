@@ -33,11 +33,11 @@ describe('CcConnectLauncher', () => {
     it('launches via `node run.js` with -config <path> + extras', () => {
       const { cmd, args } = resolveBridgeCommand(
         { configPath: '/c.toml', extraArgs: ['--force'] },
-        () => '/node_modules/hermit-bridge/run.js'
+        () => '/node_modules/cc-connect/run.js'
       );
       // Mirrors the CLI (bin/hermit.mjs): spawn(node, [run.js, -config, ...]).
       expect(cmd).toBe(process.execPath);
-      expect(args).toEqual(['/node_modules/hermit-bridge/run.js', '-config', '/c.toml', '--force']);
+      expect(args).toEqual(['/node_modules/cc-connect/run.js', '-config', '/c.toml', '--force']);
     });
 
     it('maps host platforms to the single cc-connect cross-platform binary', () => {
@@ -47,9 +47,9 @@ describe('CcConnectLauncher', () => {
       expect(resolveHermitBridgeBinaryName('win32', 'arm64')).toBe('cc-connect.exe');
     });
 
-    it('throws when the hermit-bridge runner is absent (no silent fallback)', () => {
+    it('throws when the cc-connect runner is absent (no silent fallback)', () => {
       expect(() => resolveBridgeCommand({ configPath: '/c.toml' }, () => null)).toThrow(
-        /hermit-bridge runner not found/
+        /cc-connect runner not found/
       );
     });
   });
@@ -76,7 +76,7 @@ describe('CcConnectLauncher', () => {
       const spawn = vi.fn<SpawnFn>(() => fakeChild);
       const launcher = new CcConnectLauncher({
         spawn,
-        resolveBinary: () => '/node_modules/hermit-bridge/run.js',
+        resolveBinary: () => '/node_modules/cc-connect/run.js',
       });
       const client = probe(2); // initial check fails, first poll succeeds
 
@@ -92,7 +92,7 @@ describe('CcConnectLauncher', () => {
       expect(spawn).toHaveBeenCalledTimes(1);
       expect(spawn.mock.calls[0][0]).toBe(process.execPath);
       expect(spawn.mock.calls[0][1]).toEqual([
-        '/node_modules/hermit-bridge/run.js',
+        '/node_modules/cc-connect/run.js',
         '-config',
         '/c.toml',
         '--force',
@@ -130,7 +130,7 @@ describe('CcConnectLauncher', () => {
     it('kills (SIGTERM) a process this launcher started', async () => {
       const kill = vi.fn();
       const spawn = vi.fn<SpawnFn>(() => ({ pid: 7, kill }));
-      const launcher = new CcConnectLauncher({ spawn, resolveBinary: () => '/bin/hermit-bridge' });
+      const launcher = new CcConnectLauncher({ spawn, resolveBinary: () => '/bin/cc-connect' });
 
       await launcher.ensureRunning({
         client: probe(2),
