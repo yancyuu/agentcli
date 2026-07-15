@@ -1,9 +1,12 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = join(ROOT, '_site');
+
+// 说明书版本号跟随 package.json，避免落后于发版（此前硬编码在 v1.9.11）。
+const PKG_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
 
 function writeText(relativePath, content) {
   const target = join(OUT_DIR, relativePath);
@@ -217,7 +220,7 @@ const html = `<!DOCTYPE html>
   </header>
 
   <section class="hero">
-    <span class="hero-badge">Local-first · 本地控制面 · v1.9.13</span>
+    <span class="hero-badge">Local-first · 本地控制面 · v${PKG_VERSION}</span>
     <h1>AgentCli</h1>
     <p class="lede">本地优先的 AI 数字员工工作台。<strong>CLI 给 agent，Web 给人</strong>——自动采集 Claude Code / Codex / Cursor 等运行时用量，统一管理数字员工团队。</p>
     <p class="oss-line">AgentCli 管本地运行时与工作台，数据默认落在本机 <code>~/.hermit/</code>；AgentBus 负责消息路由、团队协作与组织级用量汇总。</p>
