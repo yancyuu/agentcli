@@ -208,7 +208,7 @@ export function getLarkCredentials(opts = {}) {
     }
     appId = hit.appId;
     userOpenId = userOpenId || hit.userOpenId;
-  }
+  } else if (!userOpenId) {
     userOpenId = profiles.find((p) => p.appId === appId)?.userOpenId;
   }
 
