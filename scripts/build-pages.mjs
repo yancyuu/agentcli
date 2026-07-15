@@ -362,6 +362,10 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <li><strong>Codex</strong> <code>~/.codex/auth.json</code>（<code>OPENAI_API_KEY</code>）+ <code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> / wire_api 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。Codex base_url 由网关 <code>proxyPaths</code> 按所选 wire_api 解析，与 Claude endpoint 不同。</li>
     </ul>
     <p>配置文件是 Claude Code / Codex 的常规生效路径：AgentCli 不再修改 <code>.zshrc</code> / <code>.bashrc</code>，也不安装 <code>precmd</code> / <code>PROMPT_COMMAND</code> shell hook；重新启动所选运行时即可读取新配置。<code>~/.hermit/aikey.env</code> 仍以 0600 权限保留为认领标记，外部 agent 需要时可手动 <code>source</code>。</p>
+    <div class="callout">
+      <div class="callout-title">api key 与 base url 怎么用</div>
+      <p><strong>Claude Code</strong> 认 <code>ANTHROPIC_AUTH_TOKEN</code>，认领时已写入 <code>~/.claude/settings.json</code> 的 <code>env</code> 块（不是 shell 环境变量）——重启 Claude Code 即生效，无需 <code>source</code> 或 <code>export</code>。<strong>Codex</strong> 认 <code>~/.codex/auth.json</code> 的 <code>OPENAI_API_KEY</code>。<strong>外部 agent / 手动调用</strong>才 <code>source ~/.hermit/aikey.env</code>，里面导出的是 <code>ANTHROPIC_API_KEY</code>。<code>ANTHROPIC_AUTH_TOKEN</code>（Claude 专用）与 <code>ANTHROPIC_API_KEY</code>（aikey.env / 外部 agent）是两个不同的变量，别混用。</p>
+    </div>
     <div class="callout warn">
       <div class="callout-title">注意</div>
       <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit/agentcli.env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。检查快照时会自动修正旧版本遗留的备份路径记录。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>

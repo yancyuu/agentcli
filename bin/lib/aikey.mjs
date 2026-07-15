@@ -360,7 +360,13 @@ export async function runAikeyManual({ exitOnDone = true, home = os.homedir(), h
     if (result.codex.model) rows.push(['Codex model', result.codex.model, 'ok']);
     if (result.codex.wireApi) rows.push(['Codex wire_api', result.codex.wireApi, 'info']);
     if (result.codex.baseUrl) rows.push(['Codex base_url', result.codex.baseUrl, 'info']);
-    printCliRows('AgentCli 说明书', rows, '外部 agent：source ~/.hermit/aikey.env 获取 key + base_url，按说明书指定模型调用。');
+    printCliRows('AgentCli 说明书', rows, [
+      '使用说明：',
+      '• Claude Code：认领时已写入 ~/.claude/settings.json（ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL），重启 Claude Code 即生效，无需手动 source。',
+      '• Codex：已写入 ~/.codex/auth.json（OPENAI_API_KEY）+ config.toml，重启 Codex 即生效。',
+      '• 外部 agent / 手动调用：source ~/.hermit/aikey.env（ANTHROPIC_API_KEY + base_url），按上方模型调用。',
+      '• 注意：Claude 认 ANTHROPIC_AUTH_TOKEN（settings.json），aikey.env 导出的是 ANTHROPIC_API_KEY，两者不同，别混用。',
+    ].join('\n'));
   }
 
   if (exitOnDone) process.exit(0);
