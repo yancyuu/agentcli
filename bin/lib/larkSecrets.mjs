@@ -195,11 +195,20 @@ export function getLarkCredentials(opts = {}) {
   let { appId, userOpenId } = opts;
   if (!appId) {
     const want = activeAppId();
-    const hit = profiles.find((p) => !want || p.appId === want) || profiles[0];
-    if (!hit) return { ok: false, message: '未找到 lark-cli 存储的 token (请先 `lark-cli auth login`)' };
+    const hit = want
+      ? profiles.find((p) => p.appId === want && (!userOpenId || p.userOpenId === userOpenId))
+      : profiles.find((p) => !userOpenId || p.userOpenId === userOpenId);
+    if (!hit) {
+      return {
+        ok: false,
+        message: want
+          ? `当前 lark-cli 应用缺少个人授权 (appId=${want})`
+          : '未找到 lark-cli 存储的 token (请先 `lark-cli auth login`)',
+      };
+    }
     appId = hit.appId;
     userOpenId = userOpenId || hit.userOpenId;
-  } else if (!userOpenId) {
+  }
     userOpenId = profiles.find((p) => p.appId === appId)?.userOpenId;
   }
 
@@ -277,20 +286,24 @@ export function pickProfileNameByAppId(profiles, appId) {
 function triggerLarkRefresh(appId, scope) {
   const binary = findLarkBinary();
   if (!binary) return false;
-  // `auth check --scope` accepts a single space-separated scope string. Pass the
-  // complete personal grant instead of checking only its first scope: the initial
-  // digital-worker login uses `--domain all`, and a refresh must keep validating
-  // the full scope set rather than silently degrading it.
   const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
-  // Resolve the real profile name so the refresh always targets the right
-  // account, even when the profile is named after a worker rather than its appId.
   const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
-    const r = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName], {
+    const check = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName], {
       encoding: 'utf-8',
       shell: isWin,
     });
-    return r.status === 0;
+    if (check.status !== 0) return false;
+    const checked = JSON.parse((check.stdout || '').trim());
+    if (checked?.ok !== true || (Array.isArray(checked.missing) && checked.missing.length > 0)) return false;
+
+    const verify = spawnSync(binary, ['auth', 'status', '--json', '--verify', '--profile', profileName], {
+      encoding: 'utf-8',
+      shell: isWin,
+    });
+    if (verify.status !== 0) return false;
+    const status = JSON.parse((verify.stdout || '').trim());
+    return status?.identities?.user?.available === true && status.identities.user.verified === true;
   } catch {
     return false;
   }
@@ -321,11 +334,25 @@ export function shouldRefreshLarkCredentials(credentials, now = Date.now()) {
  */
 export function getLarkCredentialsFresh(opts = {}) {
   const first = getLarkCredentials(opts);
-  if (first.ok && shouldRefreshLarkCredentials(first.credentials)) {
-    triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
-    return getLarkCredentials(opts);
+  if (!first.ok) return first;
+
+  if (!shouldRefreshLarkCredentials(first.credentials) || !triggerLarkRefresh(first.credentials.appId, first.credentials.scope)) {
+    return {
+      ok: false,
+      refreshFailed: true,
+      message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
+    };
   }
-  return first;
+
+  const refreshed = getLarkCredentials(opts);
+  if (!refreshed.ok) {
+    return {
+      ok: false,
+      refreshFailed: true,
+      message: 'lark-cli 刷新后无法读取个人授权凭证，未执行上报',
+    };
+  }
+  return refreshed;
 }
 
 export function buildLarkReportPayload(c) {

@@ -40,6 +40,12 @@ const TEST_LOOKUP_EMPTY: GetLarkCredentialsResult = {
   message: '未找到 lark-cli 存储的 token',
 };
 
+const TEST_LOOKUP_REFRESH_FAILED: GetLarkCredentialsResult = {
+  ok: false,
+  refreshFailed: true,
+  message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
+};
+
 function makeFetchMock(
   status = 200,
   body = ''
@@ -142,6 +148,24 @@ describe('reportLarkCredentialsOnce', () => {
     expect(result.reason).toBe('no-credentials');
     expect(result.message).toBe('未找到 lark-cli 存储的 token');
     expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('returns refresh-failed and makes no request when local refresh did not complete', async () => {
+    const resolver = vi.fn();
+    const fetchImpl = vi.fn();
+    const onPayload = vi.fn();
+    const result = await reportLarkCredentialsOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: resolver,
+      __lookupForTests: () => TEST_LOOKUP_REFRESH_FAILED,
+      fetchImpl,
+      onPayload,
+    });
+
+    expect(result).toMatchObject({ ok: false, enabled: true, reason: 'refresh-failed' });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(onPayload).not.toHaveBeenCalled();
   });
 
   it('returns not-authorized when the auth resolver returns null', async () => {

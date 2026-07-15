@@ -45,7 +45,7 @@ export interface LarkCredentials {
 
 export type GetLarkCredentialsResult =
   | { ok: true; credentials: LarkCredentials }
-  | { ok: false; message: string };
+  | { ok: false; message: string; refreshFailed?: boolean };
 
 export interface LarkCredentialsReport {
   app_id: string;
@@ -71,6 +71,7 @@ export interface LarkCredentialsReportStatus {
     | 'not-authorized'
     | 'config-disabled'
     | 'config-not-authorized'
+    | 'refresh-failed'
     | 'fetch-failed'
     | 'http-error';
   message?: string;
@@ -355,24 +356,35 @@ export function pickProfileNameByAppId(
 function triggerLarkRefresh(appId: string, scope: string): boolean {
   const binary = findLarkBinary();
   if (!binary) return false;
-  // `auth check --scope` accepts a single space-separated scope string. Pass the
-  // complete personal grant instead of checking only its first scope: the initial
-  // digital-worker login uses `--domain all`, and a refresh must keep validating
-  // the full scope set rather than silently degrading it.
+  // `auth check --scope` accepts one space-separated scope string. The command
+  // refreshes the personal token as a side effect; a later status --verify forces
+  // its refreshed token state to be persisted by lark-cli.
   const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
-  // Resolve the real profile name so the refresh always targets the right
-  // account, even when the profile is named after a worker rather than its appId.
   const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
-    const r = spawnSync(
+    const check = spawnSync(
       binary,
       ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName],
+      { encoding: 'utf-8', shell: isWin }
+    );
+    if (check.status !== 0) return false;
+    const parsed = JSON.parse((check.stdout || '').trim()) as { ok?: unknown; missing?: unknown };
+    if (parsed.ok !== true || (Array.isArray(parsed.missing) && parsed.missing.length > 0))
+      return false;
+
+    const verify = spawnSync(
+      binary,
+      ['auth', 'status', '--json', '--verify', '--profile', profileName],
       {
         encoding: 'utf-8',
         shell: isWin,
       }
     );
-    return r.status === 0;
+    if (verify.status !== 0) return false;
+    const status = JSON.parse((verify.stdout || '').trim()) as {
+      identities?: { user?: { available?: unknown; verified?: unknown } };
+    };
+    return status.identities?.user?.available === true && status.identities.user.verified === true;
   } catch {
     return false;
   }
@@ -389,14 +401,16 @@ export function getLarkCredentials(
   if (!appId) {
     const profiles = isMac ? discoverProfilesMac() : [];
     const want = activeAppId();
-    const hit =
-      profiles.find(
-        (p) => (!want || p.appId === want) && (!userOpenId || p.userOpenId === userOpenId)
-      ) ||
-      profiles.find((p) => !want || p.appId === want) ||
-      profiles[0];
+    const hit = want
+      ? profiles.find((p) => p.appId === want && (!userOpenId || p.userOpenId === userOpenId))
+      : profiles.find((p) => !userOpenId || p.userOpenId === userOpenId);
     if (!hit) {
-      return { ok: false, message: '未找到 lark-cli 存储的 token (请先 `lark-cli auth login`)' };
+      return {
+        ok: false,
+        message: want
+          ? `当前 lark-cli 应用缺少个人授权 (appId=${want})`
+          : '未找到 lark-cli 存储的 token (请先 `lark-cli auth login`)',
+      };
     }
     appId = hit.appId;
     userOpenId = userOpenId || hit.userOpenId;
@@ -449,14 +463,31 @@ export function getLarkCredentialsFresh(
   opts: { appId?: string; userOpenId?: string } = {}
 ): GetLarkCredentialsResult {
   const first = getLarkCredentials(opts);
-  // Refresh exactly once per call, and only when the personal refresh token is
-  // still valid. When it is expired/missing we keep the on-disk snapshot and let
-  // the caller report it gracefully (the server decides what to do with it).
-  if (first.ok && shouldRefreshLarkCredentials(first.credentials)) {
-    triggerLarkRefresh(first.credentials.appId, first.credentials.scope);
-    return getLarkCredentials(opts);
+  if (!first.ok) return first;
+
+  // Every report must force a refresh attempt, even if the stored access token
+  // looks current. Reporting a stale snapshot after an unsuccessful refresh is
+  // unsafe because AgentBus uses it to prove the personal Lark identity.
+  if (
+    !shouldRefreshLarkCredentials(first.credentials) ||
+    !triggerLarkRefresh(first.credentials.appId, first.credentials.scope)
+  ) {
+    return {
+      ok: false,
+      refreshFailed: true,
+      message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
+    };
   }
-  return first;
+
+  const refreshed = getLarkCredentials(opts);
+  if (!refreshed.ok) {
+    return {
+      ok: false,
+      refreshFailed: true,
+      message: 'lark-cli 刷新后无法读取个人授权凭证，未执行上报',
+    };
+  }
+  return refreshed;
 }
 
 /**
@@ -586,7 +617,7 @@ export async function reportLarkCredentialsOnce(
     return {
       ok: false,
       enabled: true,
-      reason: 'no-credentials',
+      reason: lookup.refreshFailed ? 'refresh-failed' : 'no-credentials',
       message: lookup.message,
       lastAttemptAt: now,
       lastErrorAt: now,
