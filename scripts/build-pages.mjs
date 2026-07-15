@@ -378,7 +378,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <ol>
       <li><span class="step-label">登录上报目标</span> — <code>agentcli auth login</code>（飞书授权绑定 AgentBus），<code>agentcli auth status</code> 确认已登录。</li>
       <li><span class="step-label">启用消息上报</span> — <code>agentcli</code> →「用量同步」→ 回车展开 →「消息上报」开启，选择上报运行时。<em>该开关只在终端菜单 / Web 里，没有单独子命令。</em></li>
-      <li><span class="step-label">启动后台采集</span> — 推荐 <code>agentcli init</code> 一次性启动 Web 工作台 + 轻量 worker；也可单独运行 <code>agentcli usage start</code>。后台 worker 默认开机自启，约 5 分钟按服务端 cursor 增量扫描。停止用 <code>agentcli usage stop</code>。</li>
+      <li><span class="step-label">启动后台采集</span> — 推荐 <code>agentcli services start web</code> 启动 Web 工作台，<code>agentcli usage start</code> 启动后台 worker。后台 worker 默认开机自启，约 5 分钟按服务端 cursor 增量扫描。停止用 <code>agentcli usage stop</code>。</li>
       <li><span class="step-label">立即补报一次</span> — <code>agentcli usage report</code>（增量）；<code>usage report --full</code> 手动全量重扫最近 7 天。</li>
       <li><span class="step-label">核对状态</span> — <code>agentcli usage status</code>，或 Web 工作台「用量」Tab。</li>
     </ol>
@@ -401,7 +401,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <li><span class="step-label">停止用量 worker</span> — <code>agentcli usage stop</code>。该命令默认同时关闭用量 worker 的开机自启；更新完成后再显式启动。</li>
       <li><span class="step-label">停止 Web daemon</span> — <code>agentcli services stop web</code>。由 Web daemon 启动的 cc-connect / hermit-bridge 渠道运行时也会随之退出；协作服务只是配置项，不是本地进程，无需单独停止。</li>
       <li><span class="step-label">安装最新版</span> — <code>npm install -g @yancyyu/agentcli@latest --prefer-online</code>。不要把裸 <code>agentcli stop</code> 当成停止命令，它只显示指引。</li>
-      <li><span class="step-label">重新启动</span> — 推荐 <code>agentcli init</code>，一次启动 Web 工作台和用量 worker；也可分别运行 <code>agentcli services start web</code> 与 <code>agentcli usage start</code>。</li>
+      <li><span class="step-label">重新启动</span> — 推荐 <code>agentcli restart</code>，一键重启 Web 工作台和用量 worker；也可分别运行 <code>agentcli services start web</code> 与 <code>agentcli usage start</code>。</li>
       <li><span class="step-label">验证</span> — 运行 <code>agentcli --version</code>、<code>agentcli status</code>、<code>agentcli usage status</code> 和 <code>agentcli doctor</code>，确认版本、Web、worker 与本地配置均正常。</li>
     </ol>
     <pre><code># 1. 停止会占用安装文件的进程
@@ -412,7 +412,7 @@ agentcli services stop web
 npm install -g @yancyyu/agentcli@latest --prefer-online
 
 # 3. 恢复服务
-agentcli init
+agentcli restart
 
 # 4. 验证
 agentcli --version
@@ -429,7 +429,7 @@ agentcli doctor</code></pre>
     </div>
     <div class="callout success">
       <div class="callout-title">数据不会因更新被删除</div>
-      <p>上述停止和更新命令不会删除 <code>~/.hermit/</code> 中的团队、渠道配置、登录态或用量状态。更新后使用 <code>agentcli init</code> 恢复服务即可。</p>
+      <p>上述停止和更新命令不会删除 <code>~/.hermit/</code> 中的团队、渠道配置、登录态或用量状态。更新后使用 <code>agentcli restart</code> 恢复服务即可。</p>
     </div>
   </section>
 
