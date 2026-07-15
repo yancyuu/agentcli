@@ -708,6 +708,10 @@ async function startDeviceAuthSession(config) {
     const res = await fetch(startUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      // client_kind:"cli" tells the broker this is a long-lived CLI session, so it
+      // issues a refresh_token on the poll. Without it the poll response omits
+      // refresh_token and the access token can't be refreshed (daily re-login).
+      body: JSON.stringify({ client_kind: 'cli' }),
       signal: AbortSignal.timeout(30_000),
     });
     lastStatus = res.status;

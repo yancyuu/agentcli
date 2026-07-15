@@ -144,3 +144,53 @@ describe('access-token expiry resolution', () => {
     }
   });
 });
+
+// The broker only issues a refresh_token when the device-auth /start request
+// identifies the client as a long-lived CLI (client_kind:"cli"). Without it the
+// poll response omits refresh_token, the access token can't be refreshed, and the
+// user must re-login daily. Lock the { client_kind: "cli" } body on /start.
+describe('startDeviceAuthSession — client_kind:"cli" on /start', () => {
+  const previousEnv = { ...process.env };
+  let tmpHome;
+
+  afterEach(async () => {
+    process.env = { ...previousEnv };
+    vi.resetModules();
+    if (tmpHome) await rm(tmpHome, { recursive: true, force: true });
+    tmpHome = null;
+  });
+
+  async function freshAuth() {
+    tmpHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-auth-start-'));
+    await mkdir(path.join(tmpHome, 'auth'), { recursive: true });
+    return importAuthWithHome(tmpHome);
+  }
+
+  it('sends { client_kind: "cli" } so the broker returns a refresh_token', async () => {
+    const auth = await freshAuth();
+    const originalFetch = globalThis.fetch;
+    const captured = [];
+    globalThis.fetch = async (url, opts) => {
+      captured.push({ url: String(url), body: opts?.body ? JSON.parse(opts.body) : null });
+      return Response.json({
+        flow_id: 'flow-1',
+        poll_secret: 'ps',
+        authorization_url: 'https://auth.example.test/authorize',
+        expires_in: 600,
+        interval: 2,
+      });
+    };
+    try {
+      const config = {
+        startUrl: 'https://auth.example.test/api/v1/auth/start',
+        startFallbackUrl: 'https://auth.example.test/api/cli-auth/start',
+      };
+      const session = await auth.startDeviceAuthSession(config);
+      expect(captured[0].url).toBe(config.startUrl);
+      expect(captured[0].body).toEqual({ client_kind: 'cli' });
+      expect(session.flowId).toBe('flow-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
