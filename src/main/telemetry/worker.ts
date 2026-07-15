@@ -1,23 +1,20 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { TaskBusConfig } from '@shared/types/team';
 
-import { scanTelemetryOnce } from '@main/services/session-intelligence/UsageTelemetryService';
-import { sweepStaleUploadLock } from '@main/services/session-intelligence/ConversationMessageUploadService';
 import { getValidBearerToken } from '@main/services/auth/OpenHermitAuthClient';
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
 import { reportLarkCredentialsOnce, type LarkCredentialsReportStatus } from './larkCredentials';
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
-// Personal Feishu credentials are refreshed-then-reported once per cycle, so the
-// cadence is what keeps the access token alive between user re-authorizations.
-// 5 minutes mirrors the documented "每 5 分钟增量扫描" promise.
-export const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_SCAN_INTERVAL_MS = 10 * 60 * 1000;
+const DEFAULT_LARK_CREDENTIALS_INTERVAL_MS = 5 * 60 * 1000;
+const LARK_AUDIT_MAX_BYTES = 512 * 1024;
 
 type WorkerState = 'starting' | 'scanning' | 'idle' | 'disabled' | 'stopped' | 'error';
 
@@ -43,77 +40,66 @@ export interface UsageTelemetryWorkerStatus {
   telemetryEnabled: boolean;
   telemetry: UsageTelemetryStatus;
   lastError?: string;
-  /**
-   * Latest lark / feishu credential report. Runs serial after `telemetry` every
-   * scan cycle; worker writes this alongside status so the renderer can show
-   * "上报成功 / 未登录 / 未配置" without a separate request.
-   */
-  larkCredentials?: LarkCredentialsReportStatus;
+}
+
+export interface LarkCredentialsWorkerPaths {
+  statusPath: string;
+  auditLogPath: string;
+}
+
+export interface LarkCredentialsWorkerStatus {
+  schemaVersion: typeof STATUS_SCHEMA_VERSION;
+  state: 'starting' | 'reporting' | 'idle' | 'error' | 'stopped';
+  running: boolean;
+  pid: number | null;
+  startedAt: string | null;
+  updatedAt: string;
+  lastAttempt: string | null;
+  report?: LarkCredentialsReportStatus;
 }
 
 interface SavedSettings {
   taskBus?: TaskBusConfig;
 }
 
-type LarkAuthedResolver = (
-  hermitHome: string
-) => Promise<{ baseUrl: string; token: string } | null>;
-
-/**
- * Auth resolver injected into the lark credentials reporter. The default wires
- * `getValidBearerToken` (which proactively refreshes the access token when it
- * is near/expired) plus the same OPENHERMIT_* base URL overrides the upload
- * pipeline uses. Tests can swap this with a stub to exercise both branches.
- */
-let larkAuthedResolver: LarkAuthedResolver = defaultLarkAuthedResolver;
-
-export function setLarkAuthedResolver(resolver: LarkAuthedResolver | null): void {
-  larkAuthedResolver = resolver ?? defaultLarkAuthedResolver;
-}
-
-async function defaultLarkAuthedResolver(
-  hermitHome: string
-): Promise<{ baseUrl: string; token: string } | null> {
-  const envBaseUrl =
-    normalizeCloudBaseUrl(
-      process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL,
-      'OPENHERMIT_CLOUD_UPLOAD_BASE_URL'
-    ) ||
-    normalizeCloudBaseUrl(
-      process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL,
-      'OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL'
-    );
-  const baseUrl =
-    envBaseUrl ||
-    `${DEFAULT_OPENHERMIT_CLOUD_SCHEME}://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}`;
-  const token = await getValidBearerToken(hermitHome, baseUrl);
-  if (!token) return null;
-  return { baseUrl, token };
-}
-
-function normalizeCloudBaseUrl(value: string | undefined, optionName: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      throw new Error(`${optionName} 必须是 http(s)://`);
-    }
-    return url.toString().replace(/\/+$/, '');
-  } catch (err) {
-    throw new Error(`${optionName} 无法解析：${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
-const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
-const DEFAULT_OPENHERMIT_CLOUD_SCHEME = 'http';
-
 let stopping = false;
 let startedAt = new Date().toISOString();
 let lastTelemetry = emptyUsageTelemetryStatus();
 let lastScan: string | null = null;
+
+export function createInterruptibleWait(): {
+  wait: (ms: number) => Promise<void>;
+  interrupt: () => void;
+} {
+  const pending = new Set<{ timer: NodeJS.Timeout; resolve: () => void }>();
+  return {
+    wait: (ms) =>
+      new Promise((resolve) => {
+        const entry = {
+          timer: setTimeout(() => {
+            pending.delete(entry);
+            resolve();
+          }, ms),
+          resolve,
+        };
+        pending.add(entry);
+      }),
+    interrupt: () => {
+      for (const entry of pending) {
+        clearTimeout(entry.timer);
+        entry.resolve();
+      }
+      pending.clear();
+    },
+  };
+}
+
+const larkWait = createInterruptibleWait();
+
+function requestWorkerStop(): void {
+  stopping = true;
+  larkWait.interrupt();
+}
 
 export function resolveHermitHome(): string {
   return process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
@@ -131,6 +117,15 @@ export function getUsageTelemetryWorkerPaths(
     logPath: path.join(hermitHome, 'logs', 'telemetry-worker.log'),
     errorLogPath: path.join(hermitHome, 'logs', 'telemetry-worker.err.log'),
     settingsPath: path.join(hermitHome, 'settings.json'),
+  };
+}
+
+export function getLarkCredentialsWorkerPaths(
+  hermitHome = resolveHermitHome()
+): LarkCredentialsWorkerPaths {
+  return {
+    statusPath: path.join(hermitHome, 'lark-credentials', 'status.json'),
+    auditLogPath: path.join(hermitHome, 'logs', 'lark-credentials-audit.ndjson'),
   };
 }
 
@@ -283,7 +278,6 @@ async function writeStatus(
     telemetry?: UsageTelemetryStatus;
     error?: string;
     startedAt?: string | null;
-    larkCredentials?: LarkCredentialsReportStatus;
   } = {}
 ): Promise<UsageTelemetryWorkerStatus> {
   const telemetry = await resolveStatusTelemetry(paths, options.telemetry);
@@ -300,7 +294,6 @@ async function writeStatus(
     source: 'local-jsonl',
     telemetryEnabled: Boolean(cfg?.telemetry?.enabled),
     telemetry,
-    ...(options.larkCredentials ? { larkCredentials: options.larkCredentials } : {}),
     ...(options.error ? { lastError: options.error } : {}),
   };
   await mkdir(paths.telemetryDir, { recursive: true, mode: 0o700 });
@@ -337,6 +330,20 @@ function shouldForceLocalScan(): boolean {
   return process.env.HERMIT_USAGE_SCAN_DISABLED === '1' || isUsageUploadDisabled();
 }
 
+async function scanUsageTelemetryOnce(
+  cfg: TaskBusConfig | null
+): Promise<UsageTelemetryStatus | null | undefined> {
+  const { scanTelemetryOnce } =
+    await import('@main/services/session-intelligence/UsageTelemetryService');
+  return scanTelemetryOnce(cfg ?? undefined);
+}
+
+async function sweepUsageUploadLock(hermitHome: string): Promise<void> {
+  const { sweepStaleUploadLock } =
+    await import('@main/services/session-intelligence/ConversationMessageUploadService');
+  await sweepStaleUploadLock(hermitHome);
+}
+
 export async function scanUsageTelemetryWorkerOnce(
   hermitHome = resolveHermitHome()
 ): Promise<{ status: UsageTelemetryWorkerStatus; shouldContinue: boolean }> {
@@ -346,32 +353,26 @@ export async function scanUsageTelemetryWorkerOnce(
     if (shouldForceLocalScan()) {
       await writeStatus(paths, 'scanning', cfg);
       try {
-        const telemetry = (await scanTelemetryOnce()) ?? emptyUsageTelemetryStatus();
-        const larkCredentials = await safeScanLarkCredentials(hermitHome);
+        const telemetry = (await scanUsageTelemetryOnce(null)) ?? emptyUsageTelemetryStatus();
         const status = await writeStatus(paths, 'idle', cfg, {
           running: false,
           telemetry,
           startedAt: null,
-          larkCredentials,
         });
         return { status, shouldContinue: false };
       } catch (err) {
-        const larkCredentials = await safeScanLarkCredentials(hermitHome);
         const status = await writeStatus(paths, 'error', cfg, {
           running: false,
           error: err instanceof Error ? err.message : String(err),
           startedAt: null,
-          larkCredentials,
         });
         return { status, shouldContinue: false };
       }
     }
-    const larkCredentials = await safeScanLarkCredentials(hermitHome);
     const status = await writeStatus(paths, 'disabled', cfg, {
       running: false,
       telemetry: lastTelemetry,
       startedAt: null,
-      larkCredentials,
     });
     await removePid(paths);
     return { status, shouldContinue: false };
@@ -379,43 +380,164 @@ export async function scanUsageTelemetryWorkerOnce(
 
   await writeStatus(paths, 'scanning', cfg);
   try {
-    const telemetry = (await scanTelemetryOnce(cfg)) ?? emptyUsageTelemetryStatus();
-    const larkCredentials = await safeScanLarkCredentials(hermitHome);
-    const status = await writeStatus(paths, 'idle', cfg, { telemetry, larkCredentials });
+    const telemetry = (await scanUsageTelemetryOnce(cfg)) ?? emptyUsageTelemetryStatus();
+    const status = await writeStatus(paths, 'idle', cfg, { telemetry });
     return { status, shouldContinue: true };
   } catch (err) {
-    const larkCredentials = await safeScanLarkCredentials(hermitHome);
     const status = await writeStatus(paths, 'error', cfg, {
       error: err instanceof Error ? err.message : String(err),
-      larkCredentials,
     });
     return { status, shouldContinue: true };
   }
 }
 
-/**
- * Same-shape wrapper: never throws, never blocks the scan loop. A failure here
- * must NEVER escalate to a worker exit — it just lives in status.json as the
- * last `larkCredentials` snapshot, visible to the renderer with the reason.
- */
-async function safeScanLarkCredentials(
+async function resolveLarkAuthedContext(
   hermitHome: string
-): Promise<LarkCredentialsReportStatus | undefined> {
+): Promise<{ baseUrl: string; token: string } | null> {
+  const baseUrl = (
+    process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL ||
+    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL ||
+    'http://159.75.231.98:8088'
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  const token = await getValidBearerToken(hermitHome, baseUrl);
+  return token ? { baseUrl, token } : null;
+}
+
+function redactLarkError(message: string): string {
+  return message
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, '$1[hidden]')
+    .replace(/(token|secret|password|authorization)=([^\s,;&]+)/gi, '$1=[hidden]')
+    .slice(0, 500);
+}
+
+interface LarkCredentialsAuditEntry {
+  timestamp: string;
+  ok: boolean;
+  reason?: LarkCredentialsReportStatus['reason'];
+  httpStatus?: number;
+  accountCount?: number;
+  accounts?: LarkCredentialsReportStatus['accounts'];
+}
+
+function buildLarkCredentialsAuditEntry(
+  report: LarkCredentialsReportStatus
+): LarkCredentialsAuditEntry {
+  return {
+    timestamp: report.lastAttemptAt,
+    ok: report.ok,
+    ...(report.reason ? { reason: report.reason } : {}),
+    ...(report.lastHttpStatus ? { httpStatus: report.lastHttpStatus } : {}),
+    ...(report.accountCount ? { accountCount: report.accountCount } : {}),
+    ...(report.accounts ? { accounts: report.accounts } : {}),
+  };
+}
+
+export async function appendLarkCredentialsAuditLog(
+  hermitHome: string,
+  report: LarkCredentialsReportStatus
+): Promise<void> {
+  const { auditLogPath } = getLarkCredentialsWorkerPaths(hermitHome);
   try {
-    return await reportLarkCredentialsOnce({
-      hermitHome,
-      resolveAuthedContext: larkAuthedResolver,
+    await mkdir(path.dirname(auditLogPath), { recursive: true, mode: 0o700 });
+    try {
+      if ((await stat(auditLogPath)).size >= LARK_AUDIT_MAX_BYTES) {
+        await truncate(auditLogPath, 0);
+      }
+    } catch {
+      // First append creates the file.
+    }
+    await appendFile(auditLogPath, `${JSON.stringify(buildLarkCredentialsAuditEntry(report))}\n`, {
+      encoding: 'utf-8',
+      mode: 0o600,
     });
+  } catch {
+    // An audit-write failure must never block the five-minute reporting loop.
+  }
+}
+
+async function safeWriteLarkCredentialsStatus(
+  hermitHome: string,
+  state: LarkCredentialsWorkerStatus['state'],
+  report?: LarkCredentialsReportStatus
+): Promise<void> {
+  try {
+    await persistLarkCredentialsStatus(hermitHome, state, report);
+  } catch {
+    // Status persistence is diagnostic only; it must not stop Lark reporting.
+  }
+}
+
+async function persistLarkCredentialsStatus(
+  hermitHome: string,
+  state: LarkCredentialsWorkerStatus['state'],
+  report?: LarkCredentialsReportStatus
+): Promise<void> {
+  const paths = getLarkCredentialsWorkerPaths(hermitHome);
+  await mkdir(path.dirname(paths.statusPath), { recursive: true, mode: 0o700 });
+  const status: LarkCredentialsWorkerStatus = {
+    schemaVersion: STATUS_SCHEMA_VERSION,
+    state,
+    running: state !== 'stopped',
+    pid: state === 'stopped' ? null : process.pid,
+    startedAt,
+    updatedAt: new Date().toISOString(),
+    lastAttempt: report?.lastAttemptAt ?? null,
+    ...(report
+      ? {
+          report: report.message ? { ...report, message: redactLarkError(report.message) } : report,
+        }
+      : {}),
+  };
+  await writeFile(paths.statusPath, `${JSON.stringify(status, null, 2)}\n`, {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+}
+
+export async function scanLarkCredentialsOnce(
+  hermitHome = resolveHermitHome()
+): Promise<LarkCredentialsReportStatus> {
+  await safeWriteLarkCredentialsStatus(hermitHome, 'reporting');
+  try {
+    const report = await reportLarkCredentialsOnce({
+      hermitHome,
+      resolveAuthedContext: resolveLarkAuthedContext,
+    });
+    await safeWriteLarkCredentialsStatus(hermitHome, report.ok ? 'idle' : 'error', report);
+    await appendLarkCredentialsAuditLog(hermitHome, report);
+    return report;
   } catch (err) {
-    return {
+    const now = new Date().toISOString();
+    const report: LarkCredentialsReportStatus = {
       ok: false,
       enabled: true,
       reason: 'fetch-failed',
-      message: err instanceof Error ? err.message : String(err),
-      lastAttemptAt: new Date().toISOString(),
-      lastErrorAt: new Date().toISOString(),
+      message: redactLarkError(err instanceof Error ? err.message : String(err)),
+      lastAttemptAt: now,
+      lastErrorAt: now,
     };
+    await safeWriteLarkCredentialsStatus(hermitHome, 'error', report);
+    await appendLarkCredentialsAuditLog(hermitHome, report);
+    return report;
   }
+}
+
+function larkCredentialsIntervalMs(): number {
+  const raw = Number.parseInt(process.env.HERMIT_LARK_CREDENTIALS_INTERVAL_MS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0
+    ? Math.max(1_000, raw)
+    : DEFAULT_LARK_CREDENTIALS_INTERVAL_MS;
+}
+
+async function runLarkCredentialsLoop(hermitHome: string): Promise<void> {
+  await safeWriteLarkCredentialsStatus(hermitHome, 'starting');
+  while (!stopping) {
+    await scanLarkCredentialsOnce(hermitHome);
+    if (!stopping) await larkWait.wait(larkCredentialsIntervalMs());
+  }
+  await safeWriteLarkCredentialsStatus(hermitHome, 'stopped');
 }
 
 function scanIntervalMs(): number {
@@ -439,12 +561,16 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
   await writePid(paths);
   // Clear any upload lock left by a previous crash/reboot before the first scan,
   // so a stale lock never blocks the first cycle of a fresh boot.
-  await sweepStaleUploadLock(hermitHome);
+  try {
+    await sweepUsageUploadLock(hermitHome);
+  } catch {
+    // Usage module failures must not prevent the independent Lark loop from starting.
+  }
   await writeStatus(paths, 'starting', await readTaskBusConfig(paths));
 
   const stop = async () => {
     if (stopping) return;
-    stopping = true;
+    requestWorkerStop();
     await writeStatus(paths, 'stopped', await readTaskBusConfig(paths), {
       running: false,
       startedAt,
@@ -459,11 +585,16 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
     void stop().finally(() => process.exit(0));
   });
 
+  const larkLoop = runLarkCredentialsLoop(hermitHome);
   while (!stopping) {
     const result = await scanUsageTelemetryWorkerOnce(hermitHome);
-    if (!result.shouldContinue) return;
+    if (!result.shouldContinue) {
+      requestWorkerStop();
+      break;
+    }
     await wait(scanIntervalMs());
   }
+  await larkLoop;
 }
 
 async function runCli(): Promise<void> {
