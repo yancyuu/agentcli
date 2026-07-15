@@ -341,6 +341,10 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <li><strong>Codex</strong> <code>~/.codex/auth.json</code>（<code>OPENAI_API_KEY</code>）+ <code>~/.codex/config.toml</code>：surgical 改写 <code>model_provider</code> / <code>model</code> / wire_api 与 <code>[model_providers.*]</code>，<strong>原样保留 <code>[projects.*]</code></strong>。Codex base_url 由网关 <code>proxyPaths</code> 按所选 wire_api 解析，与 Claude endpoint 不同。</li>
     </ul>
     <p>配置文件是 Claude Code / Codex 的常规生效路径：AgentCli 不再修改 <code>.zshrc</code> / <code>.bashrc</code>，也不安装 <code>precmd</code> / <code>PROMPT_COMMAND</code> shell hook；重新启动所选运行时即可读取新配置。<code>~/.hermit/aikey.env</code> 仍以 0600 权限保留为认领标记，外部 agent 需要时可手动 <code>source</code>。</p>
+    <div class="callout">
+      <div class="callout-title">api key 与 base url 怎么用</div>
+      <p><strong>Claude Code</strong> 认 <code>ANTHROPIC_AUTH_TOKEN</code>，认领时已写入 <code>~/.claude/settings.json</code> 的 <code>env</code> 块（不是 shell 环境变量）——重启 Claude Code 即生效，无需 <code>source</code> 或 <code>export</code>。<strong>Codex</strong> 认 <code>~/.codex/auth.json</code> 的 <code>OPENAI_API_KEY</code>。<strong>外部 agent / 手动调用</strong>才 <code>source ~/.hermit/aikey.env</code>，里面导出的是 <code>ANTHROPIC_API_KEY</code>。<code>ANTHROPIC_AUTH_TOKEN</code>（Claude 专用）与 <code>ANTHROPIC_API_KEY</code>（aikey.env / 外部 agent）是两个不同的变量，别混用。</p>
+    </div>
     <div class="callout warn">
       <div class="callout-title">注意</div>
       <p>首次写入前自动把<strong>原始</strong> Claude/Codex 配置快照到 <code>~/.hermit/agentcli.env.bak</code>（<strong>只创建一次</strong>，后续认领不覆盖）；在「token 池 → 一键恢复原始配置」可随时还原，token 池新建的文件会被删除、无残留。检查快照时会自动修正旧版本遗留的备份路径记录。认领到的 key 是<strong>即焚明文</strong>，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。</p>
@@ -353,7 +357,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
     <ol>
       <li><span class="step-label">登录上报目标</span> — <code>agentcli auth login</code>（飞书授权绑定 AgentBus），<code>agentcli auth status</code> 确认已登录。</li>
       <li><span class="step-label">启用消息上报</span> — <code>agentcli</code> →「用量同步」→ 回车展开 →「消息上报」开启，选择上报运行时。<em>该开关只在终端菜单 / Web 里，没有单独子命令。</em></li>
-      <li><span class="step-label">启动后台采集</span> — 推荐 <code>agentcli init</code> 一次性启动 Web 工作台 + 轻量 worker；也可单独运行 <code>agentcli usage start</code>。后台 worker 默认开机自启，约 5 分钟按服务端 cursor 增量扫描。停止用 <code>agentcli usage stop</code>。</li>
+      <li><span class="step-label">启动后台采集</span> — 推荐 <code>agentcli services start web</code> 启动 Web 工作台，<code>agentcli usage start</code> 启动后台 worker。后台 worker 默认开机自启，约 5 分钟按服务端 cursor 增量扫描。停止用 <code>agentcli usage stop</code>。</li>
       <li><span class="step-label">立即补报一次</span> — <code>agentcli usage report</code>（增量）；<code>usage report --full</code> 手动全量重扫最近 7 天。</li>
       <li><span class="step-label">核对状态</span> — <code>agentcli usage status</code>，或 Web 工作台「用量」Tab。</li>
     </ol>
@@ -376,7 +380,7 @@ npm uninstall -g @yancyyu/agentcli</code></pre>
       <li><span class="step-label">停止用量 worker</span> — <code>agentcli usage stop</code>。该命令默认同时关闭用量 worker 的开机自启；更新完成后再显式启动。</li>
       <li><span class="step-label">停止 Web daemon</span> — <code>agentcli services stop web</code>。由 Web daemon 启动的 cc-connect / hermit-bridge 渠道运行时也会随之退出；协作服务只是配置项，不是本地进程，无需单独停止。</li>
       <li><span class="step-label">安装最新版</span> — <code>npm install -g @yancyyu/agentcli@latest --prefer-online</code>。不要把裸 <code>agentcli stop</code> 当成停止命令，它只显示指引。</li>
-      <li><span class="step-label">重新启动</span> — 推荐 <code>agentcli init</code>，一次启动 Web 工作台和用量 worker；也可分别运行 <code>agentcli services start web</code> 与 <code>agentcli usage start</code>。</li>
+      <li><span class="step-label">重新启动</span> — 推荐 <code>agentcli restart</code>，一键重启 Web 工作台和用量 worker；也可分别运行 <code>agentcli services start web</code> 与 <code>agentcli usage start</code>。</li>
       <li><span class="step-label">验证</span> — 运行 <code>agentcli --version</code>、<code>agentcli status</code>、<code>agentcli usage status</code> 和 <code>agentcli doctor</code>，确认版本、Web、worker 与本地配置均正常。</li>
     </ol>
     <pre><code># 1. 停止会占用安装文件的进程
@@ -387,7 +391,7 @@ agentcli services stop web
 npm install -g @yancyyu/agentcli@latest --prefer-online
 
 # 3. 恢复服务
-agentcli init
+agentcli restart
 
 # 4. 验证
 agentcli --version
@@ -404,7 +408,7 @@ agentcli doctor</code></pre>
     </div>
     <div class="callout success">
       <div class="callout-title">数据不会因更新被删除</div>
-      <p>上述停止和更新命令不会删除 <code>~/.hermit/</code> 中的团队、渠道配置、登录态或用量状态。更新后使用 <code>agentcli init</code> 恢复服务即可。</p>
+      <p>上述停止和更新命令不会删除 <code>~/.hermit/</code> 中的团队、渠道配置、登录态或用量状态。更新后使用 <code>agentcli restart</code> 恢复服务即可。</p>
     </div>
   </section>
 
