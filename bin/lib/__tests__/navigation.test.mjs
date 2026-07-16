@@ -17,10 +17,15 @@ import { onlineGuideRows } from '../navigationCommand.mjs';
 import { NAV_ACTIONS } from '../menus.mjs';
 
 describe('onlineGuideRows — handoff prompt', () => {
-  it('prints the guide URL and a copyable Claude Code prompt', () => {
+  it('prints the guide URL, installation URL, and a copyable Claude Code prompt', () => {
     const rows = onlineGuideRows();
 
     expect(rows).toContainEqual(['说明书', 'https://yancyuu.github.io/agentcli/', 'info']);
+    expect(rows).toContainEqual([
+      '安装说明书',
+      'https://yancyuu.github.io/agentcli/install.sh',
+      'info',
+    ]);
     const handoff = rows.find(([label]) => label === '交给 Claude Code')?.[1];
     expect(handoff).toContain('请先阅读 AgentCli 在线说明书：https://yancyuu.github.io/agentcli/');
     expect(handoff).toContain('后续回答和操作请以这份说明书为准。');

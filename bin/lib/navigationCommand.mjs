@@ -145,6 +145,7 @@ function renderTerminalQr(value) {
 }
 
 const ONLINE_GUIDE_URL = 'https://yancyuu.github.io/agentcli/';
+const ONLINE_INSTALL_GUIDE_URL = 'https://yancyuu.github.io/agentcli/install.sh';
 const ONLINE_GUIDE_HANDOFF = [
   `请先阅读 AgentCli 在线说明书：${ONLINE_GUIDE_URL}`,
   '这是本机 AgentCli/Hermit 的使用手册。',
@@ -154,6 +155,7 @@ const ONLINE_GUIDE_HANDOFF = [
 export function onlineGuideRows() {
   return [
     ['说明书', ONLINE_GUIDE_URL, 'info'],
+    ['安装说明书', ONLINE_INSTALL_GUIDE_URL, 'info'],
     ['交给 Claude Code', ONLINE_GUIDE_HANDOFF, 'ok'],
     ['用途', '把这段提示复制给 Claude Code / Codex，让它先读说明书再操作', 'info'],
   ];
