@@ -49,8 +49,7 @@ export const NAV_ACTIONS = [
     description: '回车展开；签发并认领 AI 网关 key，可选写入 Claude/Codex 配置，支持一键恢复',
     children: [
       { id: 'aikey-claim', label: '认领', description: '签发消费者并认领 key；选择运行时（Claude/Codex，默认都写），写入本地配置 + aikey env' },
-      { id: 'aikey-manual', label: '说明书', description: '列出本地认领的变量名 + 端点 + 可用模型（给 agent 用，不含明文 key）' },
-      { id: 'guide', label: '在线说明书', description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex' },
+      { id: 'aikey-manual', label: '说明书', description: '在线说明书 + 本地脱敏配置：变量名、端点和可用模型（给 agent 用，不含明文 key）' },
       { id: 'aikey-restore', label: '一键恢复原始配置', description: '从 ~/.hermit/agentcli.env.bak 一键还原 token 池介入前的 Claude/Codex 配置' },
       { id: 'aikey-status', label: '状态', description: '查看当前 token 池状态' },
     ],

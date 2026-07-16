@@ -28,25 +28,20 @@ describe('onlineGuideRows — handoff prompt', () => {
 });
 
 describe('NAV_ACTIONS — token 池 menu wiring', () => {
-  it('orders frequent operations first, keeps status last, and hosts the online guide', () => {
+  it('orders frequent operations first, keeps status last, and combines the guides', () => {
     const pool = NAV_ACTIONS.find((a) => a.id === 'aikey');
     expect(pool).toBeDefined();
     const childIds = pool.children.map((c) => c.id);
-    // The 在线说明书 (guide) moved here from the 用户 menu. Frequent ops stay
-    // first, status stays last; the local 说明书 (aikey-manual) and the online
-    // guide sit together as the two reference rows.
-    expect(childIds).toEqual(['aikey-claim', 'aikey-manual', 'guide', 'aikey-restore', 'aikey-status']);
+    expect(childIds).toEqual(['aikey-claim', 'aikey-manual', 'aikey-restore', 'aikey-status']);
     expect(pool.children[0].label).toBe('认领');
     expect(pool.children[1].label).toBe('说明书');
-    expect(pool.children[2].label).toBe('在线说明书');
-    expect(pool.children[3].label).toBe('一键恢复原始配置');
-    expect(pool.children[4].label).toBe('状态');
+    expect(pool.children[2].label).toBe('一键恢复原始配置');
+    expect(pool.children[3].label).toBe('状态');
     expect(pool.label).toBe('token 池（Beta）');
-    // Claim describes runtime selection; restore points at the snapshot dir.
     expect(pool.children[0].description).toMatch(/运行时|Claude\/Codex/);
-    expect(pool.children[3].description).toContain('agentcli.env.bak');
-    // The guide points at the online manual and stays agent-hand-off friendly.
-    expect(pool.children[2].description).toContain('https://yancyuu.github.io/agentcli/');
+    expect(pool.children[1].description).toContain('在线说明书');
+    expect(pool.children[1].description).toContain('本地脱敏配置');
+    expect(pool.children[2].description).toContain('agentcli.env.bak');
   });
 
   it('no longer hosts the online guide under the 用户 group', () => {

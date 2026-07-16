@@ -1331,11 +1331,6 @@ export async function runNavigationAction(action) {
     return waitForContinue(ACTION_DONE_MSG);
   }
   if (action.id === 'exit') { cancelCli(); return; }
-  if (action.id === 'guide') {
-    printOnlineGuide();
-    console.log('');
-    return waitForContinue(ACTION_DONE_MSG);
-  }
   // Auth transitions re-probe /api/v1/auth/me and cache the server-confirmed
   // state BEFORE the pause screen repaints. /me is authoritative for "logged in
   // right now" — the local store can lag a login write — so awaiting it means
@@ -1362,7 +1357,13 @@ export async function runNavigationAction(action) {
   if (action.id === 'quick-create-assistant') { await runQuickCreateAssistantFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-claim') { await runTokenClaimFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-status') { await runAikeyStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
-  if (action.id === 'aikey-manual') { await runAikeyManual({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
+  if (action.id === 'aikey-manual') {
+    printOnlineGuide();
+    console.log('');
+    await runAikeyManual({ exitOnDone: false });
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
   if (action.id === 'aikey-restore') { return runRestoreOriginalsFlow(); }
   // Dedicated submenu pages (reached from nested menus, not home navigation).
   if (action.id === 'local-use') { return runLocalUseAction(); }
