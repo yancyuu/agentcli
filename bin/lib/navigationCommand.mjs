@@ -164,12 +164,6 @@ function printOnlineGuide() {
 }
 
 function inlineBusyMessage(action) {
-  if (action.id === 'toggle-feishu-bridge') {
-    const fb = currentFeatureStates().feishuBridge;
-    if (!fb.installed) return '正在按需安装 feishu-codex-bridge（首次开启，需要一点时间）...';
-    if (!fb.configured) return '即将弹出飞书应用配置向导（App ID / App Secret）...';
-    return fb.running ? '正在停止飞书 Codex 桥...' : '正在启动飞书 Codex 桥...';
-  }
   if (action.id === 'toggle-web') {
     return currentFeatureStates().webRunning ? '正在关闭 AgentCli 工作台...' : '正在启动 AgentCli 工作台...';
   }

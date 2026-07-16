@@ -2,7 +2,7 @@
 //
 // Bridges the CLI layer (hermit.mjs) to cc-connect's `create feishu-assistant`
 // subcommand. cc-connect is the bundled optionalDependency that ships the channel
-// binding runtime. This module follows the same pattern as feishuBridgeCli.mjs:
+// binding runtime. This module follows the same conventions as the other bin/lib CLI helpers:
 // no import-time side effects, structured results, never throws.
 //
 // Usage in hermit.mjs:

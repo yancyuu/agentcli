@@ -1,7 +1,7 @@
 // Tests for bin/lib/featureState.mjs — the extracted feature-state aggregator.
 //
 // The module-surface test statically imports featureState.mjs, which transitively
-// pulls in env/auth/daemon/settings/usageRemote/uploadState/feishuBridgeCli/aikey/
+// pulls in env/auth/daemon/settings/usageRemote/uploadState/aikey/
 // runtime — so a green run proves the whole import graph resolves (no missing
 // export, no circular import) after the extraction from hermit.mjs.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';

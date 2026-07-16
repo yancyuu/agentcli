@@ -202,16 +202,6 @@ import {
 } from './lib/menus.mjs';
 import { installLarkCli } from './lib/larkCli.mjs';
 import {
-  ensureFeishuCodexBridge,
-  configureFeishuBridge,
-  feishuBridgeConfigured,
-  startFeishuBridge,
-  stopFeishuBridge,
-  feishuBridgeStatus,
-  feishuBridgeState,
-  feishuBridgeWebUrl,
-} from './lib/feishuBridgeCli.mjs';
-import {
   readPidFile,
   readDaemonPid,
   refreshDaemonPidFromReadyServer,

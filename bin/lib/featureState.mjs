@@ -27,7 +27,6 @@ import { readPidFile, readDaemonPid, isPidRunning, refreshDaemonPidFromReadyServ
 import { readHermitSettings } from './settings.mjs';
 import { normalizeUploadProviders } from './usageRemote.mjs';
 import { resolveConversationUploadEnabled } from './uploadState.mjs';
-import { feishuBridgeState } from './feishuBridgeCli.mjs';
 import { parseActiveEnv } from './aikey.mjs';
 import { checkExistingOpenHermitServer } from './runtime.mjs';
 
@@ -150,10 +149,6 @@ export function currentFeatureStates() {
     conversationUploadEnabled: resolveConversationUploadEnabled(telemetry),
     uploadProviders,
     aikeyClaimed,
-    // feishu-codex-bridge is an optional connector (not bundled); state comes
-    // from its own ~/.feishu-codex-bridge/service.pid, same pid+liveness pattern
-    // as web/usage. Read on every repaint — cheap (one stat + kill -0).
-    feishuBridge: feishuBridgeState(),
   };
 }
 
