@@ -22,6 +22,7 @@ import {
   reportLarkCredentialsBatchOnce,
   reportLarkCredentialsOnce,
   shouldRefreshLarkCredentials,
+  parseLarkCliPersonalAuthorizations,
   type GetLarkCredentialsAllResult,
   type GetLarkCredentialsResult,
   type LarkCredentials,
@@ -66,6 +67,36 @@ function makeFetchMock(
   return { fn, calls };
 }
 
+describe('lark-cli profile authorization discovery', () => {
+  it('keeps the exact profile name when auth metadata identifies a personal authorization', () => {
+    expect(
+      parseLarkCliPersonalAuthorizations(
+        { name: '2222', appId: 'cli_aadcbb097af8dd2c' },
+        [
+          {
+            appId: 'cli_aadcbb097af8dd2c',
+            userOpenId: 'ou_target_user',
+          },
+        ]
+      )
+    ).toEqual([
+      {
+        profileName: '2222',
+        appId: 'cli_aadcbb097af8dd2c',
+        userOpenId: 'ou_target_user',
+      },
+    ]);
+  });
+
+  it('rejects auth metadata whose app identity does not match the profile', () => {
+    expect(
+      parseLarkCliPersonalAuthorizations(
+        { name: '2222', appId: 'cli_aadcbb097af8dd2c' },
+        [{ appId: 'cli_other', userOpenId: 'ou_target_user' }]
+      )
+    ).toEqual([]);
+  });
+});
 describe('lark-cli profile selection', () => {
   it('uses the profile name for an app instead of assuming it equals the appId', () => {
     expect(

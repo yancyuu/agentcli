@@ -265,6 +265,28 @@ function listLarkProfiles() {
   }
 }
 
+function listLarkCliPersonalAuthorizations() {
+  const binary = findLarkBinary();
+  if (!binary) return [];
+  const authorizations = new Map();
+  for (const profile of listLarkProfiles()) {
+    if (!profile || typeof profile.name !== 'string' || !profile.name || typeof profile.appId !== 'string' || !profile.appId) continue;
+    try {
+      const result = spawnSync(binary, ['auth', 'list', '--json', '--profile', profile.name], { encoding: 'utf-8', shell: isWin });
+      const records = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
+      if (!Array.isArray(records)) continue;
+      for (const record of records) {
+        const appId = typeof record?.appId === 'string' ? record.appId : '';
+        const userOpenId = typeof record?.userOpenId === 'string' ? record.userOpenId : typeof record?.user_open_id === 'string' ? record.user_open_id : '';
+        if (appId === profile.appId && userOpenId) authorizations.set(`${appId}:${userOpenId}`, { profileName: profile.name, appId, userOpenId });
+      }
+    } catch {
+      // One malformed profile must not hide other personal authorizations.
+    }
+  }
+  return [...authorizations.values()];
+}
+
 /**
  * Pure: resolve the lark-cli profile NAME for an appId. `auth check --profile`
  * takes a profile name, but a per-worker profile is named after the worker, not
@@ -306,17 +328,17 @@ export function isLarkRefreshSucceeded({ checkStatus, verifyStatus, verifyStdout
  * login uses --domain all), but a partial/missing scope no longer blocks the
  * upload — the decoupled success rule lives in isLarkRefreshSucceeded. Mirrors TS.
  */
-function triggerLarkRefresh(appId, scope) {
+function triggerLarkRefresh(appId, scope, profileName) {
   const binary = findLarkBinary();
   if (!binary) return false;
   const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
-  const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
+  const targetProfile = profileName || pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
-    const check = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName], {
+    const check = spawnSync(binary, ['auth', 'check', '--json', '--scope', scopeArg, '--profile', targetProfile], {
       encoding: 'utf-8',
       shell: isWin,
     });
-    const verify = spawnSync(binary, ['auth', 'status', '--json', '--verify', '--profile', profileName], {
+    const verify = spawnSync(binary, ['auth', 'status', '--json', '--verify', '--profile', targetProfile], {
       encoding: 'utf-8',
       shell: isWin,
     });
@@ -390,20 +412,24 @@ export function getLarkCredentialsAll() {
 }
 
 export function getLarkCredentialsFreshAll() {
-  const all = getLarkCredentialsAll();
-  if (!all.ok) return all;
+  if (!isMac && !isWin) return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
 
   const credentials = [];
-  const skipped = [...all.skipped];
-  for (const credential of all.credentials) {
-    const profile = { appId: credential.appId, userOpenId: credential.userOpenId };
-    if (!shouldRefreshLarkCredentials(credential) || !triggerLarkRefresh(credential.appId, credential.scope)) {
+  const skipped = [];
+  for (const authorization of listLarkCliPersonalAuthorizations()) {
+    const profile = { appId: authorization.appId, userOpenId: authorization.userOpenId };
+    const beforeRefresh = getLarkCredentials(profile);
+    const scope = beforeRefresh.ok ? beforeRefresh.credentials.scope : '';
+    if (!triggerLarkRefresh(authorization.appId, scope, authorization.profileName)) {
       skipped.push({ ...profile, reason: 'refresh-failed', message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证' });
       continue;
     }
     const refreshed = getLarkCredentials(profile);
-    if (refreshed.ok) credentials.push(refreshed.credentials);
-    else skipped.push({ ...profile, reason: 'no-credentials', message: refreshed.message });
+    if (!refreshed.ok || refreshed.credentials.appId !== profile.appId || refreshed.credentials.userOpenId !== profile.userOpenId) {
+      skipped.push({ ...profile, reason: 'no-credentials', message: refreshed.ok ? 'lark-cli 刷新后凭证身份不匹配，未执行上报' : refreshed.message });
+      continue;
+    }
+    credentials.push(refreshed.credentials);
   }
   return { ok: true, credentials, skipped };
 }

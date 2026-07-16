@@ -348,26 +348,83 @@ function findLarkBinary(): string | null {
  * already prints a JSON array to stdout, so parse that directly. Returns [] on
  * any failure so callers fall back gracefully.
  */
-function listLarkProfiles(): Array<{ appId?: string; name?: string }> {
+export interface LarkCliProfile {
+  name: string;
+  appId: string;
+}
+
+export interface LarkCliPersonalAuthorization {
+  profileName: string;
+  appId: string;
+  userOpenId: string;
+}
+
+export function parseLarkCliPersonalAuthorizations(
+  profile: LarkCliProfile,
+  raw: unknown
+): LarkCliPersonalAuthorization[] {
+  if (!profile?.name || !profile.appId || !Array.isArray(raw)) return [];
+  const authorizations = new Map<string, LarkCliPersonalAuthorization>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const appId = typeof record.appId === 'string' ? record.appId : '';
+    const userOpenId =
+      typeof record.userOpenId === 'string'
+        ? record.userOpenId
+        : typeof record.user_open_id === 'string'
+          ? record.user_open_id
+          : '';
+    if (appId !== profile.appId || !userOpenId) continue;
+    authorizations.set(`${appId}:${userOpenId}`, {
+      appId,
+      profileName: profile.name,
+      userOpenId,
+    });
+  }
+  return [...authorizations.values()];
+}
+
+function listLarkProfiles(): LarkCliProfile[] {
   const binary = findLarkBinary();
   if (!binary) return [];
   try {
-    const r = spawnSync(binary, ['profile', 'list'], { encoding: 'utf-8', shell: isWin });
-    if (r.status !== 0) return [];
-    const parsed = JSON.parse((r.stdout || '').trim());
-    return Array.isArray(parsed) ? parsed : [];
+    const result = spawnSync(binary, ['profile', 'list'], { encoding: 'utf-8', shell: isWin });
+    const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      return typeof record.name === 'string' && record.name && typeof record.appId === 'string' && record.appId
+        ? [{ name: record.name, appId: record.appId }]
+        : [];
+    });
   } catch {
     return [];
   }
 }
 
-/**
- * Pure: resolve the lark-cli profile NAME for an appId. `auth check --profile`
- * takes a profile name, but a profile created per-worker is named after the
- * worker — not its appId — so blindly passing `--profile <appId>` misses those
- * and the refresh silently no-ops. Falls back to appId (correct only when a
- * profile happens to share its appId as name, e.g. the default app profile).
- */
+function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
+  const binary = findLarkBinary();
+  if (!binary) return [];
+  const authorizations = new Map<string, LarkCliPersonalAuthorization>();
+  for (const profile of listLarkProfiles()) {
+    try {
+      const result = spawnSync(binary, ['auth', 'list', '--json', '--profile', profile.name], {
+        encoding: 'utf-8',
+        shell: isWin,
+      });
+      const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
+      for (const authorization of parseLarkCliPersonalAuthorizations(profile, parsed)) {
+        authorizations.set(`${authorization.appId}:${authorization.userOpenId}`, authorization);
+      }
+    } catch {
+      // One malformed profile must not hide other personal authorizations.
+    }
+  }
+  return [...authorizations.values()];
+}
+
 export function pickProfileNameByAppId(
   profiles: Array<{ appId?: string; name?: string }>,
   appId: string
@@ -411,7 +468,7 @@ export function isLarkRefreshSucceeded(opts: {
   return status.identities?.user?.available === true;
 }
 
-function triggerLarkRefresh(appId: string, scope: string): boolean {
+function triggerLarkRefresh(appId: string, scope: string, profileName?: string): boolean {
   const binary = findLarkBinary();
   if (!binary) return false;
   // `auth check --scope` triggers the token refresh as a side effect; `auth status
@@ -420,16 +477,16 @@ function triggerLarkRefresh(appId: string, scope: string): boolean {
   // grant, but a partial/missing scope no longer blocks the upload — the success
   // rule lives in isLarkRefreshSucceeded (decoupled from scope completeness).
   const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
-  const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
+  const targetProfile = profileName || pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
     const check = spawnSync(
       binary,
-      ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName],
+      ['auth', 'check', '--json', '--scope', scopeArg, '--profile', targetProfile],
       { encoding: 'utf-8', shell: isWin }
     );
     const verify = spawnSync(
       binary,
-      ['auth', 'status', '--json', '--verify', '--profile', profileName],
+      ['auth', 'status', '--json', '--verify', '--profile', targetProfile],
       { encoding: 'utf-8', shell: isWin }
     );
     return isLarkRefreshSucceeded({
@@ -567,17 +624,17 @@ export function getLarkCredentialsAll(): GetLarkCredentialsAllResult {
 }
 
 export function getLarkCredentialsFreshAll(): GetLarkCredentialsAllResult {
-  const all = getLarkCredentialsAll();
-  if (!all.ok) return all;
+  if (!isMac && !isWin) {
+    return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
+  }
 
   const credentials: LarkCredentials[] = [];
-  const skipped = [...all.skipped];
-  for (const credential of all.credentials) {
-    const profile = { appId: credential.appId, userOpenId: credential.userOpenId };
-    if (
-      !shouldRefreshLarkCredentials(credential) ||
-      !triggerLarkRefresh(credential.appId, credential.scope)
-    ) {
+  const skipped: LarkProfileSkip[] = [];
+  for (const authorization of listLarkCliPersonalAuthorizations()) {
+    const profile = { appId: authorization.appId, userOpenId: authorization.userOpenId };
+    const beforeRefresh = getLarkCredentials(profile);
+    const scope = beforeRefresh.ok ? beforeRefresh.credentials.scope : '';
+    if (!triggerLarkRefresh(authorization.appId, scope, authorization.profileName)) {
       skipped.push({
         ...profile,
         reason: 'refresh-failed',
@@ -587,11 +644,15 @@ export function getLarkCredentialsFreshAll(): GetLarkCredentialsAllResult {
     }
 
     const refreshed = getLarkCredentials(profile);
-    if (refreshed.ok) {
-      credentials.push(refreshed.credentials);
-    } else {
-      skipped.push({ ...profile, reason: 'no-credentials', message: refreshed.message });
+    if (!refreshed.ok || refreshed.credentials.appId !== profile.appId || refreshed.credentials.userOpenId !== profile.userOpenId) {
+      skipped.push({
+        ...profile,
+        reason: 'no-credentials',
+        message: refreshed.ok ? 'lark-cli 刷新后凭证身份不匹配，未执行上报' : refreshed.message,
+      });
+      continue;
     }
+    credentials.push(refreshed.credentials);
   }
   return { ok: true, credentials, skipped };
 }
@@ -1029,6 +1090,7 @@ export const __internals = {
   decryptAesGcm,
   discoverProfilesMacCore,
   parseStoredToken,
+  parseLarkCliPersonalAuthorizations,
   safeFileName,
   pickProfileNameByAppId,
 };
