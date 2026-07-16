@@ -856,7 +856,6 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
     ], '请更新 lark-cli，并在飞书应用与租户后台启用/审批上述权限后重试；仅有 basic_profile 不能创建数字员工。');
     return null;
   }
-  const userOpenId = result.auth?.user?.userOpenId;
   // Deliberately detached: credential synchronization is silent and must never
   // delay or change a successful local Digital Worker authorization.
   void reportLarkCredentials({ appId: options.appId, userOpenId }).catch(() => {});

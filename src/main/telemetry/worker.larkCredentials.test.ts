@@ -8,6 +8,7 @@ import {
   appendLarkCredentialsAuditLog,
   createInterruptibleWait,
   getLarkCredentialsWorkerPaths,
+  runWorkerCycle,
   scanLarkCredentialsOnce,
 } from './worker';
 
@@ -61,7 +62,45 @@ describe('Lark credential loop', () => {
     expect(raw).not.toContain('never-write-this');
     expect(raw).not.toContain('also-never-write-this');
   });
-  it('interrupts the Lark cadence wait immediately', async () => {
+  it('starts Lark refresh and reporting even when usage reporting fails', async () => {
+    let releaseLark: (() => void) | undefined;
+    const lark = new Promise<void>((resolve) => {
+      releaseLark = resolve;
+    });
+    const calls: string[] = [];
+    const cycle = runWorkerCycle({
+      scanUsage: async () => {
+        calls.push('usage');
+        throw new Error('usage upload unavailable');
+      },
+      scanLark: () => {
+        calls.push('lark');
+        return lark;
+      },
+    });
+
+    expect(calls).toEqual(['usage', 'lark']);
+    releaseLark?.();
+    await expect(cycle).resolves.toEqual({ shouldContinue: true });
+  });
+
+  it('finishes a same-cycle Lark refresh before stopping for disabled usage', async () => {
+    const calls: string[] = [];
+    await expect(
+      runWorkerCycle({
+        scanUsage: async () => {
+          calls.push('usage');
+          return { shouldContinue: false };
+        },
+        scanLark: async () => {
+          calls.push('lark');
+        },
+      })
+    ).resolves.toEqual({ shouldContinue: false });
+    expect(calls).toEqual(['usage', 'lark']);
+  });
+
+  it('interrupts the worker scheduler wait immediately', async () => {
     const wait = createInterruptibleWait();
     const completion = wait.wait(5 * 60 * 1000);
     wait.interrupt();

@@ -15,9 +15,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __internals,
+  buildLarkBatchPayload,
   buildLarkReportPayload,
+  isLarkRefreshSucceeded,
+  meetsBatchFieldConstraints,
+  reportLarkCredentialsBatchOnce,
   reportLarkCredentialsOnce,
   shouldRefreshLarkCredentials,
+  type GetLarkCredentialsAllResult,
   type GetLarkCredentialsResult,
   type LarkCredentials,
 } from './larkCredentials';
@@ -106,6 +111,65 @@ describe('shouldRefreshLarkCredentials', () => {
   });
 });
 
+describe('isLarkRefreshSucceeded (decoupled: a refreshed token must still upload)', () => {
+  const ok = (
+    over: Partial<{ checkStatus: number; verifyStatus: number; verifyStdout: string }> = {}
+  ) => ({
+    checkStatus: 0,
+    verifyStatus: 0,
+    verifyStdout: JSON.stringify({ identities: { user: { available: true, verified: true } } }),
+    ...over,
+  });
+
+  it('succeeds when auth check + status verify exit 0 and the user is available', () => {
+    expect(isLarkRefreshSucceeded(ok())).toBe(true);
+  });
+
+  it('succeeds even when verified is false — availability is enough', () => {
+    // a56f531 required verified===true; it flapped on transient lark-cli checks and
+    // withheld an already-refreshed token, dropping the user's authorization.
+    expect(
+      isLarkRefreshSucceeded(
+        ok({
+          verifyStdout: JSON.stringify({
+            identities: { user: { available: true, verified: false } },
+          }),
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('succeeds regardless of scope missing — scope drift must not withhold the upload', () => {
+    // isLarkRefreshSucceeded no longer inspects auth check's ok/missing at all.
+    expect(
+      isLarkRefreshSucceeded(
+        ok({ verifyStdout: JSON.stringify({ identities: { user: { available: true } } }) })
+      )
+    ).toBe(true);
+  });
+
+  it('fails when the refreshed token is not available', () => {
+    expect(
+      isLarkRefreshSucceeded(
+        ok({ verifyStdout: JSON.stringify({ identities: { user: { available: false } } }) })
+      )
+    ).toBe(false);
+  });
+
+  it('fails when auth check or status verify exits non-zero', () => {
+    expect(isLarkRefreshSucceeded(ok({ checkStatus: 1 }))).toBe(false);
+    expect(isLarkRefreshSucceeded(ok({ verifyStatus: 2 }))).toBe(false);
+  });
+
+  it('fails on unparseable verify output', () => {
+    expect(isLarkRefreshSucceeded(ok({ verifyStdout: 'not-json' }))).toBe(false);
+  });
+
+  it('fails for null/missing opts', () => {
+    expect(isLarkRefreshSucceeded(undefined as never)).toBe(false);
+  });
+});
+
 describe('buildLarkReportPayload', () => {
   it('uses only the backend-supported four-field snake_case wire payload', () => {
     const payload = buildLarkReportPayload(TEST_CRED);
@@ -115,6 +179,148 @@ describe('buildLarkReportPayload', () => {
       access_token: TEST_CRED.accessToken,
       refresh_token: TEST_CRED.refreshToken,
     });
+  });
+});
+
+describe('lark-cli batch reporting', () => {
+  const batchCred = (index: number): LarkCredentials => ({
+    ...TEST_CRED,
+    appId: `cli_batch_${index}`,
+    appSecret: `secret-${'a'.repeat(40)}-${index}`,
+    accessToken: `access-${'a'.repeat(40)}-${index}`,
+    refreshToken: `refresh-${'a'.repeat(40)}-${index}`,
+    userOpenId: `ou_batch_${index}`,
+  });
+
+  const batchLookup = (credentials: LarkCredentials[]): GetLarkCredentialsAllResult => ({
+    ok: true,
+    credentials,
+    skipped: [],
+  });
+
+  it('builds one unique wire item per personal authorization', () => {
+    const payload = buildLarkBatchPayload([batchCred(1), batchCred(2), batchCred(3), batchCred(1)]);
+
+    expect(payload.items).toHaveLength(3);
+    expect(payload.items.map((item) => item.client_item_id)).toEqual([
+      'cli_batch_1:ou_batch_1',
+      'cli_batch_2:ou_batch_2',
+      'cli_batch_3:ou_batch_3',
+    ]);
+    expect(payload.items[0]).toEqual({
+      client_item_id: 'cli_batch_1:ou_batch_1',
+      app_id: 'cli_batch_1',
+      app_secret: batchCred(1).appSecret,
+      access_token: batchCred(1).accessToken,
+      refresh_token: batchCred(1).refreshToken,
+    });
+    expect(
+      payload.items.every((item) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(item.client_item_id))
+    ).toBe(true);
+  });
+
+  it('prevalidates batch items so one incomplete credential cannot reject the whole atomic request', () => {
+    expect(meetsBatchFieldConstraints(batchCred(1))).toBe(true);
+    expect(meetsBatchFieldConstraints({ ...batchCred(1), appId: 'not-cli' })).toBe(false);
+    expect(meetsBatchFieldConstraints({ ...batchCred(1), appSecret: 'short' })).toBe(false);
+    expect(meetsBatchFieldConstraints({ ...batchCred(1), accessToken: 'short' })).toBe(false);
+    expect(meetsBatchFieldConstraints({ ...batchCred(1), refreshToken: 'short' })).toBe(false);
+  });
+
+  it('keeps an API-valid stable client item id when a profile identity exceeds 64 characters', () => {
+    const long = {
+      ...batchCred(1),
+      appId: `cli_${'a'.repeat(150)}`,
+      userOpenId: `ou_${'b'.repeat(80)}`,
+    };
+    const first = buildLarkBatchPayload([long]).items[0].client_item_id;
+    const second = buildLarkBatchPayload([long]).items[0].client_item_id;
+
+    expect(first).toBe(second);
+    expect(first).toHaveLength(64);
+    expect(first).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+  });
+
+  it('splits more than 20 eligible profiles into API-valid atomic batches', async () => {
+    const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
+    const credentials = Array.from({ length: 21 }, (_, index) => batchCred(index + 1));
+    const result = await reportLarkCredentialsBatchOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
+      __lookupAllForTests: () => batchLookup(credentials),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: true, accountCount: 21 });
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => JSON.parse(String(call.init.body)).items.length)).toEqual([20, 1]);
+  });
+
+  it('stops after a later batch fails without retransmitting earlier batches', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const status = calls.length === 2 ? 503 : 200;
+      return new Response('{}', { status });
+    }) as unknown as typeof fetch;
+    const credentials = Array.from({ length: 41 }, (_, index) => batchCred(index + 1));
+
+    const result = await reportLarkCredentialsBatchOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
+      __lookupAllForTests: () => batchLookup(credentials),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'http-error', lastHttpStatus: 503 });
+    expect(calls.map((call) => JSON.parse(String(call.init.body)).items.length)).toEqual([20, 20]);
+  });
+
+  it('POSTs every eligible personal authorization to the atomic batch endpoint', async () => {
+    const { fn: fetchImpl, calls } = makeFetchMock(200, '{"ok":true}');
+    const credentials = [batchCred(1), batchCred(2), batchCred(3)];
+    const result = await reportLarkCredentialsBatchOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 'test-token-1' }),
+      __lookupAllForTests: () => batchLookup(credentials),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: true, accountCount: 3 });
+    expect(result.accounts).toHaveLength(3);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://monitor.test/api/v1/feishu/lark-cli/credentials/batch');
+    expect(calls[0].init.method).toBe('POST');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(buildLarkBatchPayload(credentials));
+  });
+
+  it('filters invalid profiles before POST and does not send an empty batch', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const resolver = vi.fn();
+    const result = await reportLarkCredentialsBatchOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: resolver,
+      __lookupAllForTests: () => batchLookup([{ ...batchCred(1), accessToken: 'short' }]),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'no-credentials', accountCount: 0 });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('keeps valid profiles when another profile is invalid', async () => {
+    const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
+    const result = await reportLarkCredentialsBatchOnce({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
+      __lookupAllForTests: () =>
+        batchLookup([batchCred(1), { ...batchCred(2), refreshToken: 'short' }]),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: true, accountCount: 1 });
+    expect(JSON.parse(String(calls[0].init.body)).items).toHaveLength(1);
   });
 });
 

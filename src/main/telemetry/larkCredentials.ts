@@ -16,7 +16,7 @@
  * daemon can keep the code in sync with the CLI without spawning a child process.
  */
 
-import { createDecipheriv } from 'node:crypto';
+import { createDecipheriv, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -46,6 +46,29 @@ export interface LarkCredentials {
 export type GetLarkCredentialsResult =
   | { ok: true; credentials: LarkCredentials }
   | { ok: false; message: string; refreshFailed?: boolean };
+
+export interface LarkProfileSkip {
+  appId: string;
+  userOpenId: string;
+  reason: 'no-credentials' | 'refresh-failed';
+  message: string;
+}
+
+export type GetLarkCredentialsAllResult =
+  | { ok: true; credentials: LarkCredentials[]; skipped: LarkProfileSkip[] }
+  | { ok: false; message: string };
+
+export interface LarkBatchItem {
+  client_item_id: string;
+  app_id: string;
+  app_secret: string;
+  access_token: string;
+  refresh_token: string;
+}
+
+export interface LarkBatchReport {
+  items: LarkBatchItem[];
+}
 
 export interface LarkCredentialsReport {
   app_id: string;
@@ -353,12 +376,49 @@ export function pickProfileNameByAppId(
   return hit?.name || appId;
 }
 
+/**
+ * Decide whether a lark-cli refresh succeeded, from the raw exit codes + verify
+ * stdout. Factored out of `triggerLarkRefresh` (which spawns the lark-cli binary)
+ * so the decoupling rule is unit-testable without the binary on PATH.
+ *
+ * Decoupling (fixes authorization drops): an access token lark-cli just refreshed
+ * MUST still be uploaded. Requiring the full scope set to be present (a56f531)
+ * or `verified === true` withheld the already-refreshed token whenever a scope
+ * drifted or lark-cli's verify flapped — agentbus then kept a stale token and
+ * the user's Lark authorization "dropped" (401) even though worker kept refreshing.
+ * So:
+ *   • auth check exit 0 — the refresh side-effect ran. We no longer inspect its
+ *     `ok`/`missing`: a partial scope grant still means the token was refreshed,
+ *     and scope degradation should warn, not withhold the upload.
+ *   • status --verify exit 0 + identities.user.available === true — the refreshed
+ *     token is usable. `verified` is no longer required (it flaps on transient
+ *     checks); availability already proves the token works.
+ */
+export function isLarkRefreshSucceeded(opts: {
+  checkStatus: number | null;
+  verifyStatus: number | null;
+  verifyStdout: string;
+}): boolean {
+  if (!opts) return false;
+  if (opts.checkStatus !== 0) return false;
+  if (opts.verifyStatus !== 0) return false;
+  let status: { identities?: { user?: { available?: unknown } } } = {};
+  try {
+    status = JSON.parse(String(opts.verifyStdout || '').trim());
+  } catch {
+    return false;
+  }
+  return status.identities?.user?.available === true;
+}
+
 function triggerLarkRefresh(appId: string, scope: string): boolean {
   const binary = findLarkBinary();
   if (!binary) return false;
-  // `auth check --scope` accepts one space-separated scope string. The command
-  // refreshes the personal token as a side effect; a later status --verify forces
-  // its refreshed token state to be persisted by lark-cli.
+  // `auth check --scope` triggers the token refresh as a side effect; `auth status
+  // --verify` persists the refreshed state. We still pass the full personal scope
+  // (the digital-worker login uses --domain all) so lark-cli refreshes the whole
+  // grant, but a partial/missing scope no longer blocks the upload — the success
+  // rule lives in isLarkRefreshSucceeded (decoupled from scope completeness).
   const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
   const profileName = pickProfileNameByAppId(listLarkProfiles(), appId);
   try {
@@ -367,24 +427,16 @@ function triggerLarkRefresh(appId: string, scope: string): boolean {
       ['auth', 'check', '--json', '--scope', scopeArg, '--profile', profileName],
       { encoding: 'utf-8', shell: isWin }
     );
-    if (check.status !== 0) return false;
-    const parsed = JSON.parse((check.stdout || '').trim()) as { ok?: unknown; missing?: unknown };
-    if (parsed.ok !== true || (Array.isArray(parsed.missing) && parsed.missing.length > 0))
-      return false;
-
     const verify = spawnSync(
       binary,
       ['auth', 'status', '--json', '--verify', '--profile', profileName],
-      {
-        encoding: 'utf-8',
-        shell: isWin,
-      }
+      { encoding: 'utf-8', shell: isWin }
     );
-    if (verify.status !== 0) return false;
-    const status = JSON.parse((verify.stdout || '').trim()) as {
-      identities?: { user?: { available?: unknown; verified?: unknown } };
-    };
-    return status.identities?.user?.available === true && status.identities.user.verified === true;
+    return isLarkRefreshSucceeded({
+      checkStatus: check.status,
+      verifyStatus: verify.status,
+      verifyStdout: verify.stdout || '',
+    });
   } catch {
     return false;
   }
@@ -488,6 +540,98 @@ export function getLarkCredentialsFresh(
     };
   }
   return refreshed;
+}
+
+export function getLarkCredentialsAll(): GetLarkCredentialsAllResult {
+  if (!isMac && !isWin) {
+    return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
+  }
+
+  const profiles = isMac ? discoverProfilesMac() : [];
+  const credentials: LarkCredentials[] = [];
+  const skipped: LarkProfileSkip[] = [];
+  for (const profile of profiles) {
+    const result = getLarkCredentials(profile);
+    if (result.ok) {
+      credentials.push(result.credentials);
+    } else {
+      skipped.push({
+        appId: profile.appId,
+        userOpenId: profile.userOpenId,
+        reason: 'no-credentials',
+        message: result.message,
+      });
+    }
+  }
+  return { ok: true, credentials, skipped };
+}
+
+export function getLarkCredentialsFreshAll(): GetLarkCredentialsAllResult {
+  const all = getLarkCredentialsAll();
+  if (!all.ok) return all;
+
+  const credentials: LarkCredentials[] = [];
+  const skipped = [...all.skipped];
+  for (const credential of all.credentials) {
+    const profile = { appId: credential.appId, userOpenId: credential.userOpenId };
+    if (
+      !shouldRefreshLarkCredentials(credential) ||
+      !triggerLarkRefresh(credential.appId, credential.scope)
+    ) {
+      skipped.push({
+        ...profile,
+        reason: 'refresh-failed',
+        message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
+      });
+      continue;
+    }
+
+    const refreshed = getLarkCredentials(profile);
+    if (refreshed.ok) {
+      credentials.push(refreshed.credentials);
+    } else {
+      skipped.push({ ...profile, reason: 'no-credentials', message: refreshed.message });
+    }
+  }
+  return { ok: true, credentials, skipped };
+}
+
+export function meetsBatchFieldConstraints(credential: LarkCredentials): boolean {
+  const { appId, appSecret, accessToken, refreshToken } = credential;
+  return (
+    appId.startsWith('cli_') &&
+    appId.length >= 5 &&
+    appId.length <= 160 &&
+    appSecret.length >= 8 &&
+    appSecret.length <= 4096 &&
+    accessToken.length >= 40 &&
+    accessToken.length <= 65536 &&
+    refreshToken.length >= 40 &&
+    refreshToken.length <= 65536
+  );
+}
+
+function clientItemIdFor(credential: LarkCredentials): string {
+  const identity = `${credential.appId}:${credential.userOpenId}`;
+  if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(identity)) return identity;
+  const prefix = credential.appId.replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, 47) || 'lark';
+  const suffix = createHash('sha256').update(identity).digest('hex').slice(0, 16);
+  return `${prefix}:${suffix}`;
+}
+
+export function buildLarkBatchPayload(credentials: LarkCredentials[]): LarkBatchReport {
+  const items = new Map<string, LarkBatchItem>();
+  for (const credential of credentials) {
+    const clientItemId = clientItemIdFor(credential);
+    items.set(clientItemId, {
+      client_item_id: clientItemId,
+      app_id: credential.appId,
+      app_secret: credential.appSecret,
+      access_token: credential.accessToken,
+      refresh_token: credential.refreshToken,
+    });
+  }
+  return { items: [...items.values()] };
 }
 
 /**
@@ -708,6 +852,156 @@ export async function reportLarkCredentialsOnce(
         refreshTokenExpiresAt: lookup.credentials.refreshExpiresAt,
       },
     ],
+  };
+}
+
+export interface LarkBatchReportConfig {
+  enabled?: boolean;
+  hermitHome: string;
+  resolveAuthedContext: LarkAuthedContextResolver;
+  fetchImpl?: typeof fetch;
+  endpointPath?: string;
+  onPayload?: (payload: LarkBatchReport) => void;
+  __lookupAllForTests?: () => GetLarkCredentialsAllResult;
+}
+
+const DEFAULT_BATCH_REPORT_ENDPOINT = '/api/v1/feishu/lark-cli/credentials/batch';
+const LARK_BATCH_MAX_ITEMS = 20;
+
+function splitBatchItems(items: LarkBatchItem[]): LarkBatchItem[][] {
+  const batches: LarkBatchItem[][] = [];
+  for (let index = 0; index < items.length; index += LARK_BATCH_MAX_ITEMS) {
+    batches.push(items.slice(index, index + LARK_BATCH_MAX_ITEMS));
+  }
+  return batches;
+}
+
+export async function reportLarkCredentialsBatchOnce(
+  config: LarkBatchReportConfig
+): Promise<LarkCredentialsReportStatus> {
+  const now = new Date().toISOString();
+  if (!config || !config.hermitHome) {
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'config-disabled',
+      message: 'hermitHome is required',
+      lastAttemptAt: now,
+      lastErrorAt: now,
+    };
+  }
+  if (!isMac && !isWin)
+    return disabledStatus(now, 'unsupported-platform', `不支持的平台: ${process.platform}`);
+  if (config.enabled === false)
+    return disabledStatus(now, 'config-disabled', 'lark credentials reporting disabled by config');
+
+  let lookup: GetLarkCredentialsAllResult;
+  try {
+    lookup = config.__lookupAllForTests
+      ? config.__lookupAllForTests()
+      : getLarkCredentialsFreshAll();
+  } catch {
+    lookup = { ok: false, message: 'lark-cli 凭证读取失败' };
+  }
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'no-credentials',
+      message: lookup.message,
+      lastAttemptAt: now,
+      lastErrorAt: now,
+    };
+  }
+
+  const eligible = lookup.credentials.filter(meetsBatchFieldConstraints);
+  const payload = buildLarkBatchPayload(eligible);
+  if (payload.items.length === 0) {
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'no-credentials',
+      message: '无满足批量上报条件的 lark-cli 个人授权',
+      accountCount: 0,
+      accounts: [],
+      lastAttemptAt: now,
+      lastErrorAt: now,
+    };
+  }
+
+  let ctx: AuthorizedServerContext | null = null;
+  try {
+    ctx = await config.resolveAuthedContext(config.hermitHome);
+  } catch (err) {
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'config-not-authorized',
+      message: sanitizeAuthError(err),
+      lastAttemptAt: now,
+      lastErrorAt: now,
+    };
+  }
+  if (!ctx)
+    return {
+      ok: false,
+      enabled: true,
+      reason: 'not-authorized',
+      message: 'not logged in to agentbus — run `agentcli auth login`',
+      lastAttemptAt: now,
+      lastErrorAt: now,
+    };
+
+  const endpoint = `${ctx.baseUrl}${config.endpointPath || DEFAULT_BATCH_REPORT_ENDPOINT}`;
+  const fetchImpl = config.fetchImpl ?? fetch;
+  for (const items of splitBatchItems(payload.items)) {
+    const batchPayload = { items };
+    try {
+      config.onPayload?.(batchPayload);
+    } catch {
+      /* observer errors are diagnostic only */
+    }
+
+    let response: Response;
+    try {
+      response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchPayload),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      return failureStatus(undefined, now, 'fetch-failed', sanitizeAuthError(err));
+    }
+    if (!response.ok) {
+      let body = '';
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        /* ignore */
+      }
+      return failureStatus(
+        undefined,
+        now,
+        'http-error',
+        `HTTP ${response.status}: ${sanitizeAuthError(body || response.statusText)}`,
+        response.status
+      );
+    }
+  }
+  return {
+    ok: true,
+    enabled: true,
+    lastAttemptAt: now,
+    lastSuccessAt: now,
+    accountCount: eligible.length,
+    accounts: eligible.map((credential) => ({
+      appId: credential.appId,
+      userOpenId: credential.userOpenId,
+      scope: credential.scope,
+      accessTokenExpiresAt: credential.expiresAt,
+      refreshTokenExpiresAt: credential.refreshExpiresAt,
+    })),
   };
 }
 

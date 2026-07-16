@@ -87,6 +87,22 @@ describe('usage telemetry worker status snapshots', () => {
     });
   });
 
+  it('keeps the worker eligible for its independent Lark loop when message usage upload fails', async () => {
+    const paths = getUsageTelemetryWorkerPaths(home);
+    await mkdir(paths.telemetryDir, { recursive: true });
+    await writeFile(
+      paths.settingsPath,
+      JSON.stringify({ taskBus: { telemetry: { enabled: true } } })
+    );
+    scanTelemetryOnceMock.mockRejectedValue(new Error('upload /api/v1/report/messages HTTP 422'));
+
+    const result = await scanUsageTelemetryWorkerOnce(home);
+
+    expect(result.shouldContinue).toBe(true);
+    expect(result.status).toMatchObject({ state: 'error', running: true });
+    expect(result.status.lastError).toContain('HTTP 422');
+  });
+
   it('keeps Lark reporting out of the usage status snapshot', async () => {
     const paths = getUsageTelemetryWorkerPaths(home);
     await mkdir(paths.telemetryDir, { recursive: true });

@@ -278,10 +278,33 @@ export function pickProfileNameByAppId(profiles, appId) {
 }
 
 /**
- * Force lark-cli to refresh+persist its stored user access token before we read
- * it. `auth check` verifies against the server and rewrites the .enc store when
- * the token is near/expired — `auth status --verify` does NOT reliably persist
- * (verified on lark-cli 1.0.53). Returns true if the check exited cleanly.
+ * Decide whether a lark-cli refresh succeeded, from the raw exit codes + verify
+ * stdout. Mirrors the TS path exactly. Decoupled (fixes authorization drops): a
+ * refreshed access token must still upload — scope drift or a transient
+ * `verified` flag must not withhold it, or agentbus keeps a stale token and the
+ * user's Lark authorization "drops" with 401s even though worker keeps refreshing.
+ *   • auth check exit 0 — the refresh side-effect ran (ok/missing no longer gated)
+ *   • status --verify exit 0 + identities.user.available === true — token usable
+ */
+export function isLarkRefreshSucceeded({ checkStatus, verifyStatus, verifyStdout } = {}) {
+  if (checkStatus !== 0) return false;
+  if (verifyStatus !== 0) return false;
+  let status = {};
+  try {
+    status = JSON.parse(String(verifyStdout || '').trim());
+  } catch {
+    return false;
+  }
+  return status?.identities?.user?.available === true;
+}
+
+/**
+ * Force lark-cli to refresh + persist its stored user access token before we
+ * read it: `auth check` triggers the refresh side effect (rewrites the .enc
+ * store when the token is near/expired), `auth status --verify` persists the
+ * refreshed state. The full personal scope is still passed (the digital-worker
+ * login uses --domain all), but a partial/missing scope no longer blocks the
+ * upload — the decoupled success rule lives in isLarkRefreshSucceeded. Mirrors TS.
  */
 function triggerLarkRefresh(appId, scope) {
   const binary = findLarkBinary();
@@ -293,17 +316,15 @@ function triggerLarkRefresh(appId, scope) {
       encoding: 'utf-8',
       shell: isWin,
     });
-    if (check.status !== 0) return false;
-    const checked = JSON.parse((check.stdout || '').trim());
-    if (checked?.ok !== true || (Array.isArray(checked.missing) && checked.missing.length > 0)) return false;
-
     const verify = spawnSync(binary, ['auth', 'status', '--json', '--verify', '--profile', profileName], {
       encoding: 'utf-8',
       shell: isWin,
     });
-    if (verify.status !== 0) return false;
-    const status = JSON.parse((verify.stdout || '').trim());
-    return status?.identities?.user?.available === true && status.identities.user.verified === true;
+    return isLarkRefreshSucceeded({
+      checkStatus: check.status,
+      verifyStatus: verify.status,
+      verifyStdout: verify.stdout || '',
+    });
   } catch {
     return false;
   }
@@ -355,6 +376,79 @@ export function getLarkCredentialsFresh(opts = {}) {
   return refreshed;
 }
 
+export function getLarkCredentialsAll() {
+  if (!isMac && !isWin) return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
+
+  const credentials = [];
+  const skipped = [];
+  for (const profile of listLarkTokenProfiles()) {
+    const result = getLarkCredentials(profile);
+    if (result.ok) credentials.push(result.credentials);
+    else skipped.push({ appId: profile.appId, userOpenId: profile.userOpenId, reason: 'no-credentials', message: result.message });
+  }
+  return { ok: true, credentials, skipped };
+}
+
+export function getLarkCredentialsFreshAll() {
+  const all = getLarkCredentialsAll();
+  if (!all.ok) return all;
+
+  const credentials = [];
+  const skipped = [...all.skipped];
+  for (const credential of all.credentials) {
+    const profile = { appId: credential.appId, userOpenId: credential.userOpenId };
+    if (!shouldRefreshLarkCredentials(credential) || !triggerLarkRefresh(credential.appId, credential.scope)) {
+      skipped.push({ ...profile, reason: 'refresh-failed', message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证' });
+      continue;
+    }
+    const refreshed = getLarkCredentials(profile);
+    if (refreshed.ok) credentials.push(refreshed.credentials);
+    else skipped.push({ ...profile, reason: 'no-credentials', message: refreshed.message });
+  }
+  return { ok: true, credentials, skipped };
+}
+
+export function meetsBatchFieldConstraints(c) {
+  return Boolean(
+    c &&
+    typeof c.appId === 'string' && c.appId.startsWith('cli_') && c.appId.length >= 5 && c.appId.length <= 160 &&
+    typeof c.appSecret === 'string' && c.appSecret.length >= 8 && c.appSecret.length <= 4096 &&
+    typeof c.accessToken === 'string' && c.accessToken.length >= 40 && c.accessToken.length <= 65536 &&
+    typeof c.refreshToken === 'string' && c.refreshToken.length >= 40 && c.refreshToken.length <= 65536
+  );
+}
+
+function clientItemIdFor(c) {
+  const identity = `${c.appId}:${c.userOpenId}`;
+  if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(identity)) return identity;
+  const prefix = c.appId.replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, 47) || 'lark';
+  const suffix = crypto.createHash('sha256').update(identity).digest('hex').slice(0, 16);
+  return `${prefix}:${suffix}`;
+}
+
+function splitBatchItems(items, size = 20) {
+  const batches = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+  return batches;
+}
+
+export function buildLarkBatchPayload(credentials = []) {
+  const items = new Map();
+  for (const c of credentials) {
+    const clientItemId = clientItemIdFor(c);
+    items.set(clientItemId, {
+      client_item_id: clientItemId,
+      app_id: c.appId,
+      app_secret: c.appSecret,
+      access_token: c.accessToken,
+      refresh_token: c.refreshToken,
+    });
+  }
+  return { items: [...items.values()] };
+}
+
 export function buildLarkReportPayload(c) {
   return {
     app_id: c.appId,
@@ -362,6 +456,54 @@ export function buildLarkReportPayload(c) {
     access_token: c.accessToken,
     refresh_token: c.refreshToken,
   };
+}
+
+export async function reportAllLarkCredentials({ fetchImpl = fetch, __lookupAllForTests } = {}) {
+  let result;
+  try {
+    result = __lookupAllForTests ? __lookupAllForTests() : getLarkCredentialsFreshAll();
+  } catch {
+    return { ok: false, reason: 'no-credentials', message: 'lark-cli 凭证读取失败' };
+  }
+  if (!result.ok) return { ok: false, reason: 'no-credentials', message: result.message };
+
+  const eligible = result.credentials.filter(meetsBatchFieldConstraints);
+  const payload = buildLarkBatchPayload(eligible);
+  if (payload.items.length === 0) {
+    return { ok: false, reason: 'no-credentials', message: '无满足批量上报条件的 lark-cli 个人授权', accountCount: 0, accounts: [] };
+  }
+
+  let ctx;
+  try {
+    const { resolveAuthedServerContext } = await import('./auth.mjs');
+    ctx = await resolveAuthedServerContext();
+  } catch {
+    return { ok: false, reason: 'config-not-authorized', message: '无法读取 AgentBus 授权状态' };
+  }
+  if (!ctx) return { ok: false, reason: 'not-authorized', message: '未登录 AgentBus，跳过飞书凭证上报' };
+
+  try {
+    for (const items of splitBatchItems(payload.items)) {
+      const response = await fetchImpl(`${ctx.baseUrl}/api/v1/feishu/lark-cli/credentials/batch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        return { ok: false, reason: 'http-error', status: response.status, message: `飞书凭证批量上报失败（HTTP ${response.status}）` };
+      }
+    }
+    return {
+      ok: true,
+      status: response.status,
+      accountCount: eligible.length,
+      accounts: eligible.map((c) => ({ appId: c.appId, userOpenId: c.userOpenId, scope: c.scope, accessTokenExpiresAt: c.expiresAt, refreshTokenExpiresAt: c.refreshExpiresAt })),
+    };
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return { ok: false, reason: timedOut ? 'timeout' : 'fetch-failed', message: timedOut ? '飞书凭证批量上报超时' : '飞书凭证批量上报请求失败' };
+  }
 }
 
 /**
@@ -476,4 +618,14 @@ export async function runLarkCredentialsCommand({ report = false, json = false }
 }
 
 // export internals for tests
-export const __internals = { getMasterKeyMac, decryptAesGcm, safeFileName, storageDirMac, readSecret, triggerLarkRefresh };
+export const __internals = {
+  getMasterKeyMac,
+  decryptAesGcm,
+  safeFileName,
+  storageDirMac,
+  readSecret,
+  triggerLarkRefresh,
+  meetsBatchFieldConstraints,
+  buildLarkBatchPayload,
+  splitBatchItems,
+};

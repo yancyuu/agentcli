@@ -12,8 +12,7 @@ import { reportLarkCredentialsOnce, type LarkCredentialsReportStatus } from './l
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
-const DEFAULT_SCAN_INTERVAL_MS = 10 * 60 * 1000;
-const DEFAULT_LARK_CREDENTIALS_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 const LARK_AUDIT_MAX_BYTES = 512 * 1024;
 
 type WorkerState = 'starting' | 'scanning' | 'idle' | 'disabled' | 'stopped' | 'error';
@@ -94,11 +93,11 @@ export function createInterruptibleWait(): {
   };
 }
 
-const larkWait = createInterruptibleWait();
+const schedulerWait = createInterruptibleWait();
 
 function requestWorkerStop(): void {
   stopping = true;
-  larkWait.interrupt();
+  schedulerWait.interrupt();
 }
 
 export function resolveHermitHome(): string {
@@ -524,30 +523,25 @@ export async function scanLarkCredentialsOnce(
   }
 }
 
-function larkCredentialsIntervalMs(): number {
-  const raw = Number.parseInt(process.env.HERMIT_LARK_CREDENTIALS_INTERVAL_MS ?? '', 10);
-  return Number.isFinite(raw) && raw > 0
-    ? Math.max(1_000, raw)
-    : DEFAULT_LARK_CREDENTIALS_INTERVAL_MS;
+export interface WorkerCycleScans {
+  scanUsage: () => Promise<{ shouldContinue: boolean }>;
+  scanLark: () => Promise<unknown>;
 }
 
-async function runLarkCredentialsLoop(hermitHome: string): Promise<void> {
-  await safeWriteLarkCredentialsStatus(hermitHome, 'starting');
-  while (!stopping) {
-    await scanLarkCredentialsOnce(hermitHome);
-    if (!stopping) await larkWait.wait(larkCredentialsIntervalMs());
-  }
-  await safeWriteLarkCredentialsStatus(hermitHome, 'stopped');
+export async function runWorkerCycle(
+  scans: WorkerCycleScans
+): Promise<{ shouldContinue: boolean }> {
+  const usage = scans.scanUsage();
+  const lark = scans.scanLark();
+  const [usageResult] = await Promise.allSettled([usage, lark]);
+  return {
+    shouldContinue: usageResult.status !== 'fulfilled' || usageResult.value.shouldContinue,
+  };
 }
 
 function scanIntervalMs(): number {
   const raw = Number.parseInt(process.env.HERMIT_USAGE_TELEMETRY_INTERVAL_MS ?? '', 10);
-  if (Number.isFinite(raw) && raw > 0) return Math.max(1_000, raw);
-  return DEFAULT_SCAN_INTERVAL_MS;
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return Number.isFinite(raw) && raw > 0 ? Math.max(1_000, raw) : DEFAULT_SCAN_INTERVAL_MS;
 }
 
 export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()): Promise<void> {
@@ -564,7 +558,7 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
   try {
     await sweepUsageUploadLock(hermitHome);
   } catch {
-    // Usage module failures must not prevent the independent Lark loop from starting.
+    // Usage module failures must not prevent the independent Lark cycle from starting.
   }
   await writeStatus(paths, 'starting', await readTaskBusConfig(paths));
 
@@ -575,6 +569,7 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
       running: false,
       startedAt,
     });
+    await safeWriteLarkCredentialsStatus(hermitHome, 'stopped');
     await removePid(paths);
   };
 
@@ -585,16 +580,18 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
     void stop().finally(() => process.exit(0));
   });
 
-  const larkLoop = runLarkCredentialsLoop(hermitHome);
   while (!stopping) {
-    const result = await scanUsageTelemetryWorkerOnce(hermitHome);
+    const result = await runWorkerCycle({
+      scanUsage: () => scanUsageTelemetryWorkerOnce(hermitHome),
+      scanLark: () => scanLarkCredentialsOnce(hermitHome),
+    });
     if (!result.shouldContinue) {
       requestWorkerStop();
       break;
     }
-    await wait(scanIntervalMs());
+    await schedulerWait.wait(scanIntervalMs());
   }
-  await larkLoop;
+  await safeWriteLarkCredentialsStatus(hermitHome, 'stopped');
 }
 
 async function runCli(): Promise<void> {
