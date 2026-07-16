@@ -110,7 +110,19 @@ export async function waitForQrAssistantBinding(port, platform, beginResult, onS
     : { deviceCode: beginResult.device_code, baseUrl: beginResult.base_url, interval: beginResult.interval || 5 };
 
   while (Date.now() - startedAt < timeoutMs) {
-    const result = await pollQrAssistantPlatform(port, platform, state);
+    let result;
+    try {
+      result = await pollQrAssistantPlatform(port, platform, state);
+    } catch (err) {
+      // A single slow/hung poll must NOT abort the whole binding. The local
+      // workbench keeps processing (the web dashboard still shows success) even
+      // when one fetch is aborted by its 15s timeout or a transient network blip.
+      // Retry until the total deadline; only the definitive statuses handled
+      // below (expired/denied/error) are fatal.
+      onStatus?.("pending");
+      await new Promise((resolve) => setTimeout(resolve, (state.interval || 5) * 1000));
+      continue;
+    }
     if (result.base_url) state.baseUrl = result.base_url;
     if (result.slow_down) state.interval = (state.interval || 5) + 5;
     onStatus?.(result.status || 'pending');
