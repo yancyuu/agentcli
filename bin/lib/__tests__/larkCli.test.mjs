@@ -23,7 +23,7 @@ describe('ensureLarkCliProfile — reuse by app_id', () => {
   it('reuses the existing profile for the same app_id instead of adding a new one', () => {
     const calls = [];
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, ...args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'profile' && args[1] === 'list') {
@@ -63,7 +63,7 @@ describe('ensureLarkCliProfile — reuse by app_id', () => {
   it('adds a new profile when the app_id is not registered yet', () => {
     const calls = [];
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, ...args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'profile' && args[1] === 'list') {
@@ -95,7 +95,7 @@ describe('larkCli — digital worker authorization', () => {
   it('reports missing Digital Worker scopes without accepting a profile-only authorization', () => {
     const calls = [];
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       // Use includes() instead of args[0/1] so the --profile prefix is tolerated.
@@ -124,7 +124,7 @@ describe('larkCli — digital worker authorization', () => {
     // Synchronous spawn mock: initial check returns missing scopes, final check returns ok
     let checkCount = 0;
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status')
@@ -200,7 +200,7 @@ describe('larkCli — digital worker authorization', () => {
     const calls = [];
     let checkCount = 0;
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status') {
@@ -245,7 +245,7 @@ describe('larkCli — digital worker authorization', () => {
   it('skips login when required scopes are already granted', async () => {
     const calls = [];
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status')
@@ -268,7 +268,7 @@ describe('larkCli — digital worker authorization', () => {
     // short-circuits and skips the authorization screen the user expects.
     const calls = [];
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       calls.push([cmd, args]);
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status')
@@ -305,7 +305,7 @@ describe('larkCli — digital worker authorization', () => {
 
   it('returns error when init step fails to produce verification_url', async () => {
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status')
         return { status: 0, stdout: '{"identities":{"user":{"available":true,"verified":true,"userName":"测试"}}}', stderr: '' };
@@ -325,7 +325,7 @@ describe('larkCli — digital worker authorization', () => {
 
   it('requires a bound personal user identity, not only a bot identity', async () => {
     vi.stubGlobal('__larkCli_test_spawn', (cmd, args) => {
-      if (cmd === 'npm') return { status: 0, stdout: cmd === 'npm' && args[0] === '--version' ? '10.0.0\n' : '', stderr: '' };
+      if (typeof cmd === 'string' && cmd.startsWith('npm')) return { status: 0, stdout: cmd.includes('--version') ? '10.0.0\n' : '', stderr: '' };
       if (cmd === 'which') return { status: 0, stdout: '/usr/local/bin/lark-cli\n', stderr: '' };
       if (args[0] === 'auth' && args[1] === 'status')
         return {

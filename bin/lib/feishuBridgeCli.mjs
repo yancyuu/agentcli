@@ -242,13 +242,13 @@ export async function ensureFeishuCodexBridge() {
     return { ok: true, alreadyInstalled: true, binPath: existing.displayPath, message: `已安装：${existing.displayPath}` };
   }
 
-  const npmCheck = spawnSync('npm', ['--version'], { encoding: 'utf-8', shell: true });
+  const npmCheck = spawnSync('npm --version', { encoding: 'utf-8', shell: true });
   if (npmCheck.status !== 0 || !(npmCheck.stdout || '').trim()) {
     return { ok: false, alreadyInstalled: false, message: '未检测到 npm，请先安装 Node.js / npm' };
   }
 
   // shell: true so npm.cmd resolves on Windows (spawn without shell → ENOENT).
-  const install = spawnSync('npm', ['install', '-g', PACKAGE], { encoding: 'utf-8', shell: true });
+  const install = spawnSync(`npm install -g ${PACKAGE}`, { encoding: 'utf-8', shell: true });
   if (install.status !== 0) {
     return {
       ok: false,

@@ -32,7 +32,7 @@ function findBinary() {
 
 function npmGlobalBin() {
   try {
-    const r = spawnLarkCli('npm', ['prefix', '-g'], { encoding: 'utf-8', shell: true });
+    const r = spawnLarkCli('npm prefix -g', [], { encoding: 'utf-8', shell: true });
     const prefix = (r.stdout || '').trim();
     if (!prefix) return null;
     return process.platform === 'win32' ? prefix : `${prefix}/bin`;
@@ -285,7 +285,7 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
  */
 export async function installLarkCli() {
   const existing = findBinary();
-  const npmCheck = spawnLarkCli('npm', ['--version'], { encoding: 'utf-8', shell: true });
+  const npmCheck = spawnLarkCli('npm --version', [], { encoding: 'utf-8', shell: true });
   if (npmCheck.status !== 0 || !(npmCheck.stdout || '').trim()) {
     return { ok: false, alreadyInstalled: false, message: '未检测到 npm，请先安装 Node.js / npm' };
   }
@@ -293,7 +293,7 @@ export async function installLarkCli() {
   // Always install the current official release. This upgrades an existing
   // lark-cli too, so AgentCli can rely on the CLI flags used by the digital
   // worker authorization flow instead of carrying compatibility fallbacks.
-  const install = spawnLarkCli('npm', ['install', '-g', PACKAGE], { encoding: 'utf-8', shell: true });
+  const install = spawnLarkCli(`npm install -g ${PACKAGE}`, [], { encoding: 'utf-8', shell: true });
   if (install.status !== 0) {
     return {
       ok: false,

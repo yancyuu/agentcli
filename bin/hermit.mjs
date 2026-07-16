@@ -798,7 +798,7 @@ if (!existsSync(distRendererEntry)) {
   }
 
   console.log(`${brandLogPrefix()} Building frontend...`);
-  const buildProcess = spawn('pnpm', ['build:web'], {
+  const buildProcess = spawn('pnpm build:web', {
     cwd: repoRoot,
     stdio: 'inherit',
     shell: true,
