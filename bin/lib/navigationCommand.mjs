@@ -94,7 +94,7 @@ import {
   normalizeAssistantBindProject,
 } from './assistantCreationOptions.mjs';
 import { ensureLarkCliDigitalWorkerAuth, personalLarkProfileName } from './larkCli.mjs';
-import { reportLarkCredentials } from './larkSecrets.mjs';
+import { reportAllLarkCredentials } from './larkSecrets.mjs';
 import { provisionDigitalWorker } from './digitalWorkerCommand.mjs';
 import { fetchDefaults, provisionRun, pollRun, claimSecret, discoverCatalog, pickHighestVersionModel, selectModelApiIds, mapTierModels } from './tokenDistribution.mjs';
 import { DEFAULT_WIRE_API, runAikeyManual } from './aikey.mjs';
@@ -713,16 +713,16 @@ async function runTokenClaimFlow() {
 }
 
 // pickRuntimes — real multi-select (Space toggles, Enter confirms). Default is
-// Codex only (Claude Code is commented out for now — re-add by uncommenting its
-// action). Adding a future runtime is just appending an action here — no
-// N-combo explosion. Returns the selected id list, or null on cancel / nothing.
+// Codex only; Claude Code is listed below Codex so users can opt in. Adding a
+// future runtime is just appending an action here — no N-combo explosion.
+// Returns the selected id list, or null on cancel / nothing.
 async function pickRuntimes() {
   const sel = await askMenuMultiSelect({
     title: '认领 token · 选择运行时',
     subtitle: '空格 切换 / 回车确认（默认只写 Codex）',
     actions: [
-      // { id: 'claude', label: 'Claude Code' }, // 暂时下掉，默认只认领 Codex；后续如需再加回取消注释即可
       { id: 'codex', label: 'Codex' },
+      { id: 'claude', label: 'Claude Code' },
     ],
     defaultSelectedIds: ['codex'],
     escapeAction: 'back',
@@ -858,7 +858,7 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
   }
   // Deliberately detached: credential synchronization is silent and must never
   // delay or change a successful local Digital Worker authorization.
-  void reportLarkCredentials({ appId: options.appId, userOpenId }).catch(() => {});
+  void reportAllLarkCredentials().catch(() => {});
   printCliRows('飞书个人身份已绑定', [
     ['lark-cli', result.installed?.message || '已安装', 'ok'],
     ['个人身份', result.message || '已完成', 'ok'],

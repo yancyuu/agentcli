@@ -1,60 +1,53 @@
 import { describe, expect, it } from 'vitest';
 
-import { __internals, buildLarkBatchPayload, meetsBatchFieldConstraints } from '../larkSecrets.mjs';
+import { reportAllLarkCredentials } from '../larkSecrets.mjs';
 
-function credential(index) {
-  return {
-    appId: `cli_batch_${index}`,
-    appSecret: `secret-${'a'.repeat(40)}-${index}`,
-    accessToken: `access-${'a'.repeat(40)}-${index}`,
-    refreshToken: `refresh-${'a'.repeat(40)}-${index}`,
-    userOpenId: `ou_batch_${index}`,
+function makeFakeChild({ stdout = '{}', code = 0, stderr = '' } = {}) {
+  const handlers = {};
+  const emitter = {
+    stdout: { on: (event, cb) => { if (event === 'data') process.nextTick(() => cb(stdout)); } },
+    stderr: { on: (event, cb) => { if (event === 'data' && stderr) process.nextTick(() => cb(stderr)); } },
+    on: (event, cb) => { handlers[event] = cb; if (event === 'close') process.nextTick(() => cb(code)); },
+    pid: 12345,
+    killed: false,
   };
+  return emitter;
 }
 
-describe('larkSecrets batch payload mirror', () => {
-  it('builds one deduplicated, API-valid item per personal authorization', () => {
-    const first = credential(1);
-    const payload = buildLarkBatchPayload([first, credential(2), first]);
-
-    expect(payload).toEqual({
-      items: [
-        {
-          client_item_id: 'cli_batch_1:ou_batch_1',
-          app_id: first.appId,
-          app_secret: first.appSecret,
-          access_token: first.accessToken,
-          refresh_token: first.refreshToken,
-        },
-        expect.objectContaining({ client_item_id: 'cli_batch_2:ou_batch_2' }),
-      ],
-    });
-  });
-
-  it('rejects incomplete profiles before they can poison an atomic batch', () => {
-    expect(meetsBatchFieldConstraints(credential(1))).toBe(true);
-    expect(meetsBatchFieldConstraints({ ...credential(1), appId: 'wrong' })).toBe(false);
-    expect(meetsBatchFieldConstraints({ ...credential(1), appSecret: 'short' })).toBe(false);
-    expect(meetsBatchFieldConstraints({ ...credential(1), accessToken: 'short' })).toBe(false);
-    expect(meetsBatchFieldConstraints({ ...credential(1), refreshToken: 'short' })).toBe(false);
-  });
-
-  it('maps an overlong profile identity to a stable API-valid client item id', () => {
-    const long = {
-      ...credential(1),
-      appId: `cli_${'a'.repeat(150)}`,
-      userOpenId: `ou_${'b'.repeat(80)}`,
+describe('reportAllLarkCredentials MJS bridge', () => {
+  it('spawns the TSX worker --report-lark-credentials-once child and returns its parsed JSON', async () => {
+    let capturedArgs;
+    const spawnImpl = (node, args) => {
+      capturedArgs = args;
+      return makeFakeChild({
+        stdout: JSON.stringify({ ok: true, accountCount: 2, lastAttemptAt: '2026-07-16T00:00:00.000Z' }),
+      });
     };
-    const first = buildLarkBatchPayload([long]).items[0].client_item_id;
-    const second = buildLarkBatchPayload([long]).items[0].client_item_id;
+    const result = await reportAllLarkCredentials({ spawnImpl, repoRoot: '/tmp/repo' });
 
-    expect(first).toBe(second);
-    expect(first).toHaveLength(64);
-    expect(first).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+    // Routes through the worker child, never reimplements batch reporting in MJS.
+    expect(capturedArgs).toContain('--report-lark-credentials-once');
+    expect(capturedArgs.some((a) => String(a).endsWith('worker.ts'))).toBe(true);
+    expect(result).toMatchObject({ ok: true, accountCount: 2 });
   });
 
-  it('splits profiles into API-valid batches of at most 20 items', () => {
-    const payload = buildLarkBatchPayload(Array.from({ length: 21 }, (_, index) => credential(index + 1)));
-    expect(__internals.splitBatchItems(payload.items).map((items) => items.length)).toEqual([20, 1]);
+  it('returns a sanitized failure status when the child emits invalid JSON', async () => {
+    const result = await reportAllLarkCredentials({
+      spawnImpl: () => makeFakeChild({ stdout: 'not-json', code: 0 }),
+      repoRoot: '/tmp/repo',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('fetch-failed');
+  });
+
+  it('returns a sanitized failure status when the child exits non-zero', async () => {
+    const result = await reportAllLarkCredentials({
+      spawnImpl: () => makeFakeChild({ stdout: '{}', code: 2, stderr: 'boom' }),
+      repoRoot: '/tmp/repo',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('fetch-failed');
+    // Raw child stderr must not leak verbatim into the returned diagnostic.
+    expect(JSON.stringify(result)).not.toContain('boom');
   });
 });

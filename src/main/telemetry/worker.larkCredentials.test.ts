@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -8,7 +8,8 @@ import {
   appendLarkCredentialsAuditLog,
   createInterruptibleWait,
   getLarkCredentialsWorkerPaths,
-  runWorkerCycle,
+  resolveLarkCloudBaseUrl,
+  runStartupOnce,
   scanLarkCredentialsOnce,
 } from './worker';
 
@@ -62,42 +63,34 @@ describe('Lark credential loop', () => {
     expect(raw).not.toContain('never-write-this');
     expect(raw).not.toContain('also-never-write-this');
   });
-  it('starts Lark refresh and reporting even when usage reporting fails', async () => {
-    let releaseLark: (() => void) | undefined;
-    const lark = new Promise<void>((resolve) => {
-      releaseLark = resolve;
-    });
-    const calls: string[] = [];
-    const cycle = runWorkerCycle({
-      scanUsage: async () => {
-        calls.push('usage');
-        throw new Error('usage upload unavailable');
-      },
-      scanLark: () => {
-        calls.push('lark');
-        return lark;
-      },
-    });
+  it('resolves the Lark report base from the configured cloud settings', async () => {
+    hermitHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-lark-base-'));
+    await writeFile(
+      path.join(hermitHome, 'settings.json'),
+      JSON.stringify({ cloud: { baseUrl: 'https://configured.example.test/' } })
+    );
 
-    expect(calls).toEqual(['usage', 'lark']);
-    releaseLark?.();
-    await expect(cycle).resolves.toEqual({ shouldContinue: true });
+    await expect(resolveLarkCloudBaseUrl(hermitHome)).resolves.toBe(
+      'https://configured.example.test'
+    );
   });
 
-  it('finishes a same-cycle Lark refresh before stopping for disabled usage', async () => {
-    const calls: string[] = [];
-    await expect(
-      runWorkerCycle({
-        scanUsage: async () => {
-          calls.push('usage');
-          return { shouldContinue: false };
-        },
-        scanLark: async () => {
-          calls.push('lark');
-        },
-      })
-    ).resolves.toEqual({ shouldContinue: false });
-    expect(calls).toEqual(['usage', 'lark']);
+  it('prefers the explicit upload override over saved cloud settings', async () => {
+    hermitHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-lark-base-env-'));
+    await writeFile(
+      path.join(hermitHome, 'settings.json'),
+      JSON.stringify({ cloud: { baseUrl: 'https://configured.example.test' } })
+    );
+    const previous = process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
+    process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = 'https://override.example.test/';
+    try {
+      await expect(resolveLarkCloudBaseUrl(hermitHome)).resolves.toBe(
+        'https://override.example.test'
+      );
+    } finally {
+      if (previous === undefined) delete process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
+      else process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = previous;
+    }
   });
 
   it('interrupts the worker scheduler wait immediately', async () => {
@@ -106,6 +99,23 @@ describe('Lark credential loop', () => {
     wait.interrupt();
     await expect(completion).resolves.toBeUndefined();
   });
+
+  it('preserves the previous attempt while entering reporting state', async () => {
+    hermitHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-lark-preserve-'));
+    const previous = process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
+    process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = 'http://127.0.0.1:1';
+    try {
+      await scanLarkCredentialsOnce(hermitHome);
+      const first = JSON.parse(
+        await readFile(getLarkCredentialsWorkerPaths(hermitHome).statusPath, 'utf-8')
+      );
+      expect(first.lastAttempt).toBeTruthy();
+      expect(first.report).toBeTruthy();
+    } finally {
+      if (previous === undefined) delete process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
+      else process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = previous;
+    }
+  }, 30_000);
 
   it('continues credential reporting when status persistence is unavailable', async () => {
     hermitHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-lark-readonly-'));
@@ -118,7 +128,7 @@ describe('Lark credential loop', () => {
       if (previous === undefined) delete process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
       else process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = previous;
     }
-  });
+  }, 30_000);
 
   it('writes an isolated, redacted Lark status when reporting cannot authenticate', async () => {
     hermitHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-lark-worker-'));
@@ -134,5 +144,117 @@ describe('Lark credential loop', () => {
       if (previous === undefined) delete process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
       else process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = previous;
     }
+  });
+
+  it('startup pass starts usage and Lark concurrently and returns both redacted results', async () => {
+    const calls: string[] = [];
+    let releaseUsage: (() => void) | undefined;
+    let releaseLark: (() => void) | undefined;
+    const usagePending = new Promise<void>((resolve) => {
+      releaseUsage = resolve;
+    });
+    const larkPending = new Promise<void>((resolve) => {
+      releaseLark = resolve;
+    });
+    const usageStatus = {
+      schemaVersion: 1 as const,
+      state: 'idle' as const,
+      running: true,
+      pid: process.pid,
+      startedAt: '2026-07-16T00:00:00.000Z',
+      updatedAt: '2026-07-16T00:00:00.000Z',
+      lastScan: '2026-07-16T00:00:00.000Z',
+      source: 'local-jsonl' as const,
+      telemetryEnabled: true,
+      telemetry: {
+        connected: false,
+        lastScan: null,
+        sessions: 0,
+        messages: 0,
+        imMessages: 0,
+        imTokensTotal: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        totalTokens: 0,
+        recentMessages: 0,
+        recentTokensTotal: 0,
+        recentByProvider: {
+          claudecode: {
+            sessions: 0,
+            messages: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            cacheRead: 0,
+            cacheCreation: 0,
+            tokensTotal: 0,
+          },
+          codex: {
+            sessions: 0,
+            messages: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            cacheRead: 0,
+            cacheCreation: 0,
+            tokensTotal: 0,
+          },
+        },
+        activeDays: 0,
+        hourly: Array.from({ length: 24 }, () => 0),
+        projects: [],
+        workSecondsByDay: {},
+        daily: {},
+        localUsers: [],
+        byProvider: {
+          claudecode: {
+            sessions: 0,
+            messages: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            cacheRead: 0,
+            cacheCreation: 0,
+            tokensTotal: 0,
+          },
+          codex: {
+            sessions: 0,
+            messages: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            cacheRead: 0,
+            cacheCreation: 0,
+            tokensTotal: 0,
+          },
+        },
+        unresolvedUsage: { sessions: 0, messages: 0, tokensTotal: 0 },
+      },
+    };
+    const startup = runStartupOnce('/unused', {
+      scanUsage: async () => {
+        calls.push('usage');
+        await usagePending;
+        return { status: usageStatus, shouldContinue: true };
+      },
+      scanLark: async () => {
+        calls.push('lark');
+        await larkPending;
+        return {
+          ok: true,
+          enabled: true,
+          lastAttemptAt: '2026-07-16T00:00:00.000Z',
+          lastSuccessAt: '2026-07-16T00:00:00.000Z',
+          accountCount: 1,
+        };
+      },
+    });
+
+    expect(calls).toEqual(['usage', 'lark']);
+    releaseLark?.();
+    releaseUsage?.();
+    const result = await startup;
+    expect(result.ok).toBe(true);
+    expect(result.usage.shouldContinue).toBe(true);
+    expect(result.lark.accountCount).toBe(1);
+    expect(JSON.stringify(result)).not.toContain('Bearer ');
   });
 });

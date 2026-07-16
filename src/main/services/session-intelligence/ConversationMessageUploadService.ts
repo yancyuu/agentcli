@@ -12,6 +12,12 @@ import {
   refreshAccessToken,
 } from '@main/services/auth/OpenHermitAuthClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
+// Single source for the cloud host/port default — change it in
+// src/shared/constants/cloudConfig.mjs only.
+import {
+  DEFAULT_OPENHERMIT_CLOUD_BASE_URL,
+  migrateLegacyCloudBaseUrl,
+} from '@shared/constants/cloudConfig.mjs';
 import { resolveUsageTotalTokens } from './tokenUsageTotals';
 import { CodexUsageAccumulator, CodexUsage, codexEventTimestamp } from './codexTokenUsage';
 type ConversationUploadTelemetryConfig = {
@@ -37,9 +43,6 @@ type ConversationUploadTelemetryConfig = {
 interface ConversationUploadConfig {
   telemetry?: ConversationUploadTelemetryConfig;
 }
-
-const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
-const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
 
 const UPLOAD_LOCK_FILE = 'conversation-message-upload.lock';
 const UPLOAD_LOG_FILE = 'conversation-upload.log';
@@ -244,20 +247,19 @@ function normalizeCloudBaseUrl(value: unknown): string | null {
   try {
     const url = new URL(withProtocol);
     if (!['http:', 'https:'].includes(url.protocol)) return null;
-    return url.toString().replace(/\/+$/u, '');
+    return migrateLegacyCloudBaseUrl(url.toString().replace(/\/+$/u, ''));
   } catch {
     return null;
   }
 }
 
+// The complete default cloud URL comes from @shared/constants/cloudConfig.mjs.
+
 function cloudBaseUrlFromHost(host: unknown): string | null {
   const raw = String(host || '').trim();
   if (!raw) return null;
   if (/^https?:\/\//iu.test(raw)) return normalizeCloudBaseUrl(raw);
-  const hasPort = /:\d+$/u.test(raw);
-  return normalizeCloudBaseUrl(
-    `http://${raw}${hasPort ? '' : `:${DEFAULT_OPENHERMIT_CLOUD_PORT}`}`
-  );
+  return normalizeCloudBaseUrl(`${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`);
 }
 
 function configuredOpenHermitCloudBaseUrl(existingBaseUrl?: unknown): string {
@@ -291,7 +293,7 @@ function configuredOpenHermitCloudBaseUrl(existingBaseUrl?: unknown): string {
     normalizeCloudBaseUrl(auth?.issuer) ||
     normalizeCloudBaseUrl(existingBaseUrl) ||
     normalizeCloudBaseUrl(conversations.baseUrl) ||
-    `http://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}`
+    DEFAULT_OPENHERMIT_CLOUD_BASE_URL
   );
 }
 

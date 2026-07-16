@@ -15,6 +15,12 @@ import { execSync } from 'node:child_process';
 
 const REAP_GRACE_MS = 200;
 
+function isTransientWorkerCommand(command: string): boolean {
+  return ['--scan-once', '--startup-once', '--report-lark-credentials-once'].some((flag) =>
+    command.includes(flag)
+  );
+}
+
 /**
  * Parse `ps -axo pid=,command=` output into the pids of OTHER live worker daemons.
  * Pure (no I/O) so it can be unit-tested directly.
@@ -29,7 +35,7 @@ export function parseOtherUsageWorkerPids(psOutput: string, selfPid: number): nu
     if (pid === selfPid) continue;
     const command = match[2];
     if (!command.includes('telemetry/worker.ts')) continue;
-    if (command.includes('--scan-once')) continue;
+    if (isTransientWorkerCommand(command)) continue;
     pids.push(pid);
   }
   return pids;

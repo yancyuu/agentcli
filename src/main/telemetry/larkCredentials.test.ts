@@ -18,7 +18,7 @@ import {
   buildLarkBatchPayload,
   isLarkRefreshSucceeded,
   meetsBatchFieldConstraints,
-  reportLarkCredentialsBatchOnce,
+  reportAllLarkCredentials,
   shouldRefreshLarkCredentials,
   parseLarkCliPersonalAuthorizations,
   type GetLarkCredentialsAllResult,
@@ -55,15 +55,12 @@ function makeFetchMock(
 describe('lark-cli profile authorization discovery', () => {
   it('keeps the exact profile name when auth metadata identifies a personal authorization', () => {
     expect(
-      parseLarkCliPersonalAuthorizations(
-        { name: '2222', appId: 'cli_aadcbb097af8dd2c' },
-        [
-          {
-            appId: 'cli_aadcbb097af8dd2c',
-            userOpenId: 'ou_target_user',
-          },
-        ]
-      )
+      parseLarkCliPersonalAuthorizations({ name: '2222', appId: 'cli_aadcbb097af8dd2c' }, [
+        {
+          appId: 'cli_aadcbb097af8dd2c',
+          userOpenId: 'ou_target_user',
+        },
+      ])
     ).toEqual([
       {
         profileName: '2222',
@@ -75,10 +72,9 @@ describe('lark-cli profile authorization discovery', () => {
 
   it('rejects auth metadata whose app identity does not match the profile', () => {
     expect(
-      parseLarkCliPersonalAuthorizations(
-        { name: '2222', appId: 'cli_aadcbb097af8dd2c' },
-        [{ appId: 'cli_other', userOpenId: 'ou_target_user' }]
-      )
+      parseLarkCliPersonalAuthorizations({ name: '2222', appId: 'cli_aadcbb097af8dd2c' }, [
+        { appId: 'cli_other', userOpenId: 'ou_target_user' },
+      ])
     ).toEqual([]);
   });
 });
@@ -248,7 +244,7 @@ describe('lark-cli batch reporting', () => {
   it('splits more than 20 eligible profiles into API-valid atomic batches', async () => {
     const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
     const credentials = Array.from({ length: 21 }, (_, index) => batchCred(index + 1));
-    const result = await reportLarkCredentialsBatchOnce({
+    const result = await reportAllLarkCredentials({
       hermitHome: '/tmp/hermit-lark',
       resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
       __lookupAllForTests: () => batchLookup(credentials),
@@ -269,7 +265,7 @@ describe('lark-cli batch reporting', () => {
     }) as unknown as typeof fetch;
     const credentials = Array.from({ length: 41 }, (_, index) => batchCred(index + 1));
 
-    const result = await reportLarkCredentialsBatchOnce({
+    const result = await reportAllLarkCredentials({
       hermitHome: '/tmp/hermit-lark',
       resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
       __lookupAllForTests: () => batchLookup(credentials),
@@ -283,7 +279,7 @@ describe('lark-cli batch reporting', () => {
   it('POSTs every eligible personal authorization to the atomic batch endpoint', async () => {
     const { fn: fetchImpl, calls } = makeFetchMock(200, '{"ok":true}');
     const credentials = [batchCred(1), batchCred(2), batchCred(3)];
-    const result = await reportLarkCredentialsBatchOnce({
+    const result = await reportAllLarkCredentials({
       hermitHome: '/tmp/hermit-lark',
       resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 'test-token-1' }),
       __lookupAllForTests: () => batchLookup(credentials),
@@ -301,7 +297,7 @@ describe('lark-cli batch reporting', () => {
   it('filters invalid profiles before POST and does not send an empty batch', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const resolver = vi.fn();
-    const result = await reportLarkCredentialsBatchOnce({
+    const result = await reportAllLarkCredentials({
       hermitHome: '/tmp/hermit-lark',
       resolveAuthedContext: resolver,
       __lookupAllForTests: () => batchLookup([{ ...batchCred(1), accessToken: 'short' }]),
@@ -315,7 +311,7 @@ describe('lark-cli batch reporting', () => {
 
   it('keeps valid profiles when another profile is invalid', async () => {
     const { fn: fetchImpl, calls } = makeFetchMock(200, '{}');
-    const result = await reportLarkCredentialsBatchOnce({
+    const result = await reportAllLarkCredentials({
       hermitHome: '/tmp/hermit-lark',
       resolveAuthedContext: async () => ({ baseUrl: 'http://monitor.test', token: 't' }),
       __lookupAllForTests: () =>

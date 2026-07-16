@@ -21,6 +21,13 @@ import {
 import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { isInteractiveCli, printCliRows, printJson } from './terminal.mjs';
 import { atomicWriteFile, chmodBestEffort, safeReadJson, readHermitSettings } from './settings.mjs';
+// Single source for the cloud host/port default — change it in
+// src/shared/constants/cloudConfig.mjs only (read by both the MJS CLI and the
+// TS worker/upload service via the matching .d.mts).
+import {
+  DEFAULT_OPENHERMIT_CLOUD_BASE_URL,
+  migrateLegacyCloudBaseUrl,
+} from '../../src/shared/constants/cloudConfig.mjs';
 
 const AUTH_CALLBACK_PATH = '/oauth/openhermit/callback';
 const AUTH_STORE_SCHEMA_VERSION = 1;
@@ -217,13 +224,12 @@ function normalizeControlUrl(value, optionName = '--control-url') {
   return url.toString().replace(/\/+$/u, '');
 }
 
-const DEFAULT_OPENHERMIT_CLOUD_HOST = '159.75.231.98';
-const DEFAULT_OPENHERMIT_CLOUD_PORT = '8088';
-
 function normalizeCloudBaseUrl(value, sourceName = 'cloud base URL') {
   const raw = String(value || '').trim();
   if (!raw) return null;
-  const withProtocol = /^https?:\/\//iu.test(raw) ? raw : `http://${raw}`;
+  const withProtocol = /^https?:\/\//iu.test(raw)
+    ? raw
+    : `${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`;
   let url;
   try {
     url = new URL(withProtocol);
@@ -233,15 +239,20 @@ function normalizeCloudBaseUrl(value, sourceName = 'cloud base URL') {
   if (!['http:', 'https:'].includes(url.protocol)) {
     throw new Error(`${sourceName} must use http or https`);
   }
-  return url.toString().replace(/\/+$/u, '');
+  return migrateLegacyCloudBaseUrl(url.toString().replace(/\/+$/u, ''));
 }
+
+// The complete default cloud URL comes from cloudConfig.mjs. Change that one
+// value to repoint every CLI, worker, upload and Lark-report path.
 
 function cloudBaseUrlFromHost(host) {
   const raw = String(host || '').trim();
   if (!raw) return null;
   if (/^https?:\/\//iu.test(raw)) return normalizeCloudBaseUrl(raw, 'OPENHERMIT_CLOUD_HOST');
-  const hasPort = /:\d+$/u.test(raw);
-  return normalizeCloudBaseUrl(`http://${raw}${hasPort ? '' : `:${DEFAULT_OPENHERMIT_CLOUD_PORT}`}`, 'OPENHERMIT_CLOUD_HOST');
+  return normalizeCloudBaseUrl(
+    `${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`,
+    'OPENHERMIT_CLOUD_HOST'
+  );
 }
 
 function configuredOpenHermitCloudBaseUrl({ includeDefault = true } = {}) {
@@ -259,7 +270,7 @@ function configuredOpenHermitCloudBaseUrl({ includeDefault = true } = {}) {
     normalizeCloudBaseUrl(authStore?.baseUrl, 'auth baseUrl') ||
     normalizeCloudBaseUrl(authStore?.issuer, 'auth issuer') ||
     normalizeCloudBaseUrl(conversations.baseUrl, 'settings.taskBus.telemetry.conversations.baseUrl') ||
-    (includeDefault ? `http://${DEFAULT_OPENHERMIT_CLOUD_HOST}:${DEFAULT_OPENHERMIT_CLOUD_PORT}` : null)
+    (includeDefault ? DEFAULT_OPENHERMIT_CLOUD_BASE_URL : null)
   );
 }
 
@@ -1294,7 +1305,7 @@ runAuthLogout,
 runAuthLogin,
 AUTH_CALLBACK_PATH,
 AUTH_STORE_SCHEMA_VERSION,
-DEFAULT_OPENHERMIT_CLOUD_HOST,
+DEFAULT_OPENHERMIT_CLOUD_BASE_URL,
 OPENHERMIT_AUTH_BROKER_URL,
 OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL,
 DEV_AUTH_UNLOCK_CODE,

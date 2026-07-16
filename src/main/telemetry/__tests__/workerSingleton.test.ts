@@ -9,17 +9,22 @@ const PS_OUTPUT = [
   ' 42790 /usr/local/bin/node --import ...tsx/dist/loader.mjs src/main/telemetry/worker.ts',
   ' 14726 node src/main/telemetry/worker.ts',
   ' 99999 node src/main/telemetry/worker.ts --scan-once',
+  ' 99998 node src/main/telemetry/worker.ts --startup-once',
+  ' 99997 node src/main/telemetry/worker.ts --report-lark-credentials-once',
   ' 50001 /usr/local/bin/node ~/.npm-global/.../openhermit/src/main/telemetry/worker.ts',
   ' 12345 /usr/local/bin/node src/main/server.ts',
   '',
 ].join('\n');
 
 describe('parseOtherUsageWorkerPids', () => {
-  it('collects peer worker daemons, excluding self, --scan-once, and unrelated procs', () => {
+  it('collects peer daemons while excluding every transient one-shot mode', () => {
     const pids = parseOtherUsageWorkerPids(PS_OUTPUT, 42790);
-    // Self (42790) excluded; --scan-once (99999) excluded; server.ts (12345) excluded.
+    // Self and every one-shot child are excluded; server.ts is unrelated.
     expect(pids).toContain(14726);
     expect(pids).toContain(50001);
+    expect(pids).not.toContain(99999);
+    expect(pids).not.toContain(99998);
+    expect(pids).not.toContain(99997);
     expect(pids).toEqual([14726, 50001]);
   });
 
