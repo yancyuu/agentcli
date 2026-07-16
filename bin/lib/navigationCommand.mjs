@@ -713,16 +713,16 @@ async function runTokenClaimFlow() {
 }
 
 // pickRuntimes — real multi-select (Space toggles, Enter confirms). Default is
-// Codex only (Claude Code is commented out for now — re-add by uncommenting its
-// action). Adding a future runtime is just appending an action here — no
-// N-combo explosion. Returns the selected id list, or null on cancel / nothing.
+// Codex only; Claude Code is listed below Codex so users can opt in. Adding a
+// future runtime is just appending an action here — no N-combo explosion.
+// Returns the selected id list, or null on cancel / nothing.
 async function pickRuntimes() {
   const sel = await askMenuMultiSelect({
     title: '认领 token · 选择运行时',
     subtitle: '空格 切换 / 回车确认（默认只写 Codex）',
     actions: [
-      // { id: 'claude', label: 'Claude Code' }, // 暂时下掉，默认只认领 Codex；后续如需再加回取消注释即可
       { id: 'codex', label: 'Codex' },
+      { id: 'claude', label: 'Claude Code' },
     ],
     defaultSelectedIds: ['codex'],
     escapeAction: 'back',
