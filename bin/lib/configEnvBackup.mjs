@@ -1,14 +1,15 @@
-// configEnvBackup.mjs — one-time snapshot + one-click restore of the LOCAL
-// runtime configs (Claude Code + Codex) that the token-pool claim flow writes.
+// configEnvBackup.mjs — snapshot + one-click restore of the LOCAL runtime configs
+// (Claude Code + Codex) that the token-pool claim flow writes.
 //
 // Semantics (deliberately NOT a per-write *.hermit-bak):
-//   • snapshotOriginals() is CREATE-ONCE. The first time the token pool is about
-//     to touch ~/.claude|~/.codex, it captures the user's PRE-token-pool originals
-//     into ~/.hermit/agentcli.env.bak. Subsequent claims never overwrite it — the
-//     snapshot always means "what the machine looked like before the token pool intervened".
+//   • snapshotOriginals() refreshes on every claim, RIGHT BEFORE the pool writes.
+//     It captures whatever the live files look like at that moment into
+//     ~/.hermit/agentcli.env.bak, overwriting any prior snapshot. So the snapshot
+//     always means "the state immediately before THIS claim", and restore always
+//     lands you one step back rather than at a stale create-once original.
 //   • restoreOriginals() replays that snapshot: existed files are copied back,
 //     files the token pool CREATED (originally absent) are deleted, so the machine
-//     returns to its pre-token-pool state with no leftover residue. After a complete
+//     returns to its pre-claim state with no leftover residue. After a complete
 //     restore, the snapshot is removed so the next claim starts a fresh cycle.
 //
 // The snapshot files hold live API keys, so they are written mode 0o600.
@@ -28,10 +29,8 @@ export function originalEnvBackupRoot(home = os.homedir()) {
 
 // One-time relocation of a legacy snapshot. Snapshots used to live at
 // ~/.hermit-env.bak (a sibling of ~/.hermit); they now live INSIDE ~/.hermit as
-// agentcli.env.bak. If a legacy snapshot exists and the new location has no
-// manifest yet, move it verbatim so the user's pre-token-pool originals survive
-// (otherwise the next snapshotOriginals would re-capture the now pool-overwritten
-// live files as "original"). Idempotent: a no-op once the new manifest exists.
+// agentcli.env.bak. If a legacy snapshot exists, move it verbatim so the user's
+// originals survive. Idempotent: harmless once the new location exists.
 //
 // CRITICAL: when moving, the manifest's `backupPath` fields still point at the
 // OLD legacy dir. We rewrite them to the new location, otherwise restoreOriginals
@@ -121,20 +120,21 @@ export function hasSnapshot({ home = os.homedir() } = {}) {
 }
 
 /**
- * Create the original-env snapshot if it does not already exist. Idempotent: a
- * second call is a no-op and never overwrites a prior snapshot. Returns a summary
- * describing whether the snapshot was created this call and what it captured.
+ * Refresh the env snapshot to match the current live files, RIGHT BEFORE the
+ * token pool writes. Always re-captures (overwrites any prior snapshot), so the
+ * snapshot always reflects "the state immediately before this claim". Returns a
+ * summary describing the capture.
  */
 export function snapshotOriginals({ home = os.homedir() } = {}) {
   migrateLegacyRootIfNeeded(home);
   const root = originalEnvBackupRoot(home);
   const manifest = manifestPath(home);
-  if (existsSync(manifest)) {
-    return { created: false, root, manifest };
-  }
 
   const now = new Date().toISOString();
   const files = {};
+  // Clear any prior snapshot so a runtime that was present before but absent now
+  // is correctly recorded as absent (no stale backup file survives).
+  if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
   for (const target of listOriginalTargets(home)) {
     const existed = existsSync(target.livePath) && statSync(target.livePath).isFile();

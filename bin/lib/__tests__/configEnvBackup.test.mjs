@@ -1,11 +1,12 @@
-// Tests for bin/lib/configEnvBackup.mjs — the one-time original-env snapshot +
-// one-click restore that brackets the token-pool claim flow.
+// Tests for bin/lib/configEnvBackup.mjs — the env snapshot + one-click restore
+// that brackets the token-pool claim flow.
 //
 // Invariants under test:
-//   • snapshotOriginals is CREATE-ONCE — a second call is a no-op and never
-//     overwrites the prior snapshot, even if the live files changed in between.
+//   • snapshotOriginals REFRESHES on every call — it re-captures the current live
+//     files each time, overwriting any prior snapshot, so the snapshot always
+//     reflects "the state immediately before this claim".
 //   • restoreOriginals replays the snapshot: existed files are copied back with
-//     their ORIGINAL content; files the token pool created (originally absent)
+//     their snapshot content; files the token pool created (originally absent)
 //     are deleted, leaving no residue.
 //
 // All paths redirect under a temp `home` so the test never touches the
@@ -84,22 +85,24 @@ describe('legacy snapshot migration', () => {
       expect(existsSync(legacyRoot)).toBe(false);
       const moved = JSON.parse(await readFile(path.join(originalEnvBackupRoot(home), 'manifest.json'), 'utf-8'));
       expect(moved.files.claude.existed).toBe(true);
-      // snapshotOriginals must NOT re-snapshot now that the (migrated) manifest exists.
+      // After migration, snapshotOriginals refreshes on demand (it re-captures the
+      // current live files rather than preserving the migrated snapshot). Here the
+      // live claude file does not exist, so the refresh records it as absent.
       const snap = snapshotOriginals({ home });
-      expect(snap.created).toBe(false);
+      expect(snap.created).toBe(true);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
   });
 });
 
-describe('snapshotOriginals — create-once', () => {
+describe('snapshotOriginals — refresh on every claim', () => {
   let home;
   afterAll(async () => {
     if (home) await rm(home, { recursive: true, force: true });
   });
 
-  it('captures existing files and records absent ones; second call is a no-op', async () => {
+  it('captures existing files and records absent ones; a later call re-captures the current state', async () => {
     home = await freshHome();
     const paths = livePaths(home);
     // Claude + codex-config exist; codex auth.json is ABSENT (will be created by token pool later).
@@ -130,15 +133,15 @@ describe('snapshotOriginals — create-once', () => {
     await writeFile(paths.claude, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'POOL-KEY' } }));
     await writeFile(paths.codexAuth, JSON.stringify({ OPENAI_API_KEY: 'POOL-KEY' }));
 
-    // Second snapshot must NOT overwrite — manifest + captured content unchanged.
+    // Second snapshot REFRESHES: it re-captures the now-current live files.
     const second = snapshotOriginals({ home });
-    expect(second.created).toBe(false);
+    expect(second.created).toBe(true);
 
     const manifest2 = JSON.parse(await readFile(path.join(originalEnvBackupRoot(home), 'manifest.json'), 'utf-8'));
     expect(manifest2.files.claude.existed).toBe(true);
-    expect(manifest2.files['codex-auth'].existed).toBe(false); // still recorded as originally absent
-    // Captured Claude content is still the ORIGINAL, not the pool key.
-    expect(await readFile(manifest2.files.claude.backupPath, 'utf-8')).toContain('ORIGINAL');
+    expect(manifest2.files['codex-auth'].existed).toBe(true); // now present, captured by the refresh
+    // Captured Claude content is the now-current value, not the stale original.
+    expect(await readFile(manifest2.files.claude.backupPath, 'utf-8')).toContain('POOL-KEY');
   });
 });
 

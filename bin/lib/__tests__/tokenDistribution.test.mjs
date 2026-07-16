@@ -73,6 +73,35 @@ describe('token distribution v3 client', () => {
     expect(d.modelApiNames).toEqual(['cpamc-openai']);
   });
 
+  it('send wraps a network-layer fetch failure with the endpoint path + cause', async () => {
+    // A bare `fetch failed` (DNS/TLS/timeout) carries no HTTP response and no
+    // hint which request failed. send must surface the path + the underlying
+    // cause so the CLI failure box can show something actionable.
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.endsWith('/api/v1/auth/me')) return meOk();
+      if (u.endsWith(`${API}/aliyun/defaults`)) {
+        const inner = new Error('getaddrinfo ENOTFOUND gateway.example');
+        const fail = new TypeError('fetch failed');
+        fail.cause = inner;
+        throw fail;
+      }
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    const { fetchDefaults } = await import('../tokenDistribution.mjs');
+    let caught;
+    try {
+      await fetchDefaults();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.path).toBe('/aliyun/defaults');
+    expect(caught.message).toContain('/aliyun/defaults');
+    expect(caught.message).toContain('getaddrinfo ENOTFOUND gateway.example');
+    expect(caught.cause?.message).toContain('ENOTFOUND');
+  });
+
   it('provisionRun posts discovery_id + gateway_id + model_api_ids with an Idempotency-Key', async () => {
     let posted = null;
     let idemHeader = null;
@@ -150,6 +179,29 @@ describe('token distribution v3 client', () => {
     await expect(pollRun('run-bad', { intervalMs: 0, timeoutMs: 500 })).rejects.toThrow(
       /aliyun_model_api_ids_not_found.*未找到 Model API ID/
     );
+  });
+
+  it('pollRun attaches the raw run body to the thrown error for full diagnostics', async () => {
+    // The CLI failure box prints the full server response so the operator can hand
+    // it to the backend. pollRun must keep that raw body reachable on the error.
+    const failedBody = {
+      status: 'failed',
+      error_code: 'aliyun_models_request_failed',
+      error_message: '调用 /cpamc-other/v1/... 失败',
+      run_id: 'run-bad',
+      events: [{ stage: 'provision', message: 'upstream timeout' }],
+    };
+    route(() => Response.json(failedBody));
+    const { pollRun } = await import('../tokenDistribution.mjs');
+    let caught;
+    try {
+      await pollRun('run-bad', { intervalMs: 0, timeoutMs: 500 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.body).toEqual(failedBody);
+    expect(caught.body.error_code).toBe('aliyun_models_request_failed');
   });
 
   it('pollRun renders a nested object error without collapsing to [object Object]', async () => {

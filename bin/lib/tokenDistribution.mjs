@@ -21,11 +21,12 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_REGION_ID = 'cn-shenzhen';
 
 class ApiError extends Error {
-  constructor(message, { status, path } = {}) {
+  constructor(message, { status, path, body } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.path = path;
+    this.body = body; // raw server response, for full diagnostics
   }
 }
 
@@ -40,7 +41,11 @@ async function requireAuthedContext() {
 async function readError(res, path) {
   const detail = await res.text().catch(() => '');
   const trimmed = detail ? `: ${detail.trim().slice(0, 200)}` : '';
-  return new ApiError(`${res.status} ${res.statusText}${trimmed}`, { status: res.status, path });
+  let body = null;
+  if (detail) {
+    try { body = JSON.parse(detail); } catch { /* keep null for non-JSON */ }
+  }
+  return new ApiError(`${res.status} ${res.statusText}${trimmed}`, { status: res.status, path, body });
 }
 
 // v3 mandates a stable Idempotency-Key (8–160 chars) on auto-provision and
@@ -58,16 +63,33 @@ async function send(ctx, method, suffix, { body, timeoutMs = DEFAULT_TIMEOUT_MS,
     Accept: 'application/json',
   };
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-  const res = await fetch(`${ctx.baseUrl}${API_PREFIX}${suffix}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const url = `${ctx.baseUrl}${API_PREFIX}${suffix}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    // Network/TLS/DNS/timeout failures never produce an HTTP response, so without
+    // wrapping they surface as a bare "fetch failed" with no clue which request
+    // or host failed. Carry the endpoint path + the underlying cause (e.g.
+    // getaddrinfo ENOTFOUND gw, certificate expired, timeout) so the CLI box can
+    // show something actionable.
+    const causeMsg = (e && (e.cause?.message || e.message)) || 'fetch failed';
+    const wrapped = new ApiError(`网络请求失败 (${method} ${suffix}): ${causeMsg}`, { path: suffix });
+    wrapped.cause = e?.cause || e;
+    throw wrapped;
+  }
   if (res.status === 401) {
     throw new Error('登录已失效（401），请重新登录后再认领 token。');
   }
-  if (!res.ok) throw await readError(res, suffix);
+  if (!res.ok) {
+    const err = await readError(res, suffix);
+    throw err;
+  }
   return res.json().catch(() => null);
 }
 
@@ -230,7 +252,9 @@ export async function pollRun(runId, { timeoutMs = 120_000, intervalMs = 2_000, 
     }
     if (status === 'succeeded') return body;
     if (status === 'failed') {
-      throw new Error(`provisioning failed: ${describeProvisioningError(body)}`);
+      const err = new Error(`provisioning failed: ${describeProvisioningError(body)}`);
+      err.body = body; // raw run object, for full diagnostics (error_code/message/events)
+      throw err;
     }
     await new Promise((resolve) => setTimeout(resolve, body?.poll_after_ms ?? intervalMs));
   }

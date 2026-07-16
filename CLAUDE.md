@@ -270,9 +270,14 @@ Note: renderer utils/hooks/types do NOT have barrel exports — import directly 
 
 ## Hermit Team Context
 
-Current team slug: `2222`
+Current team slug: `sasqwq`
 
 Available teams:
+- 333 (测试从333)
+- assistant-1784024568826 (测下)
+- assistant-1784024458167 (测试测试)
+- 2333 (测试2333)
+- 2222 (测试2222)
 - assistant-1784021484579 (牛你牛你)
 - assistant-1784021349302 (测试)
 - assistant-1784004848710 (测试)

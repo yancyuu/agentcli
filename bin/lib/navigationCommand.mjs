@@ -549,9 +549,58 @@ function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
 }
 
 function printClaimError(err) {
-  printCliRows('认领 token 失败', [
-    ['错误', err instanceof Error ? err.message : String(err), 'error'],
-  ], '请检查登录状态与网络后重试；若持续失败，服务端 token 分发接口可能尚未就绪。');
+  const message = err instanceof Error ? err.message : String(err);
+  const rows = [['错误', message, 'error']];
+
+  // Surface the fullest server diagnostics we have: HTTP status/path for ApiError,
+  // and the raw provisioning run object (error_code / error_message / events) the
+  // poll path attaches. This is what you hand to the backend to diagnose an
+  // aliyun-side provisioning failure — without it the box collapses to one line.
+  if (err && typeof err === 'object') {
+    if (err.status) rows.push(['HTTP', String(err.status), 'error']);
+    if (err.path) rows.push(['接口', err.path, 'error']);
+    const cause = extractCause(err);
+    if (cause) rows.push(['底层原因', cause, 'error']);
+    const body = err.body;
+    if (body && typeof body === 'object') {
+      const json = safeErrorBody(body);
+      if (json) rows.push(['服务端响应', json, 'error']);
+    }
+  }
+
+  printCliRows('认领 token 失败', rows, '请检查登录状态与网络后重试；若持续失败，服务端 token 分发接口可能尚未就绪。');
+}
+
+// Redact no secrets (server responses here are not credential-bearing) but keep
+// the size sane and render nested objects legibly. Returns '' if nothing useful.
+function safeErrorBody(body) {
+  try {
+    const json = JSON.stringify(body);
+    if (json && json !== '{}') return json.length > 800 ? `${json.slice(0, 800)}…` : json;
+  } catch { /* fall through */ }
+  return '';
+}
+
+// Walk err.cause (Node/undici nests the real DNS/TLS/timeout reason there) and
+// return the most informative non-redundant message. '' when there's nothing
+// beyond what the top-level message already says.
+function extractCause(err) {
+  const seen = new Set();
+  let node = err?.cause;
+  let last = '';
+  while (node && typeof node === 'object' && !seen.has(node)) {
+    seen.add(node);
+    const msg = typeof node.message === 'string' ? node.message.trim() : '';
+    if (msg && msg !== last && !err.message.includes(msg)) {
+      last = msg;
+    }
+    node = node.cause;
+  }
+  // Some causes are plain strings or Errors without nesting.
+  if (!last && err?.cause && typeof err.cause === 'string') {
+    last = err.cause.trim();
+  }
+  return last && !err.message.includes(last) ? last : '';
 }
 
 async function runTokenClaimFlow() {
@@ -976,12 +1025,6 @@ async function runAccountAction() {
       actionStateLabel: renderState.actionStateLabel,
     });
     if (actionId === 'back') return;
-    if (actionId === 'guide') {
-      printOnlineGuide();
-      const continueAction = await waitForContinue('按 Enter/← 返回登录状态菜单 | Esc/Ctrl+C 退出');
-      if (continueAction === 'back' || continueAction === 'cancel') return;
-      continue;
-    }
     if (actionId === 'quick-create-assistant') await runQuickCreateAssistantFlow();
     if (actionId === 'status') await printAuthStatus({ exitOnDone: false });
     if (actionId === 'login') await runAuthLogin({ exitOnDone: false, interactiveMenu: true });

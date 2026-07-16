@@ -6,7 +6,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 
 import { currentVersion as defaultCurrentVersion, repoRoot as defaultRepoRoot } from './env.mjs';
-import { BRAND, brandLogPrefix } from '../branding.mjs';
+import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { migrateLegacyHermitBridgeConfigIfNeeded as defaultMigrate } from './runtime.mjs';
 
 /**
@@ -111,6 +111,7 @@ async function runUpdate({
   // the live usage worker so it picks up the new code without a manual restart.
   await onUpdated?.();
   log(`Successfully updated from ${currentVersion} to version ${latestVersion}`);
+  log(`请运行 ${brandCommand('restart')}，以重启 Web 和上报服务并加载新版本。`);
 }
 
 // ---------------------------------------------------------------------------

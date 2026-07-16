@@ -39,7 +39,6 @@ export const NAV_ACTIONS = [
     description: '回车展开；登录、查看登录状态、退出登录',
     children: [
       { id: 'login', label: '飞书登录' },
-      { id: 'guide', label: '在线说明书', description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex' },
       { id: 'logout', label: '退出登录' },
       { id: 'status', label: '查看登录状态' },
     ],
@@ -51,6 +50,7 @@ export const NAV_ACTIONS = [
     children: [
       { id: 'aikey-claim', label: '认领', description: '签发消费者并认领 key；选择运行时（Claude/Codex，默认都写），写入本地配置 + aikey env' },
       { id: 'aikey-manual', label: '说明书', description: '列出本地认领的变量名 + 端点 + 可用模型（给 agent 用，不含明文 key）' },
+      { id: 'guide', label: '在线说明书', description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex' },
       { id: 'aikey-restore', label: '一键恢复原始配置', description: '从 ~/.hermit/agentcli.env.bak 一键还原 token 池介入前的 Claude/Codex 配置' },
       { id: 'aikey-status', label: '状态', description: '查看当前 token 池状态' },
     ],
@@ -278,11 +278,6 @@ export const ACCOUNT_ACTIONS = [
     id: 'status',
     label: '查看登录状态',
     description: `查看 ${BRAND.authAccountLabel} 授权状态`,
-  },
-  {
-    id: 'guide',
-    label: '在线说明书',
-    description: '打开 https://yancyuu.github.io/agentcli/，可直接丢给 Claude Code / Codex',
   },
   {
     id: 'logout',

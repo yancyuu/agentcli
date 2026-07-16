@@ -51,6 +51,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
       'Installing update...',
       'Using git installation update method...',
       'Successfully updated from 2.1.197 to version 2.1.209',
+      '请运行 agentcli restart，以重启 Web 和上报服务并加载新版本。',
     ]);
     // fetch + checkout + install + build
     expect(exec).toHaveBeenCalledTimes(4);
@@ -81,6 +82,7 @@ describe('agentcli update transcript (Claude-CLI style)', () => {
       'Installing update...',
       'Using global installation update method...',
       'Successfully updated from 2.1.197 to version 2.1.209',
+      '请运行 agentcli restart，以重启 Web 和上报服务并加载新版本。',
     ]);
     // Single npm install, pinned to the official registry.
     expect(calls).toHaveLength(1);
