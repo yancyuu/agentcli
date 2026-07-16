@@ -75,6 +75,7 @@ import {
   runAikeyStatus,
   maskKey,
   applyClaimedSecret,
+  validateClaimedSecret,
 } from './aikey.mjs';
 import {
   snapshotOriginals,
@@ -657,6 +658,16 @@ async function runTokenClaimFlow() {
     secret = await claimSecret(runId);
   } catch (err) {
     printClaimError(err);
+    return;
+  }
+
+  // 4b. Reject placeholder/junk secrets BEFORE asking the user anything or
+  //     snapshotting. The gateway returns non-functional sentinels (e.g. key
+  //     "sk-homeless", base_url "https://gw/cpaopen") when it has no real key;
+  //     writing those would brick the working config. Bail with config untouched.
+  const claimCheck = validateClaimedSecret(secret);
+  if (!claimCheck.ok) {
+    printCliRows('认领 token', [['状态', '已放弃（凭证不可用）', 'warn']], `服务端返回的凭证不可用：${claimCheck.reason}\n未修改任何 Claude / Codex 配置。token 池后端可能没有可发的真实 key，请稍后重试或联系后端。`);
     return;
   }
 

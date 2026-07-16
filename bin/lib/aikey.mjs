@@ -607,9 +607,47 @@ export function resolveCodexBaseUrl(secret) {
 // endpoint with tier model vars (auto-mapped from receipt modelIds); Codex gets
 // the resolved proxy base_url + model + wire_api. backup:false — configEnvBackup.mjs
 // owns the snapshot/restore story. choices: { model?, wireApi? }.
+// --- Claimed-secret usability guard -----------------------------------------
+// The token-pool gateway returns non-functional placeholder values when it has
+// no real key to issue — e.g. key "sk-homeless" and base_url "https://gw/cpaopen"
+// (host "gw" is not a routable domain). Writing those overwrites the user's
+// working config with values that can never connect. validateClaimedSecret()
+// detects them so a "successful" claim that only yielded sentinels is treated as
+// a failure and the config is left untouched ("失败就是失败，失败就不要改配置").
+
+// Hostnames that are clearly not usable data-plane endpoints: a bare label with
+// no dot and no IP/localhost form (e.g. "gw") can never resolve publicly.
+export function isRoutableHost(host) {
+  const h = String(host || '').toLowerCase().trim();
+  if (!h || h === 'localhost' || h === '127.0.0.1') return true;
+  if (/^\[?[0-9a-fA-F:]+\]?$/.test(h) && h.includes(':')) return true; // IPv6
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true;                  // IPv4
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(h);                          // FQDN: needs a dot + TLD
+}
+
+// Known placeholder/sentinel key tokens the gateway emits instead of a real key.
+const PLACEHOLDER_KEY = /^(sk-)?(homeless|placeholder|test|example|demo|sample|none|null|undefined|empty|changeme|your[-_]?key|xxx+|todo|fake|dummy|invalid|unavailable|na|n\/a)\b/i;
+
+export function validateClaimedSecret(secret) {
+  const key = String(secret?.key || secret?.api_key || secret?.plaintext_key || '').trim();
+  if (!key) return { ok: false, reason: '服务端未返回 key' };
+  if (PLACEHOLDER_KEY.test(key)) return { ok: false, reason: `返回的 key 是占位值（${key}），不可用` };
+  const endpoints = secret?.endpoints || {};
+  for (const [runtime, url] of Object.entries(endpoints)) {
+    const u = String(url || '').trim();
+    if (!u) continue;
+    let host = '';
+    try { host = new URL(u).hostname; } catch { host = ''; }
+    if (!isRoutableHost(host)) return { ok: false, reason: `返回的 ${runtime} endpoint 不可路由（${u}），不可用` };
+  }
+  return { ok: true };
+}
+
 export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude', 'codex'], home } = {}) {
   const key = String(secret?.key || secret?.api_key || secret?.plaintext_key || '').trim();
   if (!key) throw new Error('applyClaimedSecret: 缺少 key');
+  const claimCheck = validateClaimedSecret(secret);
+  if (!claimCheck.ok) throw new Error(`applyClaimedSecret: ${claimCheck.reason}`);
   const wanted = Array.isArray(runtimes) ? runtimes : [runtimes];
   const results = [];
   const endpoints = {};

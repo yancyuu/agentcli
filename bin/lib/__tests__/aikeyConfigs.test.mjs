@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { applyClaimedSecret, applyToConfigs, resolveClaudeBaseUrl, resolveCodexBaseUrl, writeAikeyEnv } from '../aikey.mjs';
+import { applyClaimedSecret, applyToConfigs, resolveClaudeBaseUrl, resolveCodexBaseUrl, writeAikeyEnv, validateClaimedSecret, isRoutableHost } from '../aikey.mjs';
 import { mapTierModels } from '../tokenDistribution.mjs';
 
 describe('applyToConfigs — Claude settings.json', () => {
@@ -424,22 +424,46 @@ describe('applyClaimedSecret — env file injection', () => {
     }
   });
 
-  it('does NOT write aikey.env when home is not provided (no side-effects on real home)', async () => {
-    // When home is omitted, applyClaimedSecret defaults to os.homedir().
-    // We can't safely assert about the real home, so we verify the function
-    // completes without error — the real write happens on the actual machine.
-    const result = applyClaimedSecret({
-      secret: {
-        key: 'sk-homeless',
-        endpoints: { anthropic: 'https://gw/cpamc-cc', openai: 'https://gw/cpaopen' },
-        modelIds: ['glm-5.2'],
-      },
-      choices: { model: 'glm-5.2' },
-      runtimes: ['codex'],
+});
+
+// validateClaimedSecret — the gateway returns non-functional sentinels (e.g. key
+// "sk-homeless", base_url "https://gw/cpaopen" with a non-routable host) when it
+// has no real key. These must be rejected so the working config is never
+// overwritten with values that can never connect ("失败就是失败，失败就不要改配置").
+describe('validateClaimedSecret — reject gateway placeholder/junk values', () => {
+  it('rejects the sk-homeless placeholder key', () => {
+    const r = validateClaimedSecret({ key: 'sk-homeless', endpoints: {} });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/占位值/);
+  });
+  it('rejects a non-routable endpoint host (bare "gw")', () => {
+    const r = validateClaimedSecret({ key: 'sk-prodkey-9876543210', endpoints: { openai: 'https://gw/cpaopen' } });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/不可路由/);
+  });
+  it('rejects an empty key', () => {
+    expect(validateClaimedSecret({ key: '', endpoints: {} }).ok).toBe(false);
+  });
+  it('accepts a real key + routable FQDN endpoints', () => {
+    const r = validateClaimedSecret({
+      key: 'sk-prodkey-9876543210',
+      endpoints: { openai: 'https://gw.example/cpaopen', anthropic: 'https://gw.example/cpamc-cc' },
     });
-    expect(result.ok).toBe(true);
-    // The env file is written to the real hermit home — not testable in isolation.
-    // The claim result still includes tierModels.
-    expect(result.tierModels).toEqual({ haiku: 'glm-5.2', sonnet: 'glm-5.2', opus: 'glm-5.2' });
+    expect(r.ok).toBe(true);
+  });
+  it('applyClaimedSecret THROWS on a placeholder secret (no config touched)', () => {
+    expect(() => applyClaimedSecret({
+      secret: { key: 'sk-homeless', endpoints: { openai: 'https://gw/cpaopen' } },
+      runtimes: ['codex'],
+    })).toThrow(/占位值|不可路由|不可用/);
+  });
+});
+
+describe('isRoutableHost — bare labels are not routable', () => {
+  it('accepts FQDN / IPv4 / localhost, rejects a bare "gw"', () => {
+    expect(isRoutableHost('gw.example.com')).toBe(true);
+    expect(isRoutableHost('1.2.3.4')).toBe(true);
+    expect(isRoutableHost('localhost')).toBe(true);
+    expect(isRoutableHost('gw')).toBe(false);
   });
 });
