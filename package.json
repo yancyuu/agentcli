@@ -24,6 +24,7 @@
   },
   "files": [
     "bin/",
+    "scripts/report-lark-credentials-once.mjs",
     "src/",
     "dist-renderer/",
     "branding.json",
@@ -41,6 +42,7 @@
     "postinstall": "node ./bin/postinstall.mjs",
     "prepack": "pnpm build:web",
     "start": "node bin/hermit.mjs",
+    "lark:report-once": "node scripts/report-lark-credentials-once.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ --cache --cache-location .eslintcache --cache-strategy content",
     "lint:fix": "eslint src/ --fix --cache --cache-location .eslintcache --cache-strategy content",

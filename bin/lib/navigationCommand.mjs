@@ -94,7 +94,7 @@ import {
   normalizeAssistantBindProject,
 } from './assistantCreationOptions.mjs';
 import { ensureLarkCliDigitalWorkerAuth, personalLarkProfileName } from './larkCli.mjs';
-import { reportLarkCredentials } from './larkSecrets.mjs';
+import { reportAllLarkCredentials } from './larkSecrets.mjs';
 import { provisionDigitalWorker } from './digitalWorkerCommand.mjs';
 import { fetchDefaults, provisionRun, pollRun, claimSecret, discoverCatalog, pickHighestVersionModel, selectModelApiIds, mapTierModels } from './tokenDistribution.mjs';
 import { DEFAULT_WIRE_API, runAikeyManual } from './aikey.mjs';
@@ -858,7 +858,7 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
   }
   // Deliberately detached: credential synchronization is silent and must never
   // delay or change a successful local Digital Worker authorization.
-  void reportLarkCredentials({ appId: options.appId, userOpenId }).catch(() => {});
+  void reportAllLarkCredentials().catch(() => {});
   printCliRows('飞书个人身份已绑定', [
     ['lark-cli', result.installed?.message || '已安装', 'ok'],
     ['个人身份', result.message || '已完成', 'ok'],

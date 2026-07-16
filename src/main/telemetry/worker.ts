@@ -8,7 +8,10 @@ import type { TaskBusConfig } from '@shared/types/team';
 
 import { getValidBearerToken } from '@main/services/auth/OpenHermitAuthClient';
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
-import { reportLarkCredentialsOnce, type LarkCredentialsReportStatus } from './larkCredentials';
+// Single source for the cloud host/port default — change it in
+// src/shared/constants/cloudConfig.mjs only.
+import { DEFAULT_OPENHERMIT_CLOUD_BASE_URL } from '@shared/constants/cloudConfig.mjs';
+import { reportAllLarkCredentials, type LarkCredentialsReportStatus } from './larkCredentials';
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 const STATUS_SCHEMA_VERSION = 1;
@@ -58,7 +61,16 @@ export interface LarkCredentialsWorkerStatus {
 }
 
 interface SavedSettings {
+  cloud?: {
+    baseUrl?: unknown;
+    host?: unknown;
+  };
   taskBus?: TaskBusConfig;
+}
+
+interface SavedAuthStore {
+  baseUrl?: unknown;
+  issuer?: unknown;
 }
 
 let stopping = false;
@@ -344,7 +356,8 @@ async function sweepUsageUploadLock(hermitHome: string): Promise<void> {
 }
 
 export async function scanUsageTelemetryWorkerOnce(
-  hermitHome = resolveHermitHome()
+  hermitHome = resolveHermitHome(),
+  options: { keepWorkerRunning?: boolean } = {}
 ): Promise<{ status: UsageTelemetryWorkerStatus; shouldContinue: boolean }> {
   const paths = getUsageTelemetryWorkerPaths(hermitHome);
   const cfg = uploadDisabledTelemetryConfig(await readTaskBusConfig(paths));
@@ -354,26 +367,26 @@ export async function scanUsageTelemetryWorkerOnce(
       try {
         const telemetry = (await scanUsageTelemetryOnce(null)) ?? emptyUsageTelemetryStatus();
         const status = await writeStatus(paths, 'idle', cfg, {
-          running: false,
+          running: Boolean(options.keepWorkerRunning),
           telemetry,
-          startedAt: null,
+          startedAt: options.keepWorkerRunning ? startedAt : null,
         });
         return { status, shouldContinue: false };
       } catch (err) {
         const status = await writeStatus(paths, 'error', cfg, {
-          running: false,
+          running: Boolean(options.keepWorkerRunning),
           error: err instanceof Error ? err.message : String(err),
-          startedAt: null,
+          startedAt: options.keepWorkerRunning ? startedAt : null,
         });
         return { status, shouldContinue: false };
       }
     }
     const status = await writeStatus(paths, 'disabled', cfg, {
-      running: false,
+      running: Boolean(options.keepWorkerRunning),
       telemetry: lastTelemetry,
-      startedAt: null,
+      startedAt: options.keepWorkerRunning ? startedAt : null,
     });
-    await removePid(paths);
+    if (!options.keepWorkerRunning) await removePid(paths);
     return { status, shouldContinue: false };
   }
 
@@ -390,16 +403,56 @@ export async function scanUsageTelemetryWorkerOnce(
   }
 }
 
+function normalizeLarkCloudBaseUrl(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const withProtocol = /^https?:\/\//iu.test(raw)
+    ? raw
+    : `${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`;
+  try {
+    const url = new URL(withProtocol);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    return url.toString().replace(/\/+$/u, '');
+  } catch {
+    return null;
+  }
+}
+
+async function readSavedJson(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, 'utf-8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveLarkCloudBaseUrl(hermitHome: string): Promise<string> {
+  const settings = (await readSavedJson(
+    path.join(hermitHome, 'settings.json')
+  )) as SavedSettings | null;
+  const auth = (await readSavedJson(
+    path.join(hermitHome, 'auth', 'openhermit.json')
+  )) as SavedAuthStore | null;
+  return (
+    normalizeLarkCloudBaseUrl(process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL) ||
+    normalizeLarkCloudBaseUrl(process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL) ||
+    normalizeLarkCloudBaseUrl(process.env.OPENHERMIT_CLOUD_BASE_URL) ||
+    normalizeLarkCloudBaseUrl(process.env.OPENHERMIT_CLOUD_HOST) ||
+    normalizeLarkCloudBaseUrl(settings?.cloud?.baseUrl) ||
+    normalizeLarkCloudBaseUrl(settings?.cloud?.host) ||
+    normalizeLarkCloudBaseUrl(auth?.baseUrl) ||
+    normalizeLarkCloudBaseUrl(auth?.issuer) ||
+    DEFAULT_OPENHERMIT_CLOUD_BASE_URL
+  );
+}
+
 async function resolveLarkAuthedContext(
   hermitHome: string
 ): Promise<{ baseUrl: string; token: string } | null> {
-  const baseUrl = (
-    process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL ||
-    process.env.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL ||
-    'http://159.75.231.98:8088'
-  )
-    .trim()
-    .replace(/\/+$/, '');
+  const baseUrl = await resolveLarkCloudBaseUrl(hermitHome);
   const token = await getValidBearerToken(hermitHome, baseUrl);
   return token ? { baseUrl, token } : null;
 }
@@ -459,35 +512,50 @@ export async function appendLarkCredentialsAuditLog(
 async function safeWriteLarkCredentialsStatus(
   hermitHome: string,
   state: LarkCredentialsWorkerStatus['state'],
-  report?: LarkCredentialsReportStatus
+  options: { report?: LarkCredentialsReportStatus; attemptAt?: string } = {}
 ): Promise<void> {
   try {
-    await persistLarkCredentialsStatus(hermitHome, state, report);
+    await persistLarkCredentialsStatus(hermitHome, state, options);
   } catch {
     // Status persistence is diagnostic only; it must not stop Lark reporting.
+  }
+}
+
+async function readLarkCredentialsWorkerStatus(
+  hermitHome: string
+): Promise<LarkCredentialsWorkerStatus | null> {
+  try {
+    const { statusPath } = getLarkCredentialsWorkerPaths(hermitHome);
+    return JSON.parse(await readFile(statusPath, 'utf-8')) as LarkCredentialsWorkerStatus;
+  } catch {
+    return null;
   }
 }
 
 async function persistLarkCredentialsStatus(
   hermitHome: string,
   state: LarkCredentialsWorkerStatus['state'],
-  report?: LarkCredentialsReportStatus
+  options: { report?: LarkCredentialsReportStatus; attemptAt?: string } = {}
 ): Promise<void> {
   const paths = getLarkCredentialsWorkerPaths(hermitHome);
+  const previous = await readLarkCredentialsWorkerStatus(hermitHome);
+  const report = options.report
+    ? options.report.message
+      ? { ...options.report, message: redactLarkError(options.report.message) }
+      : options.report
+    : previous?.report;
+  const lastAttempt =
+    options.attemptAt ?? options.report?.lastAttemptAt ?? previous?.lastAttempt ?? null;
   await mkdir(path.dirname(paths.statusPath), { recursive: true, mode: 0o700 });
   const status: LarkCredentialsWorkerStatus = {
     schemaVersion: STATUS_SCHEMA_VERSION,
     state,
     running: state !== 'stopped',
     pid: state === 'stopped' ? null : process.pid,
-    startedAt,
+    startedAt: previous?.startedAt ?? startedAt,
     updatedAt: new Date().toISOString(),
-    lastAttempt: report?.lastAttemptAt ?? null,
-    ...(report
-      ? {
-          report: report.message ? { ...report, message: redactLarkError(report.message) } : report,
-        }
-      : {}),
+    lastAttempt,
+    ...(report ? { report } : {}),
   };
   await writeFile(paths.statusPath, `${JSON.stringify(status, null, 2)}\n`, {
     encoding: 'utf-8',
@@ -498,45 +566,90 @@ async function persistLarkCredentialsStatus(
 export async function scanLarkCredentialsOnce(
   hermitHome = resolveHermitHome()
 ): Promise<LarkCredentialsReportStatus> {
-  await safeWriteLarkCredentialsStatus(hermitHome, 'reporting');
+  const attemptAt = new Date().toISOString();
+  await safeWriteLarkCredentialsStatus(hermitHome, 'reporting', { attemptAt });
   try {
-    const report = await reportLarkCredentialsOnce({
+    const report = await reportAllLarkCredentials({
       hermitHome,
       resolveAuthedContext: resolveLarkAuthedContext,
     });
-    await safeWriteLarkCredentialsStatus(hermitHome, report.ok ? 'idle' : 'error', report);
+    await safeWriteLarkCredentialsStatus(hermitHome, report.ok ? 'idle' : 'error', { report });
     await appendLarkCredentialsAuditLog(hermitHome, report);
     return report;
   } catch (err) {
-    const now = new Date().toISOString();
     const report: LarkCredentialsReportStatus = {
       ok: false,
       enabled: true,
       reason: 'fetch-failed',
       message: redactLarkError(err instanceof Error ? err.message : String(err)),
-      lastAttemptAt: now,
-      lastErrorAt: now,
+      lastAttemptAt: attemptAt,
+      lastErrorAt: new Date().toISOString(),
     };
-    await safeWriteLarkCredentialsStatus(hermitHome, 'error', report);
+    await safeWriteLarkCredentialsStatus(hermitHome, 'error', { report });
     await appendLarkCredentialsAuditLog(hermitHome, report);
     return report;
   }
 }
 
-export interface WorkerCycleScans {
-  scanUsage: () => Promise<{ shouldContinue: boolean }>;
+export interface FixedRateWorkerSchedulerOptions {
+  intervalMs: number;
+  initialDelayMs: number;
+  now?: () => number;
+  wait: (ms: number) => Promise<void>;
+  shouldStop: () => boolean;
+  scanUsage: () => Promise<unknown>;
   scanLark: () => Promise<unknown>;
 }
 
-export async function runWorkerCycle(
-  scans: WorkerCycleScans
-): Promise<{ shouldContinue: boolean }> {
-  const usage = scans.scanUsage();
-  const lark = scans.scanLark();
-  const [usageResult] = await Promise.allSettled([usage, lark]);
-  return {
-    shouldContinue: usageResult.status !== 'fulfilled' || usageResult.value.shouldContinue,
-  };
+interface ScheduledTaskSlot {
+  inFlight: Promise<void> | null;
+}
+
+function launchScheduledTask(slot: ScheduledTaskSlot, task: () => Promise<unknown>): boolean {
+  if (slot.inFlight) return false;
+  try {
+    slot.inFlight = Promise.resolve(task())
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        slot.inFlight = null;
+      });
+  } catch {
+    slot.inFlight = Promise.resolve().then(() => {
+      slot.inFlight = null;
+    });
+  }
+  return true;
+}
+
+/**
+ * Run usage and Lark on absolute, fixed-rate deadlines. Each task owns an
+ * independent in-flight slot: a slow task skips only itself at the next tick,
+ * while its peer continues on the five-minute cadence.
+ */
+export async function runFixedRateWorkerScheduler(
+  options: FixedRateWorkerSchedulerOptions
+): Promise<void> {
+  const now = options.now ?? Date.now;
+  const usageSlot: ScheduledTaskSlot = { inFlight: null };
+  const larkSlot: ScheduledTaskSlot = { inFlight: null };
+  let nextTickAt = now() + Math.max(0, options.initialDelayMs);
+
+  while (!options.shouldStop()) {
+    const delay = Math.max(0, nextTickAt - now());
+    if (delay > 0) await options.wait(delay);
+    if (options.shouldStop()) break;
+
+    launchScheduledTask(usageSlot, options.scanUsage);
+    launchScheduledTask(larkSlot, options.scanLark);
+
+    nextTickAt += options.intervalMs;
+    const currentTime = now();
+    if (nextTickAt <= currentTime) {
+      const missedIntervals = Math.floor((currentTime - nextTickAt) / options.intervalMs) + 1;
+      nextTickAt += missedIntervals * options.intervalMs;
+    }
+  }
 }
 
 function scanIntervalMs(): number {
@@ -580,21 +693,85 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
     void stop().finally(() => process.exit(0));
   });
 
-  while (!stopping) {
-    const result = await runWorkerCycle({
-      scanUsage: () => scanUsageTelemetryWorkerOnce(hermitHome),
-      scanLark: () => scanLarkCredentialsOnce(hermitHome),
-    });
-    if (!result.shouldContinue) {
-      requestWorkerStop();
-      break;
-    }
-    await schedulerWait.wait(scanIntervalMs());
-  }
+  // `usage start` has already run both tasks in its foreground startup pass, so
+  // it marks the daemon to wait one interval before the first tick. Direct
+  // launchd/restart boots run the first tick immediately. After that, ticks are
+  // always fixed-rate and never depend on either task's completion or Lark status.
+  const intervalMs = scanIntervalMs();
+  const initialDelayMs = process.env.HERMIT_USAGE_STARTUP_PASS_COMPLETED === '1' ? intervalMs : 0;
+
+  await runFixedRateWorkerScheduler({
+    intervalMs,
+    initialDelayMs,
+    wait: (ms) => schedulerWait.wait(ms),
+    shouldStop: () => stopping,
+    scanUsage: () => scanUsageTelemetryWorkerOnce(hermitHome, { keepWorkerRunning: true }),
+    scanLark: () => scanLarkCredentialsOnce(hermitHome),
+  });
   await safeWriteLarkCredentialsStatus(hermitHome, 'stopped');
 }
 
+/**
+ * Foreground startup pass for `agentcli usage start`: start one usage telemetry
+ * scan and one Lark credential batch report concurrently, then emit a single
+ * safe JSON object to stdout. This is a bounded one-shot pass and deliberately
+ * does NOT write or remove the daemon PID file. Each scan settles independently;
+ * a Lark problem remains visible but never prevents daemon startup.
+ */
+export interface StartupOnceResult {
+  ok: boolean;
+  usage: { status: UsageTelemetryWorkerStatus; shouldContinue: boolean };
+  lark: LarkCredentialsReportStatus;
+}
+
+export interface StartupOnceScans {
+  scanUsage: () => Promise<{ status: UsageTelemetryWorkerStatus; shouldContinue: boolean }>;
+  scanLark: () => Promise<LarkCredentialsReportStatus>;
+}
+
+export async function runStartupOnce(
+  hermitHome = resolveHermitHome(),
+  scans: StartupOnceScans = {
+    scanUsage: () => scanUsageTelemetryWorkerOnce(hermitHome),
+    scanLark: () => scanLarkCredentialsOnce(hermitHome),
+  }
+): Promise<StartupOnceResult> {
+  const [usageResult, larkResult] = await Promise.allSettled([scans.scanUsage(), scans.scanLark()]);
+  if (usageResult.status === 'rejected') throw usageResult.reason;
+  const usage = usageResult.value;
+  const lark =
+    larkResult.status === 'fulfilled'
+      ? larkResult.value
+      : {
+          ok: false,
+          enabled: true,
+          reason: 'fetch-failed' as const,
+          message: redactLarkError(
+            larkResult.reason instanceof Error
+              ? larkResult.reason.message
+              : String(larkResult.reason)
+          ),
+          lastAttemptAt: new Date().toISOString(),
+          lastErrorAt: new Date().toISOString(),
+        };
+  return {
+    ok: Boolean(usage?.status) && lark.ok,
+    usage,
+    lark,
+  };
+}
+
 async function runCli(): Promise<void> {
+  if (process.argv.includes('--startup-once')) {
+    const result = await runStartupOnce();
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+  if (process.argv.includes('--report-lark-credentials-once')) {
+    const report = await scanLarkCredentialsOnce();
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    return;
+  }
   if (process.argv.includes('--scan-once')) {
     const result = await scanUsageTelemetryWorkerOnce();
     process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);

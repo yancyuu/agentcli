@@ -512,11 +512,15 @@ function isUsageWorkerCommand(command) {
   return command.includes('src/main/telemetry/worker.ts') || command.includes('telemetry/worker.ts');
 }
 
+function isTransientUsageWorkerCommand(command) {
+  return ['--scan-once', '--startup-once', '--report-lark-credentials-once'].some((flag) => command.includes(flag));
+}
+
 function collectRunningUsageWorkerPids() {
   if (process.platform === 'win32') {
     try {
       return listProcessesWin()
-        .filter((p) => p.pid !== process.pid && isUsageWorkerCommand(p.command) && !p.command.includes('--scan-once'))
+        .filter((p) => p.pid !== process.pid && isUsageWorkerCommand(p.command) && !isTransientUsageWorkerCommand(p.command))
         .map((p) => p.pid);
     } catch { return []; }
   }
@@ -530,13 +534,17 @@ function collectRunningUsageWorkerPids() {
     if (pid === process.pid) continue;
     const command = match[2];
     if (!isUsageWorkerCommand(command)) continue;
-    if (command.includes('--scan-once')) continue;
+    if (isTransientUsageWorkerCommand(command)) continue;
     pids.push(pid);
   }
   return pids;
 }
 
-export async function startTelemetryWorker({ quiet = false, forceRestart = false } = {}) {
+export async function startTelemetryWorker({
+  quiet = false,
+  forceRestart = false,
+  startupPassCompleted = false,
+} = {}) {
   const existingPid = readPidFile(telemetryWorkerPidPath);
   for (const stray of collectRunningUsageWorkerPids()) {
     if (Number(stray) === Number(existingPid)) continue;
@@ -573,7 +581,11 @@ export async function startTelemetryWorker({ quiet = false, forceRestart = false
     cwd: repoRoot,
     detached: true,
     windowsHide: true,
-    env: { ...process.env, HERMIT_HOME: hermitHome },
+    env: {
+      ...process.env,
+      HERMIT_HOME: hermitHome,
+      ...(startupPassCompleted ? { HERMIT_USAGE_STARTUP_PASS_COMPLETED: '1' } : {}),
+    },
     stdio: ['ignore', out, err],
   });
   child.unref();
@@ -617,6 +629,44 @@ export async function stopTelemetryWorker() {
 }
 
 // --- Foreground scan --------------------------------------------------------
+
+/**
+ * Foreground startup pass for `usage start`: spawns the TSX-backed worker with
+ * `--startup-once`, which serially runs one usage telemetry scan and one Lark
+ * credential batch report, then emits a single safe JSON object. This is the
+ * synchronous, observable equivalent of one worker cycle, run before the
+ * detached daemon starts so the user gets immediate feedback instead of waiting
+ * for the first 5-minute background cycle. Lark failures surface as a sanitized
+ * degraded status and never block daemon startup; a usage/Lark child process
+ * failure (non-zero exit or invalid JSON) IS treated as a startup failure.
+ */
+async function runStartupOnceWorker() {
+  const childArgs = await telemetryWorkerChildArgs(['--startup-once']);
+  const child = spawn(process.execPath, childArgs, {
+    cwd: repoRoot,
+    env: { ...process.env, HERMIT_HOME: hermitHome },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let interrupted = false;
+  const stopChild = () => {
+    interrupted = true;
+    if (child.pid && !child.killed) child.kill('SIGTERM');
+    setTimeout(() => { if (child.pid && !child.killed) child.kill('SIGKILL'); }, 2_000).unref();
+  };
+  process.prependOnceListener('SIGINT', stopChild);
+  process.prependOnceListener('SIGTERM', stopChild);
+  child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+  const code = await new Promise((resolve) => child.on('close', resolve));
+  process.off('SIGINT', stopChild);
+  process.off('SIGTERM', stopChild);
+  if (interrupted) throw new Error('已取消本次启动上报，子进程已停止');
+  if (code !== 0) throw new Error(stderr.trim() || `telemetry worker startup exited with ${code}`);
+  const parsed = JSON.parse(stdout.trim().split('\n').pop() || '{}');
+  return parsed;
+}
 
 async function runTelemetryWorkerScanOnce({ localOnly = false, uploadDisabled = false, scanDisabled = false } = {}) {
   const childArgs = await telemetryWorkerChildArgs(['--scan-once']);
@@ -1153,7 +1203,37 @@ export async function printUsageStart({ exitOnDone = true } = {}) {
   }
   await restartTelemetryWorkerIfStale({ quiet: jsonRequested });
   const taskBus = enableLocalUsageTelemetry();
-  const worker = await startTelemetryWorker({ quiet: jsonRequested });
+
+  // Foreground startup pass: synchronously run one usage scan + one Lark batch
+  // report before daemonizing, so `usage start` immediately uploads (matching one
+  // worker cycle) instead of waiting for the first background tick. A failure to
+  // run the child is a command failure; a Lark-only failure is surfaced but does
+  // not block the daemon.
+  let startup;
+  let startupError;
+  try {
+    startup = await runStartupOnceWorker();
+  } catch (error) {
+    startupError = error instanceof Error ? error.message : String(error);
+  }
+  if (startupError) {
+    const result = {
+      ok: false,
+      command: 'usage start',
+      hermitHome,
+      error: startupError,
+      telemetry: { localScanEnabled: true, source: 'claude-jsonl' },
+    };
+    if (jsonRequested) printJson(result);
+    else console.error(`${brandLogPrefix()} 启动上报失败: ${startupError}`);
+    if (exitOnDone) process.exit(1);
+    return result;
+  }
+
+  const worker = await startTelemetryWorker({
+    quiet: jsonRequested,
+    startupPassCompleted: true,
+  });
   const autostart = autostartRequested ? await enableUsageAutostart() : await getUsageAutostartStatus();
   const result = {
     ok: true,
@@ -1164,21 +1244,28 @@ export async function printUsageStart({ exitOnDone = true } = {}) {
     autostart,
     telemetry: { localScanEnabled: true, source: 'claude-jsonl' },
     auth: { authorized: readOpenHermitAuthStatus().authorized },
+    startup,
   };
   if (jsonRequested) printJson(result);
   const auth = readOpenHermitAuthStatus();
   const conversationUploadEnabled = Boolean(taskBus.telemetry?.conversationUploadEnabled);
   const featureProviders = currentFeatureStates().uploadProviders;
   const attributionProviders = featureProviders?.length ? featureProviders : ['claudecode', 'codex'];
-  printCliRows('消息上报后台已启动', [
+  const larkStatus = startup?.lark;
+  const larkRow = larkStatus
+    ? [larkStatus.ok ? 'Lark 授权' : 'Lark 授权', larkStatus.ok ? `已批量上报 (${larkStatus.accountCount ?? 0} 个)` : `未上报: ${larkStatus.reason || ''}`, larkStatus.ok ? 'ok' : 'warn']
+    : null;
+  const rows = [
     ['消息上报', conversationUploadEnabled ? auth.authorized ? `开启（pid ${worker.pid}）` : `等待登录（pid ${worker.pid}）` : '关闭', conversationUploadEnabled ? auth.authorized ? 'ok' : 'warn' : 'off'],
     ['日志', worker.logPath, 'info'],
     ['开机自启', autostart.enabled ? '开启' : '关闭', autostart.enabled ? 'ok' : 'off'],
-    ['模式', '后台增量上报最近 7 天会话；可手动「重报最近 7 天」', 'info'],
+    ['模式', '启动即上报用量+Lark授权，之后后台增量上报', 'info'],
     ['归因', `${formatUploadProviders(attributionProviders)} + IM 会话归因`, 'info'],
-  ], conversationUploadEnabled
-    ? '消息上报会启动后台增量扫描；需要登录后用 Bearer 授权发送。'
-    : '消息上报已关闭；开启后只上报最近会话，全量历史可在「立即全量上报」手动触发。');
+  ];
+  if (larkRow) rows.splice(1, 0, larkRow);
+  printCliRows('消息上报后台已启动', rows, conversationUploadEnabled
+    ? '消息上报已执行首次同步上报；需要登录后用 Bearer 授权发送。'
+    : '消息上报已执行首次同步上报；会话内容上报当前关闭。');
   if (exitOnDone) process.exit(0);
   return result;
 }

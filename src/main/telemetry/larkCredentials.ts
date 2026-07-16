@@ -388,7 +388,10 @@ function listLarkProfiles(): LarkCliProfile[] {
     return parsed.flatMap((item) => {
       if (!item || typeof item !== 'object') return [];
       const record = item as Record<string, unknown>;
-      return typeof record.name === 'string' && record.name && typeof record.appId === 'string' && record.appId
+      return typeof record.name === 'string' &&
+        record.name &&
+        typeof record.appId === 'string' &&
+        record.appId
         ? [{ name: record.name, appId: record.appId }]
         : [];
     });
@@ -637,7 +640,11 @@ export function getLarkCredentialsFreshAll(): GetLarkCredentialsAllResult {
     }
 
     const refreshed = getLarkCredentials(profile);
-    if (!refreshed.ok || refreshed.credentials.appId !== profile.appId || refreshed.credentials.userOpenId !== profile.userOpenId) {
+    if (
+      !refreshed.ok ||
+      refreshed.credentials.appId !== profile.appId ||
+      refreshed.credentials.userOpenId !== profile.userOpenId
+    ) {
       skipped.push({
         ...profile,
         reason: 'no-credentials',
@@ -750,7 +757,15 @@ function splitBatchItems(items: LarkBatchItem[]): LarkBatchItem[][] {
   return batches;
 }
 
-export async function reportLarkCredentialsBatchOnce(
+/**
+ * Canonical all-profile Lark credential batch report. This is the ONE
+ * implementation shared by the long-lived telemetry worker and the CLI (via the
+ * TSX worker bridge in bin/lib/larkSecrets.mjs). It enumerates every personal
+ * lark-cli authorization, refreshes each, then batches the complete eligible set
+ * to the AgentBus batch endpoint. It never logs plaintext secrets and never
+ * throws to structured-return callers.
+ */
+export async function reportAllLarkCredentials(
   config: LarkBatchReportConfig
 ): Promise<LarkCredentialsReportStatus> {
   const now = new Date().toISOString();

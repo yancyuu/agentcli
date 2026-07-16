@@ -21,6 +21,50 @@ describe('auth cloud base URL resolution', () => {
     tmpHome = null;
   });
 
+  it('uses the canonical HTTPS AgentBus domain for a fresh installation', async () => {
+    tmpHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-auth-base-'));
+
+    const auth = await importAuthWithHome(tmpHome);
+
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('https://agentbus.skg.com');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('https://agentbus.skg.com');
+  });
+
+  it.each([
+    'http://47.112.24.153',
+    'http://159.75.231.98:8088',
+  ])('migrates the legacy product default %s to the new AgentBus domain', async (legacyBaseUrl) => {
+    tmpHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-auth-base-'));
+    await mkdir(path.join(tmpHome, 'auth'), { recursive: true });
+    await writeFile(
+      path.join(tmpHome, 'settings.json'),
+      JSON.stringify({ taskBus: { telemetry: { conversations: { baseUrl: legacyBaseUrl } } } })
+    );
+    await writeFile(
+      path.join(tmpHome, 'auth', 'openhermit.json'),
+      JSON.stringify({ issuer: legacyBaseUrl, baseUrl: legacyBaseUrl, token: { accessToken: 'tok' } })
+    );
+
+    const auth = await importAuthWithHome(tmpHome);
+
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('https://agentbus.skg.com');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('https://agentbus.skg.com');
+    expect(auth.resolveConversationUploadBaseUrl(legacyBaseUrl)).toBe('https://agentbus.skg.com');
+  });
+
+  it('preserves an explicitly configured custom cloud domain', async () => {
+    tmpHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-auth-base-'));
+    await mkdir(tmpHome, { recursive: true });
+    await writeFile(
+      path.join(tmpHome, 'settings.json'),
+      JSON.stringify({ cloud: { baseUrl: 'https://custom-agentbus.example.test/' } })
+    );
+
+    const auth = await importAuthWithHome(tmpHome);
+
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('https://custom-agentbus.example.test');
+  });
+
   it('prefers settings.cloud.baseUrl for auth and report base URLs', async () => {
     tmpHome = await mkdtemp(path.join(os.tmpdir(), 'hermit-auth-base-'));
     await mkdir(tmpHome, { recursive: true });
@@ -72,7 +116,8 @@ describe('auth cloud base URL resolution', () => {
 
     const auth = await importAuthWithHome(tmpHome);
 
-    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://fresh-host.example.test:8088');
-    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://fresh-host.example.test:8088');
+    // Default PORT is empty, so a bare host is not suffixed with a port.
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('https://fresh-host.example.test');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('https://fresh-host.example.test');
   });
 });
