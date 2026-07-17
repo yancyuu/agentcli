@@ -193,7 +193,7 @@ export class SkillMetadataParser {
   }
 
   private parseFrontmatter(rawContent: string): ParsedFrontmatter {
-    const content = rawContent.replace(/^﻿/, '');
+    const content = rawContent.replace(/^\uFEFF/u, '');
     if (!content.startsWith('---')) {
       return {
         rawFrontmatter: null,

@@ -6,7 +6,7 @@
  *   2. Global CLI (npm install -g): updates via npm update -g hermit
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,7 +140,10 @@ export class UpdateService {
       onProgress?.({ phase: 'installing', message: 'Installing update...' });
       onProgress?.({ phase: 'installing', message: 'Using git installation update method...' });
       execSync('git fetch --tags', { cwd: REPO_ROOT, stdio: 'pipe' });
-      execSync(`git checkout v${versionInfo.latestVersion}`, { cwd: REPO_ROOT, stdio: 'pipe' });
+      execFileSync('git', ['checkout', `v${versionInfo.latestVersion}`], {
+        cwd: REPO_ROOT,
+        stdio: 'pipe',
+      });
       execSync('npm install', { cwd: REPO_ROOT, stdio: 'pipe' });
       execSync('npm run build:web', { cwd: REPO_ROOT, stdio: 'pipe' });
 

@@ -79,7 +79,7 @@ export function SocietyNodeLabels({
   worldToScreen,
   getViewportSize,
   focusNodeIds,
-}: SocietyNodeLabelsProps): React.JSX.Element {
+}: Readonly<SocietyNodeLabelsProps>): React.JSX.Element {
   // nodeId → chip DOM，单 RAF 批量更新 transform，避免每帧 React 重渲染。
   const chipRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
   // 焦点集合随渲染更新到 ref，RAF 直接读最新值——选中切换不必重启循环。

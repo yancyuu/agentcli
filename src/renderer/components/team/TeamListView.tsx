@@ -531,8 +531,7 @@ export const TeamListView = (): React.JSX.Element => {
           leadActivityByTeam
         );
         const isRunning = status !== null;
-        if (filter.selectedStatuses.has('running') && isRunning) return true;
-        return false;
+        return filter.selectedStatuses.has('running') && isRunning;
       });
     }
 

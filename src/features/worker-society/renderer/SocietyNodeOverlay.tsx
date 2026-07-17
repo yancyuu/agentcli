@@ -46,7 +46,7 @@ export interface SocietyNodeOverlayProps {
   onSendMessage: (toWorkerId: string, text: string) => void;
 }
 
-export function SocietyNodeOverlay(props: SocietyNodeOverlayProps): React.JSX.Element {
+export function SocietyNodeOverlay(props: Readonly<SocietyNodeOverlayProps>): React.JSX.Element {
   const { node, onClose, workerById, needById, societyStats } = props;
 
   const ref = node.domainRef;
@@ -324,9 +324,9 @@ function NeedCard(props: SocietyNodeOverlayProps & { needId: string }): React.JS
 
 function LeadCard({
   societyStats,
-}: {
+}: Readonly<{
   societyStats: { workerCount: number; needCount: number };
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1 py-1">
       <p className="text-sm font-semibold">广场 · Agora</p>

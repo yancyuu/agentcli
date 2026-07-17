@@ -62,7 +62,7 @@ describe('DirectCliSessionStore', () => {
     store.set('', 'sid');
     store.set('   ', 'sid');
     store.set('team-x:lead', '   ');
-    store.set('team-x:lead', '');
+    store.set('team-y:lead', '');
     expect(store.all()).toEqual({});
   });
 

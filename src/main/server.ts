@@ -138,10 +138,23 @@ import type {
   UsageUnresolvedSummary,
   UserUsageTelemetryRow,
 } from './services/session-intelligence/usageTypes';
-import type { TeamManifest } from './services/team-management/TeamWorkspaceService';
+import type {
+  Task as TeamWorkspaceTask,
+  TeamManifest,
+} from './services/team-management/TeamWorkspaceService';
 import type { CcSession, CcSessionDetail } from '@shared/types/api';
 import type {
+  CapabilityCommandPromptRequest,
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
   CapabilityTelemetrySummary,
+  McpCustomInstallRequest,
+  McpLibraryImportRequest,
+  McpLibraryUpsertRequest,
+  PluginInstallRequest,
+  SkillDeleteRequest,
+  SkillImportRequest,
+  SkillUpsertRequest,
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
 import type {
@@ -1556,19 +1569,19 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   if (updates.management_enabled !== undefined) {
     const val = updates.management_enabled ? 'true' : 'false';
     raw = raw.replace(
-      /(\[management\][^\n]*\n(?:[^\[]*)?)(enabled\s*=\s*)(true|false)/s,
+      /(\[management\][^\n]*\n(?:[^\[]*))(enabled\s*=\s*)(true|false)/s,
       (match, prefix, key) => `${prefix}${key}${val}`
     );
   }
   if (updates.management_port !== undefined) {
     raw = raw.replace(
-      /(\[management\][^\n]*\n(?:[^\[]*)?)(port\s*=\s*)\d+/s,
+      /(\[management\][^\n]*\n(?:[^\[]*))(port\s*=\s*)\d+/s,
       `$1$2${updates.management_port}`
     );
   }
   if (updates.management_token !== undefined) {
     raw = raw.replace(
-      /(\[management\][^\n]*\n(?:[^\[]*)?)(token\s*=\s*)"[^"]*"/s,
+      /(\[management\][^\n]*\n(?:[^\[]*))(token\s*=\s*)"[^"]*"/s,
       `$1$2"${updates.management_token}"`
     );
   }
@@ -1576,17 +1589,17 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   // Update [bridge] section
   if (updates.bridge_enabled !== undefined) {
     const val = updates.bridge_enabled ? 'true' : 'false';
-    raw = raw.replace(/(\[bridge\][^\n]*\n(?:[^\[]*)?)(enabled\s*=\s*)(true|false)/s, `$1$2${val}`);
+    raw = raw.replace(/(\[bridge\][^\n]*\n(?:[^\[]*))(enabled\s*=\s*)(true|false)/s, `$1$2${val}`);
   }
   if (updates.bridge_port !== undefined) {
     raw = raw.replace(
-      /(\[bridge\][^\n]*\n(?:[^\[]*)?)(port\s*=\s*)\d+/s,
+      /(\[bridge\][^\n]*\n(?:[^\[]*))(port\s*=\s*)\d+/s,
       `$1$2${updates.bridge_port}`
     );
   }
   if (updates.bridge_token !== undefined) {
     raw = raw.replace(
-      /(\[bridge\][^\n]*\n(?:[^\[]*)?)(token\s*=\s*)"[^"]*"/s,
+      /(\[bridge\][^\n]*\n(?:[^\[]*))(token\s*=\s*)"[^"]*"/s,
       `$1$2"${updates.bridge_token}"`
     );
   }
@@ -1594,7 +1607,7 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   // Update [log] section
   if (updates.log_level !== undefined) {
     raw = raw.replace(
-      /(\[log\][^\n]*\n(?:[^\[]*)?)(level\s*=\s*)"[^"]*"/s,
+      /(\[log\][^\n]*\n(?:[^\[]*))(level\s*=\s*)"[^"]*"/s,
       `$1$2"${updates.log_level}"`
     );
   }
@@ -1603,14 +1616,14 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
   if (updates.display_thinking !== undefined) {
     const val = updates.display_thinking ? 'true' : 'false';
     raw = raw.replace(
-      /(\[display\][^\n]*\n(?:[^\[]*)?)(thinking_messages\s*=\s*)(true|false)/s,
+      /(\[display\][^\n]*\n(?:[^\[]*))(thinking_messages\s*=\s*)(true|false)/s,
       `$1$2${val}`
     );
   }
   if (updates.display_tool !== undefined) {
     const val = updates.display_tool ? 'true' : 'false';
     raw = raw.replace(
-      /(\[display\][^\n]*\n(?:[^\[]*)?)(tool_messages\s*=\s*)(true|false)/s,
+      /(\[display\][^\n]*\n(?:[^\[]*))(tool_messages\s*=\s*)(true|false)/s,
       `$1$2${val}`
     );
   }
@@ -5486,7 +5499,7 @@ async function applyTeamConfigUpdate(
         `(\\[\\[projects\\]\\]\\s*\\n(?:[^\\[]*?)?name\\s*=\\s*"${bindProject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^\\[]*?)(?=\\[\\[|$)`,
         's'
       );
-      const projectMatch = tomlRaw.match(projectPattern);
+      const projectMatch = projectPattern.exec(tomlRaw);
       if (projectMatch) {
         let section = projectMatch[1];
         if (/^reset_on_idle_mins\s*=/m.exec(section)) {
@@ -5670,7 +5683,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
         `\\[\\[projects\\]\\]\\s*\\n(?:[^\\[]*?)?name\\s*=\\s*"${bindProject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^\\[]*?(?=\\[\\[projects\\]\\]|$)`,
         's'
       );
-      const projectSection = tomlRaw.match(projectPattern);
+      const projectSection = projectPattern.exec(tomlRaw);
       if (projectSection) {
         const section = projectSection[0];
         const idleMatch = /^reset_on_idle_mins\s*=\s*(\d+)/m.exec(section);
@@ -6334,7 +6347,8 @@ app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (req
   const teamSlug = request.params.name;
   const tasks = await svc.readTasks(teamSlug);
   const pending = tasks.filter(
-    (t: any) => t.dispatchMeta?.status === 'dispatched' && t.dispatchMeta?.originTeam === teamSlug
+    (t: TeamWorkspaceTask) =>
+      t.dispatchMeta?.status === 'dispatched' && t.dispatchMeta?.originTeam === teamSlug
   );
   return { pending };
 });
@@ -7359,7 +7373,7 @@ app.get('/api/extensions/plugins/readme/:pluginId', async (request) => {
 
 app.post('/api/extensions/plugins/install', async (request) => {
   const body = request.body as Record<string, unknown>;
-  const result = await ext.pluginInstall(body as any);
+  const result = await ext.pluginInstall(body as unknown as PluginInstallRequest);
   return result;
 });
 
@@ -7382,7 +7396,7 @@ app.get('/api/extensions/mcp/installed', async (request) => {
 
 app.post('/api/extensions/mcp/install-custom', async (request) => {
   const body = request.body as Record<string, unknown>;
-  const result = await ext.mcpInstallCustom(body as any);
+  const result = await ext.mcpInstallCustom(body as unknown as McpCustomInstallRequest);
   return result;
 });
 
@@ -7402,7 +7416,7 @@ app.get('/api/extensions/mcp/library', async () => {
 });
 
 app.post('/api/extensions/mcp/library', async (request) => {
-  return ext.mcpLibraryUpsert(request.body as any);
+  return ext.mcpLibraryUpsert(request.body as McpLibraryUpsertRequest);
 });
 
 app.delete('/api/extensions/mcp/library/:id', async (request) => {
@@ -7411,7 +7425,7 @@ app.delete('/api/extensions/mcp/library/:id', async (request) => {
 });
 
 app.post('/api/extensions/mcp/library/import', async (request) => {
-  return ext.mcpLibraryImport((request.body ?? {}) as any);
+  return ext.mcpLibraryImport((request.body ?? {}) as McpLibraryImportRequest);
 });
 
 app.get('/api/extensions/capability-packs', async () => {
@@ -7419,15 +7433,17 @@ app.get('/api/extensions/capability-packs', async () => {
 });
 
 app.post('/api/extensions/capability-packs/import', async (request) => {
-  return ext.capabilityPacksImport((request.body ?? {}) as any);
+  return ext.capabilityPacksImport((request.body ?? {}) as CapabilityPackImportRequest);
 });
 
 app.post('/api/extensions/capability-packs/export', async (request) => {
-  return ext.capabilityPacksExport((request.body ?? {}) as any);
+  return ext.capabilityPacksExport((request.body ?? {}) as CapabilityPackExportRequest);
 });
 
 app.post('/api/extensions/capability-packs/export/download', async (request, reply) => {
-  const result = (await ext.capabilityPacksExport((request.body ?? {}) as any)) as {
+  const result = (await ext.capabilityPacksExport(
+    (request.body ?? {}) as CapabilityPackExportRequest
+  )) as {
     success: boolean;
     data?: { pack?: { packDir?: string; manifest?: { id?: string } }; warnings?: string[] };
     error?: string;
@@ -7457,7 +7473,7 @@ app.post('/api/extensions/capability-packs/export/download', async (request, rep
 });
 
 app.post('/api/extensions/capability-packs/command-prompt', async (request) => {
-  return ext.capabilityPacksCommandPrompt((request.body ?? {}) as any);
+  return ext.capabilityPacksCommandPrompt((request.body ?? {}) as CapabilityCommandPromptRequest);
 });
 
 app.get('/api/extensions/skills', async (request) => {
@@ -7474,29 +7490,29 @@ app.get('/api/extensions/skills/:skillId', async (request) => {
 });
 
 app.post('/api/extensions/skills/upsert', async (request) => {
-  const result = await ext.skillsUpsert(request.body as any);
+  const result = await ext.skillsUpsert(request.body as SkillUpsertRequest);
   return result;
 });
 
 app.post('/api/extensions/skills/delete', async (request) => {
-  const result = await ext.skillsDelete(request.body as any);
+  const result = await ext.skillsDelete(request.body as SkillDeleteRequest);
   return result;
 });
 
 app.post('/api/extensions/skills/preview-upsert', async (request) => {
-  return ext.skillsPreviewUpsert(request.body as any);
+  return ext.skillsPreviewUpsert(request.body as SkillUpsertRequest);
 });
 
 app.post('/api/extensions/skills/apply-upsert', async (request) => {
-  return ext.skillsApplyUpsert(request.body as any);
+  return ext.skillsApplyUpsert(request.body as SkillUpsertRequest);
 });
 
 app.post('/api/extensions/skills/preview-import', async (request) => {
-  return ext.skillsPreviewImport(request.body as any);
+  return ext.skillsPreviewImport(request.body as SkillImportRequest);
 });
 
 app.post('/api/extensions/skills/apply-import', async (request) => {
-  return ext.skillsApplyImport(request.body as any);
+  return ext.skillsApplyImport(request.body as SkillImportRequest);
 });
 
 app.post('/api/extensions/skills/watching/start', async (request) => {
@@ -7549,8 +7565,14 @@ app.post('/api/extensions/credentials/scan-required', async (request) => {
   const body = request.body as Record<string, unknown>;
   const result = await ext.credentialsScanRequired(
     body.projectPath as string,
-    body.mcpServers as any,
-    body.skillReqs as any
+    body.mcpServers as {
+      name: string;
+      envVars?: { name: string; isRequired: boolean; description?: string }[];
+    }[],
+    body.skillReqs as {
+      name: string;
+      envVars: { name: string; isRequired?: boolean; description?: string }[];
+    }[]
   );
   return result;
 });

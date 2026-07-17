@@ -17,7 +17,7 @@ interface EditTeamDialogProps {
   open: boolean;
   teamName: string;
   onClose: () => void;
-  onDeleteTeam?: (() => void) | undefined;
+  onDeleteTeam?: () => void;
 }
 
 // ── Shared input class ───────────────────────────────────────

@@ -56,7 +56,7 @@ export function SocietyGraph({
   relationships,
   onAddFirstWorker,
   renderOverlay,
-}: SocietyGraphProps): React.JSX.Element {
+}: Readonly<SocietyGraphProps>): React.JSX.Element {
   const [fullscreen, setFullscreen] = useState(false);
 
   const graphData = useMemo(

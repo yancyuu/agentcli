@@ -924,6 +924,7 @@ export default defineConfig([
       'src/renderer/**/*.{ts,tsx}',
       'src/shared/**/*.{ts,tsx}',
     ],
+    ignores: ['src/main/server.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

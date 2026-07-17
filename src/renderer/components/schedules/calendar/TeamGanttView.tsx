@@ -73,7 +73,7 @@ export const TeamGanttView = React.memo(function TeamGanttView({
   const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
 
-  const now = Date.now();
+  const [now] = useState(() => Date.now());
   const rangeMs = RANGE_MS[timeRange];
   const rangeEnd = now + rangeMs;
 

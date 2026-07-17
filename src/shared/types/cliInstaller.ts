@@ -5,10 +5,6 @@
  */
 
 // Stub types for removed codex-account feature
-type CodexAccountAppServerState = string;
-type CodexAccountAuthMode = string;
-type CodexAccountEffectiveAuthMode = string;
-type CodexLaunchReadinessState = string;
 interface CodexLoginStateDto {
   status: string;
   error?: string | null;
@@ -63,9 +59,9 @@ export interface CliProviderConnectionInfo {
   apiKeySource: 'stored' | 'environment' | null;
   apiKeySourceLabel?: string | null;
   codex?: {
-    preferredAuthMode: CodexAccountAuthMode;
-    effectiveAuthMode: CodexAccountEffectiveAuthMode;
-    appServerState: CodexAccountAppServerState;
+    preferredAuthMode: string;
+    effectiveAuthMode: string;
+    appServerState: string;
     appServerStatusMessage: string | null;
     managedAccount: CodexManagedAccountDto | null;
     requiresOpenaiAuth: boolean | null;
@@ -75,7 +71,7 @@ export interface CliProviderConnectionInfo {
     rateLimits: CodexRateLimitSnapshotDto | null;
     launchAllowed: boolean;
     launchIssueMessage: string | null;
-    launchReadinessState: CodexLaunchReadinessState;
+    launchReadinessState: string;
   } | null;
 }
 

@@ -57,6 +57,7 @@ export function shouldKeepIdleMessageInActivityWhenNoiseHidden(
   return classified?.liveDelivery === 'passive_activity';
 }
 
+// eslint-disable-next-line sonarjs/no-invariant-returns -- semantic stub: intentionally returns null for all noise labels
 export function getIdleNoiseLabel(
   value: string | Pick<InboxMessage, 'text'> | Record<string, unknown> | IdleNotificationPayload
 ): string | null {

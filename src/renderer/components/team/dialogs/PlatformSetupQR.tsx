@@ -27,14 +27,14 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function PlatformSetupQR({
+const PlatformSetupQR = ({
   platformType,
   projectName,
   workDir,
   agentType,
   onComplete,
   onCancel,
-}: Props) {
+}: Readonly<Props>): React.JSX.Element => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [qrUrl, setQrUrl] = useState('');
   const [error, setError] = useState('');
@@ -93,7 +93,7 @@ export default function PlatformSetupQR({
           if (res.slow_down) feishuRef.current.interval += 5;
 
           switch (res.status) {
-            case 'completed':
+            case 'completed': {
               setPhase('saving');
               const saved = await api.ccSetup.feishuSave({
                 project: projectName,
@@ -108,19 +108,23 @@ export default function PlatformSetupQR({
               setPhase('completed');
               pollingRef.current = false;
               return;
-            case 'denied':
+            }
+            case 'denied': {
               setPhase('denied');
               pollingRef.current = false;
               return;
-            case 'expired':
+            }
+            case 'expired': {
               setPhase('expired');
               pollingRef.current = false;
               return;
-            case 'error':
+            }
+            case 'error': {
               setError(res.error || 'Unknown error');
               setPhase('error');
               pollingRef.current = false;
               return;
+            }
           }
         } catch (e: unknown) {
           if (cancelledRef.current) break;
@@ -168,10 +172,11 @@ export default function PlatformSetupQR({
           if (cancelledRef.current) break;
 
           switch (pollRes.status) {
-            case 'scaned':
+            case 'scaned': {
               setPhase('scanned');
               break;
-            case 'confirmed':
+            }
+            case 'confirmed': {
               setPhase('saving');
               const saved = await api.ccSetup.weixinSave({
                 project: projectName,
@@ -185,9 +190,11 @@ export default function PlatformSetupQR({
               setRestartHandled(saved.restart_handled === true);
               setPhase('completed');
               return;
-            case 'expired':
+            }
+            case 'expired': {
               setPhase('expired');
               return;
+            }
           }
         } catch (e: unknown) {
           if (cancelledRef.current) break;
@@ -338,8 +345,10 @@ export default function PlatformSetupQR({
       )}
     </div>
   );
-}
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export default PlatformSetupQR;

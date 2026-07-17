@@ -606,20 +606,24 @@ interface ScheduledTaskSlot {
   inFlight: Promise<void> | null;
 }
 
+function safeInvokePromise<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    try {
+      resolve(fn());
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+}
+
 function launchScheduledTask(slot: ScheduledTaskSlot, task: () => Promise<unknown>): boolean {
   if (slot.inFlight) return false;
-  try {
-    slot.inFlight = Promise.resolve(task())
-      .then(() => undefined)
-      .catch(() => undefined)
-      .finally(() => {
-        slot.inFlight = null;
-      });
-  } catch {
-    slot.inFlight = Promise.resolve().then(() => {
+  slot.inFlight = safeInvokePromise(task)
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
       slot.inFlight = null;
     });
-  }
   return true;
 }
 

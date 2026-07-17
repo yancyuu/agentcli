@@ -179,7 +179,7 @@ export function hasDataRows(csv: string): boolean {
 }
 
 export function downloadTextFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([`﻿${content}`], { type: mimeType });
+  const blob = new Blob(['\ufeff' + content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

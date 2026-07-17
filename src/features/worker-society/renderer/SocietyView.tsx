@@ -224,21 +224,23 @@ export function SocietyView() {
  * pointer-events-auto 可点、半透明 rgba(5,5,16,.72)+backdrop-blur 保证浮于亮节点之上可读。
  * 看板已删除——这里只有创建/全局动作，单个节点动作在图谱弹卡里。
  */
-function SocietyToolbar(props: {
-  workerCount: number;
-  needCount: number;
-  relCount: number;
-  error: string | null;
-  loading: boolean;
-  tickBusy: boolean;
-  notice?: string | null;
-  showPublish: boolean;
-  showRegister: boolean;
-  onTogglePublish: () => void;
-  onToggleRegister: () => void;
-  onTriggerAutonomy: () => void;
-  onRefresh: () => void;
-}) {
+function SocietyToolbar(
+  props: Readonly<{
+    workerCount: number;
+    needCount: number;
+    relCount: number;
+    error: string | null;
+    loading: boolean;
+    tickBusy: boolean;
+    notice?: string | null;
+    showPublish: boolean;
+    showRegister: boolean;
+    onTogglePublish: () => void;
+    onToggleRegister: () => void;
+    onTriggerAutonomy: () => void;
+    onRefresh: () => void;
+  }>
+) {
   const {
     workerCount,
     needCount,
@@ -301,12 +303,14 @@ function SocietyToolbar(props: {
 }
 
 /** 工具条次级按钮（描边）；active 时高亮表示弹层已展开。 */
-function ToolbarButton(props: {
-  children: React.ReactNode;
-  onClick: () => void;
-  active?: boolean;
-  title?: string;
-}) {
+function ToolbarButton(
+  props: Readonly<{
+    children: React.ReactNode;
+    onClick: () => void;
+    active?: boolean;
+    title?: string;
+  }>
+) {
   const { children, onClick, active, title } = props;
   return (
     <button
@@ -324,7 +328,9 @@ function ToolbarButton(props: {
 }
 
 /** 浮层公共容器：锚在右上工具条下方。 */
-function PopoverShell(props: { title: string; onClose: () => void; children: React.ReactNode }) {
+function PopoverShell(
+  props: Readonly<{ title: string; onClose: () => void; children: React.ReactNode }>
+) {
   const { title, onClose, children } = props;
   return (
     <div
@@ -343,14 +349,16 @@ function PopoverShell(props: { title: string; onClose: () => void; children: Rea
 }
 
 /** 发布需求小弹层（postedBy 固定 'user'）。 */
-function PublishPopover(props: {
-  subject: string;
-  caps: string;
-  onSubject: (v: string) => void;
-  onCaps: (v: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
+function PublishPopover(
+  props: Readonly<{
+    subject: string;
+    caps: string;
+    onSubject: (v: string) => void;
+    onCaps: (v: string) => void;
+    onClose: () => void;
+    onSubmit: () => void;
+  }>
+) {
   const { subject, caps, onSubject, onCaps, onClose, onSubmit } = props;
   return (
     <PopoverShell title="发布需求" onClose={onClose}>
@@ -387,16 +395,18 @@ function PublishPopover(props: {
 }
 
 /** 注册成员小弹层。 */
-function RegisterPopover(props: {
-  name: string;
-  id: string;
-  caps: string;
-  onName: (v: string) => void;
-  onId: (v: string) => void;
-  onCaps: (v: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
+function RegisterPopover(
+  props: Readonly<{
+    name: string;
+    id: string;
+    caps: string;
+    onName: (v: string) => void;
+    onId: (v: string) => void;
+    onCaps: (v: string) => void;
+    onClose: () => void;
+    onSubmit: () => void;
+  }>
+) {
   const { name, id, caps, onName, onId, onCaps, onClose, onSubmit } = props;
   return (
     <PopoverShell title="注册成员" onClose={onClose}>

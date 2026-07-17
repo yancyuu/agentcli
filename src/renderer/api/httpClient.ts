@@ -261,12 +261,19 @@ export class HttpAPIClient implements ElectronAPI {
     }
   }
 
-  private async post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+  private async requestJsonWithBody<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    timeoutMs = 10_000
+  ): Promise<T> {
     const { controller, timeout } = this.createTimeoutController(timeoutMs);
     try {
+      const headers: Record<string, string> | undefined =
+        body !== undefined ? { 'Content-Type': 'application/json' } : undefined;
       const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+        method,
+        headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
@@ -274,80 +281,30 @@ export class HttpAPIClient implements ElectronAPI {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async post<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    return this.requestJsonWithBody<T>('POST', path, body, timeoutMs);
   }
 
   private async postLong<T>(path: string, body?: unknown, timeoutMs = 60_000): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(timeoutMs);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      return this.parseJson<T>(res);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private async del<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(timeoutMs);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'DELETE',
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      return this.parseJson<T>(res);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private async put<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(timeoutMs);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      return this.parseJson<T>(res);
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.post<T>(path, body, timeoutMs);
   }
 
   private async patch<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(timeoutMs);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      return this.parseJson<T>(res);
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.requestJsonWithBody<T>('PATCH', path, body, timeoutMs);
+  }
+
+  private async del<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    return this.requestJsonWithBody<T>('DELETE', path, body, timeoutMs);
+  }
+
+  private async put<T>(path: string, body?: unknown, timeoutMs = 10_000): Promise<T> {
+    return this.requestJsonWithBody<T>('PUT', path, body, timeoutMs);
   }
 
   private async delete<T>(path: string, timeoutMs = 10_000): Promise<T> {
-    const { controller, timeout } = this.createTimeoutController(timeoutMs);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
-      return this.parseJson<T>(res);
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.requestJsonWithBody<T>('DELETE', path, undefined, timeoutMs);
   }
 
   // ---------------------------------------------------------------------------

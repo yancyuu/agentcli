@@ -68,7 +68,7 @@ function decrypt(ciphertext: string): string {
   const encrypted = buf.subarray(IV_LENGTH + TAG_LENGTH);
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
-  return decipher.update(encrypted) + decipher.final('utf8');
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
 }
 
 function maskValue(value: string): string {
@@ -130,7 +130,7 @@ export class CredentialService {
   }
 
   async getProjectEnv(projectPath: string): Promise<Record<string, string>> {
-    return this.loadJson(getProjectEnvPath(projectPath));
+    return this.loadJson<Record<string, string>>(getProjectEnvPath(projectPath));
   }
 
   async deleteProjectEnv(projectPath: string): Promise<void> {
@@ -144,20 +144,20 @@ export class CredentialService {
   // ── Skill Global Environment Variables ──
 
   async saveSkillGlobalEnv(skillFolderName: string, vars: Record<string, string>): Promise<void> {
-    const all = await this.loadJson(getSkillGlobalEnvPath());
+    const all =
+      await this.loadJson<Record<string, Record<string, string>>>(getSkillGlobalEnvPath());
     all[skillFolderName] = vars;
     await this.writeJson(getSkillGlobalEnvPath(), all);
   }
 
   async getSkillGlobalEnv(skillFolderName: string): Promise<Record<string, string>> {
-    const all = await this.loadJson(getSkillGlobalEnvPath());
-    return (all[skillFolderName] as Record<string, string>) ?? {};
+    const all =
+      await this.loadJson<Record<string, Record<string, string>>>(getSkillGlobalEnvPath());
+    return all[skillFolderName] ?? {};
   }
 
   async getAllSkillGlobalEnv(): Promise<Record<string, Record<string, string>>> {
-    return this.loadJson(getSkillGlobalEnvPath()) as Promise<
-      Record<string, Record<string, string>>
-    >;
+    return this.loadJson<Record<string, Record<string, string>>>(getSkillGlobalEnvPath());
   }
 
   // ── Scan Required Env ──
@@ -306,15 +306,15 @@ export class CredentialService {
   // ── Private helpers ──
 
   private async loadMcpCredentials(): Promise<Record<string, Record<string, string>>> {
-    return this.loadJson(getMcpCredentialsPath());
+    return this.loadJson<Record<string, Record<string, string>>>(getMcpCredentialsPath());
   }
 
-  private async loadJson(filePath: string): Promise<Record<string, any>> {
+  private async loadJson<T = Record<string, unknown>>(filePath: string): Promise<T> {
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const encrypted = JSON.parse(raw) as Record<string, string>;
       // Decrypt values
-      const result: Record<string, any> = {};
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(encrypted)) {
         if (typeof value === 'string' && value.length > 0) {
           try {
@@ -324,13 +324,16 @@ export class CredentialService {
           }
         }
       }
-      return result;
+      return result as T;
     } catch {
-      return {};
+      return {} as T;
     }
   }
 
-  private async writeJson(filePath: string, data: Record<string, any>): Promise<void> {
+  private async writeJson<T extends Record<string, unknown>>(
+    filePath: string,
+    data: T
+  ): Promise<void> {
     // Encrypt values
     const encrypted: Record<string, string> = {};
     for (const [key, value] of Object.entries(data)) {

@@ -20,7 +20,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function PlatformManualForm({
+const PlatformManualForm = ({
   platformType,
   platformMeta: meta,
   projectName,
@@ -29,7 +29,7 @@ export default function PlatformManualForm({
   initialValues = {},
   onComplete,
   onCancel,
-}: Props) {
+}: Readonly<Props>): React.JSX.Element => {
   const [values, setValues] = useState<Record<string, unknown>>(initialValues);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -73,7 +73,7 @@ export default function PlatformManualForm({
     }
   };
 
-  const set = (key: string, val: unknown) => setValues((prev) => ({ ...prev, [key]: val }));
+  const setValue = (key: string, val: unknown) => setValues((prev) => ({ ...prev, [key]: val }));
 
   return (
     <div className="space-y-4 py-2">
@@ -84,7 +84,7 @@ export default function PlatformManualForm({
           key={f.key}
           field={f}
           value={values[f.key] as string | boolean | undefined}
-          onChange={(v) => set(f.key, v)}
+          onChange={(v) => setValue(f.key, v)}
         />
       ))}
 
@@ -107,7 +107,7 @@ export default function PlatformManualForm({
                 key={f.key}
                 field={f}
                 value={values[f.key] as string | boolean | undefined}
-                onChange={(v) => set(f.key, v)}
+                onChange={(v) => setValue(f.key, v)}
               />
             ))}
         </>
@@ -129,17 +129,17 @@ export default function PlatformManualForm({
       </div>
     </div>
   );
-}
+};
 
 const FieldInput = ({
   field,
   value,
   onChange,
-}: {
+}: Readonly<{
   field: FieldDef;
   value: string | boolean | undefined;
   onChange: (v: unknown) => void;
-}) => {
+}>): React.JSX.Element => {
   const [showPwd, setShowPwd] = useState(false);
 
   if (field.type === 'boolean') {
@@ -194,3 +194,5 @@ const FieldInput = ({
     </div>
   );
 };
+
+export default PlatformManualForm;

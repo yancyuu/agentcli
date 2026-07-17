@@ -133,7 +133,7 @@ interface AdvancedSectionProps {
   readonly onOpenInEditor: () => void;
 }
 
-export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => {
+export const AdvancedSection = (_props: AdvancedSectionProps): React.JSX.Element => {
   const [version, setVersion] = useState<string>(__APP_VERSION__);
   const [ccConfigOpen, setCcConfigOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);

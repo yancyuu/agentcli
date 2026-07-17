@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { normalizeRedisHost } from '@main/utils/redisConfig';
 
 import type { CollaborationBoardService } from './CollaborationBoardService';
@@ -373,7 +375,7 @@ export class TaskDispatchService {
     await this.workspace.patchTask(teamSlug, taskId, {
       status: 'doing',
       dispatchMeta: meta,
-    } as any);
+    });
 
     const description = task.description?.trim();
     const runtimeText = `[跨团队任务启动] 来自 ${meta.originTeam} 的任务已由用户点击启动，请开始执行。\n\n任务：${task.title}${description ? `\n\n描述：${description}` : ''}\n\n完成后请调用 complete_task 标记完成。`;
@@ -384,7 +386,7 @@ export class TaskDispatchService {
         .patchTask(teamSlug, taskId, {
           status: 'todo',
           dispatchMeta: task.dispatchMeta,
-        } as any)
+        })
         .catch(() => {});
       throw err;
     }
@@ -468,7 +470,7 @@ export class TaskDispatchService {
             status: 'received',
             remoteTaskId: localTask.id,
           },
-        } as any)
+        })
         .catch(() => {});
     }
     this.emitCollabChange(payload.dispatchId, 'received', payload.originTeam, payload.targetTeam);
@@ -544,7 +546,9 @@ export class TaskDispatchService {
           rejectReason: reason,
         },
       });
-    } catch {}
+    } catch {
+      // best-effort notification; ignore failures
+    }
 
     // Feishu notification
     this.sendFeishuNotification(
@@ -626,7 +630,9 @@ export class TaskDispatchService {
           result,
         },
       });
-    } catch {}
+    } catch {
+      // best-effort notification; ignore failures
+    }
 
     this.sendFeishuNotification(
       `跨团队任务待审核：${collabTask.fromTeam} ← ${teamSlug}\n${collabTask.subject}\n状态：待审核`
@@ -688,7 +694,9 @@ export class TaskDispatchService {
           targetTeam: collabTask.toTeam,
         },
       });
-    } catch {}
+    } catch {
+      // best-effort notification; ignore failures
+    }
 
     // Notify target agent: approved
     try {
@@ -703,7 +711,9 @@ export class TaskDispatchService {
           originTeam: teamSlug,
         },
       });
-    } catch {}
+    } catch {
+      // best-effort notification; ignore failures
+    }
 
     this.sendFeishuNotification(
       `跨团队任务完成：${collabTask.fromTeam} ← ${collabTask.toTeam}\n${collabTask.subject}\n状态：已完成`
@@ -808,7 +818,7 @@ export class TaskDispatchService {
 
     await this.workspace.patchTask(teamSlug, taskId, {
       dispatchMeta: { ...meta, status: 'completed', completedAt: update.timestamp },
-    } as any);
+    });
 
     const collabTask = this.collabBoard.getTask(meta.dispatchId);
     if (collabTask) {
@@ -886,9 +896,18 @@ export class TaskDispatchService {
   private sendFeishuNotification(text: string): void {
     setTimeout(() => {
       try {
-        const { execSync } = require('node:child_process');
-        execSync(
-          `feishu-cli msg send --receive-id-type chat_id --receive-id oc_e7d4204895f8f9d763d9f0e42ead1e5e --text ${JSON.stringify(text)}`,
+        execFileSync(
+          'feishu-cli',
+          [
+            'msg',
+            'send',
+            '--receive-id-type',
+            'chat_id',
+            '--receive-id',
+            'oc_e7d4204895f8f9d763d9f0e42ead1e5e',
+            '--text',
+            text,
+          ],
           { timeout: 5000, stdio: 'pipe' }
         );
       } catch {
@@ -1020,7 +1039,7 @@ export class TaskDispatchService {
                 status: 'failed',
                 rejectionReason: 'handshake timeout',
               },
-            } as any);
+            });
           }
         }
       } catch {
@@ -1050,7 +1069,7 @@ export class TaskDispatchService {
       const poll = async () => {
         if (this.disposed || !this.redisSub) return;
         try {
-          const raw: unknown = await (this.redisSub as any).xreadgroup(
+          const raw: unknown = await this.redisSub.xreadgroup(
             'GROUP',
             groupName,
             consumerId,
@@ -1082,12 +1101,7 @@ export class TaskDispatchService {
       this.consumerTimers.push(timer);
     };
 
-    const syncConsumers = () =>
-      void this.workspace.listTeams().then((teams) => {
-        for (const team of teams) {
-          void startForTeam(team.slug);
-        }
-      });
+    const syncConsumers = this.buildTeamSync(startForTeam);
     syncConsumers();
     this.consumerTimers.push(setInterval(syncConsumers, 10_000));
   }
@@ -1168,6 +1182,16 @@ export class TaskDispatchService {
     }
   }
 
+  private buildTeamSync(startForTeam: (teamSlug: string) => Promise<unknown>): () => void {
+    return () => {
+      void this.workspace.listTeams().then((teams) => {
+        for (const team of teams) {
+          void startForTeam(team.slug);
+        }
+      });
+    };
+  }
+
   private stopConsumers(): void {
     for (const t of this.consumerTimers) clearInterval(t);
     this.consumerTimers = [];
@@ -1195,7 +1219,7 @@ export class TaskDispatchService {
       const poll = async () => {
         if (this.disposed || !this.redisSub) return;
         try {
-          const raw: unknown = await (this.redisSub as any).xreadgroup(
+          const raw: unknown = await this.redisSub.xreadgroup(
             'GROUP',
             groupName,
             consumerId,
@@ -1227,12 +1251,7 @@ export class TaskDispatchService {
       this.responseConsumerTimers.push(timer);
     };
 
-    const syncConsumers = () =>
-      void this.workspace.listTeams().then((teams) => {
-        for (const team of teams) {
-          void startForTeam(team.slug);
-        }
-      });
+    const syncConsumers = this.buildTeamSync(startForTeam);
     syncConsumers();
     this.responseConsumerTimers.push(setInterval(syncConsumers, 10_000));
   }
@@ -1282,7 +1301,7 @@ export class TaskDispatchService {
       meta.completedAt = response.deliveredAt;
       await this.workspace.patchTask(originTeam, shadowTask.id, {
         dispatchMeta: meta,
-      } as any);
+      });
 
       // Auto-approve if no human review needed
       const collabTask = this.collabBoard.getTask(response.dispatchId);
@@ -1310,7 +1329,7 @@ export class TaskDispatchService {
 
     await this.workspace.patchTask(originTeam, shadowTask.id, {
       dispatchMeta: meta,
-    } as any);
+    });
   }
 
   private stopResponseConsumers(): void {
@@ -1360,7 +1379,7 @@ export class TaskDispatchService {
           update.status === 'completed' ? update.timestamp : shadowTask.dispatchMeta!.completedAt,
         remoteTaskId: update.remoteTaskId ?? shadowTask.dispatchMeta!.remoteTaskId,
       },
-    } as any);
+    });
   }
 
   // ── Capability inference ──────────────────────────────────────
