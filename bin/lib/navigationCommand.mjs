@@ -76,6 +76,8 @@ import {
   maskKey,
   applyClaimedSecret,
   validateClaimedSecret,
+  applyToEnvironment,
+  systemEnvVarsForClaim,
 } from './aikey.mjs';
 import {
   snapshotOriginals,
@@ -484,7 +486,7 @@ async function pickModel(modelIds) {
  * `envFilePath` / `backupRootPath` / `maskedKey` are pre-resolved strings so
  * this function touches no fs/env; the caller resolves them.
  */
-export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, backupRootPath, backupCreated, maskedKey }) {
+export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, backupRootPath, backupCreated, maskedKey, envApply }) {
   const runtimeLabel = runtimes
     .map((r) => (r === 'claude' ? 'Claude Code' : 'Codex'))
     .join(' + ');
@@ -526,10 +528,21 @@ export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, ba
     ],
     ['key', `${maskedKey}  (即焚，已写入配置，不会再显示)`, 'warn'],
   );
+  // System env surfaces (shell rc / launchctl / Windows user env) — shown per
+  // surface so a silent env-write failure is visible. Skipped surfaces (e.g. a
+  // secondary rc that doesn't exist) stay quiet; failures warn, never fail.
+  for (const surface of envApply?.results || []) {
+    if (surface.skipped) continue;
+    rows.push(
+      surface.ok
+        ? ['环境变量', `${surface.surface}（已写入）`, 'ok']
+        : ['环境变量', `${surface.surface} 写入失败：${surface.message || '未知错误'}`, 'warn'],
+    );
+  }
   return rows;
 }
 
-function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
+function renderClaimResult({ apply, secret, choices, runtimes, snapshot, envApply }) {
   const rows = buildClaimResultRows({
     apply,
     choices,
@@ -538,6 +551,7 @@ function renderClaimResult({ apply, secret, choices, runtimes, snapshot }) {
     backupRootPath: originalEnvBackupRoot(),
     backupCreated: Boolean(snapshot?.created),
     maskedKey: maskKey(secret.key),
+    envApply,
   });
   printCliRows('认领 token 完成', rows, [
     '已按所选运行时直接写入 Claude/Codex 配置文件，新开终端即可生效。',
@@ -711,7 +725,16 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  renderClaimResult({ apply, secret, choices, runtimes, snapshot });
+  // 8b. Also export the key into REAL environment variables (shell rc block +
+  //     launchctl on macOS, HKCU user env on Windows) so plain terminals and
+  //     scripts see it — user request, one-shot per claim. Best-effort: a
+  //     failing surface warns in the result panel but never fails the claim
+  //     (the config files above already landed and suffice for the runtimes).
+  const envApply = applyToEnvironment({
+    vars: systemEnvVarsForClaim({ secret, endpoints: apply.endpoints, runtimes }),
+  });
+
+  renderClaimResult({ apply, secret, choices, runtimes, snapshot, envApply });
 }
 
 // pickRuntimes — real multi-select (Space toggles, Enter confirms). Default is

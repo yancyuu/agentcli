@@ -7,7 +7,7 @@
  */
 
 import { createCipheriv, randomBytes } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -16,11 +16,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __internals,
   buildLarkBatchPayload,
-  isLarkRefreshSucceeded,
+  getLarkCredentialsFreshAll,
   meetsBatchFieldConstraints,
   reportAllLarkCredentials,
+  resolveBrandForProfile,
   shouldRefreshLarkCredentials,
   parseLarkCliPersonalAuthorizations,
+  refreshLarkCredentialsDirect,
   type GetLarkCredentialsAllResult,
   type LarkCredentials,
 } from './larkCredentials';
@@ -53,6 +55,23 @@ function makeFetchMock(
 }
 
 describe('lark-cli profile authorization discovery', () => {
+  it('infers the lark brand for a single-account refresh when callers omit brand', () => {
+    const authorizations = [
+      { profileName: 'intl', appId: 'cli_lark', userOpenId: 'ou_lark', brand: 'lark' },
+      { profileName: 'cn', appId: 'cli_feishu', userOpenId: 'ou_feishu', brand: 'feishu' },
+    ];
+    expect(
+      resolveBrandForProfile({ appId: 'cli_lark', userOpenId: 'ou_lark' }, authorizations)
+    ).toBe('lark');
+    expect(
+      resolveBrandForProfile({ appId: 'cli_feishu', userOpenId: 'ou_feishu' }, authorizations)
+    ).toBe('feishu');
+    // No matching profile retains the backwards-compatible Feishu fallback.
+    expect(
+      resolveBrandForProfile({ appId: 'unknown', userOpenId: 'ou_unknown' }, authorizations)
+    ).toBe('feishu');
+  });
+
   it('keeps the exact profile name when auth metadata identifies a personal authorization', () => {
     expect(
       parseLarkCliPersonalAuthorizations({ name: '2222', appId: 'cli_aadcbb097af8dd2c' }, [
@@ -66,6 +85,7 @@ describe('lark-cli profile authorization discovery', () => {
         profileName: '2222',
         appId: 'cli_aadcbb097af8dd2c',
         userOpenId: 'ou_target_user',
+        brand: 'feishu',
       },
     ]);
   });
@@ -123,62 +143,367 @@ describe('shouldRefreshLarkCredentials', () => {
   });
 });
 
-describe('isLarkRefreshSucceeded (decoupled: a refreshed token must still upload)', () => {
-  const ok = (
-    over: Partial<{ checkStatus: number; verifyStatus: number; verifyStdout: string }> = {}
-  ) => ({
-    checkStatus: 0,
-    verifyStatus: 0,
-    verifyStdout: JSON.stringify({ identities: { user: { available: true, verified: true } } }),
-    ...over,
+describe('refresh-lock storage location', () => {
+  it('keeps agentcli locks out of the lark-cli credential directory', () => {
+    const lockPath = __internals.directRefreshLockPath('cli_app:ou_user');
+    expect(lockPath).toContain('agentcli-lark-refresh-locks');
+    expect(lockPath).not.toContain('Application Support/lark-cli');
+  });
+});
+
+describe('direct Lark OAuth refresh', () => {
+  const NOW = 1_700_000_000_000;
+  const stored = JSON.stringify({
+    appId: TEST_CRED.appId,
+    userOpenId: TEST_CRED.userOpenId,
+    accessToken: TEST_CRED.accessToken,
+    refreshToken: TEST_CRED.refreshToken,
+    expiresAt: TEST_CRED.expiresAt,
+    refreshExpiresAt: TEST_CRED.refreshExpiresAt,
+    scope: TEST_CRED.scope,
+    grantedAt: 1_600_000_000_000,
+    futureField: 'preserve-me',
   });
 
-  it('succeeds when auth check + status verify exit 0 and the user is available', () => {
-    expect(isLarkRefreshSucceeded(ok())).toBe(true);
+  function oauthResponse(overrides: Record<string, unknown> = {}) {
+    return new Response(
+      JSON.stringify({
+        code: 0,
+        access_token: `new-access-${'a'.repeat(40)}`,
+        refresh_token: `new-refresh-${'b'.repeat(40)}`,
+        expires_in: 7_200,
+        refresh_token_expires_in: 2_592_000,
+        scope: 'contact:user.base:readonly offline_access',
+        ...overrides,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  it.each([
+    ['feishu', 'https://open.feishu.cn/open-apis/authen/v2/oauth/token'],
+    ['lark', 'https://open.larksuite.com/open-apis/authen/v2/oauth/token'],
+  ])('uses the %s OAuth v2 endpoint and exact refresh-token grant', async (brand, endpoint) => {
+    const fetchImpl = vi.fn(async () => oauthResponse()) as unknown as typeof fetch;
+    const writeStoredToken = vi.fn(async (_account: string, _value: string) => undefined);
+
+    const result = await refreshLarkCredentialsDirect(
+      { ...TEST_CRED, brand },
+      {
+        now: () => NOW,
+        fetchImpl,
+        readStoredToken: async () => stored,
+        writeStoredToken,
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0];
+    expect(url).toBe(endpoint);
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      grant_type: 'refresh_token',
+      client_id: TEST_CRED.appId,
+      client_secret: TEST_CRED.appSecret,
+      refresh_token: TEST_CRED.refreshToken,
+    });
+    expect(JSON.parse(writeStoredToken.mock.calls[0][1])).toMatchObject({
+      accessToken: `new-access-${'a'.repeat(40)}`,
+      refreshToken: `new-refresh-${'b'.repeat(40)}`,
+      expiresAt: NOW + 7_200_000,
+      refreshExpiresAt: NOW + 2_592_000_000,
+      scope: 'contact:user.base:readonly offline_access',
+      grantedAt: 1_600_000_000_000,
+      futureField: 'preserve-me',
+    });
   });
 
-  it('succeeds even when verified is false — availability is enough', () => {
-    // a56f531 required verified===true; it flapped on transient lark-cli checks and
-    // withheld an already-refreshed token, dropping the user's authorization.
-    expect(
-      isLarkRefreshSucceeded(
-        ok({
-          verifyStdout: JSON.stringify({
-            identities: { user: { available: true, verified: false } },
+  it('rereads the current token before refresh and persists the rotated pair', async () => {
+    const currentRefreshToken = `current-refresh-${'c'.repeat(40)}`;
+    const fetchImpl = vi.fn(async () => oauthResponse()) as unknown as typeof fetch;
+    const writeStoredToken = vi.fn(async (_account: string, _value: string) => undefined);
+
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl,
+      readStoredToken: async () =>
+        JSON.stringify({ ...JSON.parse(stored), refreshToken: currentRefreshToken }),
+      writeStoredToken,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      credentials: {
+        accessToken: `new-access-${'a'.repeat(40)}`,
+        refreshToken: `new-refresh-${'b'.repeat(40)}`,
+        expiresAt: NOW + 7_200_000,
+        refreshExpiresAt: NOW + 2_592_000_000,
+      },
+    });
+    expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0][1]?.body)).refresh_token).toBe(
+      currentRefreshToken
+    );
+    expect(writeStoredToken).toHaveBeenCalledOnce();
+  });
+
+  it('rejects HTTP 200 semantic errors and never writes them', async () => {
+    const writeStoredToken = vi.fn(async (_account: string, _value: string) => undefined);
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl: vi.fn(async () =>
+        oauthResponse({ code: 20037, msg: 'refresh token expired' })
+      ) as unknown as typeof fetch,
+      readStoredToken: async () => stored,
+      writeStoredToken,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'oauth-error', code: 20037 });
+    expect(writeStoredToken).not.toHaveBeenCalled();
+  });
+
+  it('does not call OAuth or write when the stored refresh token is expired', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const writeStoredToken = vi.fn(async (_account: string, _value: string) => undefined);
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl,
+      readStoredToken: async () => JSON.stringify({ ...JSON.parse(stored), refreshExpiresAt: NOW }),
+      writeStoredToken,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'refresh-expired' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(writeStoredToken).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when persistence fails after token rotation', async () => {
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl: vi.fn(async () => oauthResponse()) as unknown as typeof fetch,
+      readStoredToken: async () => stored,
+      writeStoredToken: async () => {
+        throw new Error(
+          `app_secret=${TEST_CRED.appSecret} refresh_token=${TEST_CRED.refreshToken}`
+        );
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'persist-failed' });
+    if (!result.ok) {
+      expect(result.message).not.toContain(TEST_CRED.appSecret);
+      expect(result.message).not.toContain(TEST_CRED.refreshToken);
+      expect(result.message).toContain('[hidden]');
+    }
+  });
+
+  it('retries once with the re-read token when another writer rotated the refresh token mid-flight', async () => {
+    // The race this guards: lark-cli (or any other tool sharing the store) rotated
+    // the refresh token between our read and our redeem, so the server rejects
+    // OUR token as already-used. The re-read inside the lock then shows a NEW
+    // refresh token — retry with it instead of failing the report.
+    const rotatedRefresh = `rotated-${'d'.repeat(40)}`;
+    const rotatedStored = JSON.stringify({ ...JSON.parse(stored), refreshToken: rotatedRefresh });
+    let reads = 0;
+    const sentRefreshTokens: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      sentRefreshTokens.push(JSON.parse(String(init?.body)).refresh_token);
+      if (sentRefreshTokens.length === 1) {
+        return oauthResponse({ code: 20037, msg: 'refresh token is invalid' });
+      }
+      return oauthResponse();
+    }) as unknown as typeof fetch;
+    const writeStoredToken = vi.fn(async (_account: string, _value: string) => undefined);
+
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl,
+      readStoredToken: async () => (++reads === 1 ? stored : rotatedStored),
+      writeStoredToken,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sentRefreshTokens).toEqual([TEST_CRED.refreshToken, rotatedRefresh]);
+    expect(writeStoredToken).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT retry when the re-read refresh token is unchanged after an oauth-error', async () => {
+    // No other writer rotated anything — the server genuinely rejects this token.
+    // A retry would repeat the identical failing request, so fail fast.
+    const fetchImpl = vi.fn(async () =>
+      oauthResponse({ code: 20037, msg: 'refresh token is invalid' })
+    ) as unknown as typeof fetch;
+
+    const result = await refreshLarkCredentialsDirect(TEST_CRED, {
+      now: () => NOW,
+      fetchImpl,
+      readStoredToken: async () => stored,
+      writeStoredToken: async () => undefined,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'oauth-error', code: 20037 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('removes an orphaned refresh lock whose owner process no longer exists', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lark-refresh-lock-'));
+    try {
+      const lockPath = path.join(dir, 'orphan.lock');
+      await writeFile(lockPath, '999999999\n');
+      await expect(__internals.removeOrphanedRefreshLock(lockPath)).resolves.toBe(true);
+      await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats a vanished lock file as removable but keeps a live unparsable lock until it is stale', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lark-refresh-lock-'));
+    try {
+      // Gone between our open attempt and the orphan check → caller may retry at once.
+      await expect(
+        __internals.removeOrphanedRefreshLock(path.join(dir, 'gone.lock'))
+      ).resolves.toBe(true);
+
+      // A freshly created lock whose owner has not written its pid yet (content
+      // unparsable) must NOT be broken — that is the create/write race window.
+      const freshLock = path.join(dir, 'fresh.lock');
+      await writeFile(freshLock, '');
+      await expect(__internals.removeOrphanedRefreshLock(freshLock)).resolves.toBe(false);
+      expect(await readFile(freshLock, 'utf8')).toBe('');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes concurrent refreshes for the same account and rereads after acquiring the lock', async () => {
+    let current = stored;
+    let active = 0;
+    let maxActive = 0;
+    const seenRefreshTokens: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      const sent = JSON.parse(String(init?.body)).refresh_token;
+      seenRefreshTokens.push(sent);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active -= 1;
+      return oauthResponse({
+        access_token: `access-${seenRefreshTokens.length}-${'a'.repeat(40)}`,
+        refresh_token: `refresh-${seenRefreshTokens.length}-${'b'.repeat(40)}`,
+      });
+    }) as unknown as typeof fetch;
+    const deps = {
+      now: () => NOW,
+      fetchImpl,
+      readStoredToken: async () => current,
+      writeStoredToken: async (_account: string, value: string) => {
+        current = value;
+      },
+    };
+
+    await Promise.all([
+      refreshLarkCredentialsDirect(TEST_CRED, deps),
+      refreshLarkCredentialsDirect(TEST_CRED, deps),
+    ]);
+
+    expect(maxActive).toBe(1);
+    expect(seenRefreshTokens).toEqual([TEST_CRED.refreshToken, `refresh-1-${'b'.repeat(40)}`]);
+  });
+});
+
+describe('getLarkCredentialsFreshAll — per-account failure isolation', () => {
+  const authorizations = [
+    { profileName: 'p1', appId: 'cli_app_1', userOpenId: 'ou_user_1', brand: 'feishu' },
+    { profileName: 'p2', appId: 'cli_app_2', userOpenId: 'ou_user_2', brand: 'feishu' },
+  ];
+  const readCredentials = (opts: { appId?: string; userOpenId?: string; brand?: string }) => ({
+    ok: true as const,
+    credentials: {
+      ...TEST_CRED,
+      appId: String(opts.appId),
+      userOpenId: String(opts.userOpenId),
+    },
+  });
+
+  it('a THROWN refresh (e.g. cross-process lock timeout) skips that account instead of aborting the batch', async () => {
+    // The cross-process lock is held across the 15s OAuth call but waiters only
+    // waited ~5s — a slow refresh made the lock throw, and the uncaught throw
+    // aborted reporting for EVERY account. The loop must isolate it per account.
+    const result = await getLarkCredentialsFreshAll(
+      {
+        acquireAccountLock: async () => {
+          throw new Error('timed out waiting for lark-cli refresh lock');
+        },
+      },
+      { listAuthorizations: () => authorizations, readCredentials }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`expected ok, got: ${result.message}`);
+    expect(result.credentials).toHaveLength(0);
+    expect(result.skipped).toHaveLength(2);
+    expect(result.skipped.map((s) => s.reason)).toEqual(['refresh-failed', 'refresh-failed']);
+    expect(result.skipped[0].message).toContain('timed out waiting');
+  });
+
+  it('still reports the healthy accounts when only one account fails', async () => {
+    const result = await getLarkCredentialsFreshAll(
+      {
+        acquireAccountLock: async (account, operation) => {
+          if (account.startsWith('cli_app_1:')) throw new Error('lock contention');
+          return operation();
+        },
+        fetchImpl: (async () =>
+          new Response(
+            JSON.stringify({
+              code: 0,
+              access_token: `fresh-access-${'a'.repeat(40)}`,
+              refresh_token: `fresh-refresh-${'b'.repeat(40)}`,
+              expires_in: 7_200,
+              refresh_token_expires_in: 2_592_000,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )) as unknown as typeof fetch,
+        readStoredToken: async (account: string) =>
+          JSON.stringify({
+            appId: account.split(':')[0],
+            userOpenId: account.split(':')[1],
+            refreshToken: `stored-rt-${'c'.repeat(40)}`,
+            refreshExpiresAt: 1_900_000_000_000,
           }),
-        })
-      )
-    ).toBe(true);
-  });
+        writeStoredToken: async () => undefined,
+      },
+      { listAuthorizations: () => authorizations, readCredentials }
+    );
 
-  it('succeeds regardless of scope missing — scope drift must not withhold the upload', () => {
-    // isLarkRefreshSucceeded no longer inspects auth check's ok/missing at all.
-    expect(
-      isLarkRefreshSucceeded(
-        ok({ verifyStdout: JSON.stringify({ identities: { user: { available: true } } }) })
-      )
-    ).toBe(true);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`expected ok, got: ${result.message}`);
+    expect(result.credentials.map((c) => c.appId)).toEqual(['cli_app_2']);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]).toMatchObject({ appId: 'cli_app_1', reason: 'refresh-failed' });
   });
+});
 
-  it('fails when the refreshed token is not available', () => {
-    expect(
-      isLarkRefreshSucceeded(
-        ok({ verifyStdout: JSON.stringify({ identities: { user: { available: false } } }) })
-      )
-    ).toBe(false);
-  });
+describe('master key file fallback (macOS)', () => {
+  it('reads a 32-byte master key file and rejects missing / wrong-length files', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lark-master-key-'));
+    try {
+      expect(__internals.readMasterKeyFile(dir)).toBeNull();
 
-  it('fails when auth check or status verify exits non-zero', () => {
-    expect(isLarkRefreshSucceeded(ok({ checkStatus: 1 }))).toBe(false);
-    expect(isLarkRefreshSucceeded(ok({ verifyStatus: 2 }))).toBe(false);
-  });
+      await writeFile(path.join(dir, 'master.key.file'), Buffer.alloc(16));
+      expect(__internals.readMasterKeyFile(dir)).toBeNull();
 
-  it('fails on unparseable verify output', () => {
-    expect(isLarkRefreshSucceeded(ok({ verifyStdout: 'not-json' }))).toBe(false);
-  });
-
-  it('fails for null/missing opts', () => {
-    expect(isLarkRefreshSucceeded(undefined as never)).toBe(false);
+      const key = randomBytes(32);
+      await writeFile(path.join(dir, 'master.key.file'), key);
+      expect(__internals.readMasterKeyFile(dir)?.equals(key)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -254,6 +579,24 @@ describe('lark-cli batch reporting', () => {
     expect(result).toMatchObject({ ok: true, accountCount: 21 });
     expect(calls).toHaveLength(2);
     expect(calls.map((call) => JSON.parse(String(call.init.body)).items.length)).toEqual([20, 1]);
+  });
+
+  it('reports an AgentBus upload timeout without confusing it with OAuth refresh failure', async () => {
+    const credentials = [batchCred(1), batchCred(2), batchCred(3)];
+    const result = await reportAllLarkCredentials({
+      hermitHome: '/tmp/hermit-lark',
+      resolveAuthedContext: async () => ({ baseUrl: 'https://monitor.test', token: 't' }),
+      __lookupAllForTests: () => batchLookup(credentials),
+      fetchImpl: vi.fn(async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      }) as unknown as typeof fetch,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'fetch-failed',
+      message: 'AgentBus Lark 凭证上传超时（60 秒）',
+    });
   });
 
   it('stops after a later batch fails without retransmitting earlier batches', async () => {

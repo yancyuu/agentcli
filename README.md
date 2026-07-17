@@ -178,11 +178,16 @@ AgentCli 无侵入扫描本地会话日志：
 
 ### 把网关 Key 写进 Claude / Codex（token 池认领）
 
-登录后，在终端菜单 `agentcli` →「**token 池(测试版)**」→「**认领**」，会自动签发一个一次性网关 key，当前默认且唯一写入目标是 **Codex**（Claude Code 保留为后续可恢复选项），然后直写进本地配置：
+登录后，在终端菜单 `agentcli` →「**token 池(测试版)**」→「**认领**」，会自动签发一个一次性网关 key。你可以选择写入 **Codex**、**Claude Code** 或两者；默认选择 Codex。认领后会直写本地运行时配置，并同步写入系统环境变量：
 
 - **Claude Code** `~/.claude/settings.json`：写入网关 endpoint（`ANTHROPIC_BASE_URL`）+ `ANTHROPIC_AUTH_TOKEN`，deep-merge 保留其它键，**不固定模型**。
 - **Codex** `~/.codex/auth.json`（`OPENAI_API_KEY`）+ `~/.codex/config.toml`（surgical 改写 `model_provider` / `model` / wire_api 与 `[model_providers.*]`，**保留 `[projects.*]`**）。Codex 的 base_url 由网关 `proxyPaths` 按所选 wire_api 解析，与 Claude 的 endpoint 不同。
-- 同时写 `~/.hermit/aikey.env`（0600），作为已认领标记并供外部 agent 按需手动 `source`；AgentCli **不再修改** `.zshrc` / `.bashrc`，也不安装 `precmd` / `PROMPT_COMMAND` shell hook。Claude Code / Codex 直接读取上面的自身配置，下次启动即生效。
+- 同时写 `~/.hermit/aikey.env`（0600），作为已认领标记，并供外部 agent 手动 `source`。
+- **系统环境变量**：认领时会一次性更新环境变量，不安装 `precmd` / `PROMPT_COMMAND` 等每次提示符执行的 hook：
+  - **macOS**：更新 `~/.zshrc` 的 AgentCli 管理块，并通过 `launchctl setenv` 让当前登录会话中新启动的 GUI 应用可读取；已有终端请新开一个。
+  - **Linux**：更新 `~/.bashrc` 的 AgentCli 管理块；新开终端后生效。
+  - **Windows**：写入当前用户的 Windows 环境变量；新开终端后生效。
+  - Claude Code 使用 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`；Codex 使用 `OPENAI_API_KEY` / `OPENAI_BASE_URL`。只写入你在认领时选择的运行时对应变量。
 
 > 🔒 首次写入前自动把你的**原始** Claude/Codex 配置快照到 `~/.hermit/agentcli.env.bak`（**只创建一次**，后续认领永不覆盖）。在「token 池 → **一键恢复原始配置**」可随时还原：原本存在的文件回到原内容，token 池新建的文件会被删除，无残留。检查快照时会自动修正旧版本遗留的备份路径记录，跨 1.9.8 / 1.9.9 升级后仍能准确恢复。认领到的 key 是**即焚明文**，不落库、不回显明文。该能力需服务端授权开通（部分账户暂未开放）。
 

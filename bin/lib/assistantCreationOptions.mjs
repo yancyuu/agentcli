@@ -15,7 +15,7 @@ let cachedOptions = null;
  * of truth for the restriction — both the wizard menu and the CLI flag parser
  * read these, so adding/removing a supported option is a one-line change.
  */
-const SUPPORTED_AGENT_TYPES = ['claudecode', 'codex'];
+const SUPPORTED_AGENT_TYPES = ['codex', 'claudecode'];
 const SUPPORTED_PLATFORMS = ['feishu'];
 
 export function supportedAssistantAgentTypeKeys() {
@@ -52,8 +52,12 @@ export function assistantCreationOptions() {
 }
 
 export function assistantAgentTypeActions() {
-  return assistantCreationOptions()
-    .agentTypes.filter((option) => isSupportedAssistantAgentType(option.key))
+  const optionsByKey = new Map(
+    assistantCreationOptions().agentTypes.map((option) => [option.key, option]),
+  );
+  return SUPPORTED_AGENT_TYPES
+    .map((key) => optionsByKey.get(key))
+    .filter(Boolean)
     .map((option) => ({
       id: option.key,
       label: option.label,

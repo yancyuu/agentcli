@@ -16,11 +16,12 @@
  * daemon can keep the code in sync with the CLI without spawning a child process.
  */
 
-import { createDecipheriv, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 const SERVICE = 'lark-cli';
 const MASTER_KEY_BYTES = 32;
@@ -30,6 +31,14 @@ const GO_KEYRING_PREFIX = 'go-keyring-base64:';
 
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
+
+function normalizeLarkBrand(brand: unknown): string {
+  return String(brand || '')
+    .trim()
+    .toLowerCase() === 'lark'
+    ? 'lark'
+    : 'feishu';
+}
 
 export interface LarkCredentials {
   appId: string;
@@ -136,10 +145,29 @@ function decodeMasterKey(encoded: string): Buffer | null {
   }
 }
 
-/** master AES-256 key from the macOS Keychain (service "lark-cli" / account "master.key"). */
+/**
+ * Raw 32-byte master key stored next to the encrypted secrets — used by installs
+ * where lark-cli could not use the Keychain. FALLBACK ONLY: nothing in this repo
+ * creates this file, so it must never shadow the Keychain key — a stray/stale
+ * file would silently break decryption of every existing lark-cli secret.
+ */
+function readMasterKeyFile(dir: string): Buffer | null {
+  try {
+    const key = readFileSync(join(dir, 'master.key.file'));
+    return key.length === MASTER_KEY_BYTES ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * master AES-256 key, in precedence order: env override (lark-cli sets it when
+ * spawning children) → macOS Keychain (standard lark-cli install, service
+ * "lark-cli" / account "master.key") → master.key.file (Keychain-less fallback).
+ */
 function getMasterKeyMac(): Buffer | null {
-  // Env override (rare; lark-cli sets it when spawning children). Same encoding as
-  // the keychain value, so decode it the same way.
+  // Env override (rare). Same encoding as the keychain value, so decode it the
+  // same way.
   const env = process.env.LARK_CLI_MASTER_KEY;
   if (env) {
     const key = decodeMasterKey(env);
@@ -153,8 +181,18 @@ function getMasterKeyMac(): Buffer | null {
     'master.key',
     '-w',
   ]);
-  if (!out) return null;
-  return decodeMasterKey(out);
+  if (out) {
+    const key = decodeMasterKey(out);
+    if (key) return key;
+  }
+  return readMasterKeyFile(storageDirMac());
+}
+
+function encryptAesGcm(plain: string, key: Buffer): Buffer {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, ciphertext, cipher.getAuthTag()]);
 }
 
 function decryptAesGcm(blob: Buffer, key: Buffer): string | null {
@@ -170,6 +208,56 @@ function decryptAesGcm(blob: Buffer, key: Buffer): string | null {
   } catch {
     return null;
   }
+}
+
+async function writeMacSecret(account: string, plain: string): Promise<void> {
+  const key = getMasterKeyMac();
+  if (!key) throw new Error('lark-cli master key unavailable');
+  const dir = storageDirMac();
+  const target = join(dir, safeFileName(account));
+  const tmp = join(dir, `${safeFileName(account)}.${randomUUID()}.tmp`);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(tmp, encryptAesGcm(plain, key), { mode: 0o600, flag: 'wx' });
+    const handle = await open(tmp, 'r+');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(tmp, target);
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function writeRegistryDpapi(service: string, account: string, plain: string): Promise<void> {
+  if (!isWin) throw new Error('Windows credential storage unavailable');
+  const ps = [
+    '$ErrorActionPreference="Stop"',
+    '$plain = [Console]::In.ReadToEnd()',
+    `$ent = [Convert]::FromBase64String('${dpapiEntropy(service, account).toString('base64')}')`,
+    '$blob = [System.Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($plain), $ent, "CurrentUser")',
+    `$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('${regPathFor(service)}')`,
+    `$k.SetValue('${regValueName(account)}', [Convert]::ToBase64String($blob), [Microsoft.Win32.RegistryValueKind]::String)`,
+    '$k.Close()',
+  ].join('; ');
+  const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+    encoding: 'utf-8',
+    shell: false,
+    input: plain,
+  });
+  if (result.status !== 0) throw new Error('lark-cli Windows credential write failed');
+}
+
+async function writeStoredToken(account: string, plain: string): Promise<void> {
+  if (isMac) await writeMacSecret(account, plain);
+  else if (isWin) await writeRegistryDpapi(SERVICE, account, plain);
+  else throw new Error(`unsupported platform: ${process.platform}`);
+
+  const persisted = readSecret(SERVICE, account);
+  if (persisted !== plain) throw new Error('lark-cli credential write verification failed');
 }
 
 function readSecret(service: string, account: string): string | null {
@@ -344,12 +432,14 @@ function findLarkBinary(): string | null {
 export interface LarkCliProfile {
   name: string;
   appId: string;
+  brand?: string;
 }
 
 export interface LarkCliPersonalAuthorization {
   profileName: string;
   appId: string;
   userOpenId: string;
+  brand: string;
 }
 
 export function parseLarkCliPersonalAuthorizations(
@@ -371,11 +461,27 @@ export function parseLarkCliPersonalAuthorizations(
     if (appId !== profile.appId || !userOpenId) continue;
     authorizations.set(`${appId}:${userOpenId}`, {
       appId,
+      brand: normalizeLarkBrand(profile.brand),
       profileName: profile.name,
       userOpenId,
     });
   }
   return [...authorizations.values()];
+}
+
+export function resolveBrandForProfile(
+  profile: { appId?: string; userOpenId?: string; brand?: string },
+  authorizations: LarkCliPersonalAuthorization[]
+): string {
+  // Explicit caller intent wins. Otherwise a single-account refresh must infer
+  // the brand from lark-cli's authorization metadata: using a larksuite token at
+  // the Feishu endpoint produces a misleading oauth-error / dropped report.
+  if (profile.brand) return normalizeLarkBrand(profile.brand);
+  const hit = authorizations.find(
+    (authorization) =>
+      authorization.appId === profile.appId && authorization.userOpenId === profile.userOpenId
+  );
+  return normalizeLarkBrand(hit?.brand);
 }
 
 function listLarkProfiles(): LarkCliProfile[] {
@@ -392,7 +498,13 @@ function listLarkProfiles(): LarkCliProfile[] {
         record.name &&
         typeof record.appId === 'string' &&
         record.appId
-        ? [{ name: record.name, appId: record.appId }]
+        ? [
+            {
+              name: record.name,
+              appId: record.appId,
+              brand: normalizeLarkBrand(record.brand),
+            },
+          ]
         : [];
     });
   } catch {
@@ -429,74 +541,298 @@ export function pickProfileNameByAppId(
   return hit?.name || appId;
 }
 
-/**
- * Decide whether a lark-cli refresh succeeded, from the raw exit codes + verify
- * stdout. Factored out of `triggerLarkRefresh` (which spawns the lark-cli binary)
- * so the decoupling rule is unit-testable without the binary on PATH.
- *
- * Decoupling (fixes authorization drops): an access token lark-cli just refreshed
- * MUST still be uploaded. Requiring the full scope set to be present (a56f531)
- * or `verified === true` withheld the already-refreshed token whenever a scope
- * drifted or lark-cli's verify flapped — agentbus then kept a stale token and
- * the user's Lark authorization "dropped" (401) even though worker kept refreshing.
- * So:
- *   • auth check exit 0 — the refresh side-effect ran. We no longer inspect its
- *     `ok`/`missing`: a partial scope grant still means the token was refreshed,
- *     and scope degradation should warn, not withhold the upload.
- *   • status --verify exit 0 + identities.user.available === true — the refreshed
- *     token is usable. `verified` is no longer required (it flaps on transient
- *     checks); availability already proves the token works.
- */
-export function isLarkRefreshSucceeded(opts: {
-  checkStatus: number | null;
-  verifyStatus: number | null;
-  verifyStdout: string;
-}): boolean {
-  if (!opts) return false;
-  if (opts.checkStatus !== 0) return false;
-  if (opts.verifyStatus !== 0) return false;
-  let status: { identities?: { user?: { available?: unknown } } } = {};
-  try {
-    status = JSON.parse(String(opts.verifyStdout || '').trim());
-  } catch {
-    return false;
-  }
-  return status.identities?.user?.available === true;
+export type DirectLarkRefreshResult =
+  | { ok: true; credentials: LarkCredentials }
+  | {
+      ok: false;
+      kind:
+        | 'read-failed'
+        | 'refresh-expired'
+        | 'fetch-failed'
+        | 'http-error'
+        | 'oauth-error'
+        | 'invalid-response'
+        | 'persist-failed';
+      message: string;
+      code?: number;
+      httpStatus?: number;
+    };
+
+export interface DirectLarkRefreshDependencies {
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  readStoredToken?: (account: string) => Promise<string | null>;
+  writeStoredToken?: (account: string, value: string) => Promise<void>;
+  acquireAccountLock?: <T>(account: string, operation: () => Promise<T>) => Promise<T>;
 }
 
-function triggerLarkRefresh(appId: string, scope: string, profileName?: string): boolean {
-  const binary = findLarkBinary();
-  if (!binary) return false;
-  // `auth check --scope` triggers the token refresh as a side effect; `auth status
-  // --verify` persists the refreshed state. We still pass the full personal scope
-  // (the digital-worker login uses --domain all) so lark-cli refreshes the whole
-  // grant, but a partial/missing scope no longer blocks the upload — the success
-  // rule lives in isLarkRefreshSucceeded (decoupled from scope completeness).
-  const scopeArg = String(scope || '').trim() || 'contact:user.base:readonly';
-  const targetProfile = profileName || pickProfileNameByAppId(listLarkProfiles(), appId);
+const directRefreshLocks = new Map<string, Promise<void>>();
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    const check = spawnSync(
-      binary,
-      ['auth', 'check', '--json', '--scope', scopeArg, '--profile', targetProfile],
-      { encoding: 'utf-8', shell: isWin }
-    );
-    const verify = spawnSync(
-      binary,
-      ['auth', 'status', '--json', '--verify', '--profile', targetProfile],
-      { encoding: 'utf-8', shell: isWin }
-    );
-    return isLarkRefreshSucceeded({
-      checkStatus: check.status,
-      verifyStatus: verify.status,
-      verifyStdout: verify.stdout || '',
-    });
-  } catch {
-    return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+async function removeOrphanedRefreshLock(lockPath: string): Promise<boolean> {
+  try {
+    const [owner, info] = await Promise.all([readFile(lockPath, 'utf8'), stat(lockPath)]);
+    const pid = Number.parseInt(owner.trim(), 10);
+    // An unparsable pid is usually just the create/write race window: the owner
+    // created the file (`open 'wx'`) but hasn't written its pid yet. Never break
+    // such a lock on sight — only once it is clearly stale.
+    const pidParsed = Number.isInteger(pid) && pid > 0;
+    const staleMs = Date.now() - info.mtimeMs;
+    if ((pidParsed && !isProcessAlive(pid)) || staleMs > 120_000) {
+      await rm(lockPath, { force: true });
+      return true;
+    }
+  } catch (error) {
+    // Lock vanished on its own → the caller may retry immediately. Any other
+    // error (e.g. a failing rm) must NOT spin the caller's retry loop hot.
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+  return false;
+}
+
+function directRefreshLockPath(account: string): string {
+  const digest = createHash('sha256').update(account).digest('hex');
+  // Locks are agentcli implementation details, never lark-cli credential data.
+  // Keep them in our own OS temp namespace on every platform so a future
+  // lark-cli cleanup/validation routine cannot touch them.
+  return join(tmpdir(), 'agentcli-lark-refresh-locks', `${digest}.lock`);
+}
+
+async function withCrossProcessRefreshLock<T>(
+  account: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  if (!isMac && !isWin) return withDirectRefreshLock(account, operation);
+  const lockPath = directRefreshLockPath(account);
+  await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
+  // Wait up to ~20s: the lock is held across the OAuth HTTP call (15s timeout),
+  // so a shorter wait times out under a perfectly healthy slow refresh.
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    try {
+      const handle = await open(lockPath, 'wx', 0o600);
+      try {
+        await handle.writeFile(`${process.pid}\n`);
+        return await withDirectRefreshLock(account, operation);
+      } finally {
+        await handle.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw error;
+      if (await removeOrphanedRefreshLock(lockPath)) continue;
+      await sleep(50);
+    }
+  }
+  throw new Error('timed out waiting for lark-cli refresh lock');
+}
+
+async function withDirectRefreshLock<T>(account: string, operation: () => Promise<T>): Promise<T> {
+  const previous = directRefreshLocks.get(account) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  directRefreshLocks.set(account, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (directRefreshLocks.get(account) === tail) directRefreshLocks.delete(account);
+  }
+}
+
+function oauthEndpointForBrand(brand: string): string {
+  return normalizeLarkBrand(brand) === 'lark'
+    ? 'https://open.larksuite.com/open-apis/authen/v2/oauth/token'
+    : 'https://open.feishu.cn/open-apis/authen/v2/oauth/token';
+}
+
+export async function refreshLarkCredentialsDirect(
+  credentials: LarkCredentials,
+  dependencies: DirectLarkRefreshDependencies = {}
+): Promise<DirectLarkRefreshResult> {
+  const account = `${credentials.appId}:${credentials.userOpenId}`;
+  const lock = dependencies.acquireAccountLock ?? withCrossProcessRefreshLock;
+  return lock(account, async () => {
+    const readToken =
+      dependencies.readStoredToken ?? (async (key: string) => readSecret(SERVICE, key));
+    const persistToken = dependencies.writeStoredToken ?? writeStoredToken;
+    // At most ONE retry, and only when the stored refresh token CHANGED after an
+    // oauth-error: that means another writer (lark-cli itself — our cross-process
+    // lock cannot exclude it) rotated the token between our read and our redeem,
+    // so the server rejected our copy as already-used and the new token is worth
+    // one attempt. An unchanged token after an oauth-error is a genuine
+    // rejection — fail fast, never repeat the identical failing call.
+    let lastOauthError: DirectLarkRefreshResult | null = null;
+    let lastSentRefreshToken = '';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let raw: string | null;
+      try {
+        raw = await readToken(account);
+      } catch (error) {
+        return { ok: false, kind: 'read-failed', message: sanitizeAuthError(error) };
+      }
+      if (!raw) {
+        return { ok: false, kind: 'read-failed', message: 'lark-cli personal token unavailable' };
+      }
+
+      let stored: Record<string, unknown>;
+      try {
+        stored = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return { ok: false, kind: 'read-failed', message: 'lark-cli personal token is invalid' };
+      }
+      const storedAppId = typeof stored.appId === 'string' ? stored.appId : '';
+      const storedUserOpenId = typeof stored.userOpenId === 'string' ? stored.userOpenId : '';
+      const refreshToken = typeof stored.refreshToken === 'string' ? stored.refreshToken : '';
+      const refreshExpiresAt =
+        typeof stored.refreshExpiresAt === 'number' ? stored.refreshExpiresAt : 0;
+      const requestStartedAt = (dependencies.now ?? Date.now)();
+      if (
+        storedAppId !== credentials.appId ||
+        storedUserOpenId !== credentials.userOpenId ||
+        !refreshToken
+      ) {
+        return {
+          ok: false,
+          kind: 'read-failed',
+          message: 'lark-cli personal token identity mismatch',
+        };
+      }
+      if (!Number.isFinite(refreshExpiresAt) || refreshExpiresAt <= requestStartedAt) {
+        return { ok: false, kind: 'refresh-expired', message: 'lark-cli refresh token expired' };
+      }
+      // Retry short-circuit: the re-read above shows the SAME refresh token the
+      // server just rejected — no other writer rotated it, so return the saved
+      // oauth-error instead of repeating the identical failing request.
+      if (lastOauthError && refreshToken === lastSentRefreshToken) return lastOauthError;
+
+      const fetchImpl = dependencies.fetchImpl ?? fetch;
+      let response: Response;
+      try {
+        response = await fetchImpl(oauthEndpointForBrand(credentials.brand), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            grant_type: 'refresh_token',
+            client_id: credentials.appId,
+            client_secret: credentials.appSecret,
+            refresh_token: refreshToken,
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+      } catch (error) {
+        return { ok: false, kind: 'fetch-failed', message: sanitizeAuthError(error) };
+      }
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = (await response.json()) as Record<string, unknown>;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        return {
+          ok: false,
+          kind: 'http-error',
+          httpStatus: response.status,
+          message: `HTTP ${response.status}: ${sanitizeAuthError(payload.msg || response.statusText)}`,
+        };
+      }
+      const code = typeof payload.code === 'number' ? payload.code : Number(payload.code ?? 0);
+      if (code !== 0) {
+        lastOauthError = {
+          ok: false,
+          kind: 'oauth-error',
+          code: Number.isFinite(code) ? code : undefined,
+          message: sanitizeAuthError(payload.msg || payload.message || 'OAuth refresh failed'),
+        };
+        lastSentRefreshToken = refreshToken;
+        continue;
+      }
+
+      const accessToken = typeof payload.access_token === 'string' ? payload.access_token : '';
+      const rotatedRefreshToken =
+        typeof payload.refresh_token === 'string' ? payload.refresh_token : '';
+      const expiresIn = Number(payload.expires_in);
+      const refreshExpiresIn = Number(payload.refresh_token_expires_in);
+      if (
+        !accessToken ||
+        !rotatedRefreshToken ||
+        !Number.isFinite(expiresIn) ||
+        expiresIn <= 0 ||
+        !Number.isFinite(refreshExpiresIn) ||
+        refreshExpiresIn <= 0
+      ) {
+        return {
+          ok: false,
+          kind: 'invalid-response',
+          message: 'OAuth refresh response is incomplete',
+        };
+      }
+
+      const completedAt = (dependencies.now ?? Date.now)();
+      const scope =
+        typeof payload.scope === 'string' && payload.scope.trim()
+          ? payload.scope
+          : typeof stored.scope === 'string'
+            ? stored.scope
+            : credentials.scope;
+      const nextStored = {
+        ...stored,
+        appId: credentials.appId,
+        userOpenId: credentials.userOpenId,
+        accessToken,
+        refreshToken: rotatedRefreshToken,
+        expiresAt: completedAt + expiresIn * 1000,
+        refreshExpiresAt: completedAt + refreshExpiresIn * 1000,
+        scope,
+      };
+      try {
+        await persistToken(account, JSON.stringify(nextStored));
+      } catch (error) {
+        return { ok: false, kind: 'persist-failed', message: sanitizeAuthError(error) };
+      }
+
+      return {
+        ok: true,
+        credentials: {
+          ...credentials,
+          brand: normalizeLarkBrand(credentials.brand),
+          accessToken,
+          refreshToken: rotatedRefreshToken,
+          expiresAt: nextStored.expiresAt,
+          refreshExpiresAt: nextStored.refreshExpiresAt,
+          scope,
+        },
+      };
+    }
+    // Two oauth-errors in a row (the second with a freshly rotated token).
+    return lastOauthError ?? { ok: false, kind: 'oauth-error', message: 'OAuth refresh failed' };
+  });
 }
 
 export function getLarkCredentials(
-  opts: { appId?: string; userOpenId?: string } = {}
+  opts: { appId?: string; userOpenId?: string; brand?: string } = {}
 ): GetLarkCredentialsResult {
   if (!isMac && !isWin) {
     return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
@@ -537,7 +873,7 @@ export function getLarkCredentials(
       accessToken: token?.accessToken || '',
       refreshToken: token?.refreshToken || '',
       userOpenId: token?.userOpenId || userOpenId || '',
-      brand: 'feishu',
+      brand: normalizeLarkBrand(opts.brand),
       scope: token?.scope || '',
       expiresAt: token?.expiresAt || 0,
       refreshExpiresAt: token?.refreshExpiresAt || 0,
@@ -564,35 +900,28 @@ export function shouldRefreshLarkCredentials(
   );
 }
 
-export function getLarkCredentialsFresh(
-  opts: { appId?: string; userOpenId?: string } = {}
-): GetLarkCredentialsResult {
-  const first = getLarkCredentials(opts);
+export async function getLarkCredentialsFresh(
+  opts: { appId?: string; userOpenId?: string; brand?: string } = {},
+  dependencies: DirectLarkRefreshDependencies = {}
+): Promise<GetLarkCredentialsResult> {
+  // `getLarkCredentials` deliberately keeps its historic Feishu default for
+  // generic reads. Refresh is endpoint-sensitive, though: infer a missing brand
+  // from the exact personal authorization before constructing the OAuth request.
+  const resolvedOpts = {
+    ...opts,
+    brand: resolveBrandForProfile(opts, listLarkCliPersonalAuthorizations()),
+  };
+  const first = getLarkCredentials(resolvedOpts);
   if (!first.ok) return first;
-
-  // Every report must force a refresh attempt, even if the stored access token
-  // looks current. Reporting a stale snapshot after an unsuccessful refresh is
-  // unsafe because AgentBus uses it to prove the personal Lark identity.
-  if (
-    !shouldRefreshLarkCredentials(first.credentials) ||
-    !triggerLarkRefresh(first.credentials.appId, first.credentials.scope)
-  ) {
-    return {
-      ok: false,
-      refreshFailed: true,
-      message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
-    };
-  }
-
-  const refreshed = getLarkCredentials(opts);
+  const refreshed = await refreshLarkCredentialsDirect(first.credentials, dependencies);
   if (!refreshed.ok) {
     return {
       ok: false,
       refreshFailed: true,
-      message: 'lark-cli 刷新后无法读取个人授权凭证，未执行上报',
+      message: `lark-cli 个人授权刷新失败，未上传可能过期的凭证: ${refreshed.message}`,
     };
   }
-  return refreshed;
+  return { ok: true, credentials: refreshed.credentials };
 }
 
 export function getLarkCredentialsAll(): GetLarkCredentialsAllResult {
@@ -619,36 +948,59 @@ export function getLarkCredentialsAll(): GetLarkCredentialsAllResult {
   return { ok: true, credentials, skipped };
 }
 
-export function getLarkCredentialsFreshAll(): GetLarkCredentialsAllResult {
+export interface LarkCredentialsFreshAllOverrides {
+  listAuthorizations?: () => LarkCliPersonalAuthorization[];
+  readCredentials?: (opts: {
+    appId?: string;
+    userOpenId?: string;
+    brand?: string;
+  }) => GetLarkCredentialsResult;
+}
+
+export async function getLarkCredentialsFreshAll(
+  dependencies: DirectLarkRefreshDependencies = {},
+  overrides: LarkCredentialsFreshAllOverrides = {}
+): Promise<GetLarkCredentialsAllResult> {
   if (!isMac && !isWin) {
     return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
   }
 
+  const listAuthorizations = overrides.listAuthorizations ?? listLarkCliPersonalAuthorizations;
+  const readCredentials = overrides.readCredentials ?? getLarkCredentials;
   const credentials: LarkCredentials[] = [];
   const skipped: LarkProfileSkip[] = [];
-  for (const authorization of listLarkCliPersonalAuthorizations()) {
-    const profile = { appId: authorization.appId, userOpenId: authorization.userOpenId };
-    const beforeRefresh = getLarkCredentials(profile);
-    const scope = beforeRefresh.ok ? beforeRefresh.credentials.scope : '';
-    if (!triggerLarkRefresh(authorization.appId, scope, authorization.profileName)) {
+  for (const authorization of listAuthorizations()) {
+    const profile = {
+      appId: authorization.appId,
+      userOpenId: authorization.userOpenId,
+      brand: authorization.brand,
+    };
+    const beforeRefresh = readCredentials(profile);
+    if (!beforeRefresh.ok) {
       skipped.push({
-        ...profile,
-        reason: 'refresh-failed',
-        message: 'lark-cli 个人授权刷新失败，未上传可能过期的凭证',
+        appId: profile.appId,
+        userOpenId: profile.userOpenId,
+        reason: 'no-credentials',
+        message: beforeRefresh.message,
       });
       continue;
     }
 
-    const refreshed = getLarkCredentials(profile);
-    if (
-      !refreshed.ok ||
-      refreshed.credentials.appId !== profile.appId ||
-      refreshed.credentials.userOpenId !== profile.userOpenId
-    ) {
+    // Isolate per account: a THROWN refresh (e.g. the cross-process lock timing
+    // out while a slow OAuth call holds it) must skip THIS account, not abort
+    // reporting for every other profile.
+    let refreshed: DirectLarkRefreshResult;
+    try {
+      refreshed = await refreshLarkCredentialsDirect(beforeRefresh.credentials, dependencies);
+    } catch (error) {
+      refreshed = { ok: false, kind: 'fetch-failed', message: sanitizeAuthError(error) };
+    }
+    if (!refreshed.ok) {
       skipped.push({
-        ...profile,
-        reason: 'no-credentials',
-        message: refreshed.ok ? 'lark-cli 刷新后凭证身份不匹配，未执行上报' : refreshed.message,
+        appId: profile.appId,
+        userOpenId: profile.userOpenId,
+        reason: 'refresh-failed',
+        message: refreshed.message,
       });
       continue;
     }
@@ -743,11 +1095,23 @@ export interface LarkBatchReportConfig {
   fetchImpl?: typeof fetch;
   endpointPath?: string;
   onPayload?: (payload: LarkBatchReport) => void;
-  __lookupAllForTests?: () => GetLarkCredentialsAllResult;
+  __lookupAllForTests?: () => GetLarkCredentialsAllResult | Promise<GetLarkCredentialsAllResult>;
+  __directRefreshForTests?: DirectLarkRefreshDependencies;
 }
 
 const DEFAULT_BATCH_REPORT_ENDPOINT = '/api/v1/feishu/lark-cli/credentials/batch';
 const LARK_BATCH_MAX_ITEMS = 20;
+const AGENTBUS_UPLOAD_TIMEOUT_MS = 60_000;
+
+function isTimeoutError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'TimeoutError') return true;
+  if (error instanceof Error) {
+    return (
+      error.name === 'TimeoutError' || /aborted due to timeout|timed?\s*out/i.test(error.message)
+    );
+  }
+  return false;
+}
 
 function splitBatchItems(items: LarkBatchItem[]): LarkBatchItem[][] {
   const batches: LarkBatchItem[][] = [];
@@ -787,10 +1151,10 @@ export async function reportAllLarkCredentials(
   let lookup: GetLarkCredentialsAllResult;
   try {
     lookup = config.__lookupAllForTests
-      ? config.__lookupAllForTests()
-      : getLarkCredentialsFreshAll();
-  } catch {
-    lookup = { ok: false, message: 'lark-cli 凭证读取失败' };
+      ? await config.__lookupAllForTests()
+      : await getLarkCredentialsFreshAll(config.__directRefreshForTests);
+  } catch (error) {
+    lookup = { ok: false, message: sanitizeAuthError(error) };
   }
   if (!lookup.ok) {
     return {
@@ -857,10 +1221,17 @@ export async function reportAllLarkCredentials(
         method: 'POST',
         headers: { Authorization: `Bearer ${ctx.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(batchPayload),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(AGENTBUS_UPLOAD_TIMEOUT_MS),
       });
     } catch (err) {
-      return failureStatus(undefined, now, 'fetch-failed', sanitizeAuthError(err));
+      return failureStatus(
+        undefined,
+        now,
+        'fetch-failed',
+        isTimeoutError(err)
+          ? `AgentBus Lark 凭证上传超时（${AGENTBUS_UPLOAD_TIMEOUT_MS / 1000} 秒）`
+          : sanitizeAuthError(err)
+      );
     }
     if (!response.ok) {
       let body = '';
@@ -918,7 +1289,10 @@ export const __internals = {
   decryptAesGcm,
   discoverProfilesMacCore,
   parseStoredToken,
-  parseLarkCliPersonalAuthorizations,
+  oauthEndpointForBrand,
+  readMasterKeyFile,
+  directRefreshLockPath,
+  removeOrphanedRefreshLock,
   safeFileName,
   pickProfileNameByAppId,
 };

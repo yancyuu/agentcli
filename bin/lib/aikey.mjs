@@ -1,15 +1,21 @@
 // aikey.mjs — CLI "认领 aikey" command + token-distribution config writer.
 //
-// Two distribution surfaces, both fed by the same provider→SDK-env-var map:
+// Three distribution surfaces, the first two fed by the same provider→SDK-env-var map:
 //   • applyToConfigs / applyClaimedSecret — the LIVE path: writes the gateway key
 //     straight into ~/.claude/settings.json (env.ANTHROPIC_AUTH_TOKEN/BASE_URL +
 //     tier model vars) and ~/.codex/{auth.json,config.toml}. Claude Code / Codex
-//     read their key from their own config, so NO shell-env injection is needed.
+//     read their key from their own config.
 //   • ~/.hermit/aikey.env — a sourced env file kept as the "claimed" marker and as
 //     a convenience for external agents (see runAikeyManual). It is never auto-
-//     sourced: the old precmd/PROMPT_COMMAND shell hook was REMOVED because the
-//     config-file injection above makes per-shell env exports redundant. Do not
-//     re-add it.
+//     sourced: the old precmd/PROMPT_COMMAND shell hook was REMOVED. Do not
+//     re-add a per-prompt hook.
+//   • applyToEnvironment — one-shot, claim-time write of the key into REAL
+//     environment variables (user request, 2026-07): a marked block in
+//     ~/.zshrc / ~/.bashrc so new shells export it, `launchctl setenv` on macOS
+//     for GUI apps, and the HKCU user environment on Windows. This replaces the
+//     per-prompt hook's job without hooking every prompt. Best-effort: a failing
+//     surface is reported, never thrown — the config files above already suffice
+//     for Claude Code / Codex themselves.
 //
 // Three adaptations to hermit's reality (no local aikey-proxy; key sourced from a
 // server endpoint that is NOT supported yet → mocked locally):
@@ -24,6 +30,7 @@
 // ~/.hermit/aikey-mock.json — letting ops exercise the full pipeline today.
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 
 import { hermitHome, jsonRequested } from './env.mjs';
@@ -213,6 +220,18 @@ export async function runAikey({ exitOnDone = true } = {}) {
   const activation = await activateAikeyBundle({ bundle, home });
   const sourceLabel = bundle.source === 'server' ? `服务端 (${resolveConversationUploadBaseUrl()})` : `本地 mock (${path.join(home, 'aikey-mock.json')})`;
 
+  // Also persist to the real environment (shell rc / launchctl / Windows user
+  // env) — the same one-shot, best-effort write as the token-pool claim path.
+  const sysVars = {};
+  for (const [code, creds] of Object.entries(bundle.providers || {})) {
+    const envVars = providerEnvVars(code);
+    if (!envVars) continue;
+    const [apiKeyVar, baseUrlVar] = envVars;
+    if (creds?.apiKey) sysVars[apiKeyVar] = creds.apiKey;
+    if (creds?.baseUrl) sysVars[baseUrlVar] = creds.baseUrl;
+  }
+  const envApply = applyToEnvironment({ vars: sysVars });
+
   if (jsonRequested) {
     printJson({
       ok: true,
@@ -220,6 +239,7 @@ export async function runAikey({ exitOnDone = true } = {}) {
       source: bundle.source,
       envPath: activation.envPath,
       providers: activation.providers,
+      envWritten: envApply.ok,
     });
   }
 
@@ -227,7 +247,8 @@ export async function runAikey({ exitOnDone = true } = {}) {
     ['来源', sourceLabel, 'info'],
     ...activation.providerRows,
     ['写入', activation.envPath, 'ok'],
-  ], `立即执行：source ${activation.envPath} 获取 key + base_url（或供外部 agent source）。`);
+    ['环境变量', envApply.ok ? '已写入 shell/系统环境变量' : '部分写入失败（配置不受影响）', envApply.ok ? 'ok' : 'warn'],
+  ], `新开终端直接可用；外部 agent 也可 source ${activation.envPath} 获取 key + base_url。`);
 
   const result = { ok: true, source: bundle.source, envPath: activation.envPath, providers: activation.providers };
   if (exitOnDone) process.exit(0);
@@ -696,6 +717,176 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
     home: envHome,
   });
   return { ok: true, runtimes: results, endpoints, tierModels };
+}
+
+// --- System environment injection (one-shot, at claim time) -------------------
+// See the file header: this is NOT the removed per-prompt hook. It writes once
+// per claim, and every surface is best-effort (reported, never thrown) so an
+// env-write failure can never fail a claim whose config files already landed.
+//
+//   • macOS/Linux — an idempotent marked block in the primary shell rc file
+//     (~/.zshrc on macOS, ~/.bashrc on Linux; the secondary rc only when the
+//     user already has one — don't scatter new dotfiles), so every NEW shell
+//     exports the key. macOS additionally gets `launchctl setenv` so
+//     already-running GUI apps pick it up.
+//   • Windows — HKCU user environment via [Environment]::SetEnvironmentVariable
+//     (survives reboot; new terminals see it). Secrets travel over stdin, never
+//     in argv (argv is world-visible via `ps`).
+
+const ENV_BLOCK_BEGIN = '# >>> hermit aikey >>>';
+const ENV_BLOCK_END = '# <<< hermit aikey <<<';
+
+// Escape for POSIX double-quoted strings: " \ $ and backtick stay special there.
+function shellEscapeDoubleQuoted(value) {
+  return String(value).replace(/(["\\$`])/g, '\\$1');
+}
+
+export function renderShellEnvBlock(vars) {
+  const lines = [
+    ENV_BLOCK_BEGIN,
+    '# auto-generated by agentcli 认领 — manual edits are overwritten on the next claim',
+  ];
+  for (const [name, raw] of Object.entries(vars || {})) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    lines.push(`export ${name}="${shellEscapeDoubleQuoted(value)}"`);
+  }
+  lines.push(ENV_BLOCK_END);
+  return `${lines.join('\n')}\n`;
+}
+
+// Replace the hermit block in `content` (markers inclusive), or append it when
+// no well-formed block exists. Content outside the markers is kept verbatim.
+export function upsertMarkedBlock(content, block) {
+  const body = String(content || '');
+  const lines = body.split('\n');
+  const beginIdx = lines.findIndex((line) => line.trim() === ENV_BLOCK_BEGIN);
+  const endIdx = beginIdx >= 0
+    ? lines.findIndex((line, idx) => idx > beginIdx && line.trim() === ENV_BLOCK_END)
+    : -1;
+  const blockLines = block.replace(/\n+$/, '').split('\n');
+  if (beginIdx >= 0 && endIdx > beginIdx) {
+    lines.splice(beginIdx, endIdx - beginIdx + 1, ...blockLines);
+    return lines.join('\n');
+  }
+  const trimmed = body.replace(/\s+$/, '');
+  return trimmed ? `${trimmed}\n\n${block}` : block;
+}
+
+// Primary rc is always written; the secondary only when it already exists.
+function rcPlanFor(platform) {
+  if (platform === 'darwin') return [{ name: '.zshrc', always: true }, { name: '.bashrc', always: false }];
+  if (platform === 'linux') return [{ name: '.bashrc', always: true }, { name: '.zshrc', always: false }];
+  return [];
+}
+
+export function applyShellRcEnv({ vars, home, plan }) {
+  const block = renderShellEnvBlock(vars);
+  const results = [];
+  for (const { name, always } of plan || []) {
+    const rcPath = path.join(home, name);
+    try {
+      if (!always && !existsSync(rcPath)) {
+        results.push({ surface: rcPath, ok: true, skipped: true });
+        continue;
+      }
+      let current = '';
+      try {
+        current = readFileSync(rcPath, 'utf-8');
+      } catch {
+        // New rc file — nothing to preserve, nothing to back up.
+      }
+      backupFile(rcPath, true); // no-op unless the file pre-exists
+      atomicWriteFile(rcPath, upsertMarkedBlock(current, block), { mode: 0o600 });
+      results.push({ surface: rcPath, ok: true });
+    } catch (error) {
+      results.push({ surface: rcPath, ok: false, message: String(error?.message || error) });
+    }
+  }
+  return results;
+}
+
+function applyLaunchctlEnv({ vars, spawnImpl }) {
+  const failures = [];
+  for (const [name, value] of Object.entries(vars)) {
+    try {
+      const res = spawnImpl('launchctl', ['setenv', name, value], { encoding: 'utf-8' });
+      if (res?.error) throw res.error;
+      if (res?.status !== 0) throw new Error(String(res?.stderr || `exit ${res?.status}`).trim());
+    } catch (error) {
+      failures.push(`${name}: ${error?.message || error}`);
+    }
+  }
+  return failures.length === 0
+    ? { surface: 'launchctl', ok: true }
+    : { surface: 'launchctl', ok: false, message: failures.join('; ') };
+}
+
+function applyWindowsUserEnv({ vars, spawnImpl }) {
+  const ps = [
+    '$ErrorActionPreference="Stop"',
+    '$vars = [Console]::In.ReadToEnd() | ConvertFrom-Json',
+    'foreach ($p in $vars.PSObject.Properties) { [Environment]::SetEnvironmentVariable($p.Name, $p.Value, [EnvironmentVariableTarget]::User) }',
+  ].join('; ');
+  try {
+    const res = spawnImpl('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      encoding: 'utf-8',
+      shell: false,
+      input: JSON.stringify(vars),
+    });
+    if (res?.error) throw res.error;
+    if (res?.status !== 0) throw new Error(String(res?.stderr || `exit ${res?.status}`).trim());
+    return { surface: 'registry-user-env', ok: true };
+  } catch (error) {
+    return { surface: 'registry-user-env', ok: false, message: String(error?.message || error) };
+  }
+}
+
+function sanitizeEnvVars(vars) {
+  const clean = {};
+  for (const [name, raw] of Object.entries(vars || {})) {
+    const value = String(raw ?? '').trim();
+    if (value) clean[name] = value;
+  }
+  return clean;
+}
+
+export function applyToEnvironment({
+  vars,
+  home = os.homedir(),
+  platform = process.platform,
+  spawnImpl = spawnSync,
+} = {}) {
+  const clean = sanitizeEnvVars(vars);
+  if (Object.keys(clean).length === 0) return { ok: true, results: [] };
+  const results = [];
+  if (platform === 'win32') {
+    results.push(applyWindowsUserEnv({ vars: clean, spawnImpl }));
+  } else {
+    results.push(...applyShellRcEnv({ vars: clean, home, plan: rcPlanFor(platform) }));
+    if (platform === 'darwin') results.push(applyLaunchctlEnv({ vars: clean, spawnImpl }));
+  }
+  return { ok: results.every((r) => r.ok), results };
+}
+
+// Vars for the token-pool claim path. Mirrors the settings.json choice: Claude
+// gets ANTHROPIC_AUTH_TOKEN (NOT API_KEY — Claude Code honors AUTH_TOKEN for
+// custom gateways, and exporting both makes it send conflicting auth headers),
+// Codex gets OPENAI_API_KEY. Only the user's chosen runtimes are exported.
+export function systemEnvVarsForClaim({ secret, endpoints = {}, runtimes = ['claude', 'codex'] } = {}) {
+  const key = String(secret?.key || secret?.api_key || secret?.plaintext_key || '').trim();
+  if (!key) return {};
+  const wanted = Array.isArray(runtimes) ? runtimes : [runtimes];
+  const vars = {};
+  if (wanted.includes('claude')) {
+    vars.ANTHROPIC_AUTH_TOKEN = key;
+    if (endpoints.claude) vars.ANTHROPIC_BASE_URL = endpoints.claude;
+  }
+  if (wanted.includes('codex')) {
+    vars.OPENAI_API_KEY = key;
+    if (endpoints.codex) vars.OPENAI_BASE_URL = endpoints.codex;
+  }
+  return vars;
 }
 
 export function maskKey(key) {

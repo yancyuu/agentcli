@@ -88,3 +88,43 @@ describe('buildClaimResultRows — written config file paths', () => {
     expect(rows.some(([label]) => label === 'Claude 配置')).toBe(false);
   });
 });
+
+describe('buildClaimResultRows — system environment rows', () => {
+  // The claim also writes the key into REAL environment variables (shell rc
+  // block / launchctl / Windows user env). The panel must surface each written
+  // env target so a silent env-write failure is visible; failures warn but
+  // never fail the claim itself.
+  function rowsWithEnv(envApply) {
+    return buildClaimResultRows({
+      apply: baseApply,
+      choices: { model: 'glm-5.2', wireApi: 'responses' },
+      runtimes: ['claude', 'codex'],
+      envFilePath: '/home/x/.hermit/aikey.env',
+      backupRootPath: '/home/x/.hermit/agentcli.env.bak',
+      backupCreated: false,
+      maskedKey: 'aim_…GyP8',
+      envApply,
+    });
+  }
+
+  it('shows ok rows for written env surfaces and warn rows for failures', () => {
+    const rows = rowsWithEnv({
+      ok: false,
+      results: [
+        { surface: '/home/x/.zshrc', ok: true },
+        { surface: '/home/x/.bashrc', ok: true, skipped: true },
+        { surface: 'launchctl', ok: false, message: 'boom' },
+      ],
+    });
+
+    expect(rows).toContainEqual(['环境变量', '/home/x/.zshrc（已写入）', 'ok']);
+    expect(rows).toContainEqual(['环境变量', 'launchctl 写入失败：boom', 'warn']);
+    // Skipped surfaces (secondary rc did not exist) stay quiet.
+    expect(rows.some((r) => String(r[1]).includes('.bashrc'))).toBe(false);
+  });
+
+  it('emits no env rows when envApply is absent', () => {
+    const rows = rowsFor({ runtimes: ['claude'], model: 'glm-5.2' });
+    expect(rows.some(([label]) => label === '环境变量')).toBe(false);
+  });
+});

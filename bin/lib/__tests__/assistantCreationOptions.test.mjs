@@ -16,10 +16,10 @@ import {
 } from '../assistantCreationOptions.mjs';
 
 describe('assistantCreationOptions — shared CLI assistant wizard options', () => {
-  it('offers only Claude Code and Codex runtimes for the claim/create wizard', () => {
+  it('offers Codex followed by Claude Code for the claim/create wizard', () => {
     const actions = assistantAgentTypeActions();
 
-    expect(actions.map((action) => action.id)).toEqual(['claudecode', 'codex']);
+    expect(actions.map((action) => action.id)).toEqual(['codex', 'claudecode']);
     expect(labelForAssistantAgentType('claudecode')).toBe('Claude Code');
     expect(labelForAssistantAgentType('codex')).toBe('Codex');
     expect(isSupportedAssistantAgentType('claudecode')).toBe(true);
