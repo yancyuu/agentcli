@@ -16,9 +16,9 @@
  * daemon can keep the code in sync with the CLI without spawning a child process.
  */
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -363,7 +363,7 @@ function parseStoredToken(json: string): {
 function discoverProfilesMacCore(opts: {
   dir: string;
   key: Buffer | null;
-}): Array<{ appId: string; userOpenId: string }> {
+}): { appId: string; userOpenId: string }[] {
   const key = opts.key;
   if (!key) return [];
   if (!existsSync(opts.dir)) return [];
@@ -373,7 +373,7 @@ function discoverProfilesMacCore(opts: {
   } catch {
     return [];
   }
-  const profiles: Array<{ appId: string; userOpenId: string }> = [];
+  const profiles: { appId: string; userOpenId: string }[] = [];
   for (const name of names) {
     if (!name.endsWith('.enc')) continue;
     let buf: Buffer;
@@ -394,7 +394,7 @@ function discoverProfilesMacCore(opts: {
   return profiles;
 }
 
-function discoverProfilesMac(): Array<{ appId: string; userOpenId: string }> {
+function discoverProfilesMac(): { appId: string; userOpenId: string }[] {
   return discoverProfilesMacCore({ dir: storageDirMac(), key: getMasterKeyMac() });
 }
 
@@ -408,7 +408,7 @@ function activeAppId(): string | undefined {
   if (!existsSync(config)) return undefined;
   try {
     const parsed = JSON.parse(readFileSync(config, 'utf-8')) as {
-      apps?: Array<{ appId?: string }>;
+      apps?: { appId?: string }[];
     };
     if (Array.isArray(parsed.apps) && parsed.apps.length) {
       return parsed.apps[0].appId || undefined;
@@ -534,10 +534,10 @@ function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
 }
 
 export function pickProfileNameByAppId(
-  profiles: Array<{ appId?: string; name?: string }>,
+  profiles: { appId?: string; name?: string }[],
   appId: string
 ): string {
-  const hit = profiles.find((p) => p && p.appId === appId);
+  const hit = profiles.find((p) => p?.appId === appId);
   return hit?.name || appId;
 }
 
@@ -1133,7 +1133,7 @@ export async function reportAllLarkCredentials(
   config: LarkBatchReportConfig
 ): Promise<LarkCredentialsReportStatus> {
   const now = new Date().toISOString();
-  if (!config || !config.hermitHome) {
+  if (!config?.hermitHome) {
     return {
       ok: false,
       enabled: true,

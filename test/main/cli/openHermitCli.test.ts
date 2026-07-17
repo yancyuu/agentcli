@@ -401,7 +401,7 @@ describe('openHermit CLI read-only workspace commands', () => {
         'exit',
       ]);
       expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'web')?.label).toBe('本地工作台');
-      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('用量同步');
+      expect(parsed.actions.find((action: { id: string; label: string }) => action.id === 'data-sync')?.label).toBe('消息总线');
       expect(parsed.actions.find((action: { id: string; description: string }) => action.id === 'data-sync')?.description).toContain('消息上报');
       expect(parsed.message).toContain('本地使用');
       expect(parsed.message).toContain('本地/自托管团队协作无需登录');
@@ -775,6 +775,19 @@ describe('openHermit CLI read-only workspace commands', () => {
 
   it('runs usage report without auth when message upload is disabled', async () => {
     await withHermitHome(async (hermitHome) => {
+      // Conversation upload is DEFAULT-ON for fresh installs (see uploadState.mjs),
+      // so seed an explicit opt-out to exercise the "upload disabled" path.
+      await writeFile(
+        path.join(hermitHome, 'settings.json'),
+        JSON.stringify({
+          taskBus: {
+            telemetry: {
+              conversationUploadEnabled: false,
+              conversations: { uploadEnabled: false },
+            },
+          },
+        })
+      );
       const report = await runCli(
         hermitHome,
         ['--port', '5999', 'usage', 'report', '--json'],
@@ -792,6 +805,31 @@ describe('openHermit CLI read-only workspace commands', () => {
       expect(parsedReport.worker.running).toBe(false);
       expect(report.stderr).toBe('');
       expect(existsSync(path.join(hermitHome, 'hermit-bridge'))).toBe(false);
+    });
+  });
+
+  it('requires login for usage report on a fresh install where upload defaults on', async () => {
+    await withHermitHome(async (hermitHome) => {
+      try {
+        await runCli(
+          hermitHome,
+          ['--port', '5999', 'usage', 'report', '--json'],
+          { OPENHERMIT_USAGE_WORKER_MODE: 'test', OPENHERMIT_SKIP_LAUNCHCTL: '1' }
+        );
+      } catch (err) {
+        const failure = err as { stdout?: string };
+        const parsed = JSON.parse(failure.stdout || '{}');
+        expect(parsed).toMatchObject({
+          ok: false,
+          command: 'usage report',
+          auth: { authorized: false },
+          upload: { enabled: true, authorized: false },
+        });
+        expect(parsed.error).toContain('login required');
+        expect(existsSync(path.join(hermitHome, 'hermit-bridge'))).toBe(false);
+        return;
+      }
+      throw new Error('Expected usage report to exit non-zero when upload defaults on without auth');
     });
   });
 
