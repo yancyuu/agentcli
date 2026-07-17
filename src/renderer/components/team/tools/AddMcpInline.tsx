@@ -4,8 +4,8 @@
 
 import { useState } from 'react';
 
-import { Button } from '@renderer/components/ui/button';
 import { McpLibraryEntryDialog } from '@renderer/components/extensions/mcp/McpLibraryEntryDialog';
+import { Button } from '@renderer/components/ui/button';
 
 import type { McpLibraryEntry } from '@shared/types/extensions';
 
@@ -29,7 +29,7 @@ export const AddMcpInline = ({ onAdded, onCancel }: AddMcpInlineProps): React.JS
 
   return (
     <>
-      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--color-border)] px-2 py-2">
+      <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--color-border)] p-2">
         <div className="min-w-0 flex-1 text-xs text-[var(--color-text-muted)]">
           先保存一个全局模板，随后可为当前项目填写独立实例名和参数。
         </div>

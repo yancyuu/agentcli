@@ -5,7 +5,21 @@
  * state, skills, credentials) and returns results via IPC.
  */
 
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
+import {
+  CapabilityPackLoaderService,
+  type LocalCapabilityPackSource,
+} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
+import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
+import { CredentialService } from '@main/services/extensions/credentials/CredentialService';
+import { ExtensionFacadeService } from '@main/services/extensions/ExtensionFacadeService';
+import { McpLibraryService } from '@main/services/extensions/library/McpLibraryService';
+import { getAdapter } from '@main/services/extensions/runtime/adapterRegistry';
+import { SkillsCatalogService } from '@main/services/extensions/skills/SkillsCatalogService';
+import { SkillsMutationService } from '@main/services/extensions/skills/SkillsMutationService';
+import { SkillsWatcherService } from '@main/services/extensions/skills/SkillsWatcherService';
+import { PluginInstallationStateService } from '@main/services/extensions/state/PluginInstallationStateService';
+import { createLogger } from '@shared/utils/logger';
+
 import type {
   CapabilityCommandPromptRequest,
   CapabilityPackExportRequest,
@@ -20,21 +34,7 @@ import type {
   SkillUpsertRequest,
   SkillWatcherEvent,
 } from '@shared/types/extensions';
-
-import {
-  CapabilityPackLoaderService,
-  type LocalCapabilityPackSource,
-} from '@main/services/extensions/capability-packs/CapabilityPackLoaderService';
-import { PluginCatalogService } from '@main/services/extensions/catalog/PluginCatalogService';
-import { ExtensionFacadeService } from '@main/services/extensions/ExtensionFacadeService';
-import { McpLibraryService } from '@main/services/extensions/library/McpLibraryService';
-import { PluginInstallationStateService } from '@main/services/extensions/state/PluginInstallationStateService';
-import { SkillsCatalogService } from '@main/services/extensions/skills/SkillsCatalogService';
-import { SkillsMutationService } from '@main/services/extensions/skills/SkillsMutationService';
-import { SkillsWatcherService } from '@main/services/extensions/skills/SkillsWatcherService';
-import { CredentialService } from '@main/services/extensions/credentials/CredentialService';
-import { getAdapter } from '@main/services/extensions/runtime/adapterRegistry';
-import { createLogger } from '@shared/utils/logger';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 const logger = createLogger('Extensions:IPC');
 
@@ -190,7 +190,7 @@ export const extensionHandlers = {
     harnessType?: HermitBridgeAgentType
   ) =>
     wrapHandler(async () => {
-      const ht = (harnessType ?? 'claudecode') as HermitBridgeAgentType;
+      const ht = harnessType ?? 'claudecode';
       const adapter = getAdapter(ht);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${ht}` };
 
@@ -219,7 +219,7 @@ export const extensionHandlers = {
     wrapHandler(async () => {
       const harnessType = (request.harnessType ?? 'claudecode') as HermitBridgeAgentType;
       const adapter = getAdapter(harnessType);
-      if (!adapter || !adapter.supportsMcp) {
+      if (!adapter?.supportsMcp) {
         return { state: 'error' as const, error: `MCP not supported by ${harnessType}` };
       }
 
@@ -244,7 +244,7 @@ export const extensionHandlers = {
     harnessType?: HermitBridgeAgentType
   ) =>
     wrapHandler(async () => {
-      const ht = (harnessType ?? 'claudecode') as HermitBridgeAgentType;
+      const ht = harnessType ?? 'claudecode';
       const adapter = getAdapter(ht);
       if (!adapter) return { state: 'error' as const, error: `No adapter for ${ht}` };
 

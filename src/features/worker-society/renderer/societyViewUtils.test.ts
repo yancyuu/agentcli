@@ -9,13 +9,14 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { PublishedNeed } from '../core/domain/models/society';
 import {
   NEED_STATUS_LABEL,
   needStatusColor,
   pickAvatarUrl,
   reputationColor,
 } from './societyViewUtils';
+
+import type { PublishedNeed } from '../core/domain/models/society';
 
 describe('NEED_STATUS_LABEL', () => {
   it('provides a non-empty Chinese label for every need status', () => {

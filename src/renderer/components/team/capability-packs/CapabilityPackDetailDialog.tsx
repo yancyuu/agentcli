@@ -20,7 +20,7 @@ interface CapabilityPackDetailDialogProps {
   onClose: () => void;
 }
 
-function SectionBlock({
+const SectionBlock = ({
   label,
   count,
   children,
@@ -28,7 +28,7 @@ function SectionBlock({
   label: string;
   count: number;
   children: React.ReactNode;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
@@ -46,9 +46,9 @@ function SectionBlock({
       )}
     </section>
   );
-}
+};
 
-function ItemRow({
+const ItemRow = ({
   primary,
   secondary,
   badges,
@@ -56,7 +56,7 @@ function ItemRow({
   primary: string;
   secondary?: string;
   badges?: React.ReactNode;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <div className="bg-surface/40 flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2">
       <div className="min-w-0 space-y-0.5">
@@ -72,13 +72,13 @@ function ItemRow({
       ) : null}
     </div>
   );
-}
+};
 
-export function CapabilityPackDetailDialog({
+export const CapabilityPackDetailDialog = ({
   pack,
   open,
   onClose,
-}: CapabilityPackDetailDialogProps): React.JSX.Element {
+}: CapabilityPackDetailDialogProps): React.JSX.Element => {
   const manifest = pack?.manifest;
   const commands = manifest?.capabilities.commands ?? [];
   const skills = manifest?.capabilities.skills ?? [];
@@ -198,4 +198,4 @@ export function CapabilityPackDetailDialog({
       ) : null}
     </Dialog>
   );
-}
+};

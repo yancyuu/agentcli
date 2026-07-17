@@ -1,7 +1,4 @@
 import { EventEmitter } from 'events';
-
-import type { SpawnOptions } from 'child_process';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,6 +6,8 @@ import {
   DirectCliSessionManager,
   formatClaudeStdinUserTurn,
 } from './DirectCliSessionManager';
+
+import type { SpawnOptions } from 'child_process';
 
 /** Minimal fake ChildProcess: stdout/stderr/stdin as EventEmitters + kill. */
 interface FakeChild {

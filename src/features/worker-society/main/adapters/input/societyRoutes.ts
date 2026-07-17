@@ -6,14 +6,13 @@
  *
  * 路由风格对齐 server.ts 既有约定（app.get/post，try/catch 返回兜底，body 用 Record 解析）。
  */
-import type { FastifyInstance } from 'fastify';
-
-import type { AgentCapability } from '../../../core/domain/models/society';
 import type {
   PublishNeedCommand,
   RegisterProfileCommand,
 } from '../../../core/application/WorkerSocietyService';
+import type { AgentCapability } from '../../../core/domain/models/society';
 import type { SocietyComponents } from '../../composition/societyComposition';
+import type { FastifyInstance } from 'fastify';
 
 export function registerSocietyRoutes(app: FastifyInstance, c: SocietyComponents): void {
   // ── workers（发现 / 档案）──────────────────────────────────────────────
@@ -151,7 +150,7 @@ export function registerSocietyRoutes(app: FastifyInstance, c: SocietyComponents
   app.post('/api/society/autonomy/tick', async (request) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const numOrUndef = (k: string): number | undefined =>
-      typeof body[k] === 'number' ? (body[k] as number) : undefined;
+      typeof body[k] === 'number' ? body[k] : undefined;
     const applied = await c.service.runAutonomyTick({
       maxVolunteersPerNeed: numOrUndef('maxVolunteersPerNeed'),
       maxNeedsPerWorker: numOrUndef('maxNeedsPerWorker'),

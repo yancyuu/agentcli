@@ -4,26 +4,26 @@ import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
 import {
+  Calendar,
   CheckCircle2,
   ClipboardList,
-  PlayCircle,
-  Calendar,
   Columns3,
+  PlayCircle,
   RefreshCw,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { KanbanColumn } from '../team/kanban/KanbanColumn';
 import { SchedulesView } from '../schedules/SchedulesView';
+import { KanbanColumn } from '../team/kanban/KanbanColumn';
 
 import type { GlobalTask, TeamTaskStatus } from '@shared/types';
 
 type TasksSubTab = 'overview' | 'schedules';
 type OverviewStatus = Extract<TeamTaskStatus, 'pending' | 'in_progress' | 'completed'>;
-type OverviewTaskEntry = {
+interface OverviewTaskEntry {
   task: GlobalTask;
   updatedAtMs: number;
-};
+}
 
 const SUB_TABS: { id: TasksSubTab; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Loop 任务总览', icon: <Columns3 size={13} /> },

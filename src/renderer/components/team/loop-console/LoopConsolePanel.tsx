@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
+import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
 import { selectTeamMessages, TEAM_MESSAGES_PAGE_LIMIT } from '@renderer/store/slices/teamSlice';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
-import type { LeadToolActivity } from '@renderer/utils/leadToolActivity';
 import {
   Bot,
   FilePen,
   FileText,
   Globe,
+  type LucideIcon,
   Search,
   SquareTerminal,
   Terminal,
   Trash2,
   Wrench,
-  type LucideIcon,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -36,6 +35,7 @@ import { useLeadSessionToolActivity } from './useLeadSessionToolActivity';
 import { useLoopConsoleController } from './useLoopConsoleController';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
+import type { LeadToolActivity } from '@renderer/utils/leadToolActivity';
 import type {
   CcSession,
   InboxMessage,
@@ -96,7 +96,7 @@ function reconcilePendingRepliesByMember(
   return changed ? next : pendingRepliesByMember;
 }
 
-export function LoopConsolePanel({
+export const LoopConsolePanel = ({
   teamName,
   members,
   tasks,
@@ -118,7 +118,7 @@ export function LoopConsolePanel({
   onTaskIdClick,
   statusLabel,
   sessionPendingRecipient,
-}: LoopConsolePanelProps): React.JSX.Element {
+}: LoopConsolePanelProps): React.JSX.Element => {
   const {
     teams,
     openTeamTab,
@@ -351,7 +351,7 @@ export function LoopConsolePanel({
       />
     </div>
   );
-}
+};
 
 function toolIcon(name: string): LucideIcon {
   switch (name) {
@@ -383,7 +383,7 @@ function toolIcon(name: string): LucideIcon {
  * Newest first; horizontally scrollable so a burst of activity never overflows
  * the console layout.
  */
-function LeadToolActivityStrip({ activities }: { activities: readonly LeadToolActivity[] }) {
+const LeadToolActivityStrip = ({ activities }: { activities: readonly LeadToolActivity[] }) => {
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5">
       <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[var(--color-text-muted)]">
@@ -408,4 +408,4 @@ function LeadToolActivityStrip({ activities }: { activities: readonly LeadToolAc
       })}
     </div>
   );
-}
+};

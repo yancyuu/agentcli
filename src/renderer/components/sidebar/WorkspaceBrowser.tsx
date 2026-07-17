@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@renderer/api';
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
 import { useStore } from '@renderer/store';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, ArrowUp, HardDrive } from 'lucide-react';
+import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
+import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, HardDrive } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import type { WorkspaceFileEntry, WorkspaceListResponse } from '@shared/types/editor';
-import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
 function getRelativePath(currentDir: string, rootPath: string): string {
   if (!currentDir || currentDir === rootPath) return '';
@@ -146,7 +146,10 @@ const TeamWorkspace = ({
           <span className="block truncate text-sm font-medium text-[var(--color-text)]">
             {teamDisplayName}
           </span>
-          <span className="block truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={projectPath}>
+          <span
+            className="block truncate font-mono text-[10px] text-[var(--color-text-muted)]"
+            title={projectPath}
+          >
             {projectPath}
           </span>
         </span>
@@ -353,7 +356,7 @@ export const WorkspaceBrowser = (): React.JSX.Element => {
     );
   }
 
-  if (!currentTeamWorkspace || !currentTeamWorkspace.projectPath) {
+  if (!currentTeamWorkspace?.projectPath) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <FolderOpen size={32} className="opacity-30" />

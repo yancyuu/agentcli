@@ -2,9 +2,9 @@
  * OpenCode harness adapter — uses `opencode` CLI for MCP and skills.
  */
 
-import { getHomeDir } from '@main/utils/pathDecoder';
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import path from 'node:path';
+
+import { getHomeDir } from '@main/utils/pathDecoder';
 
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter';
 
@@ -20,6 +20,7 @@ import type {
   McpInstallSpec,
   OperationResult,
 } from '@shared/types/extensions';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 function resolveBinaryFromPath(binaryName: string): Promise<string | null> {
   return new Promise((resolve) => {

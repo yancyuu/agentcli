@@ -29,66 +29,121 @@ import {
   cpSync,
   existsSync as _existsSync2,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import cors from '@fastify/cors';
 import staticPlugin from '@fastify/static';
+import { createDashboardRecentProjectsLoader } from '@features/recent-projects/main/composition/dashboardRecentProjects';
+import {
+  executeSocietyMcpTool,
+  SOCIETY_MCP_TOOLS,
+} from '@features/worker-society/main/adapters/input/societyMcp';
+import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
+import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
+import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
+import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
+import {
+  SYSTEM_MANAGER_BIND_PROJECT,
+  SYSTEM_MANAGER_DISPLAY_NAME,
+  SYSTEM_MANAGER_TEAM_NAME,
+} from '@shared/types/team';
+import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
+import { discoverableTeamToWorker, type DiscoverableWorker } from '@shared/types/worker';
 import { Cron } from 'croner';
 import Fastify from 'fastify';
 
-import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
+import {
+  buildDirectReplyMessageId,
+  type DirectCliEvent,
+  DirectCliSessionManager,
+} from './services/direct-cli';
+import { buildTeamCapabilityTelemetrySnapshots } from './services/extensions/capability-packs/CapabilityPackLoaderService';
+import { httpsGetFollowRedirects } from './services/extensions/catalog/PluginCatalogService';
+import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
+import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
+import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
+import {
+  isPlaceholderWorkDir,
+  needsWorkDirReconcile,
+} from './services/hermitBridge/workDirReconcile';
+import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
+import {
+  ConversationTelemetryService,
+  shouldIncludeContent,
+} from './services/session-intelligence/ConversationTelemetryService';
+import { defaultImSessionsDir, ImLiveWatcher } from './services/session-intelligence/ImLiveWatcher';
+import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
+import {
+  type ProjectUsageStats,
+  scanProjectStats,
+} from './services/session-intelligence/SessionUsageParser';
+import {
+  filterHiddenTeamSessions,
+  mergeLocalAndCcSessions,
+} from './services/session-intelligence/teamSessionListMapper';
+import {
+  configureUsageTelemetry,
+  getTelemetryRuntimeStatus,
+  getTelemetryStatus,
+  startTelemetry,
+  stopTelemetry,
+  triggerScan,
+} from './services/session-intelligence/UsageTelemetryService';
+import {
+  DEFAULT_HERMIT_CC_SETTINGS,
+  HermitCcSettingsService,
+} from './services/settings/HermitCcSettingsService';
+import { ensureAdminLoopInitialized as runAdminLoopInit } from './services/system-manager/AdminLoopInitializer';
+import { ensureGlobalWorkflows } from './services/system-manager/BuiltinWorkflowSeeder';
+import {
+  adminWorkDir,
+  SystemManagerConfigService,
+} from './services/system-manager/SystemManagerConfigService';
+import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
+import { ClaudeBinaryResolver } from './services/team/ClaudeBinaryResolver';
+import { TeamProvisioningService } from './services/team-management';
+import { CollaborationBoardService } from './services/team-management/CollaborationBoardService';
+import { HERMIT_OPS_GUIDE_URL } from './services/team-management/OpsRunbookContext';
+import { TaskDispatchService } from './services/team-management/TaskDispatchService';
+import { UpdateService } from './services/UpdateService';
+import {
+  getUsageTelemetryWorkerPaths,
+  isUsageTelemetryWorkerPidRunning,
+  readUsageTelemetryWorkerStatus,
+} from './telemetry/worker';
+import {
+  isExternalPlatformSessionKey,
+  resolveExternalPlatformSessionTeamSlug,
+} from './utils/externalPlatformSessionRouting';
+import { resolveCcProjectName } from './utils/teamProjectResolution';
+
 import type {
   HermitBridgeAgentType,
   HermitBridgeProjectPlatform,
   HermitBridgeSessionDetail,
   HermitBridgeSessionListItem,
 } from '../shared/types/hermitBridge';
-import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
-import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
-import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
-import {
-  isPlaceholderWorkDir,
-  needsWorkDirReconcile,
-} from './services/hermitBridge/workDirReconcile';
-import {
-  DirectCliSessionManager,
-  buildDirectReplyMessageId,
-  type DirectCliEvent,
-} from './services/direct-cli';
-import { TeamProvisioningService } from './services/team-management';
-import { TaskDispatchService } from './services/team-management/TaskDispatchService';
-import { resolveCcProjectName } from './utils/teamProjectResolution';
-import { CollaborationBoardService } from './services/team-management/CollaborationBoardService';
-import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
-import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
-import {
-  SOCIETY_MCP_TOOLS,
-  executeSocietyMcpTool,
-} from '@features/worker-society/main/adapters/input/societyMcp';
-import {
-  SystemManagerConfigService,
-  adminWorkDir,
-} from './services/system-manager/SystemManagerConfigService';
-import { ensureAdminLoopInitialized as runAdminLoopInit } from './services/system-manager/AdminLoopInitializer';
-import { httpsGetFollowRedirects } from './services/extensions/catalog/PluginCatalogService';
-import { HERMIT_OPS_GUIDE_URL } from './services/team-management/OpsRunbookContext';
-import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
-import { ensureGlobalWorkflows } from './services/system-manager/BuiltinWorkflowSeeder';
-import {
-  SYSTEM_MANAGER_BIND_PROJECT,
-  SYSTEM_MANAGER_DISPLAY_NAME,
-  SYSTEM_MANAGER_TEAM_NAME,
-} from '@shared/types/team';
+import type {
+  UsageTelemetryStatus,
+  UsageUnresolvedSummary,
+  UserUsageTelemetryRow,
+} from './services/session-intelligence/usageTypes';
+import type { TeamManifest } from './services/team-management/TeamWorkspaceService';
+import type { CcSession, CcSessionDetail } from '@shared/types/api';
+import type {
+  CapabilityTelemetrySummary,
+  TeamCapabilityTelemetrySnapshot,
+} from '@shared/types/extensions';
 import type {
   AttachmentFileData,
   AttachmentMeta,
@@ -96,64 +151,10 @@ import type {
   SystemManagerSummary,
   TaskBusConfig,
   TeamLaunchRequest,
-  ToolApprovalSettings,
-  ToolApprovalRequest,
   ToolApprovalAutoResolved,
+  ToolApprovalRequest,
+  ToolApprovalSettings,
 } from '@shared/types/team';
-import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
-import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
-import type { TeamManifest } from './services/team-management/TeamWorkspaceService';
-import { UpdateService } from './services/UpdateService';
-import {
-  configureUsageTelemetry,
-  startTelemetry,
-  stopTelemetry,
-  triggerScan,
-  getTelemetryStatus,
-  getTelemetryRuntimeStatus,
-} from './services/session-intelligence/UsageTelemetryService';
-import {
-  getUsageTelemetryWorkerPaths,
-  isUsageTelemetryWorkerPidRunning,
-  readUsageTelemetryWorkerStatus,
-} from './telemetry/worker';
-import { buildTeamCapabilityTelemetrySnapshots } from './services/extensions/capability-packs/CapabilityPackLoaderService';
-import {
-  ConversationTelemetryService,
-  shouldIncludeContent,
-} from './services/session-intelligence/ConversationTelemetryService';
-import type {
-  UserUsageTelemetryRow,
-  UsageTelemetryStatus,
-  UsageUnresolvedSummary,
-} from './services/session-intelligence/usageTypes';
-import type {
-  CapabilityTelemetrySummary,
-  TeamCapabilityTelemetrySnapshot,
-} from '@shared/types/extensions';
-import { LocalSessionScanner } from './services/session-intelligence/LocalSessionScanner';
-import { ImLiveWatcher, defaultImSessionsDir } from './services/session-intelligence/ImLiveWatcher';
-import { ClaudeBinaryResolver } from './services/team/ClaudeBinaryResolver';
-import {
-  filterHiddenTeamSessions,
-  mergeLocalAndCcSessions,
-} from './services/session-intelligence/teamSessionListMapper';
-import {
-  DEFAULT_HERMIT_CC_SETTINGS,
-  HermitCcSettingsService,
-} from './services/settings/HermitCcSettingsService';
-import type { CcSession, CcSessionDetail } from '@shared/types/api';
-import { discoverableTeamToWorker, type DiscoverableWorker } from '@shared/types/worker';
-import { LoopAssetsScannerService } from './services/loop-assets/LoopAssetsScannerService';
-import { createDashboardRecentProjectsLoader } from '@features/recent-projects/main/composition/dashboardRecentProjects';
-import {
-  scanProjectStats,
-  type ProjectUsageStats,
-} from './services/session-intelligence/SessionUsageParser';
-import {
-  isExternalPlatformSessionKey,
-  resolveExternalPlatformSessionTeamSlug,
-} from './utils/externalPlatformSessionRouting';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
@@ -327,7 +328,7 @@ function readHermitBridgeTomlToken(section: 'bridge' | 'management'): string {
   try {
     const configFile = ensureWritableHermitBridgeConfigFile();
     const raw = readFileSync(configFile, 'utf-8');
-    const match = raw.match(new RegExp(`\\[${section}\\][^\\[]*token\\s*=\\s*"([^"]+)"`, 's'));
+    const match = new RegExp(`\\[${section}\\][^\\[]*token\\s*=\\s*"([^"]+)"`, 's').exec(raw);
     return match?.[1]?.trim() ?? '';
   } catch {
     return '';
@@ -660,6 +661,7 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
 }
 
 const collabBoard = new CollaborationBoardService();
+// eslint-disable-next-line dot-notation -- bracket access intentionally bypasses TS private modifier
 const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
 // Worker Society —— 去中心化 worker 自治社交平台（替代派单的主路径）。
@@ -875,7 +877,10 @@ function isCcProjectNotFoundError(err: unknown): boolean {
 // SSE 客户端管理器 — 广播 bridge 事件到所有连接的前端客户端
 // ===========================================================================
 
-type SseClient = { res: import('node:http').ServerResponse; id: string };
+interface SseClient {
+  res: import('node:http').ServerResponse;
+  id: string;
+}
 const sseClients = new Set<SseClient>();
 
 function broadcastSse(eventName: string, data: unknown): void {
@@ -1225,9 +1230,9 @@ async function resolveTeamSlugFromCcSessions(sessionKey: string): Promise<string
  */
 function parseHermitTeamFromSessionKey(sessionKey: string): string | null {
   if (!sessionKey) return null;
-  const hermitMatch = sessionKey.match(/^hermit:([^:]+):/);
+  const hermitMatch = /^hermit:([^:]+):/.exec(sessionKey);
   if (hermitMatch) return hermitMatch[1];
-  const bridgeMatch = sessionKey.match(/^bridge:hermit-([^:]+):/);
+  const bridgeMatch = /^bridge:hermit-([^:]+):/.exec(sessionKey);
   if (bridgeMatch) return bridgeMatch[1];
   return null;
 }
@@ -1315,7 +1320,7 @@ async function proxyToHermitBridge(
   const target = `${baseUrl}/api/v1${subPath}`;
 
   const headers: Record<string, string> = {
-    'Content-Type': (request.headers['content-type'] as string) ?? 'application/json',
+    'Content-Type': request.headers['content-type']! ?? 'application/json',
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -1453,59 +1458,59 @@ function readHermitBridgeConfig(): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   // Top-level simple fields
-  const dataDirMatch = raw.match(/^data_dir\s*=\s*"([^"]*)"/m);
+  const dataDirMatch = /^data_dir\s*=\s*"([^"]*)"/m.exec(raw);
   if (dataDirMatch) result.data_dir = dataDirMatch[1];
 
-  const languageMatch = raw.match(/^language\s*=\s*"([^"]*)"/m);
+  const languageMatch = /^language\s*=\s*"([^"]*)"/m.exec(raw);
   if (languageMatch) result.language = languageMatch[1];
 
-  const idleTimeoutMatch = raw.match(/^idle_timeout_mins\s*=\s*(\d+)/m);
+  const idleTimeoutMatch = /^idle_timeout_mins\s*=\s*(\d+)/m.exec(raw);
   if (idleTimeoutMatch) result.idle_timeout_mins = Number(idleTimeoutMatch[1]);
 
-  const maxTurnTimeMatch = raw.match(/^max_turn_time_mins\s*=\s*(\d+)/m);
+  const maxTurnTimeMatch = /^max_turn_time_mins\s*=\s*(\d+)/m.exec(raw);
   if (maxTurnTimeMatch) result.max_turn_time_mins = Number(maxTurnTimeMatch[1]);
 
-  const wsIdleTimeoutMatch = raw.match(/^workspace_idle_timeout_mins\s*=\s*(\d+)/m);
+  const wsIdleTimeoutMatch = /^workspace_idle_timeout_mins\s*=\s*(\d+)/m.exec(raw);
   if (wsIdleTimeoutMatch) result.workspace_idle_timeout_mins = Number(wsIdleTimeoutMatch[1]);
 
   // [management] section
-  const mgmtSection = raw.match(/\[management\]([^\[]*)/s);
+  const mgmtSection = /\[management\]([^\[]*)/s.exec(raw);
   if (mgmtSection) {
     const section = mgmtSection[1];
-    const enabledMatch = section.match(/enabled\s*=\s*(true|false)/);
+    const enabledMatch = /enabled\s*=\s*(true|false)/.exec(section);
     if (enabledMatch) result.management_enabled = enabledMatch[1] === 'true';
-    const portMatch = section.match(/port\s*=\s*(\d+)/);
+    const portMatch = /port\s*=\s*(\d+)/.exec(section);
     if (portMatch) result.management_port = Number(portMatch[1]);
-    const tokenMatch = section.match(/token\s*=\s*"([^"]*)"/);
+    const tokenMatch = /token\s*=\s*"([^"]*)"/.exec(section);
     if (tokenMatch) result.management_token = tokenMatch[1];
   }
 
   // [bridge] section
-  const bridgeSection = raw.match(/\[bridge\]([^\[]*)/s);
+  const bridgeSection = /\[bridge\]([^\[]*)/s.exec(raw);
   if (bridgeSection) {
     const section = bridgeSection[1];
-    const enabledMatch = section.match(/enabled\s*=\s*(true|false)/);
+    const enabledMatch = /enabled\s*=\s*(true|false)/.exec(section);
     if (enabledMatch) result.bridge_enabled = enabledMatch[1] === 'true';
-    const portMatch = section.match(/port\s*=\s*(\d+)/);
+    const portMatch = /port\s*=\s*(\d+)/.exec(section);
     if (portMatch) result.bridge_port = Number(portMatch[1]);
-    const tokenMatch = section.match(/token\s*=\s*"([^"]*)"/);
+    const tokenMatch = /token\s*=\s*"([^"]*)"/.exec(section);
     if (tokenMatch) result.bridge_token = tokenMatch[1];
   }
 
   // [log] section
-  const logSection = raw.match(/\[log\]([^\[]*)/s);
+  const logSection = /\[log\]([^\[]*)/s.exec(raw);
   if (logSection) {
-    const levelMatch = logSection[1].match(/level\s*=\s*"([^"]*)"/);
+    const levelMatch = /level\s*=\s*"([^"]*)"/.exec(logSection[1]);
     if (levelMatch) result.log_level = levelMatch[1];
   }
 
   // [display] section
-  const displaySection = raw.match(/\[display\]([^\[]*)/s);
+  const displaySection = /\[display\]([^\[]*)/s.exec(raw);
   if (displaySection) {
     const section = displaySection[1];
-    const thinkingMatch = section.match(/thinking_messages\s*=\s*(true|false)/);
+    const thinkingMatch = /thinking_messages\s*=\s*(true|false)/.exec(section);
     if (thinkingMatch) result.display_thinking = thinkingMatch[1] === 'true';
-    const toolMatch = section.match(/tool_messages\s*=\s*(true|false)/);
+    const toolMatch = /tool_messages\s*=\s*(true|false)/.exec(section);
     if (toolMatch) result.display_tool = toolMatch[1] === 'true';
   }
 
@@ -1524,7 +1529,7 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
     raw = raw.replace(/^(idle_timeout_mins\s*=\s*)\d+/m, `$1${updates.idle_timeout_mins}`);
   }
   if (updates.max_turn_time_mins !== undefined) {
-    if (raw.match(/^max_turn_time_mins\s*=/m)) {
+    if (/^max_turn_time_mins\s*=/m.exec(raw)) {
       raw = raw.replace(/^(max_turn_time_mins\s*=\s*)\d+/m, `$1${updates.max_turn_time_mins}`);
     } else {
       raw = raw.replace(
@@ -1534,7 +1539,7 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
     }
   }
   if (updates.workspace_idle_timeout_mins !== undefined) {
-    if (raw.match(/^workspace_idle_timeout_mins\s*=/m)) {
+    if (/^workspace_idle_timeout_mins\s*=/m.exec(raw)) {
       raw = raw.replace(
         /^(workspace_idle_timeout_mins\s*=\s*)\d+/m,
         `$1${updates.workspace_idle_timeout_mins}`
@@ -2239,9 +2244,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       return platformAllowFrom;
     })();
     const resolvedPlatformAllowChat = (() => {
-      const normalized = normalizePlatformAllowFrom(
-        (projectSettings as Record<string, unknown>).platform_allow_chat
-      );
+      const normalized = normalizePlatformAllowFrom(projectSettings.platform_allow_chat);
       if (Object.keys(normalized).length > 0) {
         return normalized;
       }
@@ -2290,7 +2293,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/data', async (request, r
       kanbanState: { teamName: name, reviewers: [], tasks: {} },
       processes: [],
       isAlive: isOnline,
-      platforms: (p.platforms ?? []) as HermitBridgeProjectPlatform[],
+      platforms: p.platforms ?? [],
       harness: p.agent_type,
       bindProject,
       collaboration,
@@ -2396,7 +2399,7 @@ app.delete<{ Params: { name: string }; Querystring: { deleteFiles?: string } }>(
       return reply.code(403).send({ error: 'Helm Loop 不可删除' });
     }
     try {
-      let restartRequired = false;
+      const restartRequired = false;
       let ccProjectName = teamName;
       let localTeamName = teamName;
       try {
@@ -2824,13 +2827,7 @@ async function ensureLoopSessionProjectReady(teamName: string): Promise<{
       if (!workDir) {
         throw new Error('团队缺少项目路径，无法启动 Loop runtime');
       }
-      await cc.createProject(
-        bindProject,
-        harness,
-        workDir,
-        platformType,
-        platformOptions as Record<string, string>
-      );
+      await cc.createProject(bindProject, harness, workDir, platformType, platformOptions);
       projectExists = true;
     }
 
@@ -2985,7 +2982,7 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
         // Team may only exist in cc-connect.
       }
       const bindProject = manifest?.bindProject ?? name;
-      let workDir = body.cwd ?? manifest?.workDir ?? '';
+      const workDir = body.cwd ?? manifest?.workDir ?? '';
       const harness = manifest?.harness ?? 'claudecode';
       const platformType = manifest?.platform ?? 'bridge';
       const platformOptions = manifest?.platformOptions ?? {};
@@ -3005,13 +3002,7 @@ app.post<{ Params: { name: string }; Body: Partial<TeamLaunchRequest> }>(
             return reply.code(400).send({ error: '团队缺少项目路径，无法启动 cc-connect project' });
           }
           try {
-            await cc.createProject(
-              bindProject,
-              harness,
-              workDir,
-              platformType,
-              platformOptions as Record<string, string>
-            );
+            await cc.createProject(bindProject, harness, workDir, platformType, platformOptions);
             projectExists = true;
           } catch {
             /* CC Connect project creation is best-effort */
@@ -3695,7 +3686,7 @@ const DEFAULT_APP_CONFIG = {
   runtime: {
     providerBackends: {
       gemini: 'auto' as 'auto' | 'api' | 'cli-sdk',
-      codex: 'codex-native' as 'codex-native',
+      codex: 'codex-native' as const,
     },
   },
   display: {
@@ -3789,7 +3780,7 @@ const DEFAULT_SCHEDULE_WARMUP_MINUTES = 15;
 const DEFAULT_SCHEDULE_MAX_TURNS = 50;
 const DEFAULT_SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
 
-type InMemoryScheduleRun = {
+interface InMemoryScheduleRun {
   id: string;
   scheduleId: string;
   teamName: string;
@@ -3812,7 +3803,7 @@ type InMemoryScheduleRun = {
   error?: string;
   retryCount: number;
   summary?: string;
-};
+}
 
 const scheduleRunsById = new Map<string, InMemoryScheduleRun[]>();
 const scheduleRunLogsByKey = new Map<string, { stdout: string; stderr: string }>();
@@ -4393,7 +4384,7 @@ app.post<{ Body: { path?: string; limit?: number } }>(
   '/api/config/browse-folders',
   async (request) => {
     const { path: dirPath, limit = 200 } = request.body ?? {};
-    const target = dirPath && dirPath.trim() ? dirPath.trim() : os.homedir();
+    const target = dirPath?.trim() ? dirPath.trim() : os.homedir();
 
     try {
       const entries = readdirSync(target, { withFileTypes: true });
@@ -4414,7 +4405,7 @@ app.post<{ Body: { path?: string; limit?: number } }>(
 // POST /api/workspace/list — 文件目录浏览
 app.post<{ Body: { dirPath?: string } }>('/api/workspace/list', async (request) => {
   const { dirPath } = request.body ?? {};
-  const target = dirPath && dirPath.trim() ? dirPath.trim() : os.homedir();
+  const target = dirPath?.trim() ? dirPath.trim() : os.homedir();
 
   try {
     const entries = readdirSync(target, { withFileTypes: true });
@@ -4535,7 +4526,7 @@ app.get<{ Querystring: { root?: unknown; dirPath?: unknown; maxEntries?: string 
           return {
             name: entry.name,
             path: fullPath,
-            type: (entry.isDirectory() ? 'directory' : 'file') as 'directory' | 'file',
+            type: entry.isDirectory() ? 'directory' : 'file',
             size,
           };
         })
@@ -5498,7 +5489,7 @@ async function applyTeamConfigUpdate(
       const projectMatch = tomlRaw.match(projectPattern);
       if (projectMatch) {
         let section = projectMatch[1];
-        if (section.match(/^reset_on_idle_mins\s*=/m)) {
+        if (/^reset_on_idle_mins\s*=/m.exec(section)) {
           section = section.replace(/^(reset_on_idle_mins\s*=\s*)\d+/m, `$1${resetOnIdleMins}`);
         } else {
           section = section.replace(
@@ -5527,16 +5518,14 @@ async function applyTeamConfigUpdate(
       let updatedToml = tomlRaw;
       for (const [pType, opts] of Object.entries(platformOptionsUpdate)) {
         for (const [key, value] of Object.entries(opts)) {
-          const platformSection = updatedToml.match(
-            new RegExp(
-              `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n)([^\\[]*)`,
-              's'
-            )
-          );
+          const platformSection = new RegExp(
+            `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n)([^\\[]*)`,
+            's'
+          ).exec(updatedToml);
           if (platformSection) {
             const optContent = platformSection[2];
             const tomlValue = value === 'true' || value === 'false' ? value : `"${value}"`;
-            if (optContent.match(new RegExp(`^${key}\\s*=`, 'm'))) {
+            if (new RegExp(`^${key}\\s*=`, 'm').exec(optContent)) {
               updatedToml = updatedToml.replace(
                 new RegExp(
                   `(\\[\\[projects\\.platforms\\]\\]\\s*\\ntype\\s*=\\s*"${pType}"[^\\[]*?\\[projects\\.platforms\\.options\\]\\s*\\n[^\\[]*?)^(${key}\\s*=\\s*).*$`,
@@ -5595,7 +5584,7 @@ async function applyTeamConfigUpdate(
 app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request, reply) => {
   try {
     const name = request.params.name;
-    let bindProject = await resolveRouteCcProjectName(name);
+    const bindProject = await resolveRouteCcProjectName(name);
     const p = await cc.getProject(bindProject);
     // local metadata overlay
     let color = 'blue';
@@ -5659,9 +5648,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       return platformAllowFrom;
     })();
     const resolvedPlatformAllowChat = (() => {
-      const normalized = normalizePlatformAllowFrom(
-        (projectSettings as Record<string, unknown>).platform_allow_chat
-      );
+      const normalized = normalizePlatformAllowFrom(projectSettings.platform_allow_chat);
       if (Object.keys(normalized).length > 0) {
         return normalized;
       }
@@ -5676,7 +5663,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       cc.listProviders().catch(() => []),
     ]);
     let resetOnIdleMins: number | undefined;
-    let platformOptions: Record<string, Record<string, string>> = {};
+    const platformOptions: Record<string, Record<string, string>> = {};
     try {
       const { content: tomlRaw } = readHermitBridgeConfigTomlRaw();
       const projectPattern = new RegExp(
@@ -5686,7 +5673,7 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
       const projectSection = tomlRaw.match(projectPattern);
       if (projectSection) {
         const section = projectSection[0];
-        const idleMatch = section.match(/^reset_on_idle_mins\s*=\s*(\d+)/m);
+        const idleMatch = /^reset_on_idle_mins\s*=\s*(\d+)/m.exec(section);
         if (idleMatch) resetOnIdleMins = Number(idleMatch[1]);
 
         const platformBlocks = section.matchAll(
@@ -5694,17 +5681,17 @@ app.get<{ Params: { name: string } }>('/api/teams/:name/config', async (request,
         );
         for (const block of platformBlocks) {
           const content = block[1];
-          const typeMatch = content.match(/^type\s*=\s*"([^"]*)"/m);
+          const typeMatch = /^type\s*=\s*"([^"]*)"/m.exec(content);
           if (!typeMatch) continue;
           const pType = typeMatch[1];
           const opts: Record<string, string> = {};
-          const optSection = content.match(
-            /\[projects\.platforms\.options\]\s*\n([^\[]*?)(?=\[|$)/s
+          const optSection = /\[projects\.platforms\.options\]\s*\n([^\[]*?)(?=\[|$)/s.exec(
+            content
           );
           if (optSection) {
             const optLines = optSection[1];
             for (const line of optLines.split('\n')) {
-              const kv = line.match(/^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\w+))/);
+              const kv = /^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\w+))/.exec(line);
               if (kv) opts[kv[1]] = kv[2] ?? kv[3];
             }
           }
@@ -6060,6 +6047,7 @@ app.get<{ Params: { name: string; memberName: string } }>(
       // Count completed tasks from the team's task board
       let tasksCompleted = 0;
       try {
+        // eslint-disable-next-line dot-notation -- bracket access intentionally bypasses TS private modifier
         const tasks = await svc['workspace'].readTasks(team.slug || request.params.name);
         tasksCompleted = tasks.filter((t) => t.status === 'done').length;
       } catch {
@@ -6493,11 +6481,10 @@ app.get('/api/settings/task-bus', async () => {
 
 // PUT /api/settings/task-bus → save config + start/stop telemetry
 app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
-  const config = (
+  const config =
     request.body && 'taskBus' in (request.body as unknown as Record<string, unknown>)
       ? (request.body as unknown as { taskBus: TaskBusConfig }).taskBus
-      : request.body
-  ) as TaskBusConfig;
+      : request.body;
   const configPath = HERMIT_SETTINGS_FILE;
   let settings: Record<string, unknown> = {};
   try {
@@ -6582,7 +6569,7 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
   return { ok: true, connected: false, message: 'Task bus disabled' };
 });
 
-type TelemetryProjectRow = {
+interface TelemetryProjectRow {
   cwd: string;
   displayName?: string;
   teamSlug?: string;
@@ -6593,9 +6580,9 @@ type TelemetryProjectRow = {
   tokensIn: number;
   tokensOut: number;
   tokensTotal: number;
-};
+}
 
-type TelemetryStatusShape = {
+interface TelemetryStatusShape {
   ok?: boolean;
   connected: boolean;
   scan?: ReturnType<typeof getTelemetryRuntimeStatus>;
@@ -6629,7 +6616,7 @@ type TelemetryStatusShape = {
   teamCapabilitySnapshots?: TeamCapabilityTelemetrySnapshot[];
   capabilitySummary?: CapabilityTelemetrySummary;
   unresolvedUsage?: UsageUnresolvedSummary;
-};
+}
 
 async function readTaskBusSettings(): Promise<TaskBusConfig> {
   const configPath = HERMIT_SETTINGS_FILE;
@@ -6731,7 +6718,7 @@ function dosDateTime(date: Date): { date: number; time: number } {
 }
 
 async function zipDirectoryForDownload(rootDir: string): Promise<Buffer> {
-  const files: Array<{ relativePath: string; data: Buffer; mtime: Date }> = [];
+  const files: { relativePath: string; data: Buffer; mtime: Date }[] = [];
   const visit = async (dir: string): Promise<void> => {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -7519,7 +7506,7 @@ app.post('/api/extensions/skills/watching/start', async (request) => {
 
 app.post('/api/extensions/skills/watching/stop', async (request) => {
   const { watchId } = (request.body ?? {}) as { watchId?: string };
-  return ext.skillsStopWatching(watchId as string);
+  return ext.skillsStopWatching(watchId!);
 });
 
 app.get('/api/extensions/credentials/status', async () => {

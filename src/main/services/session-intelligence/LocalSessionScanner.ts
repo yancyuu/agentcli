@@ -8,10 +8,11 @@
 
 import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline';
 
 import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
+
 import { resolveUsageTotalTokens } from './tokenUsageTotals';
 
 // ---------------------------------------------------------------------------
@@ -415,7 +416,7 @@ export class LocalSessionScanner {
 
         // Check cache
         const cached = this.summaryCache.get(filePath);
-        if (cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs) {
+        if (cached?.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs) {
           summaries.push(cached.summary);
           continue;
         }
@@ -565,7 +566,7 @@ export class LocalSessionScanner {
       // Collect messages within the page range
       if (totalMessages > offset && messages.length < limit) {
         messages.push({
-          role: role as 'user' | 'assistant',
+          role: role,
           content: extractText(content),
           timestamp: ts,
         });

@@ -21,8 +21,6 @@ import type {
   BoardTaskLogStreamSummary,
   CcSession,
   CcSessionDetail,
-  LoopSessionRequest,
-  LoopSessionResponse,
   ClaudeMdFileInfo,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
@@ -44,6 +42,8 @@ import type {
   HttpServerStatus,
   KanbanColumnId,
   LoopAssetsSnapshot,
+  LoopSessionRequest,
+  LoopSessionResponse,
   MachineProfile,
   MachineRuntimeProcess,
   MemberFullStats,
@@ -74,6 +74,7 @@ import type {
   SshConnectionStatus,
   SshLastConnection,
   SubagentDetail,
+  SystemManagerSummary,
   TaskComment,
   TeamAgentRuntimeSnapshot,
   TeamChangeEvent,
@@ -86,7 +87,6 @@ import type {
   TeamLaunchRequest,
   TeamLaunchResponse,
   TeamMemberActivityMeta,
-  SystemManagerSummary,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -141,6 +141,7 @@ import type {
   SkillUpsertRequest,
   SkillWatcherEvent,
 } from '@shared/types/extensions';
+import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 import type {
   AgentChangeSet,
   ApplyReviewResult,
@@ -154,7 +155,6 @@ import type {
 import type { ApplyReviewRequest } from '@shared/types/review';
 import type { SystemManagerAPI } from '@shared/types/systemManager';
 import type { TerminalAPI } from '@shared/types/terminal';
-import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
 
 export class HttpAPIClient implements ElectronAPI {

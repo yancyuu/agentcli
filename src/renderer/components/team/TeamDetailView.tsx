@@ -51,7 +51,6 @@ import {
   buildTaskChangeRequestOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
-
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
@@ -64,15 +63,15 @@ import {
   GitBranch,
   History,
   Link,
+  Loader2,
+  MessageSquare,
+  MoreHorizontal,
   Network,
   Pencil,
   Play,
   SquareTerminal,
   Terminal,
   Trash2,
-  Loader2,
-  MessageSquare,
-  MoreHorizontal,
   Users,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -92,22 +91,24 @@ import type { ComponentProps } from 'react';
 const ProjectEditorOverlay = lazy(() =>
   import('./editor/ProjectEditorOverlay').then((m) => ({ default: m.ProjectEditorOverlay }))
 );
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
+
 import { LoopConsolePanel } from './loop-console/LoopConsolePanel';
 import { MemberList } from './members/MemberList';
 import { MessagesPanel } from './messages/MessagesPanel';
-import {
-  CcSessionsSection,
-  buildAllSessionsCsv,
-  buildAllSessionsCsvFilename,
-  downloadTextFile,
-  hasDataRows,
-  isExportPayload,
-} from './CcSessionsSection';
 import { ChangeReviewDialog } from './review/ChangeReviewDialog';
 import {
   getTeamPendingRepliesState,
   setTeamPendingRepliesState,
 } from './sidebar/teamSidebarUiState';
+import {
+  buildAllSessionsCsv,
+  buildAllSessionsCsvFilename,
+  CcSessionsSection,
+  downloadTextFile,
+  hasDataRows,
+  isExportPayload,
+} from './CcSessionsSection';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { ProcessesSection } from './ProcessesSection';
 import { getLaunchJoinMilestonesFromMembers, getLaunchJoinState } from './provisioningSteps';
@@ -134,7 +135,6 @@ import type {
   TeamTaskWithKanban,
   TeamViewSnapshot,
 } from '@shared/types';
-import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import type { EditorSelectionAction } from '@shared/types/editor';
 import type { ContextUsageLike } from '@shared/utils/contextMetrics';
 
@@ -2019,7 +2019,7 @@ export const TeamDetailView = ({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 px-0 text-[var(--color-text-muted)]"
+                          className="size-7 px-0 text-[var(--color-text-muted)]"
                         >
                           <MoreHorizontal size={14} />
                         </Button>

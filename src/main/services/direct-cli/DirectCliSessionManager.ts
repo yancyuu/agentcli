@@ -12,18 +12,16 @@
  * with no changes. We only relay the live stream over SSE for token-level display.
  */
 
+import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { spawnCli } from '@main/utils/childProcess';
+import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
+import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 
-import type { ChildProcess, SpawnOptions } from 'child_process';
-import { randomUUID } from 'crypto';
-
-import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
-
-import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { type DirectCliSessionRepository, DirectCliSessionStore } from './DirectCliSessionStore';
 
 import type { AttachmentPayload } from '@shared/types';
-import { spawnCli } from '@main/utils/childProcess';
-import { type DirectCliSessionRepository, DirectCliSessionStore } from './DirectCliSessionStore';
+import type { ChildProcess, SpawnOptions } from 'child_process';
 
 /** Args mirror the cc-connect claudecode invocation that this replaces. */
 export interface ClaudeStreamArgsOptions {
@@ -192,15 +190,13 @@ export type DirectCliSpawnFn = (
 ) => ChildProcess;
 
 /** Provider env resolver (mockable in tests). */
-export interface DirectCliEnvResolver {
-  (params: {
-    binaryPath: string | null;
-    providerId?: string;
-    providerBackendId?: string | null;
-    model?: string | null;
-    projectPath?: string;
-  }): Promise<{ env: NodeJS.ProcessEnv; providerArgs: string[] }>;
-}
+export type DirectCliEnvResolver = (params: {
+  binaryPath: string | null;
+  providerId?: string;
+  providerBackendId?: string | null;
+  model?: string | null;
+  projectPath?: string;
+}) => Promise<{ env: NodeJS.ProcessEnv; providerArgs: string[] }>;
 
 export interface DirectCliSessionManagerOptions {
   spawnFn?: DirectCliSpawnFn;

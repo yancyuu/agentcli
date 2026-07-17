@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import { Button } from '@renderer/components/ui/button';
+
 import { api } from '@renderer/api';
+import { Button } from '@renderer/components/ui/button';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Smartphone, XCircle } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 type PlatformKind = 'feishu' | 'lark' | 'weixin';
 type Phase =

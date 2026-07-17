@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { projectOffice } from '../projectOffice';
+
 import type { GraphDataPort, GraphNode } from '@claude-teams/agent-graph';
 import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 

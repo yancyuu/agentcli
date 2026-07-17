@@ -16,15 +16,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __internals,
   buildLarkBatchPayload,
+  type GetLarkCredentialsAllResult,
   getLarkCredentialsFreshAll,
+  type LarkCredentials,
   meetsBatchFieldConstraints,
+  parseLarkCliPersonalAuthorizations,
+  refreshLarkCredentialsDirect,
   reportAllLarkCredentials,
   resolveBrandForProfile,
   shouldRefreshLarkCredentials,
-  parseLarkCliPersonalAuthorizations,
-  refreshLarkCredentialsDirect,
-  type GetLarkCredentialsAllResult,
-  type LarkCredentials,
 } from './larkCredentials';
 
 const TEST_CRED: LarkCredentials = {

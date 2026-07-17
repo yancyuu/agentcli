@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createSocietyStore } from './societyStore';
+
 import type { SocietyApiClient } from './societyApi';
 
 function mockApi(overrides: Partial<SocietyApiClient> = {}): SocietyApiClient {

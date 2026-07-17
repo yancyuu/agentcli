@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { SystemManagerConfigService, adminWorkDir } from '../SystemManagerConfigService';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { adminWorkDir, SystemManagerConfigService } from '../SystemManagerConfigService';
 
 const PREV_HERMIT_HOME = process.env.HERMIT_HOME;
 let workdir: string;

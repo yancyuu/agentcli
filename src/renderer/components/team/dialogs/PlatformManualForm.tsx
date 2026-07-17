@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+
+import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
-import { api } from '@renderer/api';
-import { AlertCircle, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@renderer/lib/utils';
+import { AlertCircle, ChevronDown, Eye, EyeOff } from 'lucide-react';
+
 import type { FieldDef, PlatformMeta } from './platformMeta';
 
 interface Props {
@@ -129,7 +131,7 @@ export default function PlatformManualForm({
   );
 }
 
-function FieldInput({
+const FieldInput = ({
   field,
   value,
   onChange,
@@ -137,7 +139,7 @@ function FieldInput({
   field: FieldDef;
   value: string | boolean | undefined;
   onChange: (v: unknown) => void;
-}) {
+}) => {
   const [showPwd, setShowPwd] = useState(false);
 
   if (field.type === 'boolean') {
@@ -147,7 +149,7 @@ function FieldInput({
           type="checkbox"
           checked={!!value}
           onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600"
+          className="size-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600"
         />
         <span className="text-sm text-gray-700 dark:text-gray-300">{field.label}</span>
         {field.hint && <span className="text-[11px] text-gray-400">({field.hint})</span>}
@@ -191,4 +193,4 @@ function FieldInput({
       {field.hint && <p className="mt-1 text-[11px] text-gray-400">{field.hint}</p>}
     </div>
   );
-}
+};

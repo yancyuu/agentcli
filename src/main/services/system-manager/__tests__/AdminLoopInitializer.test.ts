@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ADMIN_INIT_MESSAGE_ID,
+  type AdminLoopInitDeps,
   buildAdminInitMessage,
   ensureAdminLoopInitialized,
   htmlToPlainText,
-  type AdminLoopInitDeps,
 } from '../AdminLoopInitializer';
+
 import type { SystemManagerConfig, SystemManagerConfigPatch } from '@shared/types/systemManager';
 
 interface Recorder {

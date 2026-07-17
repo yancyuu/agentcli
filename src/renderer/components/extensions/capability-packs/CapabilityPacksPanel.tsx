@@ -17,7 +17,7 @@ import { CapabilityPackDetailDialog } from './CapabilityPackDetailDialog';
 
 import type { CapabilityPackExportRuntime, LoadedCapabilityPack } from '@shared/types/extensions';
 
-const EXPORT_RUNTIMES: Array<{ value: CapabilityPackExportRuntime; label: string }> = [
+const EXPORT_RUNTIMES: { value: CapabilityPackExportRuntime; label: string }[] = [
   { value: 'claudecode', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
   { value: 'cursor', label: 'Cursor' },
@@ -69,7 +69,7 @@ function getPackCapabilityKinds(pack: LoadedCapabilityPack): string[] {
 function countFilterValues(
   packs: LoadedCapabilityPack[],
   getValues: (pack: LoadedCapabilityPack) => string[]
-): Array<[string, number]> {
+): [string, number][] {
   const counts = new Map<string, number>();
   for (const pack of packs) {
     for (const value of getValues(pack)) {
@@ -79,19 +79,19 @@ function countFilterValues(
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-function CapabilityPackFilterChips({
+const CapabilityPackFilterChips = ({
   counts,
   selected,
   onToggle,
   getLabel = (value) => value,
   activeClassName = 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300 shadow-sm',
 }: {
-  counts: Array<[string, number]>;
+  counts: [string, number][];
   selected: string[];
   onToggle: (value: string) => void;
   getLabel?: (value: string) => string;
   activeClassName?: string;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   if (counts.length === 0) return <></>;
 
   return (
@@ -126,9 +126,9 @@ function CapabilityPackFilterChips({
       })}
     </div>
   );
-}
+};
 
-function CapabilityPackCard({
+const CapabilityPackCard = ({
   pack,
   index,
   exporting,
@@ -140,7 +140,7 @@ function CapabilityPackCard({
   exporting: boolean;
   onExport: (packId: string, runtime: CapabilityPackExportRuntime) => void;
   onOpen: () => void;
-}) {
+}) => {
   const baseStriped = index % 2 === 0;
   const [runtime, setRuntime] = useState<CapabilityPackExportRuntime>('claudecode');
   return (
@@ -250,9 +250,9 @@ function CapabilityPackCard({
       ) : null}
     </div>
   );
-}
+};
 
-export function CapabilityPacksPanel(): React.JSX.Element {
+export const CapabilityPacksPanel = (): React.JSX.Element => {
   const {
     capabilityPacks,
     capabilityPackList,
@@ -398,7 +398,7 @@ export function CapabilityPacksPanel(): React.JSX.Element {
       }
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
-      const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? `${packId}.zip`;
+      const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `${packId}.zip`;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -623,4 +623,4 @@ export function CapabilityPacksPanel(): React.JSX.Element {
       />
     </div>
   );
-}
+};

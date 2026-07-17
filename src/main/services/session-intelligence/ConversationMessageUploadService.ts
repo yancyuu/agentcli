@@ -18,9 +18,12 @@ import {
   DEFAULT_OPENHERMIT_CLOUD_BASE_URL,
   migrateLegacyCloudBaseUrl,
 } from '@shared/constants/cloudConfig.mjs';
+
+import { codexEventTimestamp, CodexUsageAccumulator } from './codexTokenUsage';
 import { resolveUsageTotalTokens } from './tokenUsageTotals';
-import { CodexUsageAccumulator, CodexUsage, codexEventTimestamp } from './codexTokenUsage';
-type ConversationUploadTelemetryConfig = {
+
+import type { CodexUsage } from './codexTokenUsage';
+interface ConversationUploadTelemetryConfig {
   enabled?: boolean;
   platform?: UploadPlatform;
   uploadProviders?: UploadPlatform[];
@@ -38,7 +41,7 @@ type ConversationUploadTelemetryConfig = {
     uploadSinceHours?: number;
     baseUrl?: string;
   };
-};
+}
 
 interface ConversationUploadConfig {
   telemetry?: ConversationUploadTelemetryConfig;

@@ -77,12 +77,12 @@ export interface ExtensionsSlice {
   installErrors: Record<string, string>; // keyed by scoped operation key
 
   // ── Toast notifications ──
-  extensionToasts: Array<{
+  extensionToasts: {
     id: string;
     type: 'success' | 'error' | 'warning' | 'info';
     title: string;
     message?: string;
-  }>;
+  }[];
 
   // ── Capability packs cache ──
   capabilityPackList: CapabilityPackListResult | null;

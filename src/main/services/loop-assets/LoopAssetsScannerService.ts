@@ -8,9 +8,9 @@ import type {
   LoopAssetAction,
   LoopAssetCategoryKey,
   LoopAssetCategorySnapshot,
+  LoopAssetSourceRef,
   LoopAssetsSnapshot,
   LoopAssetStatus,
-  LoopAssetSourceRef,
 } from '@shared/types/loopAssets';
 
 const execFileAsync = promisify(execFile);

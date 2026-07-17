@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { discoverableTeamToWorker } from './worker';
+
 import type { DiscoverableTeam } from './team';
 
 function makeTeam(overrides: Partial<DiscoverableTeam> = {}): DiscoverableTeam {

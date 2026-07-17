@@ -8,13 +8,6 @@
  * 依赖注入：所有副作用通过 ports，保证可单测。
  */
 
-import type {
-  PublishedNeed,
-  Relationship,
-  SocialEvent,
-  WorkerDiscoveryQuery,
-  WorkerProfile,
-} from '../domain/models/society';
 import { HUMAN_OPERATOR } from '../domain/models/society';
 import {
   applyReputationDelta,
@@ -29,6 +22,14 @@ import {
   transitionNeed,
   volunteerFor,
 } from '../domain/policies/societyPolicies';
+
+import type {
+  PublishedNeed,
+  Relationship,
+  SocialEvent,
+  WorkerDiscoveryQuery,
+  WorkerProfile,
+} from '../domain/models/society';
 import type { AutonomyOptions } from '../domain/policies/societyPolicies';
 import type {
   ClockPort,

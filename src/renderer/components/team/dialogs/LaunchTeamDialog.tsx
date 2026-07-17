@@ -31,7 +31,7 @@ function reconcileAnthropicRuntimeSelections(_opts: {
   return {
     nextEffort: _opts.selectedEffort,
     effortResetReason: null as string | null,
-    nextFastMode: _opts.selectedFastMode as 'inherit' | 'on' | 'off',
+    nextFastMode: _opts.selectedFastMode,
     fastModeResetReason: null as string | null,
   };
 }

@@ -16,6 +16,12 @@
  * adapter itself stays renderer-agnostic (no asset imports here).
  */
 import type {
+  NeedStatus,
+  PublishedNeed,
+  Relationship,
+  WorkerProfile,
+} from '../core/domain/models/society';
+import type {
   GraphDataPort,
   GraphEdge,
   GraphLayoutPort,
@@ -23,13 +29,6 @@ import type {
   GraphNodeState,
   GraphParticle,
 } from '@claude-teams/agent-graph';
-
-import type {
-  NeedStatus,
-  PublishedNeed,
-  Relationship,
-  WorkerProfile,
-} from '../core/domain/models/society';
 
 /** Stable society/team name used for node ids and domain refs. */
 export const SOCIETY_GRAPH_TEAM = 'worker-society';

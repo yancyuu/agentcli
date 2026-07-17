@@ -8,7 +8,7 @@ import {
 
 function msg(
   timestamp: string,
-  toolCalls: Array<{ name: string; input: Record<string, unknown>; id?: string }>
+  toolCalls: { name: string; input: Record<string, unknown>; id?: string }[]
 ): ToolActivityMessage {
   return { timestamp, toolCalls };
 }

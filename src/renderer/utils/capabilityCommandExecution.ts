@@ -3,7 +3,7 @@ import { parseStandaloneSlashCommand } from '@shared/utils/slashCommands';
 
 import { resolveSlashCommand } from './slashCommandRegistry';
 
-import type { RegisteredSlashCommand, CapabilityScope } from '@shared/types/extensions';
+import type { CapabilityScope, RegisteredSlashCommand } from '@shared/types/extensions';
 import type { SlashCommandMeta } from '@shared/types/team';
 
 export interface SelectedCapabilityCommandRef {

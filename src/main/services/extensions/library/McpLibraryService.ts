@@ -10,13 +10,13 @@
  * Storage: ~/.hermit/mcp-library.json (HERMIT_HOME override respected).
  */
 
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
 
-import { createLogger } from '@shared/utils/logger';
 import { getErrorMessage } from '@shared/utils/errorHandling';
+import { createLogger } from '@shared/utils/logger';
 
 import { McpConfigStateReader } from '../runtime/McpConfigStateReader';
 

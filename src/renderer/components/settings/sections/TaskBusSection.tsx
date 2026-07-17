@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 
+import { Calendar, Clock, Loader2, MessageSquare, Zap } from 'lucide-react';
+
 import { SettingsSectionHeader } from '../components';
+
 import type {
   CapabilityTelemetrySummary,
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
-import { Calendar, Clock, Loader2, MessageSquare, Zap } from 'lucide-react';
 
 interface ProviderMetrics {
   sessions: number;
@@ -33,7 +35,7 @@ interface TelemetryStatus {
   byProvider?: { claudecode: ProviderMetrics; codex: ProviderMetrics };
   activeDays: number;
   hourly: number[];
-  projects: Array<{
+  projects: {
     cwd: string;
     displayName?: string;
     teamSlug?: string;
@@ -44,7 +46,7 @@ interface TelemetryStatus {
     tokensIn: number;
     tokensOut: number;
     tokensTotal: number;
-  }>;
+  }[];
   workSecondsByDay: Record<string, number>;
   localUsers?: UsageUserRow[];
   teamCapabilitySnapshots?: TeamCapabilityTelemetrySnapshot[];
@@ -111,7 +113,7 @@ const CAPABILITY_KIND_ORDER: CapabilityAssetKind[] = [
   'command',
 ];
 
-function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Element {
+const UsageDashboard = ({ status }: { status: TelemetryStatus }): React.JSX.Element => {
   const maxHourly = Math.max(...status.hourly, 1);
   const recentDays = Object.keys(status.workSecondsByDay).sort().slice(-7);
   const maxWorkSecs = Math.max(...Object.values(status.workSecondsByDay), 1);
@@ -229,15 +231,15 @@ function UsageDashboard({ status }: { status: TelemetryStatus }): React.JSX.Elem
       )}
     </div>
   );
-}
+};
 
-function UsageUserTable({
+const UsageUserTable = ({
   rows,
   title,
 }: {
   title: string;
   rows: UsageUserRow[];
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <div>
       <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">{title}</div>
@@ -250,7 +252,7 @@ function UsageUserTable({
       )}
     </div>
   );
-}
+};
 
 function getUsageProjectName(row: UsageUserRow): string {
   return row.projectName || row.teamDisplayName || row.teamName || row.identity.displayName;
@@ -317,7 +319,7 @@ function aggregateUsageRowsByProject(rows: UsageUserRow[]): UsageUserRow[] {
   return Array.from(grouped.values()).sort((a, b) => b.tokensTotal - a.tokensTotal);
 }
 
-function UsageUserRows({ rows }: { rows: UsageUserRow[] }): React.JSX.Element {
+const UsageUserRows = ({ rows }: { rows: UsageUserRow[] }): React.JSX.Element => {
   const projectRows = aggregateUsageRowsByProject(rows);
 
   return (
@@ -354,13 +356,13 @@ function UsageUserRows({ rows }: { rows: UsageUserRow[] }): React.JSX.Element {
       ))}
     </div>
   );
-}
+};
 
-function CapabilityCountPills({
+const CapabilityCountPills = ({
   counts,
 }: {
   counts: TeamCapabilityTelemetrySnapshot['counts'];
-}): React.JSX.Element {
+}): React.JSX.Element => {
   const items = [
     ['Skills', counts.skills],
     ['Workflows', counts.workflows],
@@ -380,15 +382,15 @@ function CapabilityCountPills({
       ))}
     </span>
   );
-}
+};
 
-function CapabilitySnapshotTable({
+const CapabilitySnapshotTable = ({
   snapshots,
   summary,
 }: {
   summary?: CapabilityTelemetrySummary;
   snapshots: TeamCapabilityTelemetrySnapshot[];
-}): React.JSX.Element {
+}): React.JSX.Element => {
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
   const [expandedKinds, setExpandedKinds] = useState<Record<string, boolean>>({});
   if (snapshots.length === 0) return <></>;
@@ -491,9 +493,9 @@ function CapabilitySnapshotTable({
       </div>
     </div>
   );
-}
+};
 
-function StatCard({
+const StatCard = ({
   icon,
   label,
   value,
@@ -501,7 +503,7 @@ function StatCard({
   icon: React.ReactNode;
   label: string;
   value: string;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <div className="flex flex-col gap-1 rounded bg-[var(--color-bg)] p-2">
       <div className="flex items-center gap-1 text-[var(--color-text-muted)]">
@@ -511,9 +513,9 @@ function StatCard({
       <div className="text-sm font-medium">{value}</div>
     </div>
   );
-}
+};
 
-export function TaskBusSection(): React.JSX.Element {
+export const TaskBusSection = (): React.JSX.Element => {
   const [loading, setLoading] = useState(true);
   const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
 
@@ -547,4 +549,4 @@ export function TaskBusSection(): React.JSX.Element {
       </div>
     </div>
   );
-}
+};

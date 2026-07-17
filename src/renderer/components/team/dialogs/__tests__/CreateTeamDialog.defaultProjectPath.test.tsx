@@ -49,7 +49,7 @@ vi.mock('@renderer/hooks/useCreateTeamDraft', async () => {
 
 vi.mock('@renderer/hooks/useTheme', () => ({ useTheme: () => ({ isLight: false }) }));
 vi.mock('@renderer/lib/utils', () => ({
-  cn: (...args: Array<unknown>): string =>
+  cn: (...args: unknown[]): string =>
     args.filter((arg): arg is string => typeof arg === 'string' && arg.length > 0).join(' '),
 }));
 vi.mock('@renderer/api', () => ({

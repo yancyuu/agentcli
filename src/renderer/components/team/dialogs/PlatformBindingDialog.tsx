@@ -8,12 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import assistantCreationOptions from '@shared/assistantCreationOptions.json';
 import { Settings2, Smartphone } from 'lucide-react';
 
-import assistantCreationOptions from '@shared/assistantCreationOptions.json';
-
-import { isQRPlatform, platformMeta } from './platformMeta';
 import PlatformManualForm from './PlatformManualForm';
+import { isQRPlatform, platformMeta } from './platformMeta';
 import PlatformSetupQR from './PlatformSetupQR';
 
 interface PlatformOption {
@@ -72,7 +71,7 @@ interface PlatformBindingContentProps {
   onCancel: () => void;
 }
 
-export function PlatformBindingContent({
+export const PlatformBindingContent = ({
   projectName,
   workDir,
   agentType,
@@ -80,7 +79,7 @@ export function PlatformBindingContent({
   platformAllowChat = {},
   onComplete,
   onCancel,
-}: PlatformBindingContentProps): React.JSX.Element {
+}: PlatformBindingContentProps): React.JSX.Element => {
   const [step, setStep] = useState<BindingStep>('platform');
   const [selectedPlatform, setSelectedPlatform] = useState('');
 
@@ -160,7 +159,7 @@ export function PlatformBindingContent({
   ) {
     return (
       <PlatformSetupQR
-        platformType={selectedPlatform as 'feishu' | 'lark' | 'weixin'}
+        platformType={selectedPlatform}
         projectName={projectName}
         workDir={workDir}
         agentType={agentType}
@@ -201,9 +200,7 @@ export function PlatformBindingContent({
             onClick={() => handlePlatformSelect(key)}
             className="group flex items-center gap-2.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3 text-left shadow-sm shadow-black/5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-accent-border)] hover:bg-[var(--color-accent-soft)] hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
           >
-            <div
-              className={`h-9 w-9 rounded-lg ${color} flex shrink-0 items-center justify-center`}
-            >
+            <div className={`size-9 rounded-lg ${color} flex shrink-0 items-center justify-center`}>
               {icon === 'qr' ? <Smartphone size={16} /> : <Settings2 size={16} />}
             </div>
             <div className="min-w-0">
@@ -222,14 +219,14 @@ export function PlatformBindingContent({
       </div>
     </div>
   );
-}
+};
 
 interface PlatformBindingDialogProps extends PlatformBindingContentProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function PlatformBindingDialog({
+export const PlatformBindingDialog = ({
   open,
   onOpenChange,
   projectName,
@@ -239,7 +236,7 @@ export function PlatformBindingDialog({
   platformAllowChat,
   onComplete,
   onCancel,
-}: PlatformBindingDialogProps): React.JSX.Element {
+}: PlatformBindingDialogProps): React.JSX.Element => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl sm:w-[40rem]">
@@ -262,4 +259,4 @@ export function PlatformBindingDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};

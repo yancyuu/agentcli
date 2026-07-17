@@ -438,7 +438,7 @@ export const ProviderRuntimeSettingsDialog = ({
                       return (
                         <div
                           key={provider.name}
-                          className={`rounded-xl border px-3 py-3 ${
+                          className={`rounded-xl border p-3 ${
                             isCompatible
                               ? 'border-[var(--color-border-subtle)] bg-white/[0.025]'
                               : 'border-[var(--color-border)] bg-black/10 opacity-70'

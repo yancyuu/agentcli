@@ -12,8 +12,9 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { PublishedNeed, Relationship, WorkerProfile } from '../../core/domain/models/society';
 import { FsNeedStore, FsProfileStore, FsRelationshipStore } from './fsStores';
+
+import type { PublishedNeed, Relationship, WorkerProfile } from '../../core/domain/models/society';
 
 function profile(workerId: string, reputation = 50): WorkerProfile {
   return {

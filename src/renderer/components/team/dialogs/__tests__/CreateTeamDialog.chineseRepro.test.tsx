@@ -44,7 +44,7 @@ vi.mock('@renderer/hooks/useCreateTeamDraft', () => ({
 
 vi.mock('@renderer/hooks/useTheme', () => ({ useTheme: () => ({ isLight: false }) }));
 vi.mock('@renderer/lib/utils', () => ({
-  cn: (...args: Array<unknown>): string =>
+  cn: (...args: unknown[]): string =>
     args.filter((a): a is string => typeof a === 'string' && a.length > 0).join(' '),
 }));
 vi.mock('@renderer/utils/pathNormalize', () => ({ normalizePath: (p: string) => p }));

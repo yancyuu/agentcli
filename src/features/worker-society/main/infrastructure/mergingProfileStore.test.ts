@@ -6,11 +6,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { DiscoverableWorker } from '@shared/types/worker';
-import type { WorkerProfile } from '../../core/domain/models/society';
+import { mergeRealWorker, MergingProfileStore } from './mergingProfileStore';
 
-import { MergingProfileStore, mergeRealWorker } from './mergingProfileStore';
 import type { WorkerProfileStore } from '../../core/application/ports';
+import type { WorkerProfile } from '../../core/domain/models/society';
+import type { DiscoverableWorker } from '@shared/types/worker';
 
 // ── 工厂 ──────────────────────────────────────────────────────────────────────
 

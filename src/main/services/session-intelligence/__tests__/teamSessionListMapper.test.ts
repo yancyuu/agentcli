@@ -10,10 +10,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
+import { mergeLocalAndCcSessions } from '../teamSessionListMapper';
 
 import type { LocalSessionSummary } from '../LocalSessionScanner';
-import { mergeLocalAndCcSessions } from '../teamSessionListMapper';
+import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 
 const PROJECT = 'team-x';
 

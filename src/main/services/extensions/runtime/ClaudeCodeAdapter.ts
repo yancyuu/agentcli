@@ -2,13 +2,13 @@
  * Claude Code harness adapter — uses `claude` CLI for plugin/MCP/skills.
  */
 
-import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
-import { getHomeDir } from '@main/utils/pathDecoder';
-import { execCli } from '@main/utils/childProcess';
-import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
-import { createLogger } from '@shared/utils/logger';
 import path from 'node:path';
+
+import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { execCli } from '@main/utils/childProcess';
+import { getHomeDir } from '@main/utils/pathDecoder';
+import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
+import { createLogger } from '@shared/utils/logger';
 
 import { McpConfigStateReader } from './McpConfigStateReader';
 
@@ -24,6 +24,7 @@ import type {
   McpInstallSpec,
   OperationResult,
 } from '@shared/types/extensions';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 const logger = createLogger('Extensions:CCAdapter');
 

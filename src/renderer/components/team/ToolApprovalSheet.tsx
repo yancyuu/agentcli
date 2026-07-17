@@ -179,7 +179,7 @@ export const ToolApprovalSheet: React.FC = () => {
   }, [current?.requestId]);
 
   const buildAskQuestionAnswersMessage = useCallback((): string | undefined => {
-    if (!current || current.toolName !== 'AskUserQuestion' || selectedOptions.size === 0) {
+    if (current?.toolName !== 'AskUserQuestion' || selectedOptions.size === 0) {
       return undefined;
     }
 

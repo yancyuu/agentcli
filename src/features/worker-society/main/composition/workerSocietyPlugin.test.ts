@@ -7,10 +7,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { SOCIETY_MCP_TOOLS } from '../adapters/input/societyMcp';
+
 import {
+  buildWorkerSocietyMcpLibraryEntry,
   WORKER_SOCIETY_PLUGIN,
   WORKER_SOCIETY_PLUGIN_ID,
-  buildWorkerSocietyMcpLibraryEntry,
 } from './workerSocietyPlugin';
 
 describe('WORKER_SOCIETY_PLUGIN descriptor', () => {

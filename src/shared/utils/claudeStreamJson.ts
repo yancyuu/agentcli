@@ -134,7 +134,7 @@ export function classifyClaudeStreamLine(line: string): ClaudeStreamLine | null 
           ? (raw.request as Record<string, unknown>)
           : undefined;
       const strField = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-      const inputRaw = req?.input as unknown;
+      const inputRaw = req?.input;
       return {
         type: 'control-request',
         requestId: typeof raw.request_id === 'string' ? raw.request_id : undefined,

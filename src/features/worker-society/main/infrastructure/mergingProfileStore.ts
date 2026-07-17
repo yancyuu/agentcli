@@ -17,11 +17,11 @@
  * 依赖注入：realWorkersProvider 由组合根（server.ts）注入 listDiscoverableWorkers，本层只用
  * @shared/types/worker 的 TYPE 导入，不引入 @main 运行时依赖——society 保持独立可演进。
  */
-import type { DiscoverableWorker } from '@shared/types/worker';
+import { clampReputation, DEFAULT_REPUTATION } from '../../core/domain/policies/societyPolicies';
 
-import type { WorkerProfile } from '../../core/domain/models/society';
-import { DEFAULT_REPUTATION, clampReputation } from '../../core/domain/policies/societyPolicies';
 import type { WorkerProfileStore } from '../../core/application/ports';
+import type { WorkerProfile } from '../../core/domain/models/society';
+import type { DiscoverableWorker } from '@shared/types/worker';
 
 /** 真实员工未配置 overlay 时的并发上限（保守默认；可由 overlay 覆盖）。 */
 const DEFAULT_MAX_CONCURRENT = 2;

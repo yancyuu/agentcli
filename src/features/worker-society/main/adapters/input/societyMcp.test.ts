@@ -10,9 +10,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { SocietyComponents } from '../../composition/societyComposition';
 import { createWorkerSociety } from '../../composition/societyComposition';
-import { SOCIETY_MCP_TOOLS, executeSocietyMcpTool } from './societyMcp';
+
+import { executeSocietyMcpTool, SOCIETY_MCP_TOOLS } from './societyMcp';
+
+import type { SocietyComponents } from '../../composition/societyComposition';
 
 function json(res: { text: string }[]): unknown {
   return JSON.parse(res[0].text);

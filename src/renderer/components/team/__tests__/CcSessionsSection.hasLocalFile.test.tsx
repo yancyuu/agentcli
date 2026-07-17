@@ -10,9 +10,9 @@ import { createRoot } from 'react-dom/client';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CcSession } from '@shared/types';
-
 import { CcSessionsSection } from '../CcSessionsSection';
+
+import type { CcSession } from '@shared/types';
 
 const getSessionDetail = vi.hoisted(() => vi.fn());
 

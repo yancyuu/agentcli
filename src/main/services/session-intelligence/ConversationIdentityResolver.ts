@@ -7,9 +7,9 @@ import {
 } from '@main/utils/externalPlatformSessionKey';
 
 import {
-  ConversationIdentityStore,
   conversationIdentityKey,
   type ConversationIdentityRecord,
+  ConversationIdentityStore,
 } from './ConversationIdentityStore';
 
 export interface ResolveIdentityInput {

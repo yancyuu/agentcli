@@ -14,7 +14,7 @@ declare module 'pidusage' {
   }
 
   function pidusage(
-    pids: Array<number | string>,
+    pids: (number | string)[],
     options?: { maxage?: number }
   ): Promise<Record<string, PidUsageStat>>;
   function pidusage(pid: number | string, options?: { maxage?: number }): Promise<PidUsageStat>;

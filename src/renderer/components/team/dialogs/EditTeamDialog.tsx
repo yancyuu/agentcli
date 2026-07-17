@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -9,10 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
-import { Loader2 } from 'lucide-react';
-
-import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
+import { Loader2 } from 'lucide-react';
 
 interface EditTeamDialogProps {
   open: boolean;

@@ -1,6 +1,6 @@
 import type { LocalSessionSummary } from './LocalSessionScanner';
-import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 import type { CcSession } from '@shared/types/api';
+import type { HermitBridgeSessionListItem } from '@shared/types/hermitBridge';
 
 function toLastMessage(session: HermitBridgeSessionListItem): CcSession['lastMessage'] {
   return session.last_message

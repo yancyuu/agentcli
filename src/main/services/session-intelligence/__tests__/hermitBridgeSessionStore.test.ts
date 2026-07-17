@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  lastUserMessage,
+  type ParsedHermitBridgeStore,
   parseHermitBridgeSessions,
   projectFromFileName,
   sessionLastActivityAt,
-  lastUserMessage,
-  type ParsedHermitBridgeStore,
 } from '../hermitBridgeSessionStore';
 
 /** Minimal raw store fixture matching hermit-bridge's on-disk shape. */
@@ -171,10 +171,7 @@ describe('parseHermitBridgeSessions', () => {
   });
 
   it('returns an empty (but valid) store when no maps are present', () => {
-    const store = parseHermitBridgeSessions(
-      { version: 1 },
-      'p_abc.json'
-    ) as ParsedHermitBridgeStore;
+    const store = parseHermitBridgeSessions({ version: 1 }, 'p_abc.json')!;
     // Non-hash underscores are preserved (only trailing _<hex> is stripped).
     expect(store.project).toBe('p_abc');
     expect(store.composites.size).toBe(0);

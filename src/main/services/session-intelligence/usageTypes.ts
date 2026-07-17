@@ -1,8 +1,8 @@
+import type { DailyMetrics, ParseResult, UsageProviderMetrics } from './SessionUsageParser';
 import type {
   CapabilityTelemetrySummary,
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
-import type { DailyMetrics, ParseResult, UsageProviderMetrics } from './SessionUsageParser';
 
 export interface UsageCollectionResult {
   computedAt: string;

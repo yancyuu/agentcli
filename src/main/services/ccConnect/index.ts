@@ -2,7 +2,18 @@
  * @deprecated Use ../hermitBridge for new code.
  */
 export { HermitBridgeClient as CcConnectClient } from '../hermitBridge/HermitBridgeClient';
+export type { HermitBridgeConnectionEvents as CcConnectBridgeEvents } from '../hermitBridge/HermitBridgeConnection';
 export { HermitBridgeConnection as CcConnectBridge } from '../hermitBridge/HermitBridgeConnection';
+export type {
+  BridgeCommand,
+  BridgeLaunchOptions,
+  BridgeManagementProbe,
+  EnsureRunningOptions,
+  EnsureRunningResult,
+  ResolveBinaryFn,
+  SpawnedBridge,
+  SpawnFn,
+} from '../hermitBridge/HermitBridgeLauncher';
 export { HermitBridgeLauncher as CcConnectLauncher } from '../hermitBridge/HermitBridgeLauncher';
 export { MessageBridge } from '../hermitBridge/MessageBridge';
 export {
@@ -14,14 +25,3 @@ export {
   isPlaceholderWorkDir,
   needsWorkDirReconcile,
 } from '../hermitBridge/workDirReconcile';
-export type { HermitBridgeConnectionEvents as CcConnectBridgeEvents } from '../hermitBridge/HermitBridgeConnection';
-export type {
-  BridgeCommand,
-  BridgeLaunchOptions,
-  BridgeManagementProbe,
-  EnsureRunningOptions,
-  EnsureRunningResult,
-  ResolveBinaryFn,
-  SpawnedBridge,
-  SpawnFn,
-} from '../hermitBridge/HermitBridgeLauncher';

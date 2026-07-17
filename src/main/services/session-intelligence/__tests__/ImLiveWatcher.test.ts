@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ImLiveWatcher } from '../ImLiveWatcher';
+
 import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 
 const NOW = Date.parse('2026-06-21T13:00:00+08:00');
@@ -138,7 +139,6 @@ describe('ImLiveWatcher', () => {
     expect(() => watcher.start()).not.toThrow();
     // drain the initial fire-and-forget async scan (it does real file IO)
     for (let i = 0; i < 50 && emitted.length === 0; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
       await new Promise((r) => setTimeout(r, 0));
     }
     watcher.stop();

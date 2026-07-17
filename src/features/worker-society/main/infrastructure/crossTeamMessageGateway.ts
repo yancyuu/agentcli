@@ -12,6 +12,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { formatCrossTeamText } from '@shared/constants/crossTeam';
+
 import type { ClockPort, MessageGateway, SocialMessageOut } from '../../core/application/ports';
 
 /** 一条已持久化的社交消息记录（含 cross-team 格式化文本）。 */

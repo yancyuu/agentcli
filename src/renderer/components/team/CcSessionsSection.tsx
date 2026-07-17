@@ -46,12 +46,12 @@ interface CcSessionsSectionProps {
   error: string | null;
 }
 
-export function CcSessionsSection({
+export const CcSessionsSection = ({
   teamName,
   sessions,
   loading,
   error,
-}: CcSessionsSectionProps): React.JSX.Element {
+}: CcSessionsSectionProps): React.JSX.Element => {
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [visibleHistoricalCount, setVisibleHistoricalCount] = useState(
     HISTORICAL_SESSION_PAGE_SIZE
@@ -155,7 +155,7 @@ export function CcSessionsSection({
       )}
     </div>
   );
-}
+};
 
 export function isExportPayload(
   value: unknown
@@ -255,7 +255,7 @@ function csvEscape(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function CcSessionRow({
+const CcSessionRow = ({
   teamName,
   session,
   isExpanded,
@@ -265,7 +265,7 @@ function CcSessionRow({
   session: CcSession;
   isExpanded: boolean;
   onToggleExpanded: (sessionId: string) => void;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   const timeAgo = formatShortTime(new Date(session.updatedAt));
   const label = session.chatName || session.userName || session.title || session.sessionKey;
   const platformLabel = session.platform === 'bridge' ? 'Bridge' : session.platform;
@@ -395,7 +395,7 @@ function CcSessionRow({
       {isExpanded && (
         <div className="px-3 pb-3">
           {loadingDetail && !detail && (
-            <div className="rounded-lg bg-[var(--color-surface)] px-3 py-3">
+            <div className="rounded-lg bg-[var(--color-surface)] p-3">
               <div className="space-y-2">
                 {[1, 2, 3].map((i) => (
                   <div
@@ -486,7 +486,7 @@ function CcSessionRow({
       )}
     </div>
   );
-}
+};
 
 function buildSessionRecordMarkdown(session: CcSession, detail: CcSessionDetail): string {
   const title = session.chatName || session.userName || session.title || session.sessionKey;

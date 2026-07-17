@@ -14,14 +14,14 @@
  * {@link sessionLastActivityAt}).
  */
 
-import type { ImLiveWorker, ImWorkerState } from '@shared/types/imLiveWorker';
-
 import {
-  sessionLastActivityAt,
   lastUserMessage,
-  type ParsedHermitBridgeStore,
   type ParsedHermitBridgeSession,
+  type ParsedHermitBridgeStore,
+  sessionLastActivityAt,
 } from './hermitBridgeSessionStore';
+
+import type { ImLiveWorker, ImWorkerState } from '@shared/types/imLiveWorker';
 
 export type { ImLiveWorker, ImWorkerState };
 

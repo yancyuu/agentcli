@@ -14,12 +14,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { GraphViewProps } from '@claude-teams/agent-graph';
+import { HUMAN_OPERATOR } from '../core/domain/models/society';
 
 import { SocietyGraph } from './SocietyGraph';
 import { SocietyNodeOverlay } from './SocietyNodeOverlay';
 import { createSocietyStore } from './societyStore';
-import { HUMAN_OPERATOR } from '../core/domain/models/society';
+
+import type { GraphViewProps } from '@claude-teams/agent-graph';
 
 /** 单例 store hook（renderer 内多处可复用同一份社会状态）。 */
 const useSocietyStore = createSocietyStore();

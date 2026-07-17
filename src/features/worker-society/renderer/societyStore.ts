@@ -16,6 +16,7 @@ import {
   type RegisterWorkerInput,
   type SocietyApiClient,
 } from './societyApi';
+
 import type { PublishedNeed, Relationship, WorkerProfile } from '../core/domain/models/society';
 import type { SocialMessageRecord } from '../main/infrastructure/crossTeamMessageGateway';
 

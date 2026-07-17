@@ -5,8 +5,8 @@
 
 import { useState } from 'react';
 
-import { Button } from '@renderer/components/ui/button';
 import { SkillEditorDialog } from '@renderer/components/extensions/skills/SkillEditorDialog';
+import { Button } from '@renderer/components/ui/button';
 
 interface AddSkillInlineProps {
   projectPath: string | null;

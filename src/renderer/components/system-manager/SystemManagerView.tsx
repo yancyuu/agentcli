@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
-import { useStore } from '@renderer/store';
 import { Button } from '@renderer/components/ui/button';
+import { useStore } from '@renderer/store';
 import { buildCapabilityPackCommandSuggestions } from '@renderer/utils/slashCommandRegistry';
 import { SYSTEM_MANAGER_DISPLAY_NAME, SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
-import type { SystemManagerConfig, SystemManagerStatus } from '@shared/types/systemManager';
 import { Settings2, TerminalSquare } from 'lucide-react';
 
-import type { MentionSuggestion } from '@renderer/types/mention';
-
-import { LoopConsolePanel } from '../team/loop-console/LoopConsolePanel';
 import { RuntimeConfigDialog } from '../team/dialogs/RuntimeConfigDialog';
+import { LoopConsolePanel } from '../team/loop-console/LoopConsolePanel';
 
+import type { MentionSuggestion } from '@renderer/types/mention';
 import type {
   CcSession,
   ResolvedTeamMember,
   TeamTaskWithKanban,
   TeamViewSnapshot,
 } from '@shared/types';
+import type { SystemManagerConfig, SystemManagerStatus } from '@shared/types/systemManager';
 
 interface SystemManagerViewProps {
   isPaneFocused?: boolean;

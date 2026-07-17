@@ -28,7 +28,7 @@ function isTransientWorkerCommand(command: string): boolean {
 export function parseOtherUsageWorkerPids(psOutput: string, selfPid: number): number[] {
   const pids: number[] = [];
   for (const line of psOutput.split('\n')) {
-    const match = line.trim().match(/^(\d+)\s+([\s\S]+)$/);
+    const match = /^(\d+)\s+([\s\S]+)$/.exec(line.trim());
     if (!match) continue;
     const pid = Number(match[1]);
     if (!Number.isInteger(pid) || pid <= 0) continue;

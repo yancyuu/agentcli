@@ -10,22 +10,22 @@ import {
   type SelectedCapabilityCommandRef,
 } from '@renderer/utils/capabilityCommandExecution';
 import {
-  expandWorkflowCommand,
-  resolveWorkflowCommandInput,
-} from '@renderer/utils/workflowCommandExecution';
-import {
-  RESERVED_SLASH_COMMANDS,
   buildSlashCommandRegistry,
   collectSlashSuggestionAliases,
+  RESERVED_SLASH_COMMANDS,
 } from '@renderer/utils/slashCommandRegistry';
 import {
   extractTaskRefsFromText,
   stripEncodedTaskReferenceMetadata,
 } from '@renderer/utils/taskReferenceUtils';
+import {
+  expandWorkflowCommand,
+  resolveWorkflowCommandInput,
+} from '@renderer/utils/workflowCommandExecution';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { Send, TerminalSquare } from 'lucide-react';
 
-import { parseLoopSendIntent, validateLoopSendIntent, type LoopSendIntent } from './loopSendIntent';
+import { type LoopSendIntent, parseLoopSendIntent, validateLoopSendIntent } from './loopSendIntent';
 import { useLoopCommandSuggestions } from './useLoopCommandSuggestions';
 
 import type { InlineChip } from '@renderer/types/inlineChip';
@@ -47,7 +47,7 @@ interface LoopCommandComposerProps {
 
 const EMPTY_CHIPS: InlineChip[] = [];
 
-export function LoopCommandComposer({
+export const LoopCommandComposer = ({
   teamName,
   members,
   isTeamAlive,
@@ -57,7 +57,7 @@ export function LoopCommandComposer({
   slashCommandMode = 'message',
   projectPath,
   onSubmit,
-}: LoopCommandComposerProps): React.JSX.Element {
+}: LoopCommandComposerProps): React.JSX.Element => {
   const [text, setText] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [selectedCommand, setSelectedCommand] = useState<SelectedCapabilityCommandRef | null>(null);
@@ -302,4 +302,4 @@ export function LoopCommandComposer({
       />
     </div>
   );
-}
+};

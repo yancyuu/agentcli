@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskDispatchService } from './TaskDispatchService';
 
-import type { CollabTask, CollabTaskStatus, DispatchMeta } from '@shared/types/team';
-import type { Task, TaskStatus, TeamManifest, TeamWorkspaceService } from './TeamWorkspaceService';
 import type { CollaborationBoardService } from './CollaborationBoardService';
+import type { Task, TaskStatus, TeamManifest, TeamWorkspaceService } from './TeamWorkspaceService';
+import type { CollabTask, CollabTaskStatus, DispatchMeta } from '@shared/types/team';
 
 // connectRedis() does a dynamic `import('ioredis')`; stub it so the getter can
 // be exercised without a real server. A mutable flag lets a test simulate a
@@ -14,7 +14,7 @@ const redisMockState = vi.hoisted(() => ({ connectShouldFail: false }));
 // Redis keys the team bus actually touched — e.g. that NO task:* keys are
 // written when collaboration is disabled. Hoisted so the mock factory can close
 // over it; cleared between tests in the collaboration-gate suite.
-const redisCommands = vi.hoisted(() => [] as Array<{ cmd: string; key?: string }>);
+const redisCommands = vi.hoisted(() => [] as { cmd: string; key?: string }[]);
 
 vi.mock('ioredis', () => {
   const createInstance = () => {
@@ -35,7 +35,7 @@ vi.mock('ioredis', () => {
         return async (...args: unknown[]) => {
           redisCommands.push({
             cmd: String(prop),
-            key: typeof args[0] === 'string' ? (args[0] as string) : undefined,
+            key: typeof args[0] === 'string' ? args[0] : undefined,
           });
           return undefined;
         };

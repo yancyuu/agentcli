@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
 
+import { useProjectWorkflowCommands } from '@renderer/hooks/useProjectWorkflowCommands';
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
-import { useProjectWorkflowCommands } from '@renderer/hooks/useProjectWorkflowCommands';
 import { useStore } from '@renderer/store';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';

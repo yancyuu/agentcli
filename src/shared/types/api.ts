@@ -17,6 +17,7 @@ import type {
   PluginCatalogAPI,
   SkillsCatalogAPI,
 } from './extensions';
+import type { LoopAssetsSnapshot } from './loopAssets';
 import type {
   AppConfig,
   DetectedError,
@@ -42,6 +43,7 @@ import type {
   ScheduleRun,
   UpdateSchedulePatch,
 } from './schedule';
+import type { SystemManagerAPI } from './systemManager';
 import type {
   AddMemberRequest,
   AddTaskCommentRequest,
@@ -69,6 +71,7 @@ import type {
   ReplaceMembersRequest,
   SendMessageRequest,
   SendMessageResult,
+  SystemManagerSummary,
   TaskAttachmentMeta,
   TaskChangePresenceState,
   TaskComment,
@@ -87,7 +90,6 @@ import type {
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
-  SystemManagerSummary,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
@@ -100,11 +102,9 @@ import type {
   ToolApprovalSettings,
   UpdateKanbanPatch,
 } from './team';
-import type { LoopAssetsSnapshot } from './loopAssets';
-import type { SystemManagerAPI } from './systemManager';
 import type { TerminalAPI } from './terminal';
-import type { DiscoverableWorker } from './worker';
 import type { WaterfallData } from './visualization';
+import type { DiscoverableWorker } from './worker';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type {
   ConversationGroup,

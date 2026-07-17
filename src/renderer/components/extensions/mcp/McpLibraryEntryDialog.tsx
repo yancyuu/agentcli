@@ -35,7 +35,10 @@ import type {
 type TransportMode = 'stdio' | 'http';
 type HttpTransport = 'streamable-http' | 'sse' | 'http';
 
-type EnvRow = { key: string; value: string };
+interface EnvRow {
+  key: string;
+  value: string;
+}
 
 const HTTP_TRANSPORT_OPTIONS: { value: HttpTransport; label: string }[] = [
   { value: 'streamable-http', label: 'Streamable HTTP' },

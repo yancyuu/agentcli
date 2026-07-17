@@ -4,6 +4,7 @@
  */
 
 import assistantCreationOptions from '@shared/assistantCreationOptions.json';
+
 import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 export type { HermitBridgeAgentType } from '@shared/types/hermitBridge';

@@ -1,26 +1,27 @@
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline';
 
-import type { HermitBridgeClient } from '@main/services/hermitBridge/HermitBridgeClient';
 import { getProjectsBasePath } from '@main/utils/pathDecoder';
-import type {
-  ConversationTelemetryExportFormat,
-  ConversationTelemetryQuery,
-  ConversationTelemetryResponse,
-  ConversationTelemetryRow,
-  ConversationTelemetryExportResponse,
-  ConversationTelemetryMessage,
-} from '@shared/types/api';
-import type { TeamManifest } from '../team-management/TeamWorkspaceService';
 
 import {
   ConversationIdentityResolver,
   type ResolvedConversationIdentity,
 } from './ConversationIdentityResolver';
-import type { ConversationIdentityRecord } from './ConversationIdentityStore';
 import { resolveUsageTotalTokens } from './tokenUsageTotals';
+
+import type { TeamManifest } from '../team-management/TeamWorkspaceService';
+import type { ConversationIdentityRecord } from './ConversationIdentityStore';
+import type { HermitBridgeClient } from '@main/services/hermitBridge/HermitBridgeClient';
+import type {
+  ConversationTelemetryExportFormat,
+  ConversationTelemetryExportResponse,
+  ConversationTelemetryMessage,
+  ConversationTelemetryQuery,
+  ConversationTelemetryResponse,
+  ConversationTelemetryRow,
+} from '@shared/types/api';
 
 interface ClaudeSessionSummary {
   sessionId: string;
@@ -647,10 +648,10 @@ export class ConversationTelemetryService {
 
       const cached = this.claudeCache.get(filePath);
       const parsed =
-        cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
+        cached?.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
           ? cached.parsed
           : await this.parseClaudeJsonl(root, filePath);
-      if (!cached || cached.size !== fileStat.size || cached.mtimeMs !== fileStat.mtimeMs) {
+      if (cached?.size !== fileStat.size || cached.mtimeMs !== fileStat.mtimeMs) {
         this.claudeCache.set(filePath, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, parsed });
       }
 
@@ -772,7 +773,7 @@ export class ConversationTelemetryService {
       }
 
       messages.push({
-        role: role as ConversationTelemetryMessage['role'],
+        role: role,
         timestamp,
         content: text,
         uuid: normalizeOptional(obj.uuid),

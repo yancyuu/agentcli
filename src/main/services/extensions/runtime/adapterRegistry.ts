@@ -2,14 +2,14 @@
  * Adapter registry — maps harness types to their install adapters.
  */
 
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
-
-import type { HarnessInstallAdapter } from './HarnessInstallAdapter';
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter';
 import { CodexAdapter } from './CodexAdapter';
 import { CursorAdapter } from './CursorAdapter';
 import { GeminiAdapter } from './GeminiAdapter';
 import { OpenCodeAdapter } from './OpenCodeAdapter';
+
+import type { HarnessInstallAdapter } from './HarnessInstallAdapter';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 const adapters = new Map<HermitBridgeAgentType, HarnessInstallAdapter>();
 

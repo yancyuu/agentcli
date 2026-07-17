@@ -2,8 +2,8 @@ import { api } from '@renderer/api';
 import { parseStandaloneSlashCommand } from '@shared/utils/slashCommands';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
-import type { SlashCommandMeta } from '@shared/types/team';
 import type { WorkflowPromptSummary } from '@shared/types/systemManager';
+import type { SlashCommandMeta } from '@shared/types/team';
 
 export interface ResolvedWorkflowCommand {
   folder: string;
@@ -54,7 +54,7 @@ export function resolveWorkflowCommandInput(
       typeof suggestion.command === 'string' &&
       suggestion.command.toLowerCase() === parsed.command.toLowerCase()
   );
-  if (!match || !match.workflowPromptFolder || !match.workflowPromptId) return null;
+  if (!match?.workflowPromptFolder || !match.workflowPromptId) return null;
 
   return {
     folder: match.workflowPromptFolder,

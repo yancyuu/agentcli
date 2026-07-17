@@ -4,11 +4,11 @@ import path from 'node:path';
 
 import { decodePath, getProjectsBasePath } from '@main/utils/pathDecoder';
 
-import type { RecentProjectCandidate } from '../../core/domain/models/RecentProjectCandidate';
 import type {
   RecentProjectsSourcePayload,
   RecentProjectsSourcePort,
 } from '../../core/application/ports/RecentProjectsSourcePort';
+import type { RecentProjectCandidate } from '../../core/domain/models/RecentProjectCandidate';
 
 const DEFAULT_MAX_DEPTH = 5;
 const SKIPPED_DIRS = new Set([
@@ -170,7 +170,7 @@ export class LocalClaudeProjectSource implements RecentProjectsSourcePort {
     if (!(await isDirectory(root))) return;
 
     const maxDepth = this.options.maxDepth ?? DEFAULT_MAX_DEPTH;
-    const pending: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+    const pending: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }];
 
     while (pending.length > 0) {
       const current = pending.shift();

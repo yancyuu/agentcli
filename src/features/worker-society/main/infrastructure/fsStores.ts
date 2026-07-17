@@ -14,13 +14,14 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { PublishedNeed, Relationship, WorkerProfile } from '../../core/domain/models/society';
+import { ACTIVE_NEED_STATUSES } from '../../core/domain/policies/societyPolicies';
+
 import type {
   NeedStore,
   RelationshipStore,
   WorkerProfileStore,
 } from '../../core/application/ports';
-import { ACTIVE_NEED_STATUSES } from '../../core/domain/policies/societyPolicies';
+import type { PublishedNeed, Relationship, WorkerProfile } from '../../core/domain/models/society';
 
 async function readJson<T>(filePath: string, fallback: T): Promise<T> {
   try {

@@ -1,3 +1,7 @@
+import { normalizeRedisHost } from '@main/utils/redisConfig';
+
+import type { CollaborationBoardService } from './CollaborationBoardService';
+import type { Task, TeamManifest, TeamWorkspaceService } from './TeamWorkspaceService';
 import type {
   AgentCapability,
   CollabTask,
@@ -8,12 +12,8 @@ import type {
   TaskHandshakeResponse,
   TaskStatusUpdate,
 } from '@shared/types/team';
-import type { TeamWorkspaceService, TeamManifest, Task } from './TeamWorkspaceService';
-import type { CollaborationBoardService } from './CollaborationBoardService';
 // @ts-expect-error TS2307: ioredis is an optional enterprise dependency (agentbus).
 import type Redis from 'ioredis';
-
-import { normalizeRedisHost } from '@main/utils/redisConfig';
 
 const DISPATCH_RULES_DEFAULT = `When to dispatch a task to another team:
 - Task requires access to a different codebase/project
@@ -53,7 +53,7 @@ export class TaskDispatchService {
   private consumerTeamSlugs = new Set<string>();
   private responseConsumerTeamSlugs = new Set<string>();
   private disposed = false;
-  private pendingRequests: Map<string, PendingRequest> = new Map();
+  private pendingRequests = new Map<string, PendingRequest>();
   private startingTasks = new Set<string>();
   /** Callback fired when collab task state changes (for SSE broadcast). */
   onCollabChange?: (dispatchId: string, status: string, fromTeam: string, toTeam: string) => void;

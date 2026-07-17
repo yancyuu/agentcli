@@ -65,7 +65,7 @@ export function maskSecrets(text: string): string {
   );
 }
 
-function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () => void }) {
+const ToastItem = ({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () => void }) => {
   const style = TOAST_STYLES[toast.type];
   const Icon = style.icon;
 
@@ -93,7 +93,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () =>
       </button>
     </div>
   );
-}
+};
 
 export const ExtensionToast = ({ toasts, onDismiss }: ExtensionToastProps): React.JSX.Element => {
   if (toasts.length === 0) return <></>;

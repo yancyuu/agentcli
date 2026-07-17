@@ -10,17 +10,17 @@ import {
 } from 'react';
 import { Sheet, type SheetRef } from 'react-modal-sheet';
 
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
-import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
+import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { selectTeamMessages } from '@renderer/store/slices/teamSlice';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
-import { cn } from '@renderer/lib/utils';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { shouldExcludeInboxTextFromReplyCandidates } from '@shared/utils/idleNotificationSemantics';
 import {

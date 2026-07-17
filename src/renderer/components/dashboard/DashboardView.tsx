@@ -5,9 +5,9 @@
 
 import React from 'react';
 
-import { PRODUCT_NAME } from '@shared/constants';
 import { RecentProjectsSection } from '@features/recent-projects/renderer';
 import { useStore } from '@renderer/store';
+import { PRODUCT_NAME } from '@shared/constants';
 import { Bot, MessageCircle, Settings, ShieldCheck, TerminalSquare, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -53,7 +53,7 @@ export const DashboardView = (): React.JSX.Element => {
 
       <div className="relative mx-auto max-w-6xl px-8 py-10">
         <section className="mb-6 overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-sm">
-          <div className="grid gap-6 border-b border-border px-6 py-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid gap-6 border-b border-border p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-indigo-500/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-300">
                 <TerminalSquare className="size-3.5" />
@@ -95,7 +95,7 @@ export const DashboardView = (): React.JSX.Element => {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border bg-surface px-4 py-4">
+            <div className="rounded-xl border border-border bg-surface p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="text-sm font-medium text-text">工作区状态</div>
                 <span className="rounded-full border border-border bg-surface-overlay px-2 py-0.5 text-[10px] text-text-muted">
@@ -121,10 +121,7 @@ export const DashboardView = (): React.JSX.Element => {
 
           <div className="grid gap-3 px-6 py-5 md:grid-cols-3">
             {DASHBOARD_BOUNDARIES.map((item) => (
-              <div
-                key={item.title}
-                className="rounded-xl border border-border bg-surface px-4 py-4"
-              >
+              <div key={item.title} className="rounded-xl border border-border bg-surface p-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="text-sm font-medium text-text">{item.title}</div>
                   <span className="rounded-full border border-border bg-surface-overlay px-2 py-0.5 text-[10px] text-text-muted">
@@ -150,7 +147,7 @@ export const DashboardView = (): React.JSX.Element => {
               <button
                 type="button"
                 onClick={() => openSettingsTab('harness')}
-                className="rounded-lg border border-border bg-surface px-3 py-3 text-left transition-colors hover:bg-surface-overlay"
+                className="rounded-lg border border-border bg-surface p-3 text-left transition-colors hover:bg-surface-overlay"
               >
                 <p className="flex items-center gap-2 text-sm font-medium text-text">
                   <Settings className="size-4" />
@@ -161,7 +158,7 @@ export const DashboardView = (): React.JSX.Element => {
               <button
                 type="button"
                 onClick={openTeamsTab}
-                className="rounded-lg border border-border bg-surface px-3 py-3 text-left transition-colors hover:bg-surface-overlay"
+                className="rounded-lg border border-border bg-surface p-3 text-left transition-colors hover:bg-surface-overlay"
               >
                 <p className="flex items-center gap-2 text-sm font-medium text-text">
                   <Users className="size-4" />

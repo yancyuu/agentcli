@@ -5,6 +5,8 @@
  * 不含业务规则，只是 Map/数组的薄封装。
  */
 
+import { ACTIVE_NEED_STATUSES } from '../domain/policies/societyPolicies';
+
 import type {
   PublishedNeed,
   Relationship,
@@ -20,7 +22,6 @@ import type {
   SocialMessageOut,
   WorkerProfileStore,
 } from './ports';
-import { ACTIVE_NEED_STATUSES } from '../domain/policies/societyPolicies';
 
 export class FakeClock implements ClockPort {
   constructor(private t: string) {}

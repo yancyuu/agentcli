@@ -7,22 +7,21 @@
  *   - dispatchTask(): assignee 变化时通过 Bridge 推消息给目标团队的 agent
  */
 
+import { createLogger } from '@shared/utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { createLogger } from '@shared/utils/logger';
-
-import type { HermitBridgeConnection } from '../hermitBridge/HermitBridgeConnection';
-import type { HermitBridgeClient } from '../hermitBridge/HermitBridgeClient';
-
 import { buildHermitOpsRunbookContext } from './OpsRunbookContext';
 import {
-  TeamWorkspaceService,
-  groupSessionKey,
   type CreateTeamInput,
+  groupSessionKey,
   type Task,
   type TeamManifest,
+  TeamWorkspaceService,
 } from './TeamWorkspaceService';
+
+import type { HermitBridgeClient } from '../hermitBridge/HermitBridgeClient';
+import type { HermitBridgeConnection } from '../hermitBridge/HermitBridgeConnection';
 
 const logger = createLogger('TeamProvisioningService');
 const TEAM_INSTRUCTIONS_BEGIN = '<!-- hermit:team-collaboration:start -->';
@@ -119,7 +118,7 @@ export class TeamProvisioningService {
           manifest.harness,
           manifest.workDir,
           platformType,
-          platformOpts as Record<string, string>
+          platformOpts
         );
         if (result.restart_required) {
           if (this.hooks.restartCcConnect) {

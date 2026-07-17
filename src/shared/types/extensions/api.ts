@@ -9,6 +9,14 @@ import type {
   ApiKeySaveRequest,
   ApiKeyStorageStatus,
 } from './apikey';
+import type {
+  CapabilityCommandPromptRequest,
+  CapabilityCommandPromptResult,
+  CapabilityPackExportRequest,
+  CapabilityPackImportRequest,
+  CapabilityPackListResult,
+  CapabilityPackMutationResult,
+} from './capabilityPack';
 import type { InstallScope, OperationResult } from './common';
 import type {
   InstalledMcpEntry,
@@ -23,14 +31,6 @@ import type {
   McpServerDiagnostic,
 } from './mcp';
 import type { EnrichedPlugin, PluginInstallRequest } from './plugin';
-import type {
-  CapabilityCommandPromptRequest,
-  CapabilityCommandPromptResult,
-  CapabilityPackExportRequest,
-  CapabilityPackImportRequest,
-  CapabilityPackListResult,
-  CapabilityPackMutationResult,
-} from './capabilityPack';
 import type {
   SkillCatalogItem,
   SkillDeleteRequest,

@@ -5,10 +5,10 @@ import 'react-resizable/css/styles.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
+import { restoreInitialRoute } from './utils/initialRoute';
 import { App } from './App';
 import { initSentryRenderer } from './sentry';
 import { initializeNotificationListeners, useStore } from './store';
-import { restoreInitialRoute } from './utils/initialRoute';
 
 declare global {
   interface Window {

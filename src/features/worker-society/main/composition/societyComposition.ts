@@ -12,13 +12,13 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import type { DiscoverableWorker } from '@shared/types/worker';
-
-import type { ClockPort, WorkerProfileStore } from '../../core/application/ports';
 import { WorkerSocietyService } from '../../core/application/WorkerSocietyService';
 import { CrossTeamMessageGateway } from '../infrastructure/crossTeamMessageGateway';
-import { MergingProfileStore } from '../infrastructure/mergingProfileStore';
 import { FsNeedStore, FsProfileStore, FsRelationshipStore } from '../infrastructure/fsStores';
+import { MergingProfileStore } from '../infrastructure/mergingProfileStore';
+
+import type { ClockPort, WorkerProfileStore } from '../../core/application/ports';
+import type { DiscoverableWorker } from '@shared/types/worker';
 
 /** 默认社会数据根目录：~/.hermit/society。 */
 export function defaultSocietyRoot(): string {

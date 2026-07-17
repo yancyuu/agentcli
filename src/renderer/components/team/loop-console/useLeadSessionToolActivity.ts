@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
 
 import { useStore } from '@renderer/store';
-import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
 import { extractRecentToolActivity, type LeadToolActivity } from '@renderer/utils/leadToolActivity';
+import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
 import { useShallow } from 'zustand/react/shallow';
 
 const POLL_INTERVAL_MS = 10_000;

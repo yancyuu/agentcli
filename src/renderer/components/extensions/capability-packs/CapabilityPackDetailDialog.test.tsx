@@ -3,9 +3,9 @@ import { createRoot } from 'react-dom/client';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { LoadedCapabilityPack } from '@shared/types/extensions';
-
 import { CapabilityPackDetailDialog } from './CapabilityPackDetailDialog';
+
+import type { LoadedCapabilityPack } from '@shared/types/extensions';
 
 const samplePack: LoadedCapabilityPack = {
   manifest: {

@@ -1,7 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DirectCliSessionStore } from './DirectCliSessionStore';

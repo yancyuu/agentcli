@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { mergeAdminCommandSuggestions } from './workflowCommandSuggestions';
+
 import type { MentionSuggestion } from '@renderer/types/mention';
 
 function suggestion(name: string, command?: string): MentionSuggestion {

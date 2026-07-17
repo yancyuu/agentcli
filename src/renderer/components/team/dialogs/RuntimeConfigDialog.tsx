@@ -13,18 +13,19 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { useStore } from '@renderer/store';
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import { Loader2, Plug2, Settings2, Wifi, WifiOff } from 'lucide-react';
 
-import {
-  PlatformBindingContent,
-  type PlatformBindingCompleteOptions,
-} from './PlatformBindingDialog';
 import {
   buildPlatformAllowUpdatePayload,
   getPlatformAllowValue,
   readStringRecord,
   withPlatformAllowValue,
 } from './platformAllowUtils';
+import {
+  type PlatformBindingCompleteOptions,
+  PlatformBindingContent,
+} from './PlatformBindingDialog';
 import { platformMeta } from './platformMeta';
 
 import type {
@@ -32,10 +33,9 @@ import type {
   HermitBridgeProjectPlatform,
 } from '@shared/types/hermitBridge';
 import type { TeamUpdateConfigRequest } from '@shared/types/team';
-import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
 // ── Section wrapper ──────────────────────────────────────────
-function FormSection({
+const FormSection = ({
   title,
   description,
   children,
@@ -43,7 +43,7 @@ function FormSection({
   title: string;
   description?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <div className="bg-[var(--color-surface-raised)]/55 relative overflow-hidden rounded-xl border border-[var(--color-border-subtle)] p-3 shadow-sm shadow-black/10">
       <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
@@ -56,7 +56,7 @@ function FormSection({
       <div className="mt-3 space-y-3">{children}</div>
     </div>
   );
-}
+};
 
 const inputCls =
   'w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent-border)] focus:ring-1 focus:ring-[var(--color-accent-border)]';
@@ -101,14 +101,14 @@ function uniquePlatformTypes(platforms: HermitBridgeProjectPlatform[]): string[]
   ];
 }
 
-function BoundPlatformList({
+const BoundPlatformList = ({
   platforms,
 }: {
   platforms: HermitBridgeProjectPlatform[];
-}): React.JSX.Element {
+}): React.JSX.Element => {
   if (platforms.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
+      <div className="rounded-lg border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
         暂无已绑定渠道。
       </div>
     );
@@ -148,7 +148,7 @@ function BoundPlatformList({
       ))}
     </div>
   );
-}
+};
 
 interface RuntimeConfigDialogProps {
   open: boolean;
@@ -156,11 +156,11 @@ interface RuntimeConfigDialogProps {
   onClose: () => void;
 }
 
-export function RuntimeConfigDialog({
+export const RuntimeConfigDialog = ({
   open,
   teamName,
   onClose,
-}: RuntimeConfigDialogProps): React.JSX.Element {
+}: RuntimeConfigDialogProps): React.JSX.Element => {
   const isAdminTeam = teamName === SYSTEM_MANAGER_TEAM_NAME;
   const { data, fetchTeams, selectTeam } = useStore((s) => ({
     data: s.selectedTeamName === teamName ? s.selectedTeamData : null,
@@ -172,7 +172,7 @@ export function RuntimeConfigDialog({
   const defaults = useMemo(() => {
     const cfg = data?.config;
     const d = data as Record<string, unknown> | null;
-    const rawSettings = (data?.settings ?? {}) as Record<string, unknown>;
+    const rawSettings = data?.settings ?? {};
     return {
       agentType: cfg?.agentType ?? (d?.harness as string | undefined) ?? 'claudecode',
       workDir: cfg?.projectPath ?? (d?.workDir as string | undefined) ?? '',
@@ -868,7 +868,7 @@ export function RuntimeConfigDialog({
                     );
                   })
                 ) : (
-                  <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                  <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
                     暂无适用于 {AGENT_TYPE_LABELS[agentType as HermitBridgeAgentType] ?? agentType}{' '}
                     的全局 Provider。
                   </div>
@@ -920,4 +920,4 @@ export function RuntimeConfigDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};

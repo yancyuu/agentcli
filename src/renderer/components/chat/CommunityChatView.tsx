@@ -14,7 +14,7 @@ export const CommunityChatView = (): React.JSX.Element => {
 
       <div className="relative mx-auto flex min-h-full max-w-5xl flex-col px-8 py-12">
         <section className="overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-sm">
-          <div className="border-b border-border bg-gradient-to-br from-lime-500/15 via-emerald-500/10 to-transparent px-8 py-8">
+          <div className="border-b border-border bg-gradient-to-br from-lime-500/15 via-emerald-500/10 to-transparent p-8">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-lime-500/25 bg-lime-500/10 px-3 py-1 text-[11px] font-medium text-lime-300">
               <MessageCircle className="size-3.5" />
               Chat / 交流圈
@@ -26,7 +26,7 @@ export const CommunityChatView = (): React.JSX.Element => {
             </p>
           </div>
 
-          <div className="grid gap-8 px-8 py-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-8 p-8 lg:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4">
               <div className="rounded-xl border border-border bg-surface px-5 py-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium text-text">
@@ -57,7 +57,7 @@ export const CommunityChatView = (): React.JSX.Element => {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-border bg-surface px-5 py-5 text-center">
+            <div className="rounded-2xl border border-border bg-surface p-5 text-center">
               <div className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-text">
                 <QrCode className="size-4 text-lime-400" />
                 扫码加入

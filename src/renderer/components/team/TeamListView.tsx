@@ -31,16 +31,17 @@ import {
   getProjectSelectionResetState,
   getWorktreeNavigationState,
 } from '@renderer/store/utils/stateResetHelpers';
+import { formatRelativeTime, formatTokensCompact } from '@renderer/utils/formatters';
 import { buildMemberColorMap, teamAvatarUrl } from '@renderer/utils/memberHelpers';
-import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import {
   emitOpenHermitEvent,
   getCreateTeamFromProjectPath,
   OPEN_HERMIT_EVENTS,
 } from '@renderer/utils/openHermitEvents';
+import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { formatRelativeTime, formatTokensCompact } from '@renderer/utils/formatters';
+import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 import {
   CheckCircle,
   Clock,
@@ -57,8 +58,6 @@ import {
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
-
 import { CreateTeamDialog } from './dialogs/CreateTeamDialog';
 import { LaunchTeamDialog } from './dialogs/LaunchTeamDialog';
 import { TeamEmptyState } from './TeamEmptyState';
@@ -69,6 +68,8 @@ import {
   teamMatchesProjectSelection,
 } from './teamProjectSelection';
 
+import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
+import type { TeamListFilterState } from './TeamListFilterPopover';
 import type {
   ResolvedTeamMember,
   TeamCreateRequest,
@@ -79,8 +80,6 @@ import type {
   TeamTemplateSource,
   TeamTemplateSummary,
 } from '@shared/types';
-import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
-import type { TeamListFilterState } from './TeamListFilterPopover';
 
 function generateUniqueName(sourceName: string, existingNames: string[]): string {
   const base = sourceName.replace(/-\d+$/, '');
@@ -927,7 +926,7 @@ export const TeamListView = (): React.JSX.Element => {
       clearProvisioningError={clearProvisioningError}
       existingTeamNames={teams.map((t) => t.teamName)}
       existingBindProjects={teams.map((t) => t.bindProject).filter(Boolean) as string[]}
-      existingDisplayNames={teams.map((t) => t.displayName).filter(Boolean) as string[]}
+      existingDisplayNames={teams.map((t) => t.displayName).filter(Boolean)}
       provisioningTeamNames={provisioningTeamNames}
       activeTeams={activeTeams}
       initialData={copyData ?? undefined}

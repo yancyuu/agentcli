@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { SessionEntry } from '../SessionUsageParser';
 import { localUserRowsFromSessions } from '../UsageTelemetryService';
+
+import type { SessionEntry } from '../SessionUsageParser';
 
 function makeSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
   return {
@@ -60,8 +61,14 @@ describe('localUserRowsFromSessions', () => {
 
   it('keeps separate rows for distinct projectPath', () => {
     const rows = localUserRowsFromSessions([
-      makeSession({ projectPath: '/Users/x/a', tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 5 } }),
-      makeSession({ projectPath: '/Users/x/b', tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 7 } }),
+      makeSession({
+        projectPath: '/Users/x/a',
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 5 },
+      }),
+      makeSession({
+        projectPath: '/Users/x/b',
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 7 },
+      }),
     ]);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.tokensTotal).sort((a, b) => a - b)).toEqual([5, 7]);
@@ -69,8 +76,14 @@ describe('localUserRowsFromSessions', () => {
 
   it('keeps separate rows for distinct provider on the same projectPath', () => {
     const rows = localUserRowsFromSessions([
-      makeSession({ provider: 'claudecode', tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 5 } }),
-      makeSession({ provider: 'codex', tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 7 } }),
+      makeSession({
+        provider: 'claudecode',
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 5 },
+      }),
+      makeSession({
+        provider: 'codex',
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 7 },
+      }),
     ]);
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((r) => r.provider))).toEqual(new Set(['claudecode', 'codex']));
@@ -78,8 +91,14 @@ describe('localUserRowsFromSessions', () => {
 
   it('drops sessions with no tokens and no messages', () => {
     const rows = localUserRowsFromSessions([
-      makeSession({ messageCount: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 } }),
-      makeSession({ messageCount: 3, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 } }),
+      makeSession({
+        messageCount: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 },
+      }),
+      makeSession({
+        messageCount: 3,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 },
+      }),
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].messages).toBe(3);

@@ -14,6 +14,7 @@ import { parseCrossTeamPrefix } from '@shared/constants/crossTeam';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeClock } from '../../core/application/fakes';
+
 import { CrossTeamMessageGateway } from './crossTeamMessageGateway';
 
 describe('CrossTeamMessageGateway', () => {

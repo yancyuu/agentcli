@@ -4,17 +4,17 @@
  * not upload usage, conversation messages, or capability snapshots.
  */
 
-import type { ConversationTelemetryRow } from '@shared/types/api';
-import type { TaskBusConfig } from '@shared/types/team';
-
-import { SessionUsageCollector } from './SessionUsageCollector';
 import { uploadConversationMessages } from './ConversationMessageUploadService';
+import { SessionUsageCollector } from './SessionUsageCollector';
+
 import type { SessionEntry, UsageAggregate, UsageProviderMetrics } from './SessionUsageParser';
 import type {
   UsageCollectionResult,
   UsageTelemetryStatus,
   UserUsageTelemetryRow,
 } from './usageTypes';
+import type { ConversationTelemetryRow } from '@shared/types/api';
+import type { TaskBusConfig } from '@shared/types/team';
 
 export type UsageTelemetryScanPhase = 'idle' | 'scanning' | 'done' | 'error';
 

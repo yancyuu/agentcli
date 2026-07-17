@@ -173,7 +173,7 @@ export const SortableTab = ({
     >
       {isActive && accentColor && (
         <div
-          className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full"
+          className="absolute inset-x-2 bottom-0 h-[2px] rounded-full"
           style={{ backgroundColor: accentColor, opacity: 0.6 }}
         />
       )}

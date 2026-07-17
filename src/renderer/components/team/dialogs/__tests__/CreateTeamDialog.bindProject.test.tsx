@@ -13,9 +13,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { generateBindProject } from '@renderer/utils/bindProjectSlug';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CreateTeamDialog } from '../CreateTeamDialog';
 
@@ -48,7 +47,7 @@ vi.mock('@renderer/hooks/useTheme', () => ({
 }));
 
 vi.mock('@renderer/lib/utils', () => ({
-  cn: (...args: Array<unknown>): string =>
+  cn: (...args: unknown[]): string =>
     args.filter((a): a is string => typeof a === 'string' && a.length > 0).join(' '),
 }));
 

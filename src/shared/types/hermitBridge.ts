@@ -294,8 +294,8 @@ export interface HermitBridgeUserMessage {
   /** 可选 chat 标识,默认 hermit-bridge 由 session_key 解析。 */
   chat_id?: string;
   reply_ctx?: string;
-  images?: Array<{ mime_type: string; data: string; file_name: string }>;
-  files?: Array<{ mime_type: string; data: string; file_name: string }>;
+  images?: { mime_type: string; data: string; file_name: string }[];
+  files?: { mime_type: string; data: string; file_name: string }[];
 }
 
 /** Complete reply from agent. */
@@ -342,7 +342,7 @@ export interface HermitBridgeCardMessage {
   reply_ctx?: string;
   card: {
     header?: { title: string; color?: string };
-    elements: Array<Record<string, unknown>>;
+    elements: Record<string, unknown>[];
   };
 }
 
@@ -352,7 +352,7 @@ export interface HermitBridgeButtonsMessage {
   session_key: string;
   reply_ctx?: string;
   content: string;
-  buttons: Array<Array<{ text: string; data: string }>>;
+  buttons: { text: string; data: string }[][];
 }
 
 /** Typing indicators. */

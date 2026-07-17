@@ -8,14 +8,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { providersApi } from '@renderer/api/providers';
-import { ALL_AGENT_TYPES, AGENT_TYPE_LABELS } from '@renderer/components/team/HarnessCards';
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
+import { AGENT_TYPE_LABELS, ALL_AGENT_TYPES } from '@renderer/components/team/HarnessCards';
 import { HarnessIcon } from '@renderer/components/team/HarnessSelect';
 import { cn } from '@renderer/lib/utils';
 import { OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 
 import { SettingsSectionHeader } from '../components/SettingsSectionHeader';
+
 import { CliStatusSection } from './CliStatusSection';
+
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 export const HarnessSection = (): React.JSX.Element => {
   const [providerNamesByAgentType, setProviderNamesByAgentType] = useState<

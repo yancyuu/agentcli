@@ -8,13 +8,13 @@
 
 import { createLogger } from '@shared/utils/logger';
 
+import type { HermitBridgeConnection } from './HermitBridgeConnection';
+import type { ProjectMappingStore } from './ProjectMappingStore';
 import type {
   HermitBridgeIncomingMessage,
   HermitBridgeReplyMessage,
   HermitBridgeReplyStreamMessage,
 } from '@shared/types/hermitBridge';
-import type { HermitBridgeConnection } from './HermitBridgeConnection';
-import type { ProjectMappingStore } from './ProjectMappingStore';
 
 const logger = createLogger('MessageBridge');
 
@@ -60,7 +60,7 @@ export class MessageBridge {
     }
 
     // Try parsing from session key pattern
-    const match = sessionKey.match(/^bridge:hermit-([^:]+):(.+)$/);
+    const match = /^bridge:hermit-([^:]+):(.+)$/.exec(sessionKey);
     if (match) {
       return { teamName: match[1], memberName: match[2] };
     }

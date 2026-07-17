@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { runFixedRateWorkerScheduler } from '@main/telemetry/worker';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const INTERVAL_MS = 5 * 60 * 1000;
 

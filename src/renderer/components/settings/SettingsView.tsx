@@ -5,14 +5,14 @@
 
 import { useEffect, useState } from 'react';
 
-import { PRODUCT_NAME } from '@shared/constants';
 import { useStore } from '@renderer/store';
+import { PRODUCT_NAME } from '@shared/constants';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { TaskBusSection } from './sections/TaskBusSection';
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
 import { AdvancedSection, GeneralSection, HarnessSection } from './sections';
-import { TaskBusSection } from './sections/TaskBusSection';
 import { type SettingsSection, SettingsTabs } from './SettingsTabs';
 
 export const SettingsView = (): React.JSX.Element | null => {
@@ -103,7 +103,7 @@ export const SettingsView = (): React.JSX.Element | null => {
     <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--color-surface)' }}>
       {/* Control-console settings shell */}
       <div
-        className="mx-auto flex min-h-full max-w-4xl flex-col px-6 py-6"
+        className="mx-auto flex min-h-full max-w-4xl flex-col p-6"
         style={{
           backgroundColor: 'var(--color-surface)',
         }}
@@ -113,7 +113,7 @@ export const SettingsView = (): React.JSX.Element | null => {
           style={{ borderColor: 'var(--color-border-subtle)' }}
         >
           <div className="pointer-events-none h-px bg-gradient-to-r from-transparent via-[var(--color-accent-border)] to-transparent" />
-          <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <div className="shadow-[var(--color-accent-glow)]/20 flex size-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-accent-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] shadow-sm">
                 <SlidersHorizontal className="size-4" />

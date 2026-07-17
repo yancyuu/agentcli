@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WorkerSocietyService, estimateFit } from './WorkerSocietyService';
-import type { AgentCapability, PublishedNeed, WorkerProfile } from '../domain/models/society';
-
 // Fakes（仿 TaskDispatchService.test.ts 的 FakeWorkspace 模式）—— 放在独立 fakes.ts
 // 中以便后续 adapter / renderer 测试复用。
 import {
@@ -13,6 +10,9 @@ import {
   FakeRelationshipStore,
   MemoryEventSink,
 } from './fakes';
+import { estimateFit, WorkerSocietyService } from './WorkerSocietyService';
+
+import type { AgentCapability, PublishedNeed, WorkerProfile } from '../domain/models/society';
 
 function cap(skill: string): AgentCapability {
   return { skill, description: skill };

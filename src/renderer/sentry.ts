@@ -9,9 +9,9 @@
 
 import {
   addBreadcrumb,
+  browserTracingIntegration as reactBrowserTracing,
   captureException,
   init as reactInit,
-  browserTracingIntegration as reactBrowserTracing,
   withScope,
 } from '@sentry/react';
 import {

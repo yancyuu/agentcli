@@ -24,18 +24,20 @@ import { Label } from '@renderer/components/ui/label';
 import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
-import { normalizePath } from '@renderer/utils/pathNormalize';
 import { generateBindProject, isValidBindProject } from '@renderer/utils/bindProjectSlug';
+import { normalizePath } from '@renderer/utils/pathNormalize';
 import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 import { AGENT_TYPE_LABELS } from '../HarnessCards';
 import { HarnessSelect } from '../HarnessSelect';
+
 import {
   buildSelectableProjectsWithDefaultPath,
   findProjectPathMatch,
 } from './createTeamDefaultProject';
 import { ProjectPathSelector } from './ProjectPathSelector';
+
 import type {
   EffortLevel,
   Project,
@@ -639,7 +641,7 @@ export const CreateTeamDialog = ({
                     );
                   })
                 ) : (
-                  <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                  <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
                     暂无适用于 {AGENT_TYPE_LABELS[selectedHarness] ?? selectedHarness} 的全局
                     Provider。 可先在「设置 → Harness 配置」中添加；不添加也会使用本机默认登录态。
                   </div>

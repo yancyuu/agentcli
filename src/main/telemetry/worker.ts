@@ -4,15 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type { TaskBusConfig } from '@shared/types/team';
-
 import { getValidBearerToken } from '@main/services/auth/OpenHermitAuthClient';
-import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
 // Single source for the cloud host/port default — change it in
 // src/shared/constants/cloudConfig.mjs only.
 import { DEFAULT_OPENHERMIT_CLOUD_BASE_URL } from '@shared/constants/cloudConfig.mjs';
-import { reportAllLarkCredentials, type LarkCredentialsReportStatus } from './larkCredentials';
+
+import { type LarkCredentialsReportStatus, reportAllLarkCredentials } from './larkCredentials';
 import { reapOtherUsageWorkers } from './workerSingleton';
+
+import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
+import type { TaskBusConfig } from '@shared/types/team';
 
 const STATUS_SCHEMA_VERSION = 1;
 const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;

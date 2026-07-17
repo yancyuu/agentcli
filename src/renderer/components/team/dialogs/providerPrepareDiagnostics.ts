@@ -204,7 +204,7 @@ export async function runProviderPrepareDiagnostics({
   }
   const details = [
     ...runtimeDetails,
-    ...orderedModelIds.map((modelId) => modelResultsById[modelId]!.line),
+    ...orderedModelIds.map((modelId) => modelResultsById[modelId].line),
   ];
   const status: ProviderPrepareCheckStatus = runtimeWarnings.length > 0 ? 'notes' : 'ready';
   onModelProgress?.({

@@ -22,7 +22,7 @@ export interface TeamMentionDirective {
 }
 
 export function parseTeamMentionDirective(text: string): TeamMentionDirective | null {
-  const match = text.match(TEAM_MENTION_DIRECTIVE_RE);
+  const match = TEAM_MENTION_DIRECTIVE_RE.exec(text);
   if (!match) return null;
   const mentioned = match[1];
   const subject = match[2]?.trim();

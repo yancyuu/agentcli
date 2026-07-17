@@ -8,8 +8,8 @@
 
 import React, { useCallback, useRef, useState } from 'react';
 
-import { api } from '@renderer/api';
 import * as ContextMenu from '@radix-ui/react-context-menu';
+import { api } from '@renderer/api';
 import { lastSeparatorIndex } from '@shared/utils/platformPath';
 import {
   ClipboardCopy,

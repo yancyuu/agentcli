@@ -1,5 +1,6 @@
 import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 
+import { api } from '@renderer/api';
 import { captureRendererException, isSentryRendererActive } from '@renderer/sentry';
 import { useStore } from '@renderer/store';
 import {
@@ -8,7 +9,6 @@ import {
   buildGitHubBugReportUrl,
 } from '@renderer/utils/bugReportUtils';
 import { createLogger } from '@shared/utils/logger';
-import { api } from '@renderer/api';
 import { AlertTriangle, Bug, Check, Copy, RefreshCw } from 'lucide-react';
 
 const logger = createLogger('Component:ErrorBoundary');

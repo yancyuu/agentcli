@@ -1,9 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { emitCreateTeamFromProjectIntent } from '@renderer/utils/openHermitEvents';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const storeState = vi.hoisted(() => ({
   teams: [],
@@ -63,7 +62,7 @@ vi.mock('@renderer/components/common/ConfirmDialog', () => ({ confirm: vi.fn(asy
 vi.mock('@renderer/hooks/useTheme', () => ({ useTheme: () => ({ isLight: false }) }));
 vi.mock('@renderer/hooks/useBranchSync', () => ({ useBranchSync: () => undefined }));
 vi.mock('@renderer/lib/utils', () => ({
-  cn: (...args: Array<unknown>): string =>
+  cn: (...args: unknown[]): string =>
     args.filter((arg): arg is string => typeof arg === 'string' && arg.length > 0).join(' '),
 }));
 vi.mock('@renderer/components/ui/button', () => ({

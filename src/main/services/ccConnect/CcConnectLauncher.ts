@@ -1,12 +1,6 @@
 /**
  * @deprecated Use ../hermitBridge/HermitBridgeLauncher for new code.
  */
-export {
-  buildBridgeArgs,
-  HermitBridgeLauncher as CcConnectLauncher,
-  resolveBridgeCommand,
-  resolveHermitBridgeBinaryName,
-} from '../hermitBridge/HermitBridgeLauncher';
 export type {
   BridgeCommand,
   BridgeLaunchOptions,
@@ -16,4 +10,10 @@ export type {
   ResolveBinaryFn,
   SpawnedBridge,
   SpawnFn,
+} from '../hermitBridge/HermitBridgeLauncher';
+export {
+  buildBridgeArgs,
+  HermitBridgeLauncher as CcConnectLauncher,
+  resolveBridgeCommand,
+  resolveHermitBridgeBinaryName,
 } from '../hermitBridge/HermitBridgeLauncher';

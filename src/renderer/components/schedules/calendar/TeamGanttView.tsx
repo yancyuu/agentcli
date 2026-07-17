@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { addDays, addHours, format, isToday, isSameDay } from 'date-fns';
-import { Cron } from 'croner';
 
 import { cn } from '@renderer/lib/utils';
+import { getCronDescription } from '@renderer/utils/scheduleFormatters';
+import { Cron } from 'croner';
+import { addDays, addHours, format, isSameDay, isToday } from 'date-fns';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
-import { getCronDescription } from '@renderer/utils/scheduleFormatters';
 import type { Schedule, ScheduleStatus } from '@shared/types';
 
 // =============================================================================
@@ -81,11 +81,21 @@ export const TeamGanttView = React.memo(function TeamGanttView({
   const ticks = useMemo(() => {
     let intervalMs: number;
     switch (timeRange) {
-      case '6h':  intervalMs = 3600_000; break;
-      case '24h': intervalMs = 3 * 3600_000; break;
-      case '3d':  intervalMs = 12 * 3600_000; break;
-      case '7d':  intervalMs = 24 * 3600_000; break;
-      default:   intervalMs = 3600_000; break;
+      case '6h':
+        intervalMs = 3600_000;
+        break;
+      case '24h':
+        intervalMs = 3 * 3600_000;
+        break;
+      case '3d':
+        intervalMs = 12 * 3600_000;
+        break;
+      case '7d':
+        intervalMs = 24 * 3600_000;
+        break;
+      default:
+        intervalMs = 3600_000;
+        break;
     }
     const result: { time: number; pct: number }[] = [];
     const start = Math.floor(now / intervalMs) * intervalMs;
@@ -145,9 +155,7 @@ export const TeamGanttView = React.memo(function TeamGanttView({
     <div className="rounded-xl border border-[var(--color-border)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
-        <span className="text-xs text-[var(--color-text-muted)]">
-          {teams.length} 个计划
-        </span>
+        <span className="text-xs text-[var(--color-text-muted)]">{teams.length} 个计划</span>
         <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
           {RANGE_OPTIONS.map((opt) => (
             <button
@@ -157,7 +165,7 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                 'rounded-sm px-2 py-0.5 text-[10px] transition-colors',
                 timeRange === opt.value
                   ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
               )}
               onClick={() => setTimeRange(opt.value)}
             >
@@ -169,7 +177,13 @@ export const TeamGanttView = React.memo(function TeamGanttView({
 
       {/* Time axis — aligned to grid, horizontally scrollable */}
       <div className="overflow-x-auto border-b border-[var(--color-border)]">
-        <div className="grid" style={{ gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`, minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})` }}>
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`,
+            minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})`,
+          }}
+        >
           <div className="px-3 py-1.5 text-[10px] text-[var(--color-text-muted)] opacity-50">
             团队
           </div>
@@ -205,11 +219,17 @@ export const TeamGanttView = React.memo(function TeamGanttView({
             const hiddenCount = team.schedules.length - MAX_EXPANDED_ITEMS;
 
             return (
-              <div key={team.teamName} className="group/team border-b border-[var(--color-border)] last:border-b-0">
+              <div
+                key={team.teamName}
+                className="group/team border-b border-[var(--color-border)] last:border-b-0"
+              >
                 {/* Team row (collapsed) — grid aligned */}
                 <div
-                  className="grid items-center hover:bg-white/[0.02] transition-colors"
-                  style={{ gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`, minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})` }}
+                  className="grid items-center transition-colors hover:bg-white/[0.02]"
+                  style={{
+                    gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`,
+                    minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})`,
+                  }}
                 >
                   {/* Left: team info */}
                   <button
@@ -218,9 +238,16 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                     onClick={() => toggleTeam(team.teamName)}
                   >
                     <span className="text-[var(--color-text-muted)]">
-                      {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                      {expanded ? (
+                        <ChevronDown className="size-3" />
+                      ) : (
+                        <ChevronRight className="size-3" />
+                      )}
                     </span>
-                    <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: team.color }} />
+                    <span
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: team.color }}
+                    />
                     <span className="truncate text-xs font-medium text-[var(--color-text)]">
                       {team.displayName}
                     </span>
@@ -232,32 +259,36 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                     {ticks.map((tick, i) => (
                       <div
                         key={i}
-                        className="absolute bottom-0 top-0 w-px bg-[var(--color-border)] opacity-30"
+                        className="absolute inset-y-0 w-px bg-[var(--color-border)] opacity-30"
                         style={{ left: `${tick.pct}%` }}
                       />
                     ))}
                     {/* Now marker */}
-                    <div className="absolute bottom-0 top-0 w-px bg-red-500/50" style={{ left: '0%' }} />
+                    <div className="absolute inset-y-0 w-px bg-red-500/50" style={{ left: '0%' }} />
 
                     {/* Fallback: show schedule names when no hits in range */}
-                    {hitCount === 0 && team.schedules.map((schedule) => (
-                      <button
-                        key={schedule.id}
-                        type="button"
-                        className="absolute top-1/2 z-10 -translate-y-1/2 rounded-sm border border-[var(--color-border)] px-2 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
-                        style={{ left: '8px', transform: 'translateY(-50%)' }}
-                        onClick={(e) => { e.stopPropagation(); onEdit(schedule); }}
-                      >
-                        <span className="text-[10px] font-medium text-[var(--color-text-secondary)]">
-                          {schedule.label || getCronDescription(schedule.cronExpression)}
-                        </span>
-                        <span className="ml-2 text-[9px] text-[var(--color-text-muted)]">
-                          {schedule.nextRunAt
-                            ? `下次 ${format(new Date(schedule.nextRunAt), 'M/d HH:mm')}`
-                            : '无计划'}
-                        </span>
-                      </button>
-                    ))}
+                    {hitCount === 0 &&
+                      team.schedules.map((schedule) => (
+                        <button
+                          key={schedule.id}
+                          type="button"
+                          className="absolute top-1/2 z-10 -translate-y-1/2 rounded-sm border border-[var(--color-border)] px-2 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
+                          style={{ left: '8px', transform: 'translateY(-50%)' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(schedule);
+                          }}
+                        >
+                          <span className="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                            {schedule.label || getCronDescription(schedule.cronExpression)}
+                          </span>
+                          <span className="ml-2 text-[9px] text-[var(--color-text-muted)]">
+                            {schedule.nextRunAt
+                              ? `下次 ${format(new Date(schedule.nextRunAt), 'M/d HH:mm')}`
+                              : '无计划'}
+                          </span>
+                        </button>
+                      ))}
 
                     {/* Hits as labeled pills */}
                     {team.hits.map((hit, i) => {
@@ -269,9 +300,9 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                           key={`${hit.schedule.id}-${i}`}
                           type="button"
                           className={cn(
-                            'absolute top-1/2 z-10 -translate-y-1/2 rounded-sm px-1.5 py-0.5 text-left transition-transform hover:scale-105 hover:z-20',
+                            'absolute top-1/2 z-10 -translate-y-1/2 rounded-sm px-1.5 py-0.5 text-left transition-transform hover:z-20 hover:scale-105',
                             isActive && 'opacity-100',
-                            !isActive && 'opacity-40',
+                            !isActive && 'opacity-40'
                           )}
                           style={{
                             left: `${pct}%`,
@@ -279,7 +310,10 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                             maxWidth: 120,
                             transform: `translate(-50%, -50%)`,
                           }}
-                          onClick={(e) => { e.stopPropagation(); onEdit(hit.schedule); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(hit.schedule);
+                          }}
                           title={`${hit.schedule.label || getCronDescription(hit.schedule.cronExpression)}\n${hit.date.toLocaleString('zh-CN')}`}
                         >
                           <span className="block truncate text-[9px] font-medium leading-tight text-white">
@@ -296,28 +330,39 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                   <div className="bg-[var(--color-surface-raised)]/30">
                     {showSchedules.map((schedule) => {
                       const hits = scheduleHits.get(schedule.id) ?? [];
-                      const statusLabel = schedule.status === 'active' ? '运行中' : schedule.status === 'paused' ? '已暂停' : schedule.status;
+                      const statusLabel =
+                        schedule.status === 'active'
+                          ? '运行中'
+                          : schedule.status === 'paused'
+                            ? '已暂停'
+                            : schedule.status;
 
                       return (
                         <div
                           key={schedule.id}
-                          className="grid items-center hover:bg-white/[0.02] transition-colors"
-                          style={{ gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`, minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})` }}
+                          className="grid items-center transition-colors hover:bg-white/[0.02]"
+                          style={{
+                            gridTemplateColumns: `${LEFT_W} minmax(${TIMELINE_MIN_W}, 1fr)`,
+                            minWidth: `calc(${LEFT_W} + ${TIMELINE_MIN_W})`,
+                          }}
                         >
                           {/* Left: schedule info */}
                           <button
                             type="button"
-                            className="flex min-w-0 items-center gap-2 pl-7 pr-3 py-2 text-left"
+                            className="flex min-w-0 items-center gap-2 py-2 pl-7 pr-3 text-left"
                             onClick={() => onEdit(schedule)}
                           >
                             <span className="truncate text-[11px] text-[var(--color-text-secondary)]">
                               {schedule.label || getCronDescription(schedule.cronExpression)}
                             </span>
-                            <span className={cn(
-                              'shrink-0 rounded-sm px-1 py-px text-[9px]',
-                              schedule.status === 'active' && 'bg-emerald-500/15 text-emerald-400',
-                              schedule.status === 'paused' && 'bg-amber-500/15 text-amber-400',
-                            )}>
+                            <span
+                              className={cn(
+                                'shrink-0 rounded-sm px-1 py-px text-[9px]',
+                                schedule.status === 'active' &&
+                                  'bg-emerald-500/15 text-emerald-400',
+                                schedule.status === 'paused' && 'bg-amber-500/15 text-amber-400'
+                              )}
+                            >
                               {statusLabel}
                             </span>
                           </button>
@@ -327,11 +372,14 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                             {ticks.map((tick, i) => (
                               <div
                                 key={i}
-                                className="absolute bottom-0 top-0 w-px bg-[var(--color-border)] opacity-20"
+                                className="absolute inset-y-0 w-px bg-[var(--color-border)] opacity-20"
                                 style={{ left: `${tick.pct}%` }}
                               />
                             ))}
-                            <div className="absolute bottom-0 top-0 w-px bg-red-500/30" style={{ left: '0%' }} />
+                            <div
+                              className="absolute inset-y-0 w-px bg-red-500/30"
+                              style={{ left: '0%' }}
+                            />
 
                             {hits.map((hit, i) => {
                               const pct = ((hit.date.getTime() - now) / rangeMs) * 100;
@@ -348,9 +396,7 @@ export const TeamGanttView = React.memo(function TeamGanttView({
 
                             {/* Next run label */}
                             {schedule.nextRunAt && (
-                              <span
-                                className="absolute top-1/2 right-2 -translate-y-1/2 text-[9px] tabular-nums text-[var(--color-text-muted)]"
-                              >
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] tabular-nums text-[var(--color-text-muted)]">
                                 下次 {format(new Date(schedule.nextRunAt), 'HH:mm')}
                               </span>
                             )}
@@ -359,7 +405,7 @@ export const TeamGanttView = React.memo(function TeamGanttView({
                       );
                     })}
                     {hiddenCount > 0 && (
-                      <div className="pl-7 pr-3 py-1.5 text-[10px] text-[var(--color-text-muted)]">
+                      <div className="py-1.5 pl-7 pr-3 text-[10px] text-[var(--color-text-muted)]">
                         +{hiddenCount} 更多
                       </div>
                     )}
@@ -380,7 +426,10 @@ export const TeamGanttView = React.memo(function TeamGanttView({
 
 function enumerateHits(schedule: Schedule, rangeStart: number, rangeEnd: number): ScheduleHit[] {
   try {
-    const job = new Cron(schedule.cronExpression.trim(), { timezone: schedule.timezone, paused: true });
+    const job = new Cron(schedule.cronExpression.trim(), {
+      timezone: schedule.timezone,
+      paused: true,
+    });
     const raw = job.nextRuns(MAX_CRON_HITS, new Date(rangeStart));
     const results: ScheduleHit[] = [];
     for (const d of raw) {

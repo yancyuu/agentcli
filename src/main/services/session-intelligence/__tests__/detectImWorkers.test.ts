@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { detectImWorkers, BUSY_WINDOW_MS, IDLE_WINDOW_MS } from '../detectImWorkers';
+import { BUSY_WINDOW_MS, detectImWorkers, IDLE_WINDOW_MS } from '../detectImWorkers';
+
 import type {
-  ParsedHermitBridgeStore,
   ParsedHermitBridgeSession,
+  ParsedHermitBridgeStore,
 } from '../hermitBridgeSessionStore';
 import type { HermitBridgeSessionMessage } from '@shared/types/hermitBridge';
 

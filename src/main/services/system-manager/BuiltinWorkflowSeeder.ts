@@ -8,15 +8,14 @@
  * 这些 workflow 不再作为 Claude Code slash 命令（不再 seed 到 ~/.claude/commands/hermit/），
  * 只通过能力包（capability pack）暴露给 AI。
  */
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import YAML from 'yaml';
-
 import { createLogger } from '@shared/utils/logger';
+import YAML from 'yaml';
 
 import type { WorkflowPromptSafety } from '@shared/types/systemManager';
 
@@ -202,7 +201,7 @@ export async function scanHermitWorkflows(dir: string): Promise<BuiltinWorkflowD
     if (!isWorkflowFile(name)) continue;
     const full = path.join(dir, name);
     const stats = await stat(full).catch(() => null);
-    if (!stats || !stats.isFile()) continue;
+    if (!stats?.isFile()) continue;
     const raw = await readFile(full, 'utf8');
     const parsed = name.endsWith('.js')
       ? { data: parseJsMeta(raw), body: raw }
@@ -212,7 +211,7 @@ export async function scanHermitWorkflows(dir: string): Promise<BuiltinWorkflowD
     result.push({
       id,
       filename: name,
-      commandName: `/${id}` as `/${string}`,
+      commandName: `/${id}`,
       label: String(parsed.data.label ?? parsed.data.name ?? id),
       description: String(parsed.data.description ?? ''),
       category: asCategory(parsed.data.category),

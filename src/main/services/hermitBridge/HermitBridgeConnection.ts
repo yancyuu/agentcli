@@ -9,19 +9,19 @@
  * Default target: ws://127.0.0.1:9810/bridge/ws
  */
 
+import { HERMIT_BRIDGE_DEFAULTS } from '@shared/types/hermitBridge';
 import { createLogger } from '@shared/utils/logger';
 import { EventEmitter } from 'events';
 
 import type {
+  HermitBridgeConnectionConfig,
   HermitBridgeIncomingMessage,
   HermitBridgeOutgoingMessage,
   HermitBridgeReplyMessage,
   HermitBridgeReplyStreamMessage,
   HermitBridgeUsageMessage,
   HermitBridgeUserMessage,
-  HermitBridgeConnectionConfig,
 } from '@shared/types/hermitBridge';
-import { HERMIT_BRIDGE_DEFAULTS } from '@shared/types/hermitBridge';
 
 const logger = createLogger('HermitBridgeConnection');
 
@@ -261,7 +261,7 @@ export class HermitBridgeConnection extends EventEmitter {
   }
 
   private send(msg: HermitBridgeOutgoingMessage): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
       logger.warn(`Cannot send message — Bridge WS not connected (type=${msg.type})`);
       return;
     }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CcBridgeReplyMessage, CcBridgeUsageMessage } from '@shared/types/ccConnect';
-
 import { CcConnectBridge } from './CcConnectBridge';
+
+import type { CcBridgeReplyMessage, CcBridgeUsageMessage } from '@shared/types/ccConnect';
 
 /**
  * The dispatch in handleIncomingMessage is private and normally driven by the

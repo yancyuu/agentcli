@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { projectSocietyGraph } from './societyGraphAdapter';
+
 import type { PublishedNeed, Relationship, WorkerProfile } from '../core/domain/models/society';
 
 const TEAM = 'worker-society';

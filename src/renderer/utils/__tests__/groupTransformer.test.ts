@@ -1,8 +1,8 @@
+import { EMPTY_METRICS } from '@main/types/chunks';
+import { transformChunksToConversation } from '@renderer/utils/groupTransformer';
 import { describe, expect, it } from 'vitest';
 
-import { transformChunksToConversation } from '@renderer/utils/groupTransformer';
 import type { EnhancedChunk, ParsedMessage } from '@renderer/types/data';
-import { EMPTY_METRICS } from '@main/types/chunks';
 
 // transformChunksToConversation 是 chunk→会话展示项的核心纯函数（chunk-building
 // 关键路径），此前零覆盖。这里用最小 EnhancedChunk fixture 验证 chunk 类型映射、

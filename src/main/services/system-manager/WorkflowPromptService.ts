@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -125,7 +125,7 @@ function parseWorkflowPromptFrontmatter(content: string): WorkflowPromptFrontmat
   const lineEnd = content.indexOf('\n');
   if (lineEnd !== 3 && !(lineEnd === 4 && content[3] === '\r')) return {};
 
-  const closeMatch = content.match(/\r?\n---[ \t]*(?:\r?\n|$)/);
+  const closeMatch = /\r?\n---[ \t]*(?:\r?\n|$)/.exec(content);
   if (!closeMatch?.index) return {};
 
   const block = content.slice(lineEnd + 1, closeMatch.index);

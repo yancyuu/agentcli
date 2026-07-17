@@ -1,8 +1,4 @@
-export {
-  buildClaudeStreamArgs,
-  DirectCliSessionManager,
-  formatClaudeStdinUserTurn,
-} from './DirectCliSessionManager';
+export { buildDirectReplyMessageId } from './directCliMessageId';
 export type {
   ClaudeStreamArgsOptions,
   DirectCliEnvResolver,
@@ -12,6 +8,10 @@ export type {
   DirectCliSpawnFn,
   DirectCliSpawnParams,
 } from './DirectCliSessionManager';
-export { DirectCliSessionStore, DEFAULT_DIRECT_CLI_SESSIONS_FILE } from './DirectCliSessionStore';
+export {
+  buildClaudeStreamArgs,
+  DirectCliSessionManager,
+  formatClaudeStdinUserTurn,
+} from './DirectCliSessionManager';
 export type { DirectCliSessionRepository } from './DirectCliSessionStore';
-export { buildDirectReplyMessageId } from './directCliMessageId';
+export { DEFAULT_DIRECT_CLI_SESSIONS_FILE, DirectCliSessionStore } from './DirectCliSessionStore';

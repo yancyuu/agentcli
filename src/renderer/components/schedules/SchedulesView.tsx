@@ -7,10 +7,11 @@ import { nameColorSet } from '@renderer/utils/projectColor';
 import { Calendar, Plus } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { ScheduleCalendarBoard } from './calendar';
-import type { CalendarViewMode } from './calendar';
 import { CcCronScheduleDialog } from '../team/schedule/CcCronScheduleDialog';
 
+import { ScheduleCalendarBoard } from './calendar';
+
+import type { CalendarViewMode } from './calendar';
 import type { Schedule } from '@shared/types';
 
 export const SchedulesView = (): React.JSX.Element => {

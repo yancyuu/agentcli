@@ -1,16 +1,8 @@
 import { Cron } from 'croner';
-import {
-  addDays,
-  endOfDay,
-  endOfWeek,
-  isBefore,
-  startOfDay,
-  startOfWeek,
-} from 'date-fns';
-
-import type { Schedule } from '@shared/types';
+import { addDays, endOfDay, endOfWeek, isBefore, startOfDay, startOfWeek } from 'date-fns';
 
 import type { CalendarOccurrence, CalendarViewMode, WeekRange } from './types';
+import type { Schedule } from '@shared/types';
 
 // =============================================================================
 // Config
@@ -29,7 +21,10 @@ const WEEK_STARTS_ON = 1 as const;
 // Date range computation
 // =============================================================================
 
-export function getViewRange(mode: CalendarViewMode, referenceDate: Date): { start: Date; end: Date } {
+export function getViewRange(
+  mode: CalendarViewMode,
+  referenceDate: Date
+): { start: Date; end: Date } {
   const base = startOfDay(referenceDate);
   switch (mode) {
     case 'day':
@@ -71,7 +66,7 @@ export function computeCalendarOccurrences(
   schedules: Schedule[],
   rangeStart: Date,
   rangeEnd: Date,
-  resolvers: TeamColorResolver,
+  resolvers: TeamColorResolver
 ): CalendarOccurrence[] {
   if (schedules.length === 0) return [];
 
@@ -84,7 +79,7 @@ export function computeCalendarOccurrences(
       schedule.cronExpression,
       schedule.timezone,
       rangeStart,
-      rangeEnd,
+      rangeEnd
     );
 
     for (const date of rawDates) {
@@ -118,7 +113,7 @@ function enumerateCronInRange(
   cronExpression: string,
   timezone: string,
   rangeStart: Date,
-  rangeEnd: Date,
+  rangeEnd: Date
 ): Date[] {
   try {
     const job = new Cron(cronExpression.trim(), { timezone, paused: true });
@@ -159,9 +154,7 @@ function resolveOverlaps(occurrences: CalendarOccurrence[]): void {
 }
 
 function resolveOverlapsInDay(occurrences: CalendarOccurrence[]): void {
-  const sorted = [...occurrences].sort(
-    (a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute),
-  );
+  const sorted = [...occurrences].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
 
   // --- Pass 1: greedy column assignment ---
   // columnEndTimes[col] = minute-of-day when that column becomes free

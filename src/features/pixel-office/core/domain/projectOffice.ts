@@ -62,7 +62,7 @@ function isRenderableTask(node: GraphNode): boolean {
 function mapAnimState(node: GraphNode): WorkerAnimState {
   if (node.state === 'error' || node.exceptionTone === 'error') return 'error';
   if (node.pendingApproval) return 'waiting';
-  if (node.activeTool && node.activeTool.state === 'running') return 'typing';
+  if (node.activeTool?.state === 'running') return 'typing';
   switch (node.state) {
     case 'tool_calling':
     case 'active':
@@ -81,7 +81,7 @@ function mapAnimState(node: GraphNode): WorkerAnimState {
 }
 
 function bubbleLabelFor(node: GraphNode): string | undefined {
-  if (node.activeTool && node.activeTool.state === 'running') return node.activeTool.name;
+  if (node.activeTool?.state === 'running') return node.activeTool.name;
   return node.currentTaskSubject ?? node.exceptionLabel ?? undefined;
 }
 

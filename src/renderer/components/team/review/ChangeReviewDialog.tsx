@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
-import { X } from 'lucide-react';
 import { useStore } from '@renderer/store';
+import { X } from 'lucide-react';
 
-import type { FileChangeSummary } from '@shared/types/review';
-import type { EditorSelectionAction } from '@shared/types/editor';
 import type { TaskChangeRequestOptions } from '@renderer/utils/taskChangeRequest';
+import type { EditorSelectionAction } from '@shared/types/editor';
+import type { FileChangeSummary } from '@shared/types/review';
 
 interface ChangeReviewDialogProps {
   open: boolean;

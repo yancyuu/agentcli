@@ -1,9 +1,11 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { TeamWorkspaceService } from './TeamWorkspaceService';
+
 import type { GroupMessage } from './TeamWorkspaceService';
 
 // CLAUDE.md 把 "server-side appendMessage ID propagation" 列为零覆盖的关键回归路径：

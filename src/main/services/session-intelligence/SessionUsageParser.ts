@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { getProjectDirNameCandidates, getProjectsBasePath } from '@main/utils/pathDecoder';
+
 import { CodexUsageAccumulator, isCodexTokenCountRecord } from './codexTokenUsage';
 import { resolveUsageTotalTokens } from './tokenUsageTotals';
 

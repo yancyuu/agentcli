@@ -15,15 +15,15 @@
  * tests are. `emit` is injected so this module never imports server.ts.
  */
 
-import { watch, type FSWatcher } from 'fs';
+import { type FSWatcher, watch } from 'fs';
 import { promises as fsp } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import type { ImLiveWorker } from '@shared/types/imLiveWorker';
-
 import { detectImWorkers } from './detectImWorkers';
 import { parseHermitBridgeSessions } from './hermitBridgeSessionStore';
+
+import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 
 export const IM_LIVE_WATCH_DEBOUNCE_MS = 200;
 export const IM_LIVE_WATCH_INTERVAL_MS = 5_000;

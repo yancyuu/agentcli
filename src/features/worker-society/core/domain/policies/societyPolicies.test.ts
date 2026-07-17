@@ -13,12 +13,13 @@ import {
   interestOverlap,
   isAtCapacity,
   recordCollaboration,
-  requestRevision,
   reputationDeltaForOutcome,
+  requestRevision,
   selectAssignee,
   transitionNeed,
   volunteerFor,
 } from './societyPolicies';
+
 import type {
   AgentCapability,
   PublishedNeed,

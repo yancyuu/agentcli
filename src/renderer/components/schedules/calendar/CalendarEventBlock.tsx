@@ -36,7 +36,7 @@ export const CalendarEventBlock = React.memo(function CalendarEventBlock({
       <button
         type="button"
         className={cn(
-          'flex w-full items-center gap-1 overflow-hidden rounded px-1 py-[1px] text-left transition-opacity hover:opacity-80',
+          'flex w-full items-center gap-1 overflow-hidden rounded px-1 py-px text-left transition-opacity hover:opacity-80',
           className
         )}
         style={{ backgroundColor: hexToRgba(occurrence.color, 0.12), ...style }}

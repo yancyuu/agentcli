@@ -19,13 +19,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { GraphView } from '@claude-teams/agent-graph';
-import type { GraphViewProps } from '@claude-teams/agent-graph';
 import { PARTICIPANT_AVATAR_URLS } from '@renderer/utils/memberAvatarCatalog';
 
 import { projectSocietyGraph } from './societyGraphAdapter';
-import { SocietyNodeLabels, type SocietyLabelNode } from './SocietyNodeLabels';
+import { type SocietyLabelNode, SocietyNodeLabels } from './SocietyNodeLabels';
 import { pickAvatarUrl } from './societyViewUtils';
+
 import type { PublishedNeed, Relationship, WorkerProfile } from '../core/domain/models/society';
+import type { GraphViewProps } from '@claude-teams/agent-graph';
 
 export interface SocietyGraphProps {
   workers: WorkerProfile[];

@@ -7,9 +7,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
+import { McpLibraryEnableDialog } from '@renderer/components/extensions/mcp/McpLibraryEnableDialog';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
-import { McpLibraryEnableDialog } from '@renderer/components/extensions/mcp/McpLibraryEnableDialog';
 import { useStore } from '@renderer/store';
 import { Plus, RefreshCw, Wrench } from 'lucide-react';
 
@@ -423,7 +423,7 @@ export const ToolsSection = ({
               ) : null}
             </div>
           ) : (
-            <div className="flex flex-col gap-2 rounded-md border border-dashed border-[var(--color-border)] px-2 py-2 text-xs text-[var(--color-text-muted)]">
+            <div className="flex flex-col gap-2 rounded-md border border-dashed border-[var(--color-border)] p-2 text-xs text-[var(--color-text-muted)]">
               <span>全局 MCP 模板库暂无可添加项。可以从现有 MCP 配置导入，或新建模板。</span>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -545,7 +545,7 @@ export const ToolsSection = ({
               ) : null}
             </div>
           ) : (
-            <div className="rounded-md border border-dashed border-[var(--color-border)] px-2 py-2 text-xs text-[var(--color-text-muted)]">
+            <div className="rounded-md border border-dashed border-[var(--color-border)] p-2 text-xs text-[var(--color-text-muted)]">
               全局 Skill 暂无可启用项。可以先创建用户级 Skill，再在团队中启用。
             </div>
           )}

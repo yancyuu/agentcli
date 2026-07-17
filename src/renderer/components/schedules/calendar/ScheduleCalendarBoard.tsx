@@ -1,9 +1,9 @@
 import React, { useCallback } from 'react';
 
-import type { Schedule } from '@shared/types';
-
 import { TeamGanttView } from './TeamGanttView';
+
 import type { CalendarViewMode } from './types';
+import type { Schedule } from '@shared/types';
 
 interface ScheduleCalendarBoardProps {
   schedules: Schedule[];
@@ -15,17 +15,17 @@ interface ScheduleCalendarBoardProps {
   getTeamDisplayName: (teamName: string) => string;
 }
 
-function ScheduleCalendarBoardInner({
+const ScheduleCalendarBoardInner = ({
   schedules,
   onEdit,
   getTeamColor,
   getTeamDisplayName,
-}: ScheduleCalendarBoardProps) {
+}: ScheduleCalendarBoardProps) => {
   const handleEdit = useCallback(
     (schedule: Schedule) => {
       onEdit(schedule);
     },
-    [onEdit],
+    [onEdit]
   );
 
   return (
@@ -36,6 +36,6 @@ function ScheduleCalendarBoardInner({
       onEdit={handleEdit}
     />
   );
-}
+};
 
 export const ScheduleCalendarBoard = React.memo(ScheduleCalendarBoardInner);

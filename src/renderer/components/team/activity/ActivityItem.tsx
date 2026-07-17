@@ -1099,7 +1099,7 @@ export const ActivityItem = memo(
     const hideExpandedHeaderSummary =
       isSlashCommandMessage ||
       !!displayText ||
-      (isSystemMessage && strippedText ? /^\[跨团队任务已启动\]/.test(strippedText) : false);
+      (isSystemMessage && strippedText ? strippedText.startsWith('[跨团队任务已启动]') : false);
 
     const summaryContent =
       isSlashCommandResult && message.commandOutput ? (

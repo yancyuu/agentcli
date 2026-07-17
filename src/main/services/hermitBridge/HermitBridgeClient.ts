@@ -5,6 +5,7 @@
  * Default target: http://127.0.0.1:9820
  */
 
+import { HERMIT_BRIDGE_DEFAULTS } from '@shared/types/hermitBridge';
 import { createLogger } from '@shared/utils/logger';
 
 import type {
@@ -24,7 +25,6 @@ import type {
   HermitBridgeSessionListItem,
   HermitBridgeStatus,
 } from '@shared/types/hermitBridge';
-import { HERMIT_BRIDGE_DEFAULTS } from '@shared/types/hermitBridge';
 
 const logger = createLogger('HermitBridgeClient');
 
@@ -60,7 +60,7 @@ export class HermitBridgeClient {
       'Content-Type': 'application/json',
     };
     if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      headers.Authorization = `Bearer ${this.token}`;
     }
     return headers;
   }

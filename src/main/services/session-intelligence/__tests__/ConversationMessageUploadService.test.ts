@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { setClaudeBasePathOverride } from '@main/utils/pathDecoder';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { setClaudeBasePathOverride } from '@main/utils/pathDecoder';
 import { uploadConversationMessages, withUploadLock } from '../ConversationMessageUploadService';
 
 describe('ConversationMessageUploadService', () => {
@@ -2010,7 +2010,7 @@ describe('ConversationMessageUploadService', () => {
         }
       })
       .filter((entry): entry is { message: string; status: number; statusText: string } =>
-        Boolean(entry && entry.message === 'upload-response')
+        Boolean(entry?.message === 'upload-response')
       );
     expect(responseEntries.length).toBeGreaterThan(0);
     for (const entry of responseEntries) {

@@ -72,7 +72,7 @@ function eventTypeForStatus(status: CollabTaskStatus): CollabTaskEventType {
 }
 
 export class CollaborationBoardService {
-  private tasks: Map<string, CollabTask> = new Map();
+  private tasks = new Map<string, CollabTask>();
   private redis: Redis | null = null;
   private loaded = false;
 
@@ -279,7 +279,7 @@ export class CollaborationBoardService {
       for (const id of ids) {
         if (this.tasks.has(id)) continue;
         const hash = await this.redis.hgetall(`collab:task:${id}`);
-        if (!hash || !hash.dispatchId) continue;
+        if (!hash?.dispatchId) continue;
 
         const task: CollabTask = normalizeTask({
           id: hash.id,

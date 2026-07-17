@@ -1,4 +1,4 @@
-import { KNOWN_SLASH_COMMANDS, isSupportedSlashCommandName } from '@shared/utils/slashCommands';
+import { isSupportedSlashCommandName, KNOWN_SLASH_COMMANDS } from '@shared/utils/slashCommands';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type {

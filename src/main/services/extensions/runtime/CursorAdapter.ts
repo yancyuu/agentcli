@@ -3,9 +3,10 @@
  */
 
 import * as fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { getHomeDir } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
-import path from 'node:path';
 
 import type {
   HarnessInstallAdapter,

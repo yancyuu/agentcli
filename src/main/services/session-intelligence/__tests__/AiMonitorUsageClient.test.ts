@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,8 +37,8 @@ describe('AiMonitorUsageClient', () => {
   // both assert request shape and supply a canned response.
   function captures(
     handler: () => Response = () => Response.json({})
-  ): Array<{ url: string; init: RequestInit }> {
-    const calls: Array<{ url: string; init: RequestInit }> = [];
+  ): { url: string; init: RequestInit }[] {
+    const calls: { url: string; init: RequestInit }[] = [];
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       calls.push({ url: String(url), init: init ?? {} });
       return handler();

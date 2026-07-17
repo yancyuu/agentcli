@@ -41,12 +41,12 @@ import { AlertTriangle, Boxes, Info, Loader2, Puzzle, RefreshCw } from 'lucide-r
 import { useShallow } from 'zustand/react/shallow';
 
 import { CapabilityPacksPanel } from './capability-packs/CapabilityPacksPanel';
-import { PluginsPanel } from './plugins/PluginsPanel';
 import { StoreExtensionToast } from './common/ExtensionToast';
+import { PluginsPanel } from './plugins/PluginsPanel';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
-import type { CliProviderId, CliProviderStatus } from '@shared/types';
 import type { ExtensionsSubTab } from '@renderer/hooks/useExtensionsTabState';
+import type { CliProviderId, CliProviderStatus } from '@shared/types';
 
 const ProviderCapabilityCardSkeleton = ({
   providerId,

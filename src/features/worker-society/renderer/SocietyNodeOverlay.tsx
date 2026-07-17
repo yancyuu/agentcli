@@ -17,11 +17,13 @@
  */
 import { useState } from 'react';
 
-import { NEED_STATUS_LABEL, needStatusColor, reputationColor } from './societyViewUtils';
-import { needLifecycleActions } from './societyOverlayActions';
 import { classifyOpenNeedStall } from '../core/domain/policies/societyPolicies';
-import type { GraphDomainRef, GraphNode } from '@claude-teams/agent-graph';
+
+import { needLifecycleActions } from './societyOverlayActions';
+import { NEED_STATUS_LABEL, needStatusColor, reputationColor } from './societyViewUtils';
+
 import type { PublishedNeed, WorkerProfile } from '../core/domain/models/society';
+import type { GraphDomainRef, GraphNode } from '@claude-teams/agent-graph';
 
 export interface SocietyNodeOverlayProps {
   node: GraphNode;
@@ -47,7 +49,7 @@ export interface SocietyNodeOverlayProps {
 export function SocietyNodeOverlay(props: SocietyNodeOverlayProps): React.JSX.Element {
   const { node, onClose, workerById, needById, societyStats } = props;
 
-  const ref = node.domainRef as GraphDomainRef;
+  const ref = node.domainRef;
 
   return (
     <div

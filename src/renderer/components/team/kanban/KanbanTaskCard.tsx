@@ -24,8 +24,8 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import type { DispatchMeta } from '@shared/types/team';
 import type { KanbanColumnId, KanbanTaskState, TeamTask, TeamTaskWithKanban } from '@shared/types';
+import type { DispatchMeta } from '@shared/types/team';
 
 interface KanbanTaskCardProps {
   task: TeamTaskWithKanban;

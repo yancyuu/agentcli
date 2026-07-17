@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { PRODUCT_NAME } from '@shared/constants';
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import {
@@ -11,8 +10,9 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { Textarea } from '@renderer/components/ui/textarea';
-import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
 import appIcon from '@renderer/favicon.png';
+import { emitOpenHermitEvent, OPEN_HERMIT_EVENTS } from '@renderer/utils/openHermitEvents';
+import { PRODUCT_NAME } from '@shared/constants';
 import { Check, FileEdit, Info, Loader2, RotateCcw, ServerCog, X } from 'lucide-react';
 
 import { SettingsSectionCard } from '../components';
@@ -172,7 +172,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
         description={`编辑 ${PRODUCT_NAME} 运行配置，或在配置变更后重启本地服务。`}
         icon={<ServerCog className="size-3.5" />}
       >
-        <div className="flex flex-wrap gap-2 px-3 py-3">
+        <div className="flex flex-wrap gap-2 p-3">
           <button
             onClick={() => setCcConfigOpen(true)}
             className="flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-150 hover:bg-[var(--color-accent-soft)]"
@@ -216,7 +216,7 @@ export const AdvancedSection = ({}: AdvancedSectionProps): React.JSX.Element => 
         description="当前应用版本和产品信息。"
         icon={<Info className="size-3.5" />}
       >
-        <div className="flex items-start gap-4 px-3 py-3">
+        <div className="flex items-start gap-4 p-3">
           <img src={appIcon} alt="应用图标" className="size-10 rounded-lg" />
           <div>
             <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>

@@ -59,7 +59,7 @@ export interface LoopSendIntentValidationResult {
 }
 
 function parseDirective(text: string): { directive: string; rest: string } | null {
-  const match = text.trim().match(/^!(runtime|session|message)\b\s*([\s\S]*)$/i);
+  const match = /^!(runtime|session|message)\b\s*([\s\S]*)$/i.exec(text.trim());
   if (!match) return null;
   return {
     directive: match[1].toLowerCase(),
@@ -72,7 +72,7 @@ function parseSessionDirective(
 ): Pick<LoopSessionIntent, 'text' | 'sessionName' | 'reuse'> {
   const reuse = /(?:^|\s)--reuse(?:\s|$)/.test(rest);
   const withoutReuse = rest.replace(/(?:^|\s)--reuse(?=\s|$)/g, ' ').trim();
-  const nameMatch = withoutReuse.match(/(?:^|\s)--name\s+"([^"]+)"|(?:^|\s)--name\s+([^\s]+)/);
+  const nameMatch = /(?:^|\s)--name\s+"([^"]+)"|(?:^|\s)--name\s+([^\s]+)/.exec(withoutReuse);
   const sessionName = (nameMatch?.[1] ?? nameMatch?.[2])?.trim();
   const text = nameMatch ? withoutReuse.replace(nameMatch[0], ' ').trim() : withoutReuse;
   return { text, sessionName, reuse };

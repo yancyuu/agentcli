@@ -9,9 +9,11 @@ import {
 } from '@main/services/system-manager/BuiltinWorkflowSeeder';
 import { validateOpenPathUserSelected } from '@main/utils/pathValidation';
 import { createLogger } from '@shared/utils/logger';
-import { KNOWN_SLASH_COMMANDS, isSupportedSlashCommandName } from '@shared/utils/slashCommands';
+import { isSupportedSlashCommandName, KNOWN_SLASH_COMMANDS } from '@shared/utils/slashCommands';
 
-import type { HermitBridgeCronJob } from '@shared/types/hermitBridge';
+import { McpConfigStateReader } from '../runtime/McpConfigStateReader';
+import { SkillsCatalogService } from '../skills/SkillsCatalogService';
+
 import type {
   CapabilityCommand,
   CapabilityCommandPromptRequest,
@@ -35,9 +37,7 @@ import type {
   TeamCapabilityTelemetryAsset,
   TeamCapabilityTelemetrySnapshot,
 } from '@shared/types/extensions';
-
-import { McpConfigStateReader } from '../runtime/McpConfigStateReader';
-import { SkillsCatalogService } from '../skills/SkillsCatalogService';
+import type { HermitBridgeCronJob } from '@shared/types/hermitBridge';
 
 const logger = createLogger('Extensions:CapabilityPacks');
 const MANIFEST_FILENAME = 'pack.json';
@@ -383,7 +383,7 @@ export class CapabilityPackLoaderService {
     const warnings: string[] = [];
     await fs.mkdir(this.rootDir, { recursive: true });
 
-    let entries: Array<{ name: string; isDirectory: () => boolean }> = [];
+    let entries: { name: string; isDirectory: () => boolean }[] = [];
     try {
       entries = await fs.readdir(this.rootDir, { withFileTypes: true });
     } catch (error) {
@@ -1318,13 +1318,13 @@ export class CapabilityPackLoaderService {
   }
 
   private async walkDirectory(rootDir: string): Promise<{
-    files: Array<{
+    files: {
       absolutePath: string;
       relativePath: string;
-    }>;
+    }[];
     warnings: string[];
   }> {
-    const allFiles: Array<{ absolutePath: string; relativePath: string }> = [];
+    const allFiles: { absolutePath: string; relativePath: string }[] = [];
     const warnings: string[] = [];
     let totalBytes = 0;
 

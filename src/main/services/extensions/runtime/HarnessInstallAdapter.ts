@@ -5,11 +5,10 @@
  * harness-specific installation commands and configuration paths.
  */
 
-import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 import type { McpHeaderDef, McpInstallSpec, OperationResult } from '@shared/types/extensions';
-
 import type { InstalledMcpEntry } from '@shared/types/extensions';
 import type { InstalledPluginEntry } from '@shared/types/extensions';
+import type { HermitBridgeAgentType } from '@shared/types/hermitBridge';
 
 export interface InstallOpts {
   scope: 'user' | 'project' | 'local' | 'global';

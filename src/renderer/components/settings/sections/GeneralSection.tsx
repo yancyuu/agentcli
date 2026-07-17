@@ -6,15 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
+import { Button } from '@renderer/components/ui/button';
 import { Combobox } from '@renderer/components/ui/combobox';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { getFullResetState } from '@renderer/store/utils/stateResetHelpers';
 import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agentLanguage';
-import { Bot, Check, Copy, Gauge, Loader2, Palette, Shield, Server } from 'lucide-react';
+import { Bot, Check, Copy, Gauge, Loader2, Palette, Server, Shield } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { Button } from '@renderer/components/ui/button';
 import { SettingRow, SettingsSectionCard, SettingsSelect, SettingsToggle } from '../components';
 
 import type { SafeConfig } from '../hooks/useSettingsConfig';

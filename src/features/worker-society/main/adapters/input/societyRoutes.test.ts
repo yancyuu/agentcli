@@ -11,9 +11,11 @@ import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { SocietyComponents } from '../../composition/societyComposition';
 import { createWorkerSociety } from '../../composition/societyComposition';
+
 import { registerSocietyRoutes } from './societyRoutes';
+
+import type { SocietyComponents } from '../../composition/societyComposition';
 
 describe('societyRoutes (Fastify inject)', () => {
   let root: string;
