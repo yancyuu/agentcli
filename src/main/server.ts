@@ -661,7 +661,7 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
 }
 
 const collabBoard = new CollaborationBoardService();
-// eslint-disable-next-line dot-notation -- bracket access intentionally bypasses TS private modifier
+// eslint-disable-next-line @typescript-eslint/dot-notation -- bracket access intentionally bypasses TS private modifier
 const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
 
 // Worker Society —— 去中心化 worker 自治社交平台（替代派单的主路径）。
@@ -6047,7 +6047,7 @@ app.get<{ Params: { name: string; memberName: string } }>(
       // Count completed tasks from the team's task board
       let tasksCompleted = 0;
       try {
-        // eslint-disable-next-line dot-notation -- bracket access intentionally bypasses TS private modifier
+        // eslint-disable-next-line @typescript-eslint/dot-notation -- bracket access intentionally bypasses TS private modifier
         const tasks = await svc['workspace'].readTasks(team.slug || request.params.name);
         tasksCompleted = tasks.filter((t) => t.status === 'done').length;
       } catch {

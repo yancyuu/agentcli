@@ -599,7 +599,7 @@ export default defineConfig([
   // Test files
   {
     name: 'test-files',
-    files: ['test/**/*.ts', '**/*.test.ts', '**/*.spec.ts'],
+    files: ['test/**/*.ts', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -630,8 +630,43 @@ export default defineConfig([
       // Allow magic numbers in tests
       'sonarjs/no-hardcoded-ip': 'off',
 
+      // Security rules that misfire in tests: tmp dirs are the fixture,
+      // http://127.0.0.1 and fake passwords are intentional test data
+      'sonarjs/publicly-writable-directories': 'off',
+      'sonarjs/no-clear-text-protocols': 'off',
+      'sonarjs/no-hardcoded-passwords': 'off',
+
       // Allow floating promises in tests (common with async test helpers)
       '@typescript-eslint/no-floating-promises': 'off',
+    },
+  },
+
+  // Plain JS/MJS assets inside src (workflow scripts, shared constants):
+  // not part of any tsconfig project, so type-aware linting cannot parse them
+  {
+    name: 'plain-js-src-files',
+    files: ['src/**/*.js', 'src/**/*.mjs'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+      },
+    },
+  },
+
+  // Built-in workflow scripts run in a sandboxed DSL runtime that injects
+  // these globals (same surface as the Workflow tool: phase/agent/args/meta)
+  {
+    name: 'builtin-workflow-scripts',
+    files: ['src/main/services/system-manager/builtin-workflows/**/*.js'],
+    languageOptions: {
+      globals: {
+        phase: 'readonly',
+        agent: 'readonly',
+        args: 'readonly',
+        meta: 'readonly',
+        workflow: 'readonly',
+      },
     },
   },
 
