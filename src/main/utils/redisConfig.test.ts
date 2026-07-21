@@ -28,6 +28,18 @@ describe('normalizeRedisHost', () => {
     expect(normalizeRedisHost(null)).toBe('');
     expect(normalizeRedisHost('')).toBe('');
   });
+
+  it('extracts just the hostname from URLs with userinfo/port/path (regression)', () => {
+    // Previously the impl only stripped the scheme, leaving `user:pass@host:6379/0`
+    // as the "host" — an illegal value that never resolves and silently broke
+    // the team bus + usage reporting.
+    expect(normalizeRedisHost('redis://user:pass@host:6379/0')).toBe('host');
+    expect(normalizeRedisHost('redis://host:6379')).toBe('host');
+    expect(normalizeRedisHost('redis://host/0')).toBe('host');
+    expect(normalizeRedisHost('rediss://user:p@redis.example.com:6380/2')).toBe(
+      'redis.example.com'
+    );
+  });
 });
 
 describe('normalizeRedisConfig', () => {

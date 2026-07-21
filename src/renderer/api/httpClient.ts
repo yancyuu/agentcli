@@ -191,7 +191,15 @@ export class HttpAPIClient implements ElectronAPI {
       this.eventListeners.set(channel, new Set());
       // Register SSE listener for this channel once
       this.eventSource?.addEventListener(channel, ((event: MessageEvent) => {
-        const data: unknown = JSON.parse(event.data as string);
+        let data: unknown;
+        try {
+          data = JSON.parse(event.data as string);
+        } catch (err) {
+          // Keep-alive comment frames or non-JSON payloads must not break the
+          // listener chain — drop the frame and surface it for debugging.
+          console.warn('[HttpAPIClient] SSE frame is not valid JSON, skipping', err);
+          return;
+        }
         const listeners = this.eventListeners.get(channel);
         listeners?.forEach((cb) => cb(data));
       }) as EventListener);
@@ -212,12 +220,43 @@ export class HttpAPIClient implements ElectronAPI {
    * Electron IPC preserves Date instances via structured clone, but HTTP JSON
    * serialization turns them into strings. This restores them so that
    * `.getTime()` and other Date methods work in the renderer.
+   *
+   * Field-scoped: a bare ISO-looking string inside a free-text field (message
+   * content, tool result text, error, …) is NOT converted — otherwise it would
+   * turn into a Date, break message classification (`typeof content === 'string'`)
+   * and crash `.startsWith()`/`.slice()` on the rendered text.
    */
   // eslint-disable-next-line security/detect-unsafe-regex -- anchored pattern with bounded quantifier; no backtracking risk
   private static readonly ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z?$/;
 
-  private static reviveDates(_key: string, value: unknown): unknown {
-    if (typeof value === 'string' && HttpAPIClient.ISO_DATE_RE.test(value)) {
+  private static readonly TEXT_FIELD_NAMES = new Set([
+    'content',
+    'text',
+    'message',
+    'error',
+    'reason',
+    'subject',
+    'summary',
+    'snippet',
+    'name',
+    'title',
+    'description',
+    'command',
+    'cwd',
+    'input',
+    'output',
+    'result',
+    'rawContent',
+    'originalText',
+    'replyText',
+  ]);
+
+  private static reviveDates(key: string, value: unknown): unknown {
+    if (
+      typeof value === 'string' &&
+      !HttpAPIClient.TEXT_FIELD_NAMES.has(key) &&
+      HttpAPIClient.ISO_DATE_RE.test(value)
+    ) {
       const d = new Date(value);
       if (!isNaN(d.getTime())) return d;
     }

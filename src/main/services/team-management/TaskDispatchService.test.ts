@@ -339,6 +339,7 @@ describe('TaskDispatchService local dispatch start gate', () => {
 
     await service.dispatchTask('origin', { subject: 'Deliver after done' }, 'target', {
       dispatchId: 'dispatch-5',
+      needsHumanReview: true,
     });
     const [queued] = await workspace.readTasks('target');
     await service.startDispatchedTask('target', queued.id);
@@ -394,12 +395,38 @@ describe('TaskDispatchService local dispatch start gate', () => {
     expect(workspace.messages.filter((message) => message.teamSlug === 'target')).toHaveLength(1);
   });
 
+  it('auto-approves delivery when needsHumanReview is false (skips manual review)', async () => {
+    const { service, workspace, collabBoard } = createService();
+    service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
+
+    await service.dispatchTask('origin', { subject: 'Auto approve me' }, 'target', {
+      dispatchId: 'dispatch-auto',
+      needsHumanReview: false,
+    });
+    const [queued] = await workspace.readTasks('target');
+    await service.startDispatchedTask('target', queued.id);
+    await workspace.patchTask('target', queued.id, { status: 'done', result: 'finished' });
+    await service.onTaskCompleted('target', queued.id);
+
+    await service.deliverTask('target', 'dispatch-auto', 'finished');
+
+    // Deliver + auto-approve in one step; no manual approveTask call needed.
+    expect(collabBoard.getTask('dispatch-auto')?.status).toBe('approved');
+    const originMessages = workspace.messages.filter((m) => m.teamSlug === 'origin');
+    expect(originMessages.at(-1)).toEqual(
+      expect.objectContaining({
+        content: expect.stringContaining('[跨团队任务已自动通过]'),
+      })
+    );
+  });
+
   it('rejects re-delivery after approval before callback side effects', async () => {
     const { service, workspace, collabBoard } = createService();
     service.onRuntimeStart = vi.fn().mockResolvedValue(undefined);
 
     await service.dispatchTask('origin', { subject: 'Do not deliver twice' }, 'target', {
       dispatchId: 'dispatch-6',
+      needsHumanReview: true,
     });
     const [queued] = await workspace.readTasks('target');
     await service.startDispatchedTask('target', queued.id);

@@ -12,10 +12,14 @@ export interface ParsedMessageReply {
   replyText: string;
 }
 
+// Capture agentName non-greedily up to the ` original message` delimiter so that
+// CJK / any non-ASCII member names (required by the project's i18n rules) parse
+// correctly — the previous `[\w.-]+` only matched ASCII and silently dropped
+// structured replies for Chinese-named members. Also tolerate CRLF line breaks.
 const REPLY_BLOCK_RE = new RegExp(
   '```' +
     MESSAGE_REPLY_TAG +
-    '\\nReply on @([\\w.-]+) original message with text "([\\s\\S]*?)", here is answer: "([\\s\\S]*?)"\\n```'
+    '\r?\\nReply on @(.+?) original message with text "([\\s\\S]*?)", here is answer: "([\\s\\S]*?)"\r?\\n```'
 );
 
 function encodeReplyField(value: string): string {
