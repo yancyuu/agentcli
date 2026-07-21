@@ -262,7 +262,9 @@ function cloudBaseUrlFromHost(host: unknown): string | null {
   const raw = String(host || '').trim();
   if (!raw) return null;
   if (/^https?:\/\//iu.test(raw)) return normalizeCloudBaseUrl(raw);
-  return normalizeCloudBaseUrl(`${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`);
+  const defaultUrl = new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL);
+  const defaultPort = defaultUrl.port ? `:${defaultUrl.port}` : '';
+  return normalizeCloudBaseUrl(`${defaultUrl.protocol}//${raw}${defaultPort}`);
 }
 
 function configuredOpenHermitCloudBaseUrl(existingBaseUrl?: unknown): string {

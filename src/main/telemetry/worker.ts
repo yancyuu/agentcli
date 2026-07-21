@@ -407,9 +407,11 @@ export async function scanUsageTelemetryWorkerOnce(
 function normalizeLarkCloudBaseUrl(value: unknown): string | null {
   const raw = String(value || '').trim();
   if (!raw) return null;
+  const defaultUrl = new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL);
+  const defaultPort = defaultUrl.port ? `:${defaultUrl.port}` : '';
   const withProtocol = /^https?:\/\//iu.test(raw)
     ? raw
-    : `${new URL(DEFAULT_OPENHERMIT_CLOUD_BASE_URL).protocol}//${raw}`;
+    : `${defaultUrl.protocol}//${raw}${defaultPort}`;
   try {
     const url = new URL(withProtocol);
     if (!['http:', 'https:'].includes(url.protocol)) return null;
