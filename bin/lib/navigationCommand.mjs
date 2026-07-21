@@ -654,7 +654,27 @@ async function runTokenClaimFlow() {
   try {
     await pollRun(runId, {
       intervalMs: 2_000,
-      onTick: (status) => renderBusyScreen('认领 token', `正在签发消费者…（${status}）\nrun_id: ${runId}`),
+      onTick: (() => {
+        // Avoid repainting on every 2s poll while the status is stuck (e.g.
+        // 'queued'): repaint only when the status changes, or at most every
+        // 10s to show elapsed time. Paired with in-place rendering this stops
+        // the busy screen from flashing / mojibake-looping on Windows.
+        let lastStatus = null;
+        let lastPaintAt = 0;
+        const startedAt = Date.now();
+        return (status) => {
+          const now = Date.now();
+          if (status !== lastStatus || now - lastPaintAt >= 10_000) {
+            lastStatus = status;
+            lastPaintAt = now;
+            const elapsed = Math.round((now - startedAt) / 1000);
+            renderBusyScreen(
+              '认领 token',
+              `正在签发消费者…（${status}）\n已等待 ${elapsed}s · run_id: ${runId}`
+            );
+          }
+        };
+      })(),
     });
   } catch (err) {
     printClaimError(err);
