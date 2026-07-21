@@ -11,6 +11,7 @@
  *   - 容错读：文件不存在或损坏时返回空数据，不抛——保证服务在冷启动时可启动。
  *   - 不引入任何业务规则（纯 I/O），业务规则全部留在 core/domain。
  */
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -35,7 +36,8 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
 
 async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
+  // Random suffix so concurrent writes to the same file don't share one tmp.
+  const tmp = `${filePath}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
   await rename(tmp, filePath);
 }

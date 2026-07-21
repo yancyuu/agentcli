@@ -7776,6 +7776,14 @@ const shutdown = async () => {
     process.exit(1);
   }
 };
+// Last-resort safety net: log unhandled rejections instead of letting them
+// kill the process (Node 16+ default). Without this, any fire-and-forget async
+// (telemetry interval, redis message handler, …) that rejects on a transient
+// IO error would crash the whole server. Concrete call sites still get their
+// own .catch; this is the catch-all backstop.
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ reason }, 'unhandledRejection (logged, not crashing)');
+});
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 // Sync backstop: reap direct-CLI subprocesses on any exit path that skips the async

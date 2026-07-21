@@ -249,7 +249,11 @@ export async function startTelemetry(cfg: TaskBusConfig): Promise<void> {
   await doScan(cfg);
   scanInterval = setInterval(
     async () => {
-      await doScan(cfg);
+      try {
+        await doScan(cfg);
+      } catch (err) {
+        console.error('[UsageTelemetry] scan failed:', err);
+      }
     },
     10 * 60 * 1000
   );

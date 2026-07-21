@@ -1382,7 +1382,9 @@ export class TaskDispatchService {
       try {
         const update: TaskStatusUpdate = JSON.parse(message);
         const teamSlug = channel.replace('task:status:', '');
-        this.handleStatusSync(teamSlug, update);
+        this.handleStatusSync(teamSlug, update).catch((err) => {
+          console.error('[TaskDispatchService] handleStatusSync failed:', err);
+        });
       } catch {
         // Ignore malformed messages
       }
