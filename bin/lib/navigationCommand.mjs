@@ -28,6 +28,7 @@ import {
   clearTerminalScrollback,
   isInteractiveCli,
   createPromptInterface,
+  withSpinner,
 } from './terminal.mjs';
 import {
   describeUploadToggle,
@@ -650,32 +651,25 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 3. Poll until succeeded.
+  // 3. Poll until succeeded. A standard single-line spinner (no screen clear)
+  //    shows live status + elapsed, so a stuck 'queued' run no longer flashes
+  //    or mojibake-loops the screen on every 2s poll.
   try {
-    await pollRun(runId, {
-      intervalMs: 2_000,
-      onTick: (() => {
-        // Avoid repainting on every 2s poll while the status is stuck (e.g.
-        // 'queued'): repaint only when the status changes, or at most every
-        // 10s to show elapsed time. Paired with in-place rendering this stops
-        // the busy screen from flashing / mojibake-looping on Windows.
-        let lastStatus = null;
-        let lastPaintAt = 0;
-        const startedAt = Date.now();
-        return (status) => {
-          const now = Date.now();
-          if (status !== lastStatus || now - lastPaintAt >= 10_000) {
-            lastStatus = status;
-            lastPaintAt = now;
-            const elapsed = Math.round((now - startedAt) / 1000);
-            renderBusyScreen(
-              '认领 token',
-              `正在签发消费者…（${status}）\n已等待 ${elapsed}s · run_id: ${runId}`
-            );
-          }
-        };
-      })(),
-    });
+    let pollStatus = 'running';
+    const pollStartedAt = Date.now();
+    await withSpinner(
+      () => {
+        const elapsed = Math.round((Date.now() - pollStartedAt) / 1000);
+        return `正在签发消费者…（${pollStatus}）已等待 ${elapsed}s`;
+      },
+      () =>
+        pollRun(runId, {
+          intervalMs: 2_000,
+          onTick: (status) => {
+            pollStatus = status;
+          },
+        })
+    );
   } catch (err) {
     printClaimError(err);
     return;

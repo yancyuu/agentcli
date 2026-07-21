@@ -390,6 +390,35 @@ function writeFrameSync(lines) {
   process.stdout.write(out);
 }
 
+/**
+ * Run `task` while showing a single-line spinner. The label is produced by
+ * `getLabel()` on each frame so it can reflect live progress (status, elapsed).
+ * Braille frames on unicode terminals, ASCII fallback elsewhere. Clears the
+ * line on exit. Runs the task directly (no spinner) when stdout is not a TTY —
+ * the standard CLI loading pattern that neither clears the screen nor flickers,
+ * so it stays clean on Windows GBK consoles where a full-screen repaint would
+ * re-emit CJK as mojibake.
+ */
+async function withSpinner(getLabel, task) {
+  if (!process.stdout.isTTY) return task();
+  const frames = useUnicodeUi
+    ? ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    : ['-', '\\', '|', '/'];
+  let index = 0;
+  const render = () => {
+    process.stdout.write(`\r\x1b[2K${ui.dim(frames[index])} ${getLabel()}`);
+    index = (index + 1) % frames.length;
+  };
+  render();
+  const timer = setInterval(render, 120);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+    process.stdout.write('\r\x1b[2K');
+  }
+}
+
 
 export {
   cancelCli,
@@ -437,4 +466,5 @@ export {
   clearTerminal,
   clearTerminalScrollback,
   writeFrameSync,
+  withSpinner,
 };
