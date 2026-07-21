@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.9.31] - 2026-07-21
+
+### Fixed
+
+- 修复后台遥测扫描、跨团队状态同步等 fire-and-forget 异步任务在瞬时 IO 失败时会导致整个服务进程崩溃的问题（新增全局 `unhandledRejection` 兜底，并为遥测扫描与状态同步补上 `.catch`）。
+- 修复 worker-society 持久化的原子写使用固定临时文件名、并发写覆盖丢数据的问题。
+
+### Changed
+
+- 适配阿里云 AI 网关 token 分发 v3 新契约（74abdbf）：消费者回执的 `runtime_profiles` 成为各运行时入口地址的权威来源，`endpoints` / `models_url` 仅作向后兼容；认领时优先从 `runtime_profiles` 解析 codex / claude 的 base_url，避免在未交付对应角色时拼出不存在的入口。
+
 ## [1.9.30] - 2026-07-21
 
 ### Security
