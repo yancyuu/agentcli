@@ -280,6 +280,11 @@ export async function claimSecret(runId) {
     keyId: body?.key_id || null,
     endpoint: String(body?.endpoint || '').trim(),
     endpoints: body?.endpoints || {},
+    // runtime_profiles is the authoritative source (token-distribution-v3
+    // contract 74abdbf): endpoints/models_url are kept for back-compat but only
+    // exist when the corresponding role was actually delivered.
+    runtimeProfiles: body?.runtime_profiles || {},
+    modelsUrl: String(body?.models_url || '').trim(),
     modelIds: Array.isArray(body?.model_ids) ? body.model_ids : [],
     expiresAt: body?.expires_at || null,
     raw: body,

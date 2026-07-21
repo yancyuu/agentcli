@@ -607,13 +607,21 @@ export function applyToConfigs({
 // so these always write with backup:false (no stray .hermit-bak files).
 
 // Claude Code base_url — the v3 receipt's ready-to-use anthropic endpoint.
+// Claude base_url — prefer the authoritative runtime_profiles.claude.base_url
+// (token-distribution-v3 contract 74abdbf), fall back to endpoints.anthropic.
 export function resolveClaudeBaseUrl(secret) {
+  const rp = secret?.runtimeProfiles?.claude?.base_url;
+  if (rp) return String(rp).trim();
   return String(secret?.endpoints?.anthropic || '').trim();
 }
 
-// Codex base_url — OpenAI-compatible APIs require the /v1 prefix.
+// Codex base_url — prefer runtime_profiles.codex.base_url, fall back to
+// endpoints.openai. OpenAI-compatible APIs require the /v1 prefix.
 export function resolveCodexBaseUrl(secret) {
-  const endpoint = String(secret?.endpoints?.openai || '').trim().replace(/\/+$/, '');
+  const rp = String(secret?.runtimeProfiles?.codex?.base_url || '')
+    .trim()
+    .replace(/\/+$/, '');
+  const endpoint = rp || String(secret?.endpoints?.openai || '').trim().replace(/\/+$/, '');
   if (!endpoint) return '';
   return endpoint.endsWith('/v1') ? endpoint : `${endpoint}/v1`;
 }
