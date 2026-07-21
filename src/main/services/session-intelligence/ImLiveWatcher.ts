@@ -21,7 +21,10 @@ import os from 'os';
 import path from 'path';
 
 import { detectImWorkers } from './detectImWorkers';
-import { parseHermitBridgeSessions } from './hermitBridgeSessionStore';
+import {
+  type ParsedHermitBridgeStore,
+  parseHermitBridgeSessions,
+} from './hermitBridgeSessionStore';
 
 import type { ImLiveWorker } from '@shared/types/imLiveWorker';
 
@@ -48,6 +51,17 @@ export interface ImLiveWatcherOptions {
   intervalMs?: number;
 }
 
+interface SessionFileCacheEntry {
+  mtimeMs: number;
+  ctimeMs: number;
+  size: number;
+  store: ParsedHermitBridgeStore | null;
+}
+
+function isIgnorableFsError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 export class ImLiveWatcher {
   private readonly sessionsDir: string;
   private readonly emit: (workers: ImLiveWorker[]) => void;
@@ -59,6 +73,9 @@ export class ImLiveWatcher {
   private interval: NodeJS.Timeout | null = null;
   private debounceTimer: NodeJS.Timeout | null = null;
   private running = false;
+  private readonly fileCache = new Map<string, SessionFileCacheEntry>();
+  private scanInFlight: Promise<void> | null = null;
+  private scanQueued = false;
 
   constructor(opts: ImLiveWatcherOptions) {
     this.sessionsDir = opts.sessionsDir;
@@ -80,10 +97,18 @@ export class ImLiveWatcher {
   private attachFsWatch(): void {
     if (this.fsWatcher) return;
     try {
-      this.fsWatcher = watch(this.sessionsDir, () => this.scheduleScan());
-    } catch {
+      this.fsWatcher = watch(this.sessionsDir, (_eventType, filename) => {
+        if (typeof filename === 'string' && filename.endsWith('.json')) {
+          this.fileCache.delete(filename);
+        }
+        this.scheduleScan();
+      });
+    } catch (error) {
       // Dir not present yet — the watchdog interval will re-scan and re-attach
       // once hermit-bridge creates it (see the self-heal branch in scan()).
+      if (!isIgnorableFsError(error)) {
+        console.error('[ImLiveWatcher] Failed to attach filesystem watcher', error);
+      }
       this.fsWatcher = null;
     }
   }
@@ -98,11 +123,33 @@ export class ImLiveWatcher {
 
   /** Read every `*.json` in the dir, detect live workers, emit them. */
   async scan(): Promise<void> {
+    this.scanQueued = true;
+    if (this.scanInFlight) {
+      return this.scanInFlight;
+    }
+
+    this.scanInFlight = (async () => {
+      while (this.scanQueued) {
+        this.scanQueued = false;
+        await this.scanOnce();
+      }
+    })().finally(() => {
+      this.scanInFlight = null;
+    });
+
+    return this.scanInFlight;
+  }
+
+  private async scanOnce(): Promise<void> {
     let files: string[];
     try {
       files = await fsp.readdir(this.sessionsDir);
-    } catch {
+    } catch (error) {
       // Dir missing/unreadable → no IM workers exist right now.
+      this.fileCache.clear();
+      if (!isIgnorableFsError(error)) {
+        console.error('[ImLiveWatcher] Failed to read sessions directory', error);
+      }
       this.emit([]);
       return;
     }
@@ -111,19 +158,68 @@ export class ImLiveWatcher {
     // attach now so changes are picked up instantly instead of on the watchdog.
     if (this.running && !this.fsWatcher) this.attachFsWatch();
 
-    const stores = [];
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      try {
-        const raw = await fsp.readFile(path.join(this.sessionsDir, file), 'utf-8');
-        const parsed = parseHermitBridgeSessions(JSON.parse(raw), file);
-        if (parsed) stores.push(parsed);
-      } catch {
-        // Skip unreadable / corrupt / partially-written files — next scan retries.
-      }
+    const jsonFiles = files.filter((file) => file.endsWith('.json'));
+    const liveFiles = new Set(jsonFiles);
+    for (const cachedFile of this.fileCache.keys()) {
+      if (!liveFiles.has(cachedFile)) this.fileCache.delete(cachedFile);
+    }
+
+    const stores: ParsedHermitBridgeStore[] = [];
+    for (const file of jsonFiles) {
+      const store = await this.readStoreFromCache(file);
+      if (store) stores.push(store);
     }
 
     this.emit(detectImWorkers(stores, this.now()));
+  }
+
+  private async readStoreFromCache(file: string): Promise<ParsedHermitBridgeStore | null> {
+    const filePath = path.join(this.sessionsDir, file);
+
+    let stats;
+    try {
+      stats = await fsp.stat(filePath);
+    } catch (error) {
+      console.error('[ImLiveWatcher] Failed to stat session store', filePath, error);
+      this.fileCache.delete(file);
+      return null;
+    }
+
+    const cached = this.fileCache.get(file);
+    if (
+      cached?.mtimeMs === stats.mtimeMs &&
+      cached.ctimeMs === stats.ctimeMs &&
+      cached.size === stats.size
+    ) {
+      return cached.store;
+    }
+
+    try {
+      const raw = await fsp.readFile(filePath, 'utf-8');
+      const parsed = parseHermitBridgeSessions(JSON.parse(raw), file);
+      const postReadStats = await fsp.stat(filePath);
+      if (
+        postReadStats.mtimeMs === stats.mtimeMs &&
+        postReadStats.ctimeMs === stats.ctimeMs &&
+        postReadStats.size === stats.size
+      ) {
+        this.fileCache.set(file, {
+          mtimeMs: postReadStats.mtimeMs,
+          ctimeMs: postReadStats.ctimeMs,
+          size: postReadStats.size,
+          store: parsed,
+        });
+        return parsed;
+      }
+
+      this.fileCache.delete(file);
+      this.scanQueued = true;
+      return null;
+    } catch {
+      // Skip unreadable / corrupt / partially-written files — next scan retries.
+      this.fileCache.delete(file);
+      return null;
+    }
   }
 
   stop(): void {

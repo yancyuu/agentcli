@@ -235,6 +235,7 @@ export const CliStatusSection = ({
       multimodelEnabled,
       bootstrapCliStatus,
       fetchCliStatus,
+      force: true,
     });
   }, [bootstrapCliStatus, fetchCliStatus, multimodelEnabled]);
 
@@ -297,6 +298,7 @@ export const CliStatusSection = ({
         multimodelEnabled,
         bootstrapCliStatus,
         fetchCliStatus,
+        force: true,
       });
     })();
   }, [bootstrapCliStatus, fetchCliStatus, invalidateCliStatus, multimodelEnabled]);

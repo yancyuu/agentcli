@@ -78,6 +78,7 @@ export function useSettingsHandlers({
               multimodelEnabled: appConfig?.general?.multimodelEnabled ?? false,
               bootstrapCliStatus,
               fetchCliStatus,
+              force: true,
             });
           }
         })

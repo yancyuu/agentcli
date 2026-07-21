@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, promises as fsp, rmSync, statSync, utimesSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ImLiveWatcher } from '../ImLiveWatcher';
 
@@ -47,6 +47,7 @@ describe('ImLiveWatcher', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -110,6 +111,7 @@ describe('ImLiveWatcher', () => {
 
   it('scan() reflects newly-added files on the next call (watchdog re-scan contract)', async () => {
     const emitted: ImLiveWorker[][] = [];
+    const readFileSpy = vi.spyOn(fsp, 'readFile');
     const watcher = new ImLiveWatcher({
       sessionsDir: dir,
       emit: (w) => emitted.push(w),
@@ -118,11 +120,93 @@ describe('ImLiveWatcher', () => {
 
     await watcher.scan();
     expect(emitted.at(-1)).toEqual([]);
+    expect(readFileSpy).not.toHaveBeenCalled();
 
     writeFileSync(path.join(dir, 'p_abc12345.json'), JSON.stringify(rawStore()));
     await watcher.scan();
 
+    expect(readFileSpy).toHaveBeenCalledTimes(1);
     expect(emitted.at(-1)).toHaveLength(1);
+    readFileSpy.mockRestore();
+    watcher.stop();
+  });
+
+  it('scan() reuses cached content for unchanged files but reloads changed and deleted files', async () => {
+    const fileA = path.join(dir, 'project-a_abc12345.json');
+    const fileB = path.join(dir, 'project-b_deadbeef.json');
+    writeFileSync(fileA, JSON.stringify(rawStore()));
+    writeFileSync(
+      fileB,
+      JSON.stringify(
+        rawStore({
+          sessions: {
+            s2: {
+              agent_session_id: 'claude-im-2',
+              agent_type: 'claude',
+              name: 'r2',
+              history: [
+                {
+                  role: 'user',
+                  content: '跟进 PR',
+                  timestamp: new Date(NOW - 4_000).toISOString(),
+                },
+                {
+                  role: 'assistant',
+                  content: '收到',
+                  timestamp: new Date(NOW - 1_000).toISOString(),
+                },
+              ],
+              created_at: new Date(NOW - 90_000).toISOString(),
+              updated_at: new Date(NOW - 1_000).toISOString(),
+            },
+          },
+          active_session: { 'feishu:oc_CHAT:ou_OTHER': 'claude-im-2' },
+          user_sessions: { 'feishu:oc_CHAT:ou_OTHER': ['claude-im-2'] },
+          user_meta: { 'feishu:oc_CHAT:ou_OTHER': { chat_name: '研发群', user_name: '小李' } },
+        })
+      )
+    );
+
+    const emitted: ImLiveWorker[][] = [];
+    const readFileSpy = vi.spyOn(fsp, 'readFile');
+    const watcher = new ImLiveWatcher({
+      sessionsDir: dir,
+      emit: (workers) => emitted.push(workers),
+      now: () => NOW,
+    });
+
+    await watcher.scan();
+    expect(readFileSpy).toHaveBeenCalledTimes(2);
+    expect(emitted.at(-1)).toHaveLength(2);
+
+    await watcher.scan();
+    expect(readFileSpy).toHaveBeenCalledTimes(2);
+    expect(emitted.at(-1)).toHaveLength(2);
+
+    const originalStat = statSync(fileA);
+    writeFileSync(
+      fileA,
+      JSON.stringify(
+        rawStore({
+          user_meta: { 'feishu:oc_CHAT:ou_SENDER': { chat_name: '产品群', user_name: '老周' } },
+        })
+      )
+    );
+    if (originalStat) {
+      utimesSync(fileA, originalStat.atime, new Date(originalStat.mtimeMs + 1000));
+    }
+    rmSync(fileB);
+
+    await watcher.scan();
+
+    expect(readFileSpy).toHaveBeenCalledTimes(3);
+    expect(emitted.at(-1)).toHaveLength(1);
+    expect(emitted.at(-1)?.[0]).toMatchObject({
+      agentSessionId: 'claude-im-1',
+      senderName: '老周',
+    });
+
+    readFileSpy.mockRestore();
     watcher.stop();
   });
 

@@ -1461,6 +1461,7 @@ export function initializeNotificationListeners(): () => void {
               multimodelEnabled,
               bootstrapCliStatus: useStore.getState().bootstrapCliStatus,
               fetchCliStatus: useStore.getState().fetchCliStatus,
+              force: true,
             });
           }
           useStore.setState({

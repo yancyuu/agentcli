@@ -369,6 +369,7 @@ function refreshConfiguredCliStatus(
     multimodelEnabled: state.appConfig?.general?.multimodelEnabled ?? false,
     bootstrapCliStatus: state.bootstrapCliStatus,
     fetchCliStatus: state.fetchCliStatus,
+    force: true,
   });
 }
 
