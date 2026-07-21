@@ -5,7 +5,7 @@
 // Environment variables and explicit custom ~/.hermit settings still override it.
 
 // eslint-disable-next-line sonarjs/no-clear-text-protocols
-export const DEFAULT_OPENHERMIT_CLOUD_BASE_URL = 'http://47.112.24.153:8080';
+export const DEFAULT_OPENHERMIT_CLOUD_BASE_URL = 'http://47.112.24.153';
 
 const LEGACY_OPENHERMIT_CLOUD_BASE_URLS = new Set([
   'https://agentbus.skg.com',

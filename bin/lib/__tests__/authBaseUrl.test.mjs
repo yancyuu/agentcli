@@ -26,8 +26,8 @@ describe('auth cloud base URL resolution', () => {
 
     const auth = await importAuthWithHome(tmpHome);
 
-    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://47.112.24.153:8080');
-    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://47.112.24.153:8080');
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://47.112.24.153');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://47.112.24.153');
   });
 
   it.each([
@@ -47,9 +47,9 @@ describe('auth cloud base URL resolution', () => {
 
     const auth = await importAuthWithHome(tmpHome);
 
-    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://47.112.24.153:8080');
-    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://47.112.24.153:8080');
-    expect(auth.resolveConversationUploadBaseUrl(legacyBaseUrl)).toBe('http://47.112.24.153:8080');
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://47.112.24.153');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://47.112.24.153');
+    expect(auth.resolveConversationUploadBaseUrl(legacyBaseUrl)).toBe('http://47.112.24.153');
   });
 
   it('preserves an explicitly configured custom cloud domain', async () => {
@@ -116,8 +116,8 @@ describe('auth cloud base URL resolution', () => {
 
     const auth = await importAuthWithHome(tmpHome);
 
-    // Default PORT comes from the shared base URL, so a bare host inherits :8080.
-    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://fresh-host.example.test:8080');
-    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://fresh-host.example.test:8080');
+    // HTTP's default port is 80, so URL normalization omits the explicit port.
+    expect(auth.OPENHERMIT_AUTH_BROKER_URL).toBe('http://fresh-host.example.test');
+    expect(auth.OPENHERMIT_CONVERSATION_UPLOAD_BASE_URL).toBe('http://fresh-host.example.test');
   });
 });
