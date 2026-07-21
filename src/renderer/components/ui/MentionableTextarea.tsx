@@ -1087,11 +1087,15 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     }, [rotatingTips.length]);
 
     React.useEffect(() => {
+      let tipTimeout: ReturnType<typeof setTimeout> | undefined;
       const interval = setInterval(() => {
         setTipVisible(false);
-        setTimeout(advanceTip, 300);
+        tipTimeout = setTimeout(advanceTip, 300);
       }, 10000);
-      return () => clearInterval(interval);
+      return () => {
+        clearTimeout(tipTimeout);
+        clearInterval(interval);
+      };
     }, [advanceTip]);
 
     const resolvedHintText = hintText ?? rotatingTips[tipIndex];

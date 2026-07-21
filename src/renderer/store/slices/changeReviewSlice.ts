@@ -1043,6 +1043,11 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
     },
 
     applyReview: async (teamName: string, taskId?: string, memberName?: string) => {
+      // Guard against double-trigger (double-click / programmatic re-entry):
+      // applyDecisions is mostly idempotent, but a second concurrent run wastes
+      // a disk write and surfaces a misleading "File has been modified since
+      // agent changes" error.
+      if (get().applying) return;
       set({ applying: true, applyError: null });
 
       try {
