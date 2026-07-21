@@ -47,6 +47,7 @@ vitest.config.ts.timestamp-*.mjs
 notification_example/
 temp/
 .claude/
+.pi-subagents/
 
 
 eslint-fix/

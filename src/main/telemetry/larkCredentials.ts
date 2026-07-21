@@ -111,7 +111,12 @@ export interface LarkCredentialsReportStatus {
 
 function capture(cmd: string, args: string[], options: { input?: string } = {}): string {
   try {
-    const r = spawnSync(cmd, args, { encoding: 'utf-8', shell: isWin, input: options.input });
+    const r = spawnSync(cmd, args, {
+      encoding: 'utf-8',
+      shell: isWin,
+      input: options.input,
+      windowsHide: true, // telemetry worker 定时调用 → 不藏窗口会周期性闪 cmd/powershell 黑框
+    });
     return (r.stdout || '').trim();
   } catch {
     return '';
@@ -247,6 +252,7 @@ async function writeRegistryDpapi(service: string, account: string, plain: strin
     encoding: 'utf-8',
     shell: false,
     input: plain,
+    windowsHide: true, // 否则定时写凭证时 powershell 控制台会闪现
   });
   if (result.status !== 0) throw new Error('lark-cli Windows credential write failed');
 }
@@ -488,7 +494,11 @@ function listLarkProfiles(): LarkCliProfile[] {
   const binary = findLarkBinary();
   if (!binary) return [];
   try {
-    const result = spawnSync(binary, ['profile', 'list'], { encoding: 'utf-8', shell: isWin });
+    const result = spawnSync(binary, ['profile', 'list'], {
+      encoding: 'utf-8',
+      shell: isWin,
+      windowsHide: true,
+    });
     const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item) => {
@@ -521,6 +531,7 @@ function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
       const result = spawnSync(binary, ['auth', 'list', '--json', '--profile', profile.name], {
         encoding: 'utf-8',
         shell: isWin,
+        windowsHide: true,
       });
       const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
       for (const authorization of parseLarkCliPersonalAuthorizations(profile, parsed)) {

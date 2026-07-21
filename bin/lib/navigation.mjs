@@ -73,9 +73,13 @@ export function visibleMenuRows(actions, expandedActionIds, isDeveloperModeEnabl
 }
 
 export function renderBusyScreen(title, message) {
-  clearTerminal();
-  console.log(ui.bold(title));
-  console.log(message);
+  // Redraw IN PLACE (cursor home + per-line clear-to-EOL) instead of a full
+  // screen clear. The old clearTerminal() on every repaint made the busy
+  // screen flash and, on Windows GBK consoles, repeatedly re-emit UTF-8 CJK as
+  // mojibake. In-place overwrite leaves the previous pixels visible until
+  // replaced, so there is no blank gap to flicker.
+  const lines = [ui.bold(title), ...String(message).split('\n')];
+  writeFrameSync(lines);
 }
 
 export function renderNavMenu(

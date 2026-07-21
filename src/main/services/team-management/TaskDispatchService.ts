@@ -616,6 +616,46 @@ export class TaskDispatchService {
     });
     this.emitCollabChange(dispatchId, 'delivered', deliveredTask.fromTeam, deliveredTask.toTeam);
 
+    // Auto-approve when no human review is required. Previously this lived in
+    // applyResponse where it was unreachable dead code (no shadow task exists in
+    // the origin team, and collabBoard.status was still 'in_progress' there).
+    // Doing it here — right after the 'delivered' transition — makes
+    // needsHumanReview=false actually skip the review gate.
+    if (!deliveredTask.needsHumanReview) {
+      const autoApproved = this.collabBoard.transition({
+        dispatchId,
+        expected: 'delivered',
+        next: 'approved',
+        actor: { type: 'system', id: 'auto-approve' },
+        eventType: 'task_approved',
+        payload: { auto: true },
+        extra: { approvedAt: new Date().toISOString() },
+      });
+      this.emitCollabChange(dispatchId, 'approved', autoApproved.fromTeam, autoApproved.toTeam);
+
+      try {
+        await this.workspace.appendMessage(collabTask.fromTeam, {
+          from: 'system',
+          to: 'team',
+          role: 'agent',
+          content: `[跨团队任务已自动通过] "${collabTask.subject}" — ${teamSlug} 完成任务并自动通过审核（无需人工审核）。结果：${result}`,
+          meta: {
+            source: 'cross_team_auto_approved',
+            dispatchId,
+            targetTeam: teamSlug,
+            result,
+          },
+        });
+      } catch {
+        // best-effort notification; ignore failures
+      }
+
+      this.sendFeishuNotification(
+        `跨团队任务已自动通过：${collabTask.fromTeam} ← ${teamSlug}\n${collabTask.subject}\n状态：已通过`
+      );
+      return { ok: true };
+    }
+
     // Notify origin agent: task is ready for review
     try {
       await this.workspace.appendMessage(collabTask.fromTeam, {
@@ -894,20 +934,15 @@ export class TaskDispatchService {
   // ── Feishu notification helper ──────────────────────────────────
 
   private sendFeishuNotification(text: string): void {
+    // Opt-in: the notify chat id is read from the environment so we never fall
+    // back to a hardcoded (test) chat id. If unset, notifications are skipped.
+    const chatId = process.env.HERMIT_FEISHU_NOTIFY_CHAT;
+    if (!chatId) return;
     setTimeout(() => {
       try {
         execFileSync(
           'feishu-cli',
-          [
-            'msg',
-            'send',
-            '--receive-id-type',
-            'chat_id',
-            '--receive-id',
-            'oc_e7d4204895f8f9d763d9f0e42ead1e5e',
-            '--text',
-            text,
-          ],
+          ['msg', 'send', '--receive-id-type', 'chat_id', '--receive-id', chatId, '--text', text],
           { timeout: 5000, stdio: 'pipe' }
         );
       } catch {
@@ -1302,22 +1337,10 @@ export class TaskDispatchService {
       await this.workspace.patchTask(originTeam, shadowTask.id, {
         dispatchMeta: meta,
       });
-
-      // Auto-approve if no human review needed
-      const collabTask = this.collabBoard.getTask(response.dispatchId);
-      if (collabTask && !collabTask.needsHumanReview && collabTask.status === 'delivered') {
-        const approvedAt = new Date().toISOString();
-        this.collabBoard.transition({
-          dispatchId: response.dispatchId,
-          expected: 'delivered',
-          next: 'approved',
-          actor: { type: 'system', id: 'auto-approve' },
-          eventType: 'task_approved',
-          payload: { auto: true },
-          extra: { approvedAt },
-        });
-        this.emitCollabChange(response.dispatchId, 'approved', response.fromTeam, response.toTeam);
-      }
+      // Auto-approval for needsHumanReview=false is handled in deliverTask right
+      // after the 'delivered' transition. It was unreachable here (dispatch never
+      // creates a shadow task in the origin team, and collabBoard.status was
+      // still 'in_progress' at this point), so the old block is removed.
       return;
     } else if (response.type === 'task_approve') {
       // Received by target team — already handled in approveTask

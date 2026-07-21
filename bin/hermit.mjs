@@ -399,15 +399,17 @@ ${BRAND.stylizedName} - 本地 AI runtime 工作区控制面
 await requireOpenHermitAuthForEntry();
 
 if (commandArgs[0] === 'init') {
-  const web = await runServiceAction('start-web');
+  // 默认只启动轻量的用量上报 worker。Web 工作台会拉起 hermit-bridge 等
+  // 后台进程并常驻,装完即起会拖慢系统(尤以 Windows 明显),故改为按需
+  // 启动:需要时运行 `agentcli web`。
   const usage = await runServiceAction('start-usage');
-  const result = { ok: true, command: 'init', hermitHome, web: web.web, usage: usage.usage };
+  const result = { ok: true, command: 'init', hermitHome, usage: usage.usage };
   if (jsonRequested) printJson(result);
   printCliRows('AgentCli 已初始化', [
-    ['Web 工作台', web.web?.running ? `运行中 ${web.web.url || `http://127.0.0.1:${port}`}` : '启动中'],
     ['用量后台', usage.usage?.worker?.running ? `运行中 (pid ${usage.usage.worker.pid})` : '已请求启动'],
     ['开机自启', usage.usage?.autostart?.enabled ? '已开启' : '未开启/不支持'],
-  ], '后续进入菜单：agentcli；停止 Web：agentcli services stop web；停止用量：agentcli usage stop。');
+    ['Web 工作台', '默认未启动'],
+  ], '需要 Web 工作台时运行：agentcli web；停止用量：agentcli usage stop。');
   process.exit(0);
 }
 

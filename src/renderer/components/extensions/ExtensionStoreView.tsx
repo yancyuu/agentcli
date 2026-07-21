@@ -227,6 +227,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
       multimodelEnabled,
       bootstrapCliStatus,
       fetchCliStatus,
+      force: true,
     });
   }, [bootstrapCliStatus, fetchCliStatus, multimodelEnabled]);
 

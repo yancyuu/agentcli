@@ -26,9 +26,14 @@ function resolveBinaryFromPath(binaryName: string): Promise<string | null> {
   return new Promise((resolve) => {
     import('node:child_process')
       .then(({ execFile }) => {
-        execFile('which', [binaryName], { timeout: 5_000 }, (err, stdout) => {
-          resolve(err || !stdout?.trim() ? null : stdout.trim());
-        });
+        execFile(
+          process.platform === 'win32' ? 'where' : 'which',
+          [binaryName],
+          { timeout: 5_000 },
+          (err, stdout) => {
+            resolve(err || !stdout?.trim() ? null : stdout.trim());
+          }
+        );
       })
       .catch(() => resolve(null));
   });

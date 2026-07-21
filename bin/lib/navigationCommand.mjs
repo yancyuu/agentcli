@@ -28,6 +28,7 @@ import {
   clearTerminalScrollback,
   isInteractiveCli,
   createPromptInterface,
+  withSpinner,
 } from './terminal.mjs';
 import {
   describeUploadToggle,
@@ -650,12 +651,25 @@ async function runTokenClaimFlow() {
     return;
   }
 
-  // 3. Poll until succeeded.
+  // 3. Poll until succeeded. A standard single-line spinner (no screen clear)
+  //    shows live status + elapsed, so a stuck 'queued' run no longer flashes
+  //    or mojibake-loops the screen on every 2s poll.
   try {
-    await pollRun(runId, {
-      intervalMs: 2_000,
-      onTick: (status) => renderBusyScreen('认领 token', `正在签发消费者…（${status}）\nrun_id: ${runId}`),
-    });
+    let pollStatus = 'running';
+    const pollStartedAt = Date.now();
+    await withSpinner(
+      () => {
+        const elapsed = Math.round((Date.now() - pollStartedAt) / 1000);
+        return `正在签发消费者…（${pollStatus}）已等待 ${elapsed}s`;
+      },
+      () =>
+        pollRun(runId, {
+          intervalMs: 2_000,
+          onTick: (status) => {
+            pollStatus = status;
+          },
+        })
+    );
   } catch (err) {
     printClaimError(err);
     return;

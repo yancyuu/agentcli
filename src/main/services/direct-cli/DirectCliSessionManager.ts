@@ -13,7 +13,7 @@
  */
 
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
-import { spawnCli } from '@main/utils/childProcess';
+import { killProcessTree, spawnCli } from '@main/utils/childProcess';
 import { classifyClaudeStreamLine, type ClaudeStreamLine } from '@shared/utils/claudeStreamJson';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
@@ -537,7 +537,10 @@ export class DirectCliSessionManager extends EventEmitter {
     if (!handle) return;
     handle.closed = true;
     try {
-      handle.child.kill('SIGTERM');
+      // Kill the whole process tree: on Windows the child may be a cmd.exe
+      // shell wrapper (spawnCli shell fallback), and bare child.kill() would
+      // orphan the real claude process running underneath it.
+      killProcessTree(handle.child, 'SIGTERM');
     } catch {
       // Best effort.
     }
