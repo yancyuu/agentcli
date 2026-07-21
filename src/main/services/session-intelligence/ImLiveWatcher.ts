@@ -103,6 +103,22 @@ export class ImLiveWatcher {
         }
         this.scheduleScan();
       });
+      // fs.watch() is an EventEmitter: an unhandled 'error' event (ENOSPC when
+      // the inotify watcher limit is hit, EBADF when the watched dir is
+      // deleted/renamed — both common when hermit-bridge rebuilds sessions)
+      // would crash the whole server as an uncaughtException. Drop the handle
+      // and let the watchdog interval re-attach on the next scan.
+      this.fsWatcher.on('error', (error) => {
+        if (!isIgnorableFsError(error)) {
+          console.error('[ImLiveWatcher] fs.watch error', error);
+        }
+        try {
+          this.fsWatcher?.close();
+        } catch {
+          /* best effort */
+        }
+        this.fsWatcher = null;
+      });
     } catch (error) {
       // Dir not present yet — the watchdog interval will re-scan and re-attach
       // once hermit-bridge creates it (see the self-heal branch in scan()).

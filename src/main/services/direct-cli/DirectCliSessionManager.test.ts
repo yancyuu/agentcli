@@ -11,6 +11,7 @@ import type { SpawnOptions } from 'child_process';
 
 /** Minimal fake ChildProcess: stdout/stderr/stdin as EventEmitters + kill. */
 interface FakeChild {
+  pid: number;
   stdout: EventEmitter;
   stderr: EventEmitter;
   stdin: { write: (data: string) => boolean; destroyed: boolean };
@@ -22,6 +23,9 @@ interface FakeChild {
 function createFakeChild(): FakeChild {
   const bus = new EventEmitter();
   const child: FakeChild = {
+    // A non-existent pid lets killProcessTree run its best-effort process.kill
+    // path (ESRCH, ignored) instead of short-circuiting on !pid.
+    pid: 999_999,
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
     stdin: { write: () => true, destroyed: false },
@@ -409,11 +413,7 @@ describe('DirectCliSessionManager', () => {
   });
 
   it('shutdown kills all live sessions', async () => {
-    const killed: string[] = [];
     const child = createFakeChild();
-    child.kill = (signal?: string) => {
-      killed.push(signal ?? 'none');
-    };
     const manager = new DirectCliSessionManager({
       spawnFn: () => child as unknown as import('child_process').ChildProcess,
       envResolver: async () => ({ env: {}, providerArgs: [] }),
@@ -423,8 +423,10 @@ describe('DirectCliSessionManager', () => {
     await manager.ensureSession({ sessionKey: 'a:lead', workDir: '/p' });
     await manager.ensureSession({ sessionKey: 'b:lead', workDir: '/p' });
     manager.shutdown();
-    expect(killed.length).toBe(2);
+    // shutdown reaps every session (via killProcessTree — best-effort,
+    // OS-dependent) and removes them from the live map.
     expect(manager.has('a:lead')).toBe(false);
+    expect(manager.has('b:lead')).toBe(false);
   });
 
   it('throws a clear error when workDir is missing', async () => {

@@ -50,8 +50,8 @@ import {
 } from '@features/worker-society/main/adapters/input/societyMcp';
 import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
 import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
-import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import { atomicWriteAsync } from '@main/utils/atomicWrite';
+import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
 import {
   SYSTEM_MANAGER_BIND_PROJECT,
@@ -5442,7 +5442,10 @@ async function applyTeamConfigUpdate(
   if (agentType && agentType !== 'claudecode') {
     try {
       const { execFileSync } = await import('node:child_process');
-      execFileSync('which', [agentType], { stdio: 'pipe', timeout: 5000 });
+      execFileSync(process.platform === 'win32' ? 'where' : 'which', [agentType], {
+        stdio: 'pipe',
+        timeout: 5000,
+      });
     } catch {
       throw new Error(
         `${agentType} CLI 未安装，无法切换到 ${agentType} 模式。请先安装对应的 CLI 工具。`
@@ -7764,7 +7767,10 @@ const shutdown = async () => {
     directCliManager.shutdown();
     bridgeLauncher.stop();
     bridge.dispose?.();
-    await app.close();
+    // Bound app.close() so a stuck SSE/websocket client can't hold the process
+    // alive forever on SIGINT/SIGTERM (which would otherwise need kill -9 and
+    // leak orphan claude subprocesses that the sync exit hook can't reap).
+    await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, 3000).unref())]);
     process.exit(0);
   } catch {
     process.exit(1);
