@@ -391,19 +391,29 @@ function writeFrameSync(lines) {
 }
 
 /**
+ * Shared braille spinner frames, used by every CLI spinner so the look is
+ * consistent across mac / windows / linux. We intentionally do NOT downgrade to
+ * ASCII based on terminal detection: modern terminals (Windows Terminal, VS
+ * Code, iTerm, Ghostty, …) all render braille. HERMIT_SPINNER_ASCII=1 is kept
+ * as an escape hatch for the rare legacy console that can't.
+ */
+const SPINNER_FRAMES = /^(1|true|yes)$/i.test(
+  String(process.env.HERMIT_SPINNER_ASCII ?? '').trim()
+)
+  ? ['-', '\\', '|', '/']
+  : ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/**
  * Run `task` while showing a single-line spinner. The label is produced by
  * `getLabel()` on each frame so it can reflect live progress (status, elapsed).
- * Braille frames on unicode terminals, ASCII fallback elsewhere. Clears the
- * line on exit. Runs the task directly (no spinner) when stdout is not a TTY —
- * the standard CLI loading pattern that neither clears the screen nor flickers,
- * so it stays clean on Windows GBK consoles where a full-screen repaint would
- * re-emit CJK as mojibake.
+ * Clears the line on exit. Runs the task directly (no spinner) when stdout is
+ * not a TTY — the standard CLI loading pattern that neither clears the screen
+ * nor flickers, so it stays clean on Windows GBK consoles where a full-screen
+ * repaint would re-emit CJK as mojibake.
  */
 async function withSpinner(getLabel, task) {
   if (!process.stdout.isTTY) return task();
-  const frames = useUnicodeUi
-    ? ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    : ['-', '\\', '|', '/'];
+  const frames = SPINNER_FRAMES;
   let index = 0;
   const render = () => {
     process.stdout.write(`\r\x1b[2K${ui.dim(frames[index])} ${getLabel()}`);
@@ -467,4 +477,5 @@ export {
   clearTerminalScrollback,
   writeFrameSync,
   withSpinner,
+  SPINNER_FRAMES,
 };

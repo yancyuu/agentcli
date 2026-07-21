@@ -20,6 +20,7 @@ import {
   printJson,
   ui,
   useUnicodeUi,
+  SPINNER_FRAMES,
   displayWidth,
   printCliRows,
 } from './terminal.mjs';
@@ -811,7 +812,7 @@ export async function disableUsageAutostart() {
 
 async function withCliProgress(label, task) {
   if (jsonRequested || !process.stdout.isTTY) return task();
-  const frames = useUnicodeUi ? ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] : ['-', '\\', '|', '/'];
+  const frames = SPINNER_FRAMES;
   let index = 0;
   process.stdout.write(`${ui.dim(frames[index])} ${label}`);
   const timer = setInterval(() => {
@@ -832,7 +833,7 @@ async function withCliProgress(label, task) {
 async function withUploadProgress(label, task, { fullRescan = false } = {}) {
   if (jsonRequested || !process.stdout.isTTY) return task();
   const sinceMs = Date.now() - 1000;
-  const frames = useUnicodeUi ? ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] : ['-', '\\', '|', '/'];
+  const frames = SPINNER_FRAMES;
   let frame = 0;
   const startedAt = Date.now();
   let finishedSeen = new Map();
