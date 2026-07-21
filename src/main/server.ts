@@ -51,6 +51,7 @@ import {
 import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
 import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
+import { atomicWriteAsync } from '@main/utils/atomicWrite';
 import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
 import {
   SYSTEM_MANAGER_BIND_PROJECT,
@@ -173,7 +174,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
-const HOST = process.env.HOST ?? '0.0.0.0';
+// Default to loopback so the daemon is NOT exposed to the LAN by default.
+// Set HOST=0.0.0.0 explicitly (and put a reverse proxy / origin allowlist in
+// front) to expose it remotely. Combined with the global origin hook below
+// this closes the local-service attack surface (DNS rebinding, drive-by pages).
+const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number.parseInt(process.env.PORT ?? '5680', 10);
 const STATIC_DIR = process.env.STATIC_DIR ?? path.resolve(REPO_ROOT, 'dist-renderer');
 const HARNESS_BRIDGE_CONNECT_TIMEOUT_MS = 10_000;
@@ -1314,6 +1319,22 @@ await app.register(cors, {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
 
+// Security: reject any request carrying an untrusted `Origin` header, applied
+// globally so every route is covered (previously only 5 of ~102 routes called
+// assertTrustedBrowserOrigin). Browser same-origin requests and local
+// non-browser tools (curl, CLI integrations) either omit Origin or send a
+// loopback origin and pass; malicious cross-origin pages (DNS rebinding,
+// drive-by) always send a foreign Origin on cross-origin writes and are blocked.
+// Paired with the default loopback bind this is the local-service security boundary.
+app.addHook('preHandler', async (request, reply) => {
+  const origin = Array.isArray(request.headers.origin)
+    ? request.headers.origin[0]
+    : request.headers.origin;
+  if (origin && !isTrustedBrowserOrigin(origin)) {
+    return reply.code(403).send({ ok: false, error: 'Forbidden origin' });
+  }
+});
+
 // ===========================================================================
 // /api/bridge/* → hermit-bridge /api/v1/* (canonical proxy with token)
 // /api/cc/*     → hermit-bridge /api/v1/* (legacy alias)
@@ -1530,7 +1551,7 @@ function readHermitBridgeConfig(): Record<string, unknown> {
   return result;
 }
 
-function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
+async function writeHermitBridgeConfig(updates: Record<string, unknown>): Promise<void> {
   const configFile = ensureWritableHermitBridgeConfigFile();
   let raw = readFileSync(configFile, 'utf-8');
 
@@ -1628,17 +1649,28 @@ function writeHermitBridgeConfig(updates: Record<string, unknown>): void {
     );
   }
 
-  writeFileSync(configFile, raw, 'utf-8');
+  await atomicWriteAsync(configFile, raw);
 }
 
-function writeHermitBridgeConfigRaw(content: string): void {
+async function writeHermitBridgeConfigRaw(content: string): Promise<void> {
   const configFile = ensureWritableHermitBridgeConfigFile();
-  writeFileSync(configFile, content, 'utf-8');
+  await atomicWriteAsync(configFile, content);
 }
 
 async function handleReadHermitBridgeConfig() {
   try {
     const config = readHermitBridgeConfig();
+    // Mask tokens in the structured response — the UI only needs to know they
+    // are set (mirrors /api/hermit-config masking). Raw values remain available
+    // via the origin-guarded /raw route for the config editor.
+    const mgmtToken = config.management_token;
+    if (typeof mgmtToken === 'string' && mgmtToken) {
+      config.management_token = mgmtToken.slice(0, 4) + '****';
+    }
+    const bridgeToken = config.bridge_token;
+    if (typeof bridgeToken === 'string' && bridgeToken) {
+      config.bridge_token = bridgeToken.slice(0, 4) + '****';
+    }
     return { ok: true, data: config };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -1650,7 +1682,7 @@ async function handleWriteHermitBridgeConfig(
 ) {
   try {
     const updates = request.body ?? {};
-    writeHermitBridgeConfig(updates);
+    await writeHermitBridgeConfig(updates);
 
     // If management port/token changed, notify user to restart hermit-bridge.
     const needsRestart =
@@ -1685,7 +1717,7 @@ async function handleWriteHermitBridgeConfigRaw(
     if (typeof content !== 'string') {
       return { ok: false, error: 'content 必须是字符串' };
     }
-    writeHermitBridgeConfigRaw(content);
+    await writeHermitBridgeConfigRaw(content);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4457,6 +4489,19 @@ function resolveEditorRoot(rawRoot: unknown): string {
     throw new Error('root 参数不能为空');
   }
   const resolved = path.resolve(rawRoot.trim());
+  // Defense in depth: refuse filesystem root / user home / sensitive dirs as
+  // editor root. The editor is project-scoped; primary protection is the
+  // loopback bind + global origin hook above.
+  const home = os.homedir();
+  const forbiddenRoots = new Set([
+    path.parse(resolved).root,
+    home,
+    path.join(home, '.ssh'),
+    path.join(home, '.hermit'),
+  ]);
+  if (forbiddenRoots.has(resolved)) {
+    throw new Error('不允许将该目录作为项目根目录');
+  }
   if (!_existsSync2(resolved)) {
     throw new Error(`目录不存在: ${resolved}`);
   }
