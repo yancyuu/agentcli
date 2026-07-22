@@ -9,6 +9,7 @@
 
 import type { CliArgsValidationResult } from '../utils/cliArgsParser';
 import type { CliInstallerAPI } from './cliInstaller';
+import type { RuntimeReadiness } from './runtimeReadiness';
 import type { EditorAPI, EditorFileChangeEvent, ProjectAPI, WorkspaceListResponse } from './editor';
 import type {
   ApiKeysAPI,
@@ -1283,6 +1284,9 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
 
   // CLI Installer API
   cliInstaller: CliInstallerAPI;
+
+  // Runtime readiness (cc-connect health) API
+  systemReadiness: { getStatus(): Promise<RuntimeReadiness> };
 
   // System Manager / Control Console API
   systemManager: SystemManagerAPI;

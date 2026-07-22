@@ -74,6 +74,11 @@ import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
 import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
 import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
 import {
+  getRuntimeReadiness,
+  markBridgeBinaryCheck,
+  markBridgeLaunch,
+} from './services/system/RuntimeReadiness';
+import {
   isPlaceholderWorkDir,
   needsWorkDirReconcile,
 } from './services/hermitBridge/workDirReconcile';
@@ -1751,6 +1756,14 @@ app.get('/api/status', async () => {
   } catch (err) {
     return reply500(err);
   }
+});
+
+// ===========================================================================
+// Runtime readiness — cc-connect binary + sidecar health for the UI degraded banner
+// ===========================================================================
+
+app.get('/api/v1/system/readiness', async () => {
+  return { ok: true, data: getRuntimeReadiness() };
 });
 
 // ===========================================================================
@@ -7720,6 +7733,26 @@ function reply500(err: unknown) {
 // Start
 // ===========================================================================
 
+bridgeLauncher
+  .ensureBinaryReady({
+    configPath: HERMIT_BRIDGE_CONFIG_FILE,
+    extraArgs: ['--force'],
+  })
+  .then((cmd) => {
+    markBridgeBinaryCheck({ status: 'ok', cmd: cmd.cmd });
+  })
+  .catch((err) => {
+    markBridgeBinaryCheck({
+      status: 'degraded',
+      reason: err instanceof Error ? err.message : String(err),
+      remediation: [
+        '在终端运行: npm install -g cc-connect',
+        '或设置环境变量 CC_CONNECT_MIRROR 指向可用的 GitHub release 代理（如 https://gh-proxy.com/）',
+        '安装完成后重启 AgentCli 工作台',
+      ],
+    });
+  });
+
 // Ensure hermit-bridge is running for Hermit to connect to. A no-op when the
 // management API already responds (an externally-managed hermit-bridge is left
 // untouched); otherwise launches the bundled sidecar. Fire-and-forget: a slow or
@@ -7727,6 +7760,12 @@ function reply500(err: unknown) {
 // stalls /api/version for up to HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS (180s
 // default) and the workbench reports "启动失败" on cold boot. The bridge connects
 // in the background via its own retry loop (bridge.start() below).
+//
+// NOTE on fail-fast: the cc-connect BINARY being ready is a hard prerequisite —
+// without it every team-config save surfaces as a cryptic "fetch failed". We
+// guarantee the binary (via the self-heal downloader in HermitBridgeLauncher's
+// ensureRunning) BEFORE app.listen(), so a missing binary is surfaced as a
+// clear startup error instead of a silently broken workbench.
 bridgeLauncher
   .ensureRunning({
     client: cc,
@@ -7736,10 +7775,21 @@ bridgeLauncher
     timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
   })
   .then((r) => {
-    if (r.launched) app.log.info({ pid: r.pid }, 'launched hermit-bridge sidecar');
-    else app.log.info('hermit-bridge already running — skipping auto-launch');
+    if (r.launched) {
+      app.log.info({ pid: r.pid }, 'launched hermit-bridge sidecar');
+      markBridgeLaunch({ status: 'running', pid: r.pid });
+    } else {
+      app.log.info('hermit-bridge already running — skipping auto-launch');
+      markBridgeLaunch({ status: 'running' });
+    }
   })
-  .catch((err) => app.log.warn({ err }, 'hermit-bridge auto-launch skipped'));
+  .catch((err) => {
+    app.log.warn({ err }, 'hermit-bridge auto-launch skipped');
+    markBridgeLaunch({
+      status: 'offline',
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  });
 // 启动 hermit-bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
 imLiveWatcher.start();

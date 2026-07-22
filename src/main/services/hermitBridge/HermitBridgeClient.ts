@@ -98,6 +98,21 @@ export class HermitBridgeClient {
       }
 
       return (json.data ?? json) as T;
+    } catch (err) {
+      // undici's TypeError('fetch failed') carries the real reason on `cause`
+      // (ECONNREFUSED, UND_ERR_CONNECT_TIMEOUT, ECONNRESET, …). Without this,
+      // a transport fault surfaces as a bare "fetch failed" / ccSyncError with
+      // no clue why — mirroring the OpenHermitAuthClient.fetchErrorMessage rule.
+      if (err instanceof Error && err.message === 'fetch failed') {
+        const cause = (err as { cause?: { code?: string; errno?: string; message?: string } })
+          .cause;
+        const detail =
+          cause?.code ||
+          cause?.errno ||
+          (cause?.message ? String(cause.message).split('\n')[0] : '');
+        throw new Error(detail ? `fetch failed (${detail})` : 'fetch failed', { cause: err });
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }

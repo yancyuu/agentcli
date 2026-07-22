@@ -110,6 +110,7 @@ import type {
 } from '@shared/types';
 import type { AgentConfig } from '@shared/types/api';
 import type { CliProviderStatus } from '@shared/types/cliInstaller';
+import type { RuntimeReadiness } from '@shared/types/runtimeReadiness';
 import type { EditorAPI, ProjectAPI, WorkspaceListResponse } from '@shared/types/editor';
 import type {
   CapabilityCommandPromptRequest,
@@ -2070,6 +2071,13 @@ export class HttpAPIClient implements ElectronAPI {
     },
     onProgress: (): (() => void) => {
       return () => {};
+    },
+  };
+
+  systemReadiness = {
+    /** Fetch runtime readiness (cc-connect binary + sidecar health) for the degraded banner. */
+    getStatus: async (): Promise<RuntimeReadiness> => {
+      return this.get<RuntimeReadiness>('/api/v1/system/readiness');
     },
   };
 

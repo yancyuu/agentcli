@@ -1,9 +1,12 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 
 import { createLogger } from '@shared/utils/logger';
+
+import { ensureCcConnectBinary } from './CcConnectBinaryFetcher';
 
 const require = createRequire(import.meta.url);
 const log = createLogger('HermitBridgeLauncher');
@@ -83,6 +86,23 @@ function resolveHermitBridgeRunner(): string | null {
   }
 }
 
+/**
+ * Resolve the cc-connect Go binary directly (no run.js wrapper). Used as a
+ * self-heal fallback when the cc-connect npm package is absent entirely —
+ * e.g. for users who installed agentcli before the install.js mirror patch
+ * landed and whose `optionalDependencies` install was silently skipped.
+ * Looks under HERMIT_HOME/cc-connect-bin/, where ensureCcConnectBinary()
+ * drops the binary it downloads from mirror-proxied GitHub releases.
+ *
+ * @param hermitHome HERMIT_HOME directory.
+ * @returns absolute binary path, or null when not present.
+ */
+export function resolveHermitBridgeBinaryDirect(hermitHome: string): string | null {
+  const binaryName = resolveHermitBridgeBinaryName() ?? 'cc-connect';
+  const candidate = path.join(hermitHome, 'cc-connect-bin', binaryName);
+  return existsSync(candidate) ? candidate : null;
+}
+
 /** Build the argv for `-config <path>` plus any extras. */
 export function buildBridgeArgs(opts: BridgeLaunchOptions): string[] {
   return ['-config', opts.configPath, ...(opts.extraArgs ?? [])];
@@ -150,14 +170,59 @@ export class HermitBridgeLauncher {
     }
   }
 
+  /**
+   * Fail-fast prerequisite: ensure the cc-connect binary is ready to launch
+   * (either via the bundled npm package's run.js, or via the self-heal
+   * downloader). Returns the cmd/args to launch it. Throws when the binary
+   * cannot be resolved NOR downloaded — callers SHOULD let this propagate to
+   * abort startup, so a missing binary is surfaced as a clear startup error
+   * instead of a silently broken workbench where every config save fails with
+   * a cryptic "fetch failed".
+   *
+   * Split out from ensureRunning() so the boot path can enforce it
+   * synchronously before app.listen(), while still letting the (slow) service
+   * readiness wait stay fire-and-forget.
+   */
+  async ensureBinaryReady(
+    opts: BridgeLaunchOptions,
+    resolveBinary: ResolveBinaryFn = this.deps.resolveBinary ?? resolveHermitBridgeRunner
+  ): Promise<BridgeCommand> {
+    try {
+      return resolveBridgeCommand(opts, resolveBinary);
+    } catch {
+      // cc-connect npm package not present (the classic silent-optional-failure
+      // case). Self-heal: download the binary directly into HERMIT_HOME from
+      // mirror-proxied GitHub releases.
+      const hermitHome = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit');
+      log.warn('cc-connect runner missing — attempting self-heal binary download');
+      let result: { binaryPath: string } | null = null;
+      try {
+        result = await ensureCcConnectBinary(hermitHome);
+      } catch (downloadErr) {
+        throw new Error(
+          `cc-connect is not installed and could not be downloaded automatically: ${(downloadErr as Error).message}. ` +
+            'Run `npm install -g cc-connect` manually, or set CC_CONNECT_MIRROR to a reachable GitHub-release proxy.'
+        );
+      }
+      if (!result) {
+        throw new Error(
+          'cc-connect is not installed and the current platform is unsupported for auto-download. ' +
+            'Run `npm install -g cc-connect` manually.'
+        );
+      }
+      return { cmd: result.binaryPath, args: buildBridgeArgs(opts) };
+    }
+  }
+
   async ensureRunning(opts: EnsureRunningOptions): Promise<EnsureRunningResult> {
     if (await this.isRunning(opts.client)) {
       return { launched: false, alreadyRunning: true };
     }
-    const { cmd, args } = resolveBridgeCommand(
-      opts,
-      this.deps.resolveBinary ?? resolveHermitBridgeRunner
-    );
+
+    // Hard prerequisite: binary must be ready (self-heals if missing). A
+    // failure here is the fail-fast signal callers should let propagate.
+    const { cmd, args } = await this.ensureBinaryReady(opts);
+
     log.info({ cmd, args }, 'launching cc-connect');
     const spawnFn = this.deps.spawn ?? defaultSpawn;
     this.child = spawnFn(cmd, args, { logFile: opts.logFile });

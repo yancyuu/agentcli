@@ -2,3 +2,5 @@ packages:
   - packages/agent-graph
 ignoredBuiltDependencies:
   - esbuild
+patchedDependencies:
+  cc-connect@1.4.1: patches/cc-connect@1.4.1.patch

@@ -265,6 +265,8 @@ AgentCli 无侵入扫描本地会话日志：
 
 ## 更新 AgentCli
 
+> **1.9.34+ 起**：更新会顺带修复 cc-connect 二进制下载问题（国内 / 企业防火墙环境下原本会静默失败，导致「同步到运行时失败：fetch failed」）。cc-connect 安装走镜像、启动时自愈下载，无需手动处理。遇到 fetch failed 的用户升级到最新版即可。
+
 更新前先停止会加载全局安装目录文件的进程，避免 Windows `EBUSY`，也避免旧 worker 在更新后继续运行旧代码：
 
 ```bash
@@ -300,6 +302,44 @@ agentcli doctor
 ---
 
 ## 常见问题
+
+<details>
+<summary><b>「同步到运行时失败：fetch failed」/ cc-connect 未就绪</b></summary>
+
+这是 cc-connect（hermit-bridge 的底层运行时）的二进制没装上造成的。cc-connect 的二进制会从 GitHub Releases 下载，国内 / 企业防火墙环境下经常失败，而它又是可选依赖，npm 会静默跳过，导致工作台能开但团队配置、消息收发全不可用。
+
+**1.9.34+ 已内置自动修复**：安装时走镜像、启动时自愈下载、顶部横幅提示。
+
+升级到最新版即可自动解决：
+
+```bash
+agentcli services stop web
+npm install -g @yancyyu/agentcli@latest --prefer-online
+agentcli services start web
+```
+
+升级后重开工作台，cc-connect 会自动从镜像（`gh-proxy.com` / `ghproxy.net`）下载到 `~/.hermit/cc-connect-bin/`。
+
+**临时手动修复**（无法升级时）：
+
+```bash
+# 1. 看端口有没有监听（9820 / 9810）
+netstat -ano | findstr "9820 9810"   # Windows
+lsof -i :9820                        # macOS
+
+# 2. 直接装 cc-connect，走镜像
+npm install -g cc-connect
+# 或强制指定镜像前缀
+CC_CONNECT_MIRROR=https://gh-proxy.com/ npm install -g cc-connect
+```
+
+也可设置环境变量让后续安装都用镜像：
+
+```bash
+export CC_CONNECT_MIRROR=https://gh-proxy.com/   # 加到 ~/.zshrc 或系统环境变量
+```
+
+</details>
 
 <details>
 <summary><b>EBUSY: resource busy or locked（Windows 安装 / 更新）</b></summary>

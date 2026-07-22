@@ -6,6 +6,7 @@ import { ConfirmDialog } from './components/common/ConfirmDialog';
 import { ContextSwitchOverlay } from './components/common/ContextSwitchOverlay';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { TabbedLayout } from './components/layout/TabbedLayout';
+import { RuntimeReadinessBanner } from './components/runtime/RuntimeReadinessBanner';
 import { type SplashSceneHandle, startSplashScene } from './components/splash/splashScene';
 import { ToolApprovalSheet } from './components/team/ToolApprovalSheet';
 import { useTheme } from './hooks/useTheme';
@@ -233,6 +234,7 @@ export const App = (): React.JSX.Element => {
     <ErrorBoundary>
       <TooltipProvider delayDuration={150} skipDelayDuration={1500}>
         <ContextSwitchOverlay />
+        <RuntimeReadinessBanner />
         <TabbedLayout />
         <ConfirmDialog />
         <ToolApprovalSheet />

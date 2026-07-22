@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  cc-connect@1.4.1:
+    hash: f358e07305444cc493d3b75f794dfd4a351ca4b992df1b5c2501ea20692db99e
+    path: patches/cc-connect@1.4.1.patch
+
 importers:
 
   .:
@@ -387,7 +392,7 @@ importers:
     optionalDependencies:
       cc-connect:
         specifier: 1.4.1
-        version: 1.4.1
+        version: 1.4.1(patch_hash=f358e07305444cc493d3b75f794dfd4a351ca4b992df1b5c2501ea20692db99e)
 
   packages/agent-graph:
     dependencies:
@@ -8998,7 +9003,7 @@ snapshots:
 
   caniuse-lite@1.0.30001781: {}
 
-  cc-connect@1.4.1:
+  cc-connect@1.4.1(patch_hash=f358e07305444cc493d3b75f794dfd4a351ca4b992df1b5c2501ea20692db99e):
     optional: true
 
   ccount@2.0.1: {}
