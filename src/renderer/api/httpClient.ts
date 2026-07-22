@@ -2077,7 +2077,10 @@ export class HttpAPIClient implements ElectronAPI {
   systemReadiness = {
     /** Fetch runtime readiness (cc-connect binary + sidecar health) for the degraded banner. */
     getStatus: async (): Promise<RuntimeReadiness> => {
-      return this.get<RuntimeReadiness>('/api/v1/system/readiness');
+      const res = await this.get<{ ok: boolean; data: RuntimeReadiness }>(
+        '/api/v1/system/readiness'
+      );
+      return res.data;
     },
   };
 

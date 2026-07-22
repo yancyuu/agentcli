@@ -13,6 +13,11 @@ import type { RuntimeReadiness } from '@shared/types/runtimeReadiness';
  * problem and the exact remediation steps. Hides automatically once the runtime
  * becomes healthy (e.g. after the user installs cc-connect and restarts).
  *
+ * CRASH-SAFETY CONTRACT: this component MUST NEVER throw. It is rendered at the
+ * app root (inside App's ErrorBoundary but above TabbedLayout); an uncaught
+ * exception here takes down the whole workbench. Every field access is
+ * defensive and the render is wrapped — worst case the banner simply hides.
+ *
  * Why this exists: previously a missing cc-connect surfaced only later as a
  * cryptic "fetch failed" when saving team config. The banner turns that into a
  * visible, actionable state at app-entry.
@@ -45,19 +50,30 @@ export function RuntimeReadinessBanner() {
     };
   }, []);
 
-  if (!readiness || readiness.status === 'ok') return null;
+  // Defensive: tolerate ANY shape from the API (early boot, partial payload,
+  // unexpected undefined fields). If we cannot confidently read the degraded
+  // state, hide the banner rather than risk throwing.
+  const binaryState = readiness?.bridgeBinary;
+  const launchState = readiness?.bridgeLaunch;
+  const overallOk =
+    readiness?.status === 'ok' ||
+    (binaryState?.status === 'ok' && launchState?.status === 'running');
+  if (!readiness || overallOk) return null;
 
-  // Per-session dismiss: collapse until the underlying state key changes.
-  const stateKey = `${readiness.bridgeBinary.status}:${readiness.bridgeLaunch.status}`;
+  // Guard: only render when we have a clear "degraded" signal we can read.
+  const binaryDegraded = binaryState && binaryState.status === 'degraded' ? binaryState : null;
+  const launchOffline = launchState && launchState.status === 'offline' ? launchState : null;
+  // If neither sub-state is readable as degraded, bail out — safer to hide.
+  if (!binaryDegraded && !launchOffline) return null;
+
+  const binaryStatusKey = binaryState?.status ?? 'unknown';
+  const launchStatusKey = launchState?.status ?? 'unknown';
+  const stateKey = `${binaryStatusKey}:${launchStatusKey}`;
   if (dismissedKey === stateKey) return null;
 
-  const binaryDegraded =
-    readiness.bridgeBinary.status === 'degraded' ? readiness.bridgeBinary : null;
-  const launchOffline = readiness.bridgeLaunch.status === 'offline' ? readiness.bridgeLaunch : null;
   const reason = binaryDegraded?.reason || launchOffline?.reason || '运行时未就绪';
-
   const remediation = binaryDegraded
-    ? binaryDegraded.remediation
+    ? (binaryDegraded.remediation ?? [])
     : ['请等待 cc-connect 启动，或检查端口 9820/9810 是否被占用'];
 
   return (
@@ -72,11 +88,13 @@ export function RuntimeReadinessBanner() {
       <div className="min-w-0 flex-1">
         <div className="font-medium">cc-connect 运行时未就绪：团队配置、消息收发等功能将不可用</div>
         <div className="mt-0.5 text-xs text-amber-200/70">原因：{reason}</div>
-        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-amber-200/80">
-          {remediation.map((step, i) => (
-            <li key={i}>{step}</li>
-          ))}
-        </ul>
+        {remediation.length > 0 && (
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-amber-200/80">
+            {remediation.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ul>
+        )}
       </div>
       <button
         type="button"
