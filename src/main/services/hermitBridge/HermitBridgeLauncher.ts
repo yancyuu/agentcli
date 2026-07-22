@@ -75,12 +75,26 @@ export function resolveHermitBridgeBinaryName(
  * outward, but the upstream npm package it ships is `cc-connect` — the former
  * `hermit-bridge` wrapper was dropped because it duplicated cc-connect with no
  * added logic and broke its own version→release coupling.)
+ *
+ * IMPORTANT: this also verifies the Go binary itself is present. On Windows /
+ * behind the GFW, cc-connect's own install.js (GitHub Releases download) fails
+ * silently because cc-connect sits in optionalDependencies — npm keeps the
+ * package shell (run.js, install.js) but the binary never lands. If we only
+ * checked for run.js, the boot path would think the runner is ready and hand
+ * off to run.js, which then re-runs the same failing install.js in a loop.
+ * Returning null here forces ensureBinaryReady() down the self-heal download
+ * path (agentcli's own mirror-based fetcher), which is the reliable fix.
  */
 function resolveHermitBridgeRunner(): string | null {
   try {
     const pkgRoot = path.dirname(require.resolve('cc-connect/package.json'));
     const runner = path.join(pkgRoot, 'run.js');
-    return existsSync(runner) ? runner : null;
+    if (!existsSync(runner)) return null;
+    // Binary must also exist — run.js without the binary just re-runs the
+    // failing GitHub download. bin/cc-connect[.exe] lives next to install.js.
+    const binaryName = resolveHermitBridgeBinaryName() ?? 'cc-connect';
+    const binaryPath = path.join(pkgRoot, 'bin', binaryName);
+    return existsSync(binaryPath) ? runner : null;
   } catch {
     return null;
   }
