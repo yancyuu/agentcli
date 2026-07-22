@@ -8,7 +8,7 @@
 
 ### Added
 
-- token 池认领新增 `Pi` 渠道：选 Pi 后把网关 key + codex 入口（cpamc-openai + `openai-responses`）+ 模型写入 `~/.pi/agent/models.json` 的 `agentcli` provider，原有 pi provider（如 `skg`）保持不变。Codex / Claude / Pi 三渠道认领后均使用同一把下发的 key。
+- token 池认领新增 `Pi` 渠道：选 Pi 后把网关 key + codex 入口（cpamc-openai + `openai-responses`）+ 全部已授权模型写入 `~/.pi/agent/models.json` 的 `skg` provider（把旧的 `cpamc-openai-v2` / completions 更新为新契约），其他 pi provider 保持不变。Codex / Claude / Pi 三渠道认领后均使用同一把下发的 key。
 
 ## [1.9.31] - 2026-07-21
 

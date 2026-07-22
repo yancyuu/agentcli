@@ -602,10 +602,11 @@ export function applyToConfigs({
 }
 
 // Pi (~/.pi/agent/models.json) — reuses the codex contract (cpamc-openai +
-// openai-responses). Upserts a single `agentcli` provider carrying the claimed
-// key + endpoint + model; the user's other pi providers are left untouched.
+// openai-responses). Upserts the `skg` provider carrying the claimed key +
+// endpoint + all claimed models, replacing the legacy skg config (cpamc-openai-v2
+// + completions) with the current contract. Other pi providers stay untouched.
 // Atomic (tmp+rename via atomicWriteFile). models.json reloads on `/model`.
-export function applyPiConfig({ key, baseUrl, model, home = os.homedir() } = {}) {
+export function applyPiConfig({ key, baseUrl, modelIds, home = os.homedir() } = {}) {
   if (!key) throw new Error('applyPiConfig: 缺少 key');
   if (!baseUrl) throw new Error('applyPiConfig: 缺少 baseUrl');
   const piDir = path.join(home, '.pi', 'agent');
@@ -619,27 +620,28 @@ export function applyPiConfig({ key, baseUrl, model, home = os.homedir() } = {})
   } catch {
     // missing or corrupt — start fresh (dir may not exist on a clean machine)
   }
-  const modelId = String(model || 'gpt-5.6-sol').trim();
+  const ids = (Array.isArray(modelIds) ? modelIds : [])
+    .map((m) => String(m || '').trim())
+    .filter(Boolean);
+  if (ids.length === 0) ids.push('gpt-5.6-sol');
   existing.providers = existing.providers || {};
-  existing.providers.agentcli = {
+  existing.providers.skg = {
     baseUrl,
     api: 'openai-responses',
     apiKey: key,
     authHeader: true,
-    models: [
-      {
-        id: modelId,
-        name: `${modelId} (agentcli)`,
-        reasoning: true,
-        input: ['text', 'image'],
-        contextWindow: 272000,
-        maxTokens: 16384,
-      },
-    ],
+    models: ids.map((id) => ({
+      id,
+      name: `${id} (skg)`,
+      reasoning: true,
+      input: ['text', 'image'],
+      contextWindow: 272000,
+      maxTokens: 16384,
+    })),
   };
   mkdirSync(piDir, { recursive: true });
   atomicWriteFile(modelsFile, `${JSON.stringify(existing, null, 2)}\n`);
-  return { provider: 'agentcli', path: modelsFile, baseUrl, model: modelId };
+  return { provider: 'skg', path: modelsFile, baseUrl, models: ids };
 }
 
 // --- Claim orchestration layer ------------------------------------------------
@@ -751,16 +753,18 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
   }
   if (wanted.includes('pi')) {
     // Pi reuses the codex (cpamc-openai + responses) contract: openai-responses
-    // API, baseUrl = codex base + /v1. Upserts an `agentcli` provider into
-    // ~/.pi/agent/models.json; the user's other pi providers stay untouched.
-    // Best-effort: a pi write failure must NOT roll back claude/codex already done.
+    // API, baseUrl = codex base + /v1. Updates the `skg` provider in
+    // ~/.pi/agent/models.json with the claimed key + endpoint + all claimed
+    // models (replacing the legacy cpamc-openai-v2 config). Other pi providers
+    // stay untouched. Best-effort: a pi write failure must NOT roll back the
+    // claude/codex writes already done.
     try {
       const piBaseUrl = resolveCodexBaseUrl(secret);
       if (piBaseUrl) {
         const pi = applyPiConfig({
           key,
           baseUrl: piBaseUrl,
-          model: choices.model,
+          modelIds: secret?.modelIds,
           ...(home ? { home } : {}),
         });
         results.push({ runtime: 'pi', ok: true, ...pi });
