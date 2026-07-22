@@ -118,6 +118,74 @@ function migrateLegacyHermitBridgeFiles() {
 }
 
 const migratedRuntimeConfig = migrateLegacyHermitBridgeFiles();
+
+// Patch the bundled cc-connect's install.js so its GitHub-Release binary
+// download goes through mirrors. IMPORTANT: pnpm's patchedDependencies only
+// applies when THIS package is installed via pnpm; the majority of users
+// install with `npm install -g`, for which pnpm patches never run. Applying
+// the mirror rewrite here inside agentcli's own postinstall covers BOTH npm
+// and pnpm users. Idempotent and best-effort: failures never block install.
+function patchCcConnectInstaller() {
+  let installJsPath;
+  try {
+    const pkgRoot = path.dirname(require.resolve('cc-connect/package.json'));
+    installJsPath = path.join(pkgRoot, 'install.js');
+  } catch {
+    return { applied: false, reason: 'cc-connect not installed (optional dep skipped)' };
+  }
+  if (!existsSync(installJsPath)) {
+    return { applied: false, reason: `install.js missing at ${installJsPath}` };
+  }
+  let src;
+  try {
+    src = readFileSync(installJsPath, 'utf-8');
+  } catch (err) {
+    return { applied: false, reason: `read failed: ${err.message}` };
+  }
+  // Idempotency: skip if an earlier agentcli postinstall already patched it.
+  if (src.includes('Patched by @yancyyu/agentcli')) {
+    return { applied: false, reason: 'already patched', already: true };
+  }
+  // The original returns a 2-element array of github/gitee URLs. Replace just
+  // that return with a mirror-prepended list, mirroring the pnpm patch.
+  const marker = '  return [';
+  const idx = src.indexOf(marker);
+  if (idx === -1) {
+    return { applied: false, reason: 'install.js structure changed; cannot locate getDownloadURLs return' };
+  }
+  const before = src.slice(0, idx);
+  const after = src.slice(idx);
+  const replacement =
+    '  const github = `https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${filename}`;\n' +
+    '  const gitee = `https://gitee.com/${GITEE_REPO}/releases/download/${VERSION}/${filename}`;\n' +
+    '  // Patched by @yancyyu/agentcli: prepend GitHub-release mirror prefixes so the\n' +
+    '  // binary can be fetched from behind the GFW / corporate firewalls where raw\n' +
+    '  // github.com releases are unreachable. CC_CONNECT_MIRROR (comma-separated)\n' +
+    '  // overrides the defaults. Mirrors are tried first; originals remain as fallback.\n' +
+    '  const defaults = ["https://gh-proxy.com/", "https://ghproxy.net/"];\n' +
+    '  const configured = (process.env.CC_CONNECT_MIRROR || "")\n' +
+    '    .split(",")\n' +
+    '    .map((s) => s.trim())\n' +
+    '    .filter(Boolean);\n' +
+    '  const prefixes = [...configured, ...defaults];\n' +
+    '  const mirrored = prefixes.map((p) => `${p}${github}`);\n' +
+    '  return [...mirrored, github, gitee];';
+  // Find the closing `];` of the original return array.
+  const closeIdx = after.indexOf('];');
+  if (closeIdx === -1) {
+    return { applied: false, reason: 'install.js structure changed; cannot locate return array close' };
+  }
+  const patched = before + replacement + after.slice(closeIdx + 2);
+  try {
+    writeFileSync(installJsPath, patched, 'utf-8');
+    return { applied: true };
+  } catch (err) {
+    return { applied: false, reason: `write failed: ${err.message}` };
+  }
+}
+
+const ccInstallPatchResult = patchCcConnectInstaller();
+
 let seededWorkflows = { copied: 0, refreshed: 0, skipped: 0 };
 let workflowSeedError = null;
 try {
@@ -130,6 +198,11 @@ console.log(`${brandLogPrefix()} Installed ${version}`);
 console.log(`${brandLogPrefix()} Bundled ${BRAND.runtimeBridgeName} runtime service: ${runtimeVersion}`);
 console.log(`${brandLogPrefix()} Data directory: ${hermitHome}`);
 if (migratedRuntimeConfig) console.log(`${brandLogPrefix()} Migrated runtime files to ~/${BRAND.defaultLocalHomeName}/${BRAND.runtimeBridgeName}/`);
+if (ccInstallPatchResult.applied) {
+  console.log(`${brandLogPrefix()} Patched cc-connect installer to use mirror downloads`);
+} else if (!ccInstallPatchResult.already) {
+  console.log(`${brandLogPrefix()} cc-connect installer mirror-patch skipped: ${ccInstallPatchResult.reason}`);
+}
 if (workflowSeedError) {
   console.log(`${brandLogPrefix()} Skipped workflow installation: ${workflowSeedError.message ?? String(workflowSeedError)}`);
 } else {
