@@ -118,7 +118,7 @@ describe('applyToConfigs — Codex auth.json', () => {
 });
 
 describe('applyToConfigs — Codex config.toml (surgical, no TOML lib)', () => {
-  it('sets model_provider/model, (re)writes [model_providers.X], and preserves [projects.*] verbatim', async () => {
+  it('sets model_provider/model, writes [model_providers.skg], and preserves [projects.*] verbatim', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-aikey-codex-toml-'));
     try {
       const file = path.join(home, '.codex', 'config.toml');
@@ -155,14 +155,20 @@ size = 1000
 
       // model + model_provider rewritten at top level.
       expect(out).toMatch(/^model = "qwen-max"/m);
-      // The provider name is REUSED from the existing model_provider ("openai").
-      expect(out).toMatch(/^model_provider = "openai"/m);
+      expect(out).toMatch(/^model_provider = "skg"/m);
 
-      // The [model_providers.openai] block now points at the gateway with wire_api=chat.
-      expect(out).toMatch(/\[model_providers\.openai\]/);
+      // The claimed gateway is always written into an isolated [model_providers.skg]
+      // block so pre-existing providers like [model_providers.openai] are not clobbered.
+      expect(out).toMatch(/\[model_providers\.skg\]/);
+      expect(out).toMatch(/name = "skg"/);
       expect(out).toMatch(/base_url = "https:\/\/gw\.example"/);
       expect(out).toMatch(/wire_api = "chat"/);
       expect(out).toMatch(/requires_openai_auth = true/);
+
+      // Existing provider sections survive untouched.
+      expect(out).toMatch(/\[model_providers\.openai\]/);
+      expect(out).toMatch(/name = "OpenAI"/);
+      expect(out).toMatch(/base_url = "https:\/\/api\.openai\.com\/v1"/);
 
       // [projects.*] blocks — the whole point of surgical edits — survive intact.
       expect(out).toContain('[projects.my-project]');
@@ -178,7 +184,7 @@ size = 1000
     }
   });
 
-  it('defaults the provider name to "hermit" when no model_provider exists', async () => {
+  it('defaults the provider name to "skg" when no model_provider exists', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'hermit-aikey-codex-toml-bare-'));
     try {
       const file = path.join(home, '.codex', 'config.toml');
@@ -195,9 +201,9 @@ size = 1000
       });
 
       const out = await readFile(file, 'utf-8');
-      expect(out).toMatch(/^model_provider = "hermit"/m);
+      expect(out).toMatch(/^model_provider = "skg"/m);
       expect(out).toMatch(/^model = "qwen-max"/m);
-      expect(out).toMatch(/\[model_providers\.hermit\]/);
+      expect(out).toMatch(/\[model_providers\.skg\]/);
       expect(out).toMatch(/base_url = "https:\/\/gw\.example"/);
       // Pre-existing top-level key preserved.
       expect(out).toMatch(/approval_policy = "untrusted"/);

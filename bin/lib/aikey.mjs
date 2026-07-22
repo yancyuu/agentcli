@@ -407,7 +407,7 @@ export async function runAikeyManual({ exitOnDone = true, home = os.homedir(), h
 
 const CLAUDE_DIR = '.claude';
 const CODEX_DIR = '.codex';
-const DEFAULT_PROVIDER_NAME = 'hermit';
+const DEFAULT_PROVIDER_NAME = 'skg';
 // Codex dropped "chat" wire_api support (openai/codex#7782) — a freshly-claimed
 // Codex config must default to "responses" or Codex refuses to boot. Exported so
 // the claim-flow menu reuses the same source of truth instead of re-literalizing.
@@ -566,9 +566,7 @@ function applyCodexConfig({ endpoint, model, wireApi, home, backup, providerName
     raw = '';
   }
   const { head, sections } = splitTomlSections(raw);
-  // Reuse the user's existing model_provider name if they already had one; this
-  // rewrites their configured provider in place rather than orphaning it.
-  const name = readTopLevelTomlValue(head, 'model_provider') || providerName || DEFAULT_PROVIDER_NAME;
+  const name = providerName || DEFAULT_PROVIDER_NAME;
   setTopLevelTomlKey(head, 'model_provider', name);
   if (model) setTopLevelTomlKey(head, 'model', model);
   setModelProviderSection(sections, name, { endpoint, wireApi });

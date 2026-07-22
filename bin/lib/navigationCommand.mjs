@@ -84,6 +84,7 @@ import {
   snapshotOriginals,
   restoreOriginals,
   hasSnapshot,
+  listSnapshots,
   originalEnvBackupRoot,
 } from './configEnvBackup.mjs';
 import {
@@ -558,7 +559,7 @@ function renderClaimResult({ apply, secret, choices, runtimes, snapshot, envAppl
   });
   printCliRows('认领 token 完成', rows, [
     '已按所选运行时直接写入 Claude/Codex 配置文件，新开终端即可生效。',
-    '原始配置已快照到 ~/.hermit/agentcli.env.bak，可在「token 池 → 恢复原始配置」一键还原。',
+    '认领前配置已快照到 ~/.hermit/agentcli.env.bak，可在「token 池 → 恢复原始配置」一键回退到最近一次认领前的状态。',
   ].join('\n'));
 }
 
@@ -719,8 +720,9 @@ async function runTokenClaimFlow() {
   }
   const choices = { model, wireApi };
 
-  // 7. Snapshot originals (create-once) BEFORE any write, so one-click restore
-  //    always returns to the pre-token-pool state regardless of future claims.
+  // 7. Snapshot the current local configs BEFORE any write. The snapshot is
+  //    refreshed on every claim, so one-click restore returns to the state
+  //    immediately before the most recent token-pool claim.
   let snapshot;
   try {
     renderBusyScreen('认领 token', '正在快照原始配置…');
@@ -775,29 +777,55 @@ async function pickRuntimes() {
   return sel;
 }
 
-// One-click restore of the original Claude/Codex configs from the create-once
-// snapshot. Existed files are copied back; files the pool created are deleted.
+// Restore one chosen snapshot of Claude/Codex/Pi configs.
 async function runRestoreOriginalsFlow() {
-  if (!hasSnapshot()) {
-    printCliRows('恢复原始配置', [['状态', '无可恢复的原始配置', 'warn']], 'token 池尚未改过 Claude / Codex 配置，无需恢复。');
+  const snapshots = listSnapshots();
+  if (snapshots.length === 0) {
+    printCliRows(
+      '恢复原始配置',
+      [['状态', '无可恢复的配置快照', 'warn']],
+      'token 池尚未改过 Claude / Codex / Pi 配置，无需恢复。'
+    );
     console.log('');
     return waitForContinue(ACTION_DONE_MSG);
   }
-  const confirmed = await promptBoolean('确认恢复 Claude/Codex 原始配置？当前 token 池写入将被覆盖/删除');
+
+  const snapshotActionId = await askMenuAction({
+    title: '恢复原始配置 · 选择快照',
+    subtitle: '选择一个时间点恢复 Claude / Codex / Pi 配置',
+    actions: snapshots.map((snapshot, index) => ({
+      id: `snapshot::${snapshot.id}`,
+      label: `${new Date(snapshot.createdAt).toLocaleString('zh-CN', { hour12: false })}${snapshot.legacy ? '（旧版快照）' : ''}`,
+      description: `包含 ${snapshot.fileCount} 个配置文件${index === 0 ? ' · 最新' : ''}`,
+      ...(index === 0 ? { recommended: true } : {}),
+    })),
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  if (snapshotActionId === 'back') {
+    printCliRows('恢复原始配置', [['状态', '已取消', 'warn']], '未做任何改动。');
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
+
+  const selectedSnapshotId = snapshotActionId.replace(/^snapshot::/, '');
+  const confirmed = await promptBoolean('确认恢复所选快照？当前 token 池写入将被覆盖/删除');
   if (confirmed !== true) {
     printCliRows('恢复原始配置', [['状态', '已取消', 'warn']], '未做任何改动。');
     console.log('');
     return waitForContinue(ACTION_DONE_MSG);
   }
-  const { results } = restoreOriginals();
+
+  const { results } = restoreOriginals({ snapshotId: selectedSnapshotId });
   const rows = results.map((r) => {
     if (r.action === 'restored') return [r.runtime, `还原 ${r.path}`, 'ok'];
     if (r.action === 'deleted') return [r.runtime, `删除 ${r.path}（token 池新建）`, 'ok'];
     return [r.runtime, `跳过（${r.reason}）`, 'off'];
   });
   printCliRows('恢复原始配置完成', rows, [
-    '已回到 token 池介入前的本地配置。',
-    '快照保留在 ~/.hermit/agentcli.env.bak，可再次恢复或在下次认领时复用。',
+    '已回到所选快照对应的本地配置。',
+    `快照保留在 ${originalEnvBackupRoot()}，后续仍可选择其他时间点继续恢复。`,
   ].join('\n'));
   console.log('');
   return waitForContinue(ACTION_DONE_MSG);

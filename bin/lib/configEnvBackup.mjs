@@ -1,144 +1,151 @@
-// configEnvBackup.mjs — snapshot + one-click restore of the LOCAL runtime configs
-// (Claude Code + Codex) that the token-pool claim flow writes.
+// configEnvBackup.mjs — timestamped snapshots + restore of the LOCAL runtime
+// configs (Claude Code + Codex) changed by the token-pool claim flow.
 //
-// Semantics (deliberately NOT a per-write *.hermit-bak):
-//   • snapshotOriginals() refreshes on every claim, RIGHT BEFORE the pool writes.
-//     It captures whatever the live files look like at that moment into
-//     ~/.hermit/agentcli.env.bak, overwriting any prior snapshot. So the snapshot
-//     always means "the state immediately before THIS claim", and restore always
-//     lands you one step back rather than at a stale create-once original.
-//   • restoreOriginals() replays that snapshot: existed files are copied back,
-//     files the token pool CREATED (originally absent) are deleted, so the machine
-//     returns to its pre-claim state with no leftover residue. After a complete
-//     restore, the snapshot is removed so the next claim starts a fresh cycle.
-//
-// The snapshot files hold live API keys, so they are written mode 0o600.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// Every claim captures a new snapshot. Restore deliberately does NOT remove a
+// snapshot: users choose a time point in the CLI and may restore it again later.
+// Snapshot contents include live API keys, so every file is written mode 0o600.
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { chmodBestEffort } from './settings.mjs';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const BACKUP_DIR_NAME = 'agentcli.env.bak';
-const LEGACY_BACKUP_DIR_NAME = '.hermit-env.bak'; // pre-rename sibling of ~/.hermit
+const LEGACY_BACKUP_DIR_NAME = '.hermit-env.bak';
+const SNAPSHOTS_DIR_NAME = 'snapshots';
+const MAX_SNAPSHOTS = 20;
 
 export function originalEnvBackupRoot(home = os.homedir()) {
   return path.join(home, '.hermit', BACKUP_DIR_NAME);
 }
 
-// One-time relocation of a legacy snapshot. Snapshots used to live at
-// ~/.hermit-env.bak (a sibling of ~/.hermit); they now live INSIDE ~/.hermit as
-// agentcli.env.bak. If a legacy snapshot exists, move it verbatim so the user's
-// originals survive. Idempotent: harmless once the new location exists.
-//
-// CRITICAL: when moving, the manifest's `backupPath` fields still point at the
-// OLD legacy dir. We rewrite them to the new location, otherwise restoreOriginals
-// looks for files at the (now-gone) legacy path and reports `backup-missing`.
-function migrateLegacyRootIfNeeded(home) {
-  const legacy = path.join(home, LEGACY_BACKUP_DIR_NAME);
-  if (!existsSync(legacy)) return;
-  const next = originalEnvBackupRoot(home);
-  if (existsSync(path.join(next, 'manifest.json'))) return; // new location already populated — don't clobber
-  try {
-    mkdirSync(path.dirname(next), { recursive: true });
-    renameSync(legacy, next); // same-filesystem rename under ~ → atomic, no cross-device risk
-    rewriteManifestBackupPaths(next, home); // fix the now-stale legacy paths in-place
-  } catch {
-    // Leave the legacy dir in place on unexpected failure rather than risk
-    // losing the snapshot; the user can restore once and the legacy dir becomes
-    // harmless. Not worth a cross-device copy shim for a one-time migration.
-  }
+function snapshotsRoot(home) {
+  return path.join(originalEnvBackupRoot(home), SNAPSHOTS_DIR_NAME);
 }
 
-// Rewrite every `files[*].backupPath` in a manifest to the CURRENT canonical
-// backup path for its runtime, regardless of what was recorded at snapshot time.
-// This makes restore resilient to: (a) legacy-path migration leaving stale paths
-// in the manifest, and (b) home-dir moves. Falls back to the recorded path only
-// if the runtime tag is unknown.
-function rewriteManifestBackupPaths(root, home) {
-  const manifestFile = path.join(root, 'manifest.json');
-  if (!existsSync(manifestFile)) return;
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(manifestFile, 'utf-8'));
-  } catch {
-    return;
-  }
-  if (!manifest || typeof manifest !== 'object' || !manifest.files) return;
-  const byRuntime = new Map(listOriginalTargets(home).map((t) => [t.runtime, t]));
-  let changed = false;
-  for (const [runtime, entry] of Object.entries(manifest.files)) {
-    const target = byRuntime.get(runtime);
-    if (!target || !entry) continue;
-    const canonical = backupPathFor(target, home);
-    if (entry.backupPath !== canonical) {
-      entry.backupPath = canonical;
-      changed = true;
-    }
-  }
-  if (changed) {
-    writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
-      encoding: 'utf-8',
-      mode: 0o600,
-    });
-    chmodBestEffort(manifestFile, 0o600);
-  }
+function manifestPath(snapshotRoot) {
+  return path.join(snapshotRoot, 'manifest.json');
 }
 
-// The three files the claim flow can mutate, keyed by a stable runtime tag used
-// both in the manifest and in the backup directory layout.
+// The files the claim flow can mutate, keyed by a stable runtime tag.
 export function listOriginalTargets(home = os.homedir()) {
   return [
     { runtime: 'claude', dir: 'claude', file: 'settings.json', livePath: path.join(home, '.claude', 'settings.json') },
     { runtime: 'codex-auth', dir: 'codex', file: 'auth.json', livePath: path.join(home, '.codex', 'auth.json') },
     { runtime: 'codex-config', dir: 'codex', file: 'config.toml', livePath: path.join(home, '.codex', 'config.toml') },
+    { runtime: 'pi-auth', dir: 'pi', file: 'auth.json', livePath: path.join(home, '.pi', 'agent', 'auth.json') },
+    { runtime: 'pi-models', dir: 'pi', file: 'models.json', livePath: path.join(home, '.pi', 'agent', 'models.json') },
+    { runtime: 'pi-settings', dir: 'pi', file: 'settings.json', livePath: path.join(home, '.pi', 'agent', 'settings.json') },
   ];
 }
 
-function manifestPath(home) {
-  return path.join(originalEnvBackupRoot(home), 'manifest.json');
+function backupPathFor(target, snapshotRoot) {
+  return path.join(snapshotRoot, target.dir, target.file);
 }
 
-function backupPathFor(target, home) {
-  return path.join(originalEnvBackupRoot(home), target.dir, target.file);
+function parseManifest(snapshotRoot, id, legacy = false) {
+  const file = manifestPath(snapshotRoot);
+  if (!existsSync(file)) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(file, 'utf-8'));
+    if (!manifest || typeof manifest !== 'object' || !manifest.files) return null;
+    return {
+      id,
+      root: snapshotRoot,
+      manifest,
+      legacy,
+      createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+// One-time relocation for pre-1.9.32 snapshots. A legacy root holds a single
+// manifest directly under ~/.hermit-env.bak; preserve it as one selectable
+// legacy entry rather than re-capturing the now-modified live configs.
+function migrateLegacyRootIfNeeded(home) {
+  const legacy = path.join(home, LEGACY_BACKUP_DIR_NAME);
+  if (!existsSync(legacy)) return;
+  const next = originalEnvBackupRoot(home);
+  if (existsSync(manifestPath(next)) || existsSync(snapshotsRoot(home))) return;
+  try {
+    mkdirSync(path.dirname(next), { recursive: true });
+    renameSync(legacy, next);
+  } catch {
+    // Keep the old directory intact if the move cannot be completed.
+  }
+}
+
+/** List available restore points, newest first. Metadata contains no secrets. */
+export function listSnapshots({ home = os.homedir() } = {}) {
+  migrateLegacyRootIfNeeded(home);
+  const root = originalEnvBackupRoot(home);
+  const snapshots = [];
+
+  // A pre-history snapshot was stored directly at the backup root. Continue to
+  // expose it so upgrades do not discard the only recoverable configuration.
+  const legacy = parseManifest(root, 'legacy', true);
+  if (legacy) snapshots.push(legacy);
+
+  const historyRoot = snapshotsRoot(home);
+  if (existsSync(historyRoot)) {
+    for (const entry of readdirSync(historyRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const snapshot = parseManifest(path.join(historyRoot, entry.name), entry.name);
+      if (snapshot) snapshots.push(snapshot);
+    }
+  }
+
+  return snapshots
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map(({ id, createdAt, legacy: isLegacy, manifest }) => ({
+      id,
+      createdAt,
+      legacy: isLegacy,
+      fileCount: Object.keys(manifest.files).length,
+    }));
 }
 
 export function hasSnapshot({ home = os.homedir() } = {}) {
-  migrateLegacyRootIfNeeded(home);
-  // Self-heal stale backupPath entries. A manifest can carry legacy-root paths if
-  // it was created before the dir rename and migration short-circuited (canonical
-  // manifest already existed, so the rename path — the only place that rewrote
-  // paths — never ran), or after a home-dir move. restoreOriginals resolves the
-  // canonical path at read time regardless, but normalize here so the on-disk
-  // manifest stays truthful for anyone inspecting it. Idempotent no-op when the
-  // paths are already canonical.
-  if (existsSync(manifestPath(home))) {
-    rewriteManifestBackupPaths(originalEnvBackupRoot(home), home);
-  }
-  return existsSync(manifestPath(home));
+  return listSnapshots({ home }).length > 0;
 }
 
-/**
- * Refresh the env snapshot to match the current live files, RIGHT BEFORE the
- * token pool writes. Always re-captures (overwrites any prior snapshot), so the
- * snapshot always reflects "the state immediately before this claim". Returns a
- * summary describing the capture.
- */
+function snapshotId(now) {
+  return `${now.replace(/[-:.TZ]/g, '')}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function pruneSnapshots(home) {
+  const historyRoot = snapshotsRoot(home);
+  const all = listSnapshots({ home }).filter((snapshot) => !snapshot.legacy);
+  for (const snapshot of all.slice(MAX_SNAPSHOTS)) {
+    rmSync(path.join(historyRoot, snapshot.id), { recursive: true, force: true });
+  }
+}
+
+/** Capture a new restore point immediately before token-pool config writes. */
 export function snapshotOriginals({ home = os.homedir() } = {}) {
   migrateLegacyRootIfNeeded(home);
-  const root = originalEnvBackupRoot(home);
-  const manifest = manifestPath(home);
-
   const now = new Date().toISOString();
+  const id = snapshotId(now);
+  const root = path.join(snapshotsRoot(home), id);
   const files = {};
-  // Clear any prior snapshot so a runtime that was present before but absent now
-  // is correctly recorded as absent (no stale backup file survives).
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
+
   for (const target of listOriginalTargets(home)) {
     const existed = existsSync(target.livePath) && statSync(target.livePath).isFile();
-    const entry = { existed, livePath: target.livePath, backupPath: backupPathFor(target, home) };
+    const entry = { existed, livePath: target.livePath, backupPath: backupPathFor(target, root) };
     if (existed) {
       mkdirSync(path.dirname(entry.backupPath), { recursive: true });
       copyFileSync(target.livePath, entry.backupPath);
@@ -146,42 +153,59 @@ export function snapshotOriginals({ home = os.homedir() } = {}) {
     }
     files[target.runtime] = entry;
   }
+
+  const manifest = manifestPath(root);
   writeFileSync(manifest, `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, createdAt: now, files }, null, 2)}\n`, {
     encoding: 'utf-8',
     mode: 0o600,
   });
   chmodBestEffort(manifest, 0o600);
-  return { created: true, root, manifest, createdAt: now, files };
+  pruneSnapshots(home);
+  return { created: true, id, root, manifest, createdAt: now, files };
 }
 
-function readManifest(home) {
-  if (!hasSnapshot({ home })) return null;
-  try {
-    return JSON.parse(readFileSync(manifestPath(home), 'utf-8'));
-  } catch {
-    return null;
+function readSnapshot(home, requestedId) {
+  migrateLegacyRootIfNeeded(home);
+  const root = originalEnvBackupRoot(home);
+  const candidates = [];
+  const legacy = parseManifest(root, 'legacy', true);
+  if (legacy) candidates.push(legacy);
+  const historyRoot = snapshotsRoot(home);
+  if (existsSync(historyRoot)) {
+    for (const entry of readdirSync(historyRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const snapshot = parseManifest(path.join(historyRoot, entry.name), entry.name);
+        if (snapshot) candidates.push(snapshot);
+      }
+    }
   }
+  candidates.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return requestedId ? candidates.find((snapshot) => snapshot.id === requestedId) ?? null : candidates[0] ?? null;
 }
 
 /**
- * Restore the original-env snapshot. For each tracked file: copy the backup back
- * over the live path when it originally existed, or DELETE the live path when the
- * token pool created it (originally absent). Returns a per-runtime result list.
+ * Restore one selected snapshot. Existing target files are copied back; files
+ * that did not exist at capture time are deleted. The selected snapshot remains
+ * available afterwards, so users can select it again or choose another time.
  */
-export function restoreOriginals({ home = os.homedir() } = {}) {
-  const manifest = readManifest(home);
-  if (!manifest) {
-    return { ok: false, reason: 'no-snapshot', results: [] };
+export function restoreOriginals({ home = os.homedir(), snapshotId: requestedId } = {}) {
+  const snapshot = readSnapshot(home, requestedId);
+  if (!snapshot) {
+    return { ok: false, reason: requestedId ? 'snapshot-not-found' : 'no-snapshot', results: [] };
   }
-  // Resolve the CURRENT canonical backup path per runtime, ignoring any stale
-  // path recorded in the manifest (legacy migration / home moves can leave it
-  // pointing at a dir that no longer exists → bogus `backup-missing`).
-  const byRuntime = new Map(listOriginalTargets(home).map((t) => [t.runtime, t]));
+
+  const byRuntime = new Map(listOriginalTargets(home).map((target) => [target.runtime, target]));
   const results = [];
-  for (const [runtime, entry] of Object.entries(manifest.files || {})) {
+  for (const [runtime, entry] of Object.entries(snapshot.manifest.files || {})) {
     const target = byRuntime.get(runtime);
     if (entry.existed) {
-      const backupPath = target ? backupPathFor(target, home) : entry.backupPath;
+      // New snapshots have exact paths. For legacy manifests that record the
+      // old root, use the selected snapshot root as a safe canonical fallback.
+      const backupPath = existsSync(entry.backupPath)
+        ? entry.backupPath
+        : target
+          ? backupPathFor(target, snapshot.root)
+          : entry.backupPath;
       if (!backupPath || !existsSync(backupPath)) {
         results.push({ runtime, action: 'skipped', reason: 'backup-missing' });
         continue;
@@ -190,18 +214,13 @@ export function restoreOriginals({ home = os.homedir() } = {}) {
       copyFileSync(backupPath, entry.livePath);
       chmodBestEffort(entry.livePath, 0o600);
       results.push({ runtime, action: 'restored', path: entry.livePath });
+    } else if (existsSync(entry.livePath)) {
+      rmSync(entry.livePath, { force: true });
+      results.push({ runtime, action: 'deleted', path: entry.livePath });
     } else {
-      if (existsSync(entry.livePath)) {
-        rmSync(entry.livePath, { force: true });
-        results.push({ runtime, action: 'deleted', path: entry.livePath });
-      } else {
-        results.push({ runtime, action: 'skipped', reason: 'already-absent' });
-      }
+      results.push({ runtime, action: 'skipped', reason: 'already-absent' });
     }
   }
-  const complete = results.every((result) => result.reason !== 'backup-missing');
-  if (complete) {
-    rmSync(originalEnvBackupRoot(home), { recursive: true, force: true });
-  }
-  return { ok: complete, ...(complete ? {} : { reason: 'incomplete' }), results };
+  const ok = results.every((result) => result.reason !== 'backup-missing');
+  return { ok, ...(ok ? {} : { reason: 'incomplete' }), snapshotId: snapshot.id, results };
 }
