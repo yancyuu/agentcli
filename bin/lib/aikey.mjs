@@ -601,6 +601,47 @@ export function applyToConfigs({
   return { ok: true, runtimes: results };
 }
 
+// Pi (~/.pi/agent/models.json) — reuses the codex contract (cpamc-openai +
+// openai-responses). Upserts a single `agentcli` provider carrying the claimed
+// key + endpoint + model; the user's other pi providers are left untouched.
+// Atomic (tmp+rename via atomicWriteFile). models.json reloads on `/model`.
+export function applyPiConfig({ key, baseUrl, model, home = os.homedir() } = {}) {
+  if (!key) throw new Error('applyPiConfig: 缺少 key');
+  if (!baseUrl) throw new Error('applyPiConfig: 缺少 baseUrl');
+  const piDir = path.join(home, '.pi', 'agent');
+  const modelsFile = path.join(piDir, 'models.json');
+  let existing = { providers: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(modelsFile, 'utf8'));
+    if (parsed && typeof parsed === 'object' && parsed.providers && typeof parsed.providers === 'object') {
+      existing = parsed;
+    }
+  } catch {
+    // missing or corrupt — start fresh (dir may not exist on a clean machine)
+  }
+  const modelId = String(model || 'gpt-5.6-sol').trim();
+  existing.providers = existing.providers || {};
+  existing.providers.agentcli = {
+    baseUrl,
+    api: 'openai-responses',
+    apiKey: key,
+    authHeader: true,
+    models: [
+      {
+        id: modelId,
+        name: `${modelId} (agentcli)`,
+        reasoning: true,
+        input: ['text', 'image'],
+        contextWindow: 272000,
+        maxTokens: 16384,
+      },
+    ],
+  };
+  mkdirSync(piDir, { recursive: true });
+  atomicWriteFile(modelsFile, `${JSON.stringify(existing, null, 2)}\n`);
+  return { provider: 'agentcli', path: modelsFile, baseUrl, model: modelId };
+}
+
 // --- Claim orchestration layer ------------------------------------------------
 // Sits above applyToConfigs: turns a claimed token-pool secret into the correct
 // per-runtime endpoint + writes. configEnvBackup.mjs owns the original snapshot,
@@ -707,6 +748,27 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
         ...(home ? { home } : {}),
       }).runtimes,
     );
+  }
+  if (wanted.includes('pi')) {
+    // Pi reuses the codex (cpamc-openai + responses) contract: openai-responses
+    // API, baseUrl = codex base + /v1. Upserts an `agentcli` provider into
+    // ~/.pi/agent/models.json; the user's other pi providers stay untouched.
+    // Best-effort: a pi write failure must NOT roll back claude/codex already done.
+    try {
+      const piBaseUrl = resolveCodexBaseUrl(secret);
+      if (piBaseUrl) {
+        const pi = applyPiConfig({
+          key,
+          baseUrl: piBaseUrl,
+          model: choices.model,
+          ...(home ? { home } : {}),
+        });
+        results.push({ runtime: 'pi', ok: true, ...pi });
+        endpoints.pi = piBaseUrl;
+      }
+    } catch (err) {
+      results.push({ runtime: 'pi', ok: false, error: err?.message || String(err) });
+    }
   }
   // Env-file injection: write ~/.hermit/aikey.env so external agents can source
   // the key + base_url directly (no plaintext in the manual — it just names the vars).

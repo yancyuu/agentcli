@@ -500,6 +500,7 @@ export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, ba
     claude: 'Claude 配置',
     'codex-auth': 'Codex 认证',
     'codex-config': 'Codex 配置',
+    pi: 'Pi 配置',
   };
   for (const result of apply.runtimes || []) {
     if (!result?.path) continue;
@@ -508,6 +509,7 @@ export function buildClaimResultRows({ apply, choices, runtimes, envFilePath, ba
   }
   if (apply.endpoints.claude) rows.push(['Claude endpoint', apply.endpoints.claude, 'info']);
   if (apply.endpoints.codex) rows.push(['Codex endpoint', apply.endpoints.codex, 'info']);
+  if (apply.endpoints.pi) rows.push(['Pi endpoint', apply.endpoints.pi, 'info']);
   // Codex model row is meaningful only when Codex was selected. A Claude-only
   // claim never picked a Codex model, so it must not report "未返回 model_ids".
   if (runtimes.includes('codex')) {
@@ -762,6 +764,7 @@ async function pickRuntimes() {
     actions: [
       { id: 'codex', label: 'Codex' },
       { id: 'claude', label: 'Claude Code' },
+      { id: 'pi', label: 'Pi' },
     ],
     defaultSelectedIds: ['codex'],
     escapeAction: 'back',
