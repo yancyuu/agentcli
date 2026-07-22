@@ -601,16 +601,37 @@ export function applyToConfigs({
   return { ok: true, runtimes: results };
 }
 
-// Pi (~/.pi/agent/models.json) — reuses the codex contract (cpamc-openai +
-// openai-responses). Upserts the `skg` provider carrying the claimed key +
-// endpoint + all claimed models, replacing the legacy skg config (cpamc-openai-v2
-// + completions) with the current contract. Other pi providers stay untouched.
-// Atomic (tmp+rename via atomicWriteFile). models.json reloads on `/model`.
-export function applyPiConfig({ key, baseUrl, modelIds, home = os.homedir() } = {}) {
+// Pi config spans THREE files:
+//   • ~/.pi/agent/auth.json    — per-provider API key (pi's canonical key store,
+//     the /login target). Upsert skg = { type: 'api_key', key }.
+//   • ~/.pi/agent/models.json   — provider/model config (endpoint + models), NO
+//     apiKey here (pi reads the key from auth.json).
+//   • ~/.pi/agent/settings.json — defaultProvider + defaultModel so pi boots
+//     straight into skg + the chosen model.
+// Reuses the codex contract (cpamc-openai + openai-responses). The `skg`
+// provider replaces the legacy cpamc-openai-v2/completions config; other pi
+// providers and unrelated settings fields stay untouched. Atomic (tmp+rename).
+export function applyPiConfig({ key, baseUrl, modelIds, model, home = os.homedir() } = {}) {
   if (!key) throw new Error('applyPiConfig: 缺少 key');
   if (!baseUrl) throw new Error('applyPiConfig: 缺少 baseUrl');
   const piDir = path.join(home, '.pi', 'agent');
   const modelsFile = path.join(piDir, 'models.json');
+  const authFile = path.join(piDir, 'auth.json');
+  const settingsFile = path.join(piDir, 'settings.json');
+  mkdirSync(piDir, { recursive: true });
+
+  // 1. auth.json — upsert the skg provider's API key.
+  let auth = {};
+  try {
+    const parsed = JSON.parse(readFileSync(authFile, 'utf8'));
+    if (parsed && typeof parsed === 'object') auth = parsed;
+  } catch {
+    // missing or corrupt — start fresh
+  }
+  auth.skg = { type: 'api_key', key };
+  atomicWriteFile(authFile, `${JSON.stringify(auth, null, 2)}\n`);
+
+  // 2. models.json — provider/model config (NO apiKey; key lives in auth.json).
   let existing = { providers: {} };
   try {
     const parsed = JSON.parse(readFileSync(modelsFile, 'utf8'));
@@ -628,7 +649,6 @@ export function applyPiConfig({ key, baseUrl, modelIds, home = os.homedir() } = 
   existing.providers.skg = {
     baseUrl,
     api: 'openai-responses',
-    apiKey: key,
     authHeader: true,
     models: ids.map((id) => ({
       id,
@@ -639,9 +659,30 @@ export function applyPiConfig({ key, baseUrl, modelIds, home = os.homedir() } = 
       maxTokens: 16384,
     })),
   };
-  mkdirSync(piDir, { recursive: true });
   atomicWriteFile(modelsFile, `${JSON.stringify(existing, null, 2)}\n`);
-  return { provider: 'skg', path: modelsFile, baseUrl, models: ids };
+
+  // 3. settings.json — defaultProvider + defaultModel (other fields preserved).
+  const defaultModel = String(model || ids[0] || 'gpt-5.6-sol').trim();
+  let settings = {};
+  try {
+    const parsed = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    if (parsed && typeof parsed === 'object') settings = parsed;
+  } catch {
+    // missing or corrupt — start fresh
+  }
+  settings.defaultProvider = 'skg';
+  settings.defaultModel = defaultModel;
+  atomicWriteFile(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+
+  return {
+    provider: 'skg',
+    path: modelsFile,
+    authPath: authFile,
+    settingsPath: settingsFile,
+    baseUrl,
+    models: ids,
+    defaultModel,
+  };
 }
 
 // --- Claim orchestration layer ------------------------------------------------
@@ -765,6 +806,7 @@ export function applyClaimedSecret({ secret, choices = {}, runtimes = ['claude',
           key,
           baseUrl: piBaseUrl,
           modelIds: secret?.modelIds,
+          model: choices.model,
           ...(home ? { home } : {}),
         });
         results.push({ runtime: 'pi', ok: true, ...pi });
