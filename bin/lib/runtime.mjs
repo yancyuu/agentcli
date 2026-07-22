@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
@@ -114,6 +115,160 @@ function commandExists(command) {
   } catch {
     return false;
   }
+}
+
+function ccConnectBinaryName() {
+  return process.platform === 'win32' ? 'cc-connect.exe' : 'cc-connect';
+}
+
+/**
+ * Resolve the cc-connect package dir inside agentcli's own node_modules.
+ * Returns null when the optionalDependency was skipped at install time
+ * (the classic silent failure behind "fetch failed" on Windows / behind firewalls).
+ */
+function resolveCcConnectPackageDir() {
+  try {
+    const pkgJson = require.resolve('cc-connect/package.json');
+    return path.dirname(pkgJson);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Patch cc-connect's install.js so its binary download uses GitHub-release
+ * mirrors instead of raw github.com (unreachable behind GFW / corporate
+ * firewalls). Idempotent: skips if already patched.
+ */
+function patchCcConnectInstaller(pkgDir) {
+  const installJsPath = path.join(pkgDir, 'install.js');
+  if (!existsSync(installJsPath)) return false;
+  let src;
+  try {
+    src = readFileSync(installJsPath, 'utf-8');
+  } catch {
+    return false;
+  }
+  if (src.includes('Patched by @yancyyu/agentcli')) return true;
+  const marker = '  return [';
+  const idx = src.indexOf(marker);
+  if (idx === -1) return false;
+  const before = src.slice(0, idx);
+  const after = src.slice(idx);
+  const closeIdx = after.indexOf('];');
+  if (closeIdx === -1) return false;
+  const replacement =
+    '  const github = `https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${filename}`;\n' +
+    '  const gitee = `https://gitee.com/${GITEE_REPO}/releases/download/${VERSION}/${filename}`;\n' +
+    '  // Patched by @yancyyu/agentcli: prepend GitHub-release mirror prefixes so the\n' +
+    '  // binary can be fetched from behind the GFW / corporate firewalls where raw\n' +
+    '  // github.com releases are unreachable. CC_CONNECT_MIRROR (comma-separated)\n' +
+    '  // overrides the defaults. Mirrors are tried first; originals remain as fallback.\n' +
+    '  const defaults = ["https://gh-proxy.com/", "https://ghproxy.net/"];\n' +
+    '  const configured = (process.env.CC_CONNECT_MIRROR || "")\n' +
+    '    .split(",")\n' +
+    '    .map((s) => s.trim())\n' +
+    '    .filter(Boolean);\n' +
+    '  const prefixes = [...configured, ...defaults];\n' +
+    '  const mirrored = prefixes.map((p) => `${p}${github}`);\n' +
+    '  return [...mirrored, github, gitee];';
+  try {
+    writeFileSync(installJsPath, before + replacement + after.slice(closeIdx + 2), 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure the cc-connect npm package AND its native binary are present.
+ * Mirrors ensureClaudeCodeCliIfNeeded: detect → install → verify.
+ *
+ * Flow:
+ *   1. If the package shell is missing (optionalDependency was silently
+ *      skipped), `npm install cc-connect` it into agentcli's node_modules.
+ *   2. Patch its install.js to use GitHub-release mirrors (raw github.com is
+ *      unreachable for many Windows / behind-firewall users — the root cause
+ *      of the original "fetch failed" bug).
+ *   3. Run install.js to download the binary (now via mirrors).
+ *   4. Verify the binary exists.
+ *
+ * Why this lives here (not in the TS layer): the TS HermitBridgeLauncher runs
+ * inside the spawned server.ts; by then node is already loaded and a missing
+ * binary can only fail at spawn time. Running the check + install here, in the
+ * CLI entry (bin/hermit.mjs) BEFORE server.ts starts, means the binary is
+ * guaranteed present by the time the server launches cc-connect.
+ */
+export function ensureCcConnectBinary() {
+  let pkgDir = resolveCcConnectPackageDir();
+  const binaryName = ccConnectBinaryName();
+
+  // Fast path: package + binary both present.
+  if (pkgDir && existsSync(path.join(pkgDir, 'bin', binaryName))) {
+    return;
+  }
+
+  // Read the pinned version from agentcli's own package.json.
+  let version = 'latest';
+  try {
+    const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf-8'));
+    const pinned = rootPkg.optionalDependencies?.['cc-connect'];
+    if (pinned) version = pinned;
+  } catch {
+    /* fall back to latest */
+  }
+
+  // Step 1: install the package shell if missing.
+  if (!pkgDir) {
+    console.log(`${brandLogPrefix()} cc-connect package not found, installing cc-connect@${version}...`);
+    try {
+      execSync(`npm install cc-connect@${version} --prefer-online --ignore-scripts`, {
+        stdio: 'inherit',
+        cwd: repoRoot,
+        shell: true,
+      });
+    } catch (err) {
+      console.error(`${brandLogPrefix()} cc-connect package install failed.`);
+      console.error(`${brandLogPrefix()} Please install it manually: npm install -g cc-connect@${version}`);
+      throw err;
+    }
+    pkgDir = resolveCcConnectPackageDir();
+    if (!pkgDir) {
+      throw new Error('cc-connect package install reported success but package.json still not resolvable');
+    }
+  }
+
+  // Step 2: patch install.js to use mirrors.
+  const patched = patchCcConnectInstaller(pkgDir);
+  if (patched) {
+    console.log(`${brandLogPrefix()} Patched cc-connect installer to use mirror downloads.`);
+  }
+
+  // Step 3: run install.js to fetch the binary (now via mirrors).
+  if (!existsSync(path.join(pkgDir, 'bin', binaryName))) {
+    console.log(`${brandLogPrefix()} Downloading cc-connect binary (~10 MB) via mirror...`);
+    try {
+      execSync(`node install.js`, {
+        stdio: 'inherit',
+        cwd: pkgDir,
+        shell: true,
+      });
+    } catch (err) {
+      console.error(`${brandLogPrefix()} cc-connect binary download failed.`);
+      console.error(`${brandLogPrefix()} Try setting CC_CONNECT_MIRROR=https://gh-proxy.com/ and retry.`);
+      throw err;
+    }
+  }
+
+  // Step 4: verify.
+  const binaryPath = path.join(pkgDir, 'bin', binaryName);
+  if (!existsSync(binaryPath)) {
+    throw new Error(
+      `cc-connect install finished but binary ${binaryName} is still missing. ` +
+        'Set CC_CONNECT_MIRROR=https://gh-proxy.com/ and restart, or download manually from https://github.com/chenhg5/cc-connect/releases'
+    );
+  }
+  console.log(`${brandLogPrefix()} cc-connect binary ready at ${binaryPath}`);
 }
 
 function ensureClaudeCodeCliIfNeeded(raw) {

@@ -128,6 +128,7 @@ import {
   hasProjectEntries,
   commandExists,
   ensureClaudeCodeCliIfNeeded,
+  ensureCcConnectBinary,
   hasTomlSection,
   buildOpenHermitStarterConfig,
   normalizeMigratedHermitBridgeConfig,
@@ -696,6 +697,7 @@ if (!skipHermitBridge) {
     console.log(`${brandLogPrefix()} Runtime service already running: ${bridgeBaseUrl}`);
   } else if (bridgeTokens.hasProjects) {
     try {
+      ensureCcConnectBinary();
       ensureClaudeCodeCliIfNeeded(bridgeTokens.raw);
       shouldStartRuntime = true;
     } catch {
