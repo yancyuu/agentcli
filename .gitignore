@@ -60,3 +60,5 @@ remotion/*
 .home/
 .gstack/
 
+vendor/cc-connect/*/
+!vendor/cc-connect/.gitkeep

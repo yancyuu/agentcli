@@ -122,6 +122,32 @@ function ccConnectBinaryName() {
 }
 
 /**
+ * Detect the cc-connect release platform/arch suffix for the vendored layout.
+ * Returns e.g. 'windows-amd64' / 'darwin-arm64', or null if unsupported.
+ */
+function ccConnectVendorTarget() {
+  const osMap = { darwin: 'darwin', win32: 'windows', linux: 'linux' };
+  const archMap = { x64: 'amd64', arm64: 'arm64' };
+  const os = osMap[process.platform];
+  const arch = archMap[process.arch];
+  if (!os || !arch) return null;
+  return `${os}-${arch}`;
+}
+
+/**
+ * Resolve the vendored (pre-baked) cc-connect binary path shipped inside
+ * agentcli's own npm tarball under vendor/cc-connect/<os>-<arch>/. Returns null
+ * when this platform has no vendored binary (e.g. linux) — callers then fall
+ * back to the mirror download path.
+ */
+function resolveVendoredCcConnectBinary() {
+  const target = ccConnectVendorTarget();
+  if (!target) return null;
+  const candidate = path.join(repoRoot, 'vendor', 'cc-connect', target, ccConnectBinaryName());
+  return existsSync(candidate) ? candidate : null;
+}
+
+/**
  * Resolve the cc-connect package dir inside agentcli's own node_modules.
  * Returns null when the optionalDependency was skipped at install time
  * (the classic silent failure behind "fetch failed" on Windows / behind firewalls).
@@ -208,6 +234,58 @@ export function ensureCcConnectBinary() {
     return;
   }
 
+  // PREFERRED PATH: use the vendored (pre-baked) binary shipped inside
+  // agentcli's own npm tarball. This needs ZERO network — the binary is
+  // physically in the package — so it works on the nastiest networks
+  // (air-gapped, corp proxy, GFW, antivirus MITM, …). We copy it into
+  // cc-connect's expected bin/ location so run.js picks it up unchanged.
+  const vendoredBinary = resolveVendoredCcConnectBinary();
+  if (vendoredBinary) {
+    // Ensure the cc-connect package shell exists (run.js lives there). If it
+    // was silently skipped as an optionalDependency, install just the shell
+    // without scripts so we don't trigger the failing GitHub download.
+    if (!pkgDir) {
+      let version = 'latest';
+      try {
+        const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf-8'));
+        const pinned = rootPkg.optionalDependencies?.['cc-connect'];
+        if (pinned) version = pinned;
+      } catch {
+        /* latest */
+      }
+      try {
+        execSync(`npm install cc-connect@${version} --ignore-scripts`, {
+          stdio: 'inherit',
+          cwd: repoRoot,
+          shell: true,
+        });
+      } catch (err) {
+        console.error(`${brandLogPrefix()} cc-connect package shell install failed; cannot place vendored binary.`);
+        throw err;
+      }
+      pkgDir = resolveCcConnectPackageDir();
+      if (!pkgDir) {
+        throw new Error('cc-connect package shell install reported success but package.json still not resolvable');
+      }
+    }
+    // Place the vendored binary into cc-connect/bin/.
+    const targetBinDir = path.join(pkgDir, 'bin');
+    mkdirSync(targetBinDir, { recursive: true });
+    const targetBinaryPath = path.join(targetBinDir, binaryName);
+    try {
+      cpSync(vendoredBinary, targetBinaryPath);
+      if (process.platform !== 'win32') {
+        execSync(`chmod +x ${JSON.stringify(targetBinaryPath)}`, { shell: true });
+      }
+      console.log(`${brandLogPrefix()} cc-connect binary placed from vendored package (no download needed).`);
+      return;
+    } catch (err) {
+      console.warn(`${brandLogPrefix()} Vendored binary copy failed, falling back to download: ${err.message}`);
+      /* fall through to download path */
+    }
+  }
+
+  // FALLBACK PATH (no vendored binary, e.g. linux): download via mirror.
   // Read the pinned version from agentcli's own package.json.
   let version = 'latest';
   try {
