@@ -86,15 +86,20 @@ export function resolveHermitBridgeBinaryName(
  * path (agentcli's own mirror-based fetcher), which is the reliable fix.
  */
 function resolveHermitBridgeRunner(): string | null {
+  // PREFERRED: return the binary path directly (not run.js), mirroring bin/lib/runtime.mjs.
+  // run.js does execFileSync(binary, {stdio:'inherit'}) WITHOUT windowsHide, so on
+  // Windows the cc-connect.exe pops a console window — users close it and kill the
+  // runtime. Spawning the binary ourselves (defaultSpawn, which sets windowsHide)
+  // avoids that. ensureCcConnectBinary() already validated the binary before we
+  // get here, so run.js's version re-check adds no value.
   try {
     const pkgRoot = path.dirname(require.resolve('cc-connect/package.json'));
-    const runner = path.join(pkgRoot, 'run.js');
-    if (!existsSync(runner)) return null;
-    // Binary must also exist — run.js without the binary just re-runs the
-    // failing GitHub download. bin/cc-connect[.exe] lives next to install.js.
     const binaryName = resolveHermitBridgeBinaryName() ?? 'cc-connect';
     const binaryPath = path.join(pkgRoot, 'bin', binaryName);
-    return existsSync(binaryPath) ? runner : null;
+    if (existsSync(binaryPath)) return binaryPath;
+    // Fallback: run.js if the binary somehow isn't placed yet.
+    const runner = path.join(pkgRoot, 'run.js');
+    return existsSync(runner) ? runner : null;
   } catch {
     return null;
   }
@@ -139,7 +144,14 @@ export function resolveBridgeCommand(
       'cc-connect runner not found — install cc-connect via npm (npm i cc-connect) or use --no-hermit-bridge to skip.'
     );
   }
-  return { cmd: process.execPath, args: [runner, ...buildBridgeArgs(opts)] };
+  // If runner is run.js, spawn under node; otherwise it's the native binary
+  // (preferred — avoids run.js popping a console window on Windows) and spawn
+  // directly. Mirrors bin/hermit.mjs's isJs branching.
+  const isJs = /\.(js|mjs)$/i.test(runner);
+  const bridgeArgs = buildBridgeArgs(opts);
+  return isJs
+    ? { cmd: process.execPath, args: [runner, ...bridgeArgs] }
+    : { cmd: runner, args: bridgeArgs };
 }
 
 /** Spawn the bridge detached, redirecting stdio to a log file (or ignoring it). */
@@ -148,9 +160,9 @@ function defaultSpawn(cmd: string, args: string[], opts: { logFile?: string }): 
   let child: ChildProcess;
   if (opts.logFile) {
     const fd = fs.openSync(opts.logFile, 'a');
-    child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd] });
+    child = spawn(cmd, args, { detached: true, windowsHide: true, stdio: ['ignore', fd, fd] });
   } else {
-    child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    child = spawn(cmd, args, { detached: true, windowsHide: true, stdio: 'ignore' });
   }
   child.on('error', (err) => log.error({ err, cmd }, 'cc-connect spawn failed'));
   child.unref();
