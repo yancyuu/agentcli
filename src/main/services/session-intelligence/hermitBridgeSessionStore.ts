@@ -2,7 +2,7 @@
  * Pure parser for hermit-bridge's on-disk session store.
  *
  * hermit-bridge (the cc-connect fork) persists one JSON file per project at
- * `<hermitHome>/hermit-bridge/data/sessions/<project>_<hash>.json`. This module
+ * `<hermitHome>/cc-connect/data/sessions/<project>_<hash>.json`. This module
  * is the single place that knows that raw shape; live worker detection
  * (detectImWorkers / the IM live watcher) consumes its output instead of
  * re-parsing the files.

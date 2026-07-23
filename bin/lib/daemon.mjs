@@ -195,7 +195,7 @@ function collectOrphanedDaemonChildPids() {
       return procs
         .filter((p) => p.pid !== process.pid && !live.has(p.ppid)
           && !p.command.includes('--scan-once')
-          && (p.command.includes('src/main/server.ts') || p.command.includes('hermit-bridge')))
+          && (p.command.includes('src/main/server.ts') || p.command.includes('hermit-bridge') || p.command.includes('cc-connect')))
         .map((p) => p.pid);
     } catch {
       return [];
@@ -217,7 +217,7 @@ function collectOrphanedDaemonChildPids() {
     if (pid === process.pid) continue;
     if (ppid !== 1) continue; // only true orphans — never a live daemon's child
     if (command.includes('--scan-once')) continue; // transient foreground scan
-    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge')) {
+    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge') || command.includes('cc-connect')) {
       pids.push(pid);
     }
   }

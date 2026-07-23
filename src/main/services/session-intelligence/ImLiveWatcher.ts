@@ -3,7 +3,7 @@
  * push signal the renderer can render.
  *
  * hermit-bridge writes one JSON file per project at
- * `<hermitHome>/hermit-bridge/data/sessions/<project>_<hash>.json` whenever an
+ * `<hermitHome>/cc-connect/data/sessions/<project>_<hash>.json` whenever an
  * IM-driven agent turn happens. This watcher observes that directory and, on
  * any change (debounced) plus a 5s watchdog, reparses every file into live
  * workers via {@link parseHermitBridgeSessions} → {@link detectImWorkers} and
