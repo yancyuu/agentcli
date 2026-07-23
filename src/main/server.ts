@@ -68,11 +68,6 @@ import { HermitBridgeClient } from './services/hermitBridge/HermitBridgeClient';
 import { HermitBridgeConnection } from './services/hermitBridge/HermitBridgeConnection';
 import { HermitBridgeLauncher } from './services/hermitBridge/HermitBridgeLauncher';
 import {
-  getRuntimeReadiness,
-  markBridgeBinaryCheck,
-  markBridgeLaunch,
-} from './services/system/RuntimeReadiness';
-import {
   isPlaceholderWorkDir,
   needsWorkDirReconcile,
 } from './services/hermitBridge/workDirReconcile';
@@ -103,6 +98,11 @@ import {
   DEFAULT_HERMIT_CC_SETTINGS,
   HermitCcSettingsService,
 } from './services/settings/HermitCcSettingsService';
+import {
+  getRuntimeReadiness,
+  markBridgeBinaryCheck,
+  markBridgeLaunch,
+} from './services/system/RuntimeReadiness';
 import { ensureAdminLoopInitialized as runAdminLoopInit } from './services/system-manager/AdminLoopInitializer';
 import { ensureGlobalWorkflows } from './services/system-manager/BuiltinWorkflowSeeder';
 import {
@@ -160,8 +160,8 @@ import type {
   AttachmentMeta,
   AttachmentPayload,
   SystemManagerSummary,
-  TelemetryConfig,
   TeamLaunchRequest,
+  TelemetryConfig,
   ToolApprovalAutoResolved,
   ToolApprovalRequest,
   ToolApprovalSettings,
@@ -654,27 +654,57 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
 }
 
 async function restartHermitBridgeAndReconnect(): Promise<void> {
-  // Use cc-connect's own restart endpoint. The stop+start approach (killing the
-  // process and re-launching via the launcher) repeatedly failed on Windows:
-  // timing races in ensureRunning's isRunning check, spawn env/cwd mismatches,
-  // and port-release delays all left cc-connect dead → ECONNREFUSED on the
-  // very next operation. After multiple regressions (1.9.48–1.9.61) trying to
-  // also avoid the console-window pop, reliability of the runtime MUST win over
-  // window cosmetics. cc.restart() is what cc-connect itself trusts to come
-  // back from. The black-box-on-restart issue will be handled separately
-  // WITHOUT touching this path.
-  await cc.restart();
-
-  // Wait for hermit-bridge management API to come back (restart only signals, process respawns async).
+  // Two-stage restart for cross-platform reliability + no black box on Mac:
+  //   1. Try cc.restart() first. On macOS/Linux cc-connect re-execs cleanly AND
+  //      the respawn inherits windowsHide — no black box, fast. On Windows the
+  //      respawn loses windowsHide (black box) AND may fail to come back from
+  //      a detached daemon.
+  //   2. If the management API does NOT come back within ~15s, fall back to
+  //      killing by port + re-launching via the launcher (which applies
+  //      windowsHide). Mac never hits the fallback; Windows gets rescued when
+  //      cc.restart() leaves the runtime dead.
   let managementReady = false;
-  for (let i = 0; i < 30; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  try {
+    await cc.restart();
+    for (let i = 0; i < 15; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        await cc.listProjects();
+        managementReady = true;
+        break;
+      } catch {
+        /* not back yet */
+      }
+    }
+  } catch {
+    /* cc.restart() threw — fall through to launcher rescue */
+  }
+
+  if (!managementReady) {
+    app.log.warn('cc.restart() did not bring runtime back; trying launcher rescue');
+    bridgeLauncher.stop();
+    await stopRuntimeSidecarProcesses();
+    await waitForRuntimePortsFree(5_000);
     try {
-      await cc.listProjects();
-      managementReady = true;
-      break;
-    } catch {
-      /* not back yet */
+      await bridgeLauncher.ensureRunning({
+        client: cc,
+        configPath: HERMIT_BRIDGE_CONFIG_FILE,
+        extraArgs: ['--force'],
+        logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
+        timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
+      });
+    } catch (err) {
+      app.log.error({ err }, 'launcher rescue also failed');
+    }
+    for (let i = 0; i < 15; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        await cc.listProjects();
+        managementReady = true;
+        break;
+      } catch {
+        /* not back yet */
+      }
     }
   }
   if (!managementReady) {
@@ -6230,7 +6260,7 @@ app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], e
 
 // Digital Workers API
 async function listDiscoverableWorkers(): Promise<DiscoverableWorker[]> {
-  const teams = await svc['workspace'].discoverTeams();
+  const teams = await svc.workspace.discoverTeams();
   return teams
     .filter((team) => team.slug !== SYSTEM_MANAGER_TEAM_NAME && team.location === 'local')
     .map(discoverableTeamToWorker)
