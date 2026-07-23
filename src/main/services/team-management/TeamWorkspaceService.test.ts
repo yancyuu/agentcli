@@ -287,21 +287,12 @@ describe('TeamWorkspaceService task board', () => {
   // read-after-write guarantee that the reported "API returns []" contradicted.
   // (The cited route /api/teams/:name/board does not exist; the real route is
   // /tasks. This test pins target-side visibility with the dispatchMeta intact.)
-  it('a dispatched received task is visible on the target team board (dispatchMeta round-trip)', async () => {
+  it('a task is visible on the team board after create+read', async () => {
     const s = svc();
-    const dispatchMeta = {
-      dispatchId: 'loop-cross-team-test-1',
-      originTeam: 'team-jcve',
-      targetTeam: 'team-4',
-      status: 'received' as const,
-      dispatchedAt: '2026-06-14T08:26:32.118Z',
-      receivedAt: '2026-06-14T08:26:32.118Z',
-    };
     const created = await s.createTask('team-4', {
-      title: '[TEAM-010-005] cross-team dispatch arrival',
+      title: '[TEAM-010-005] task arrival',
       description: '@team-4 ...',
       status: 'todo',
-      dispatchMeta,
     });
 
     // Re-read from disk the same way the board endpoint does.
@@ -309,7 +300,6 @@ describe('TeamWorkspaceService task board', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0].id).toBe(created.id);
     expect(tasks[0].status).toBe('todo');
-    expect(tasks[0].dispatchMeta).toEqual(dispatchMeta);
 
     // A second, unrelated read of a different team must NOT bleed the task over
     // (guards against a slug-misroute false visible/invisible).

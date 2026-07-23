@@ -82,12 +82,6 @@ declare module 'agent-teams-controller' {
     reconcileArtifacts(flags?: Record<string, unknown>): unknown;
   }
 
-  export interface ControllerCrossTeamApi {
-    sendCrossTeamMessage(flags: Record<string, unknown>): unknown;
-    listCrossTeamTargets(flags?: Record<string, unknown>): unknown;
-    getCrossTeamOutbox(): unknown;
-  }
-
   export interface ControllerRuntimeApi {
     launchTeam(flags: Record<string, unknown>): Promise<unknown>;
     stopTeam(flags?: Record<string, unknown>): Promise<unknown>;
@@ -114,7 +108,6 @@ declare module 'agent-teams-controller' {
     messages: ControllerMessageApi;
     processes: ControllerProcessApi;
     maintenance: ControllerMaintenanceApi;
-    crossTeam: ControllerCrossTeamApi;
     runtime: ControllerRuntimeApi;
   }
 
@@ -132,8 +125,7 @@ declare module 'agent-teams-controller' {
     | 'review'
     | 'message'
     | 'process'
-    | 'runtime'
-    | 'crossTeam';
+    | 'runtime';
 
   export interface AgentTeamsMcpToolGroup {
     id: AgentTeamsMcpToolGroupId;

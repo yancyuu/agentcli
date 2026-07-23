@@ -57,9 +57,6 @@ export function restoreInitialRoute(state: AppState, pathname: string): void {
     case 'dashboard':
       state.openDashboard();
       break;
-    case 'society':
-      state.openSocietyTab();
-      break;
     case 'session':
       if (arg1 && arg2) {
         state.navigateToSession(arg1, arg2);

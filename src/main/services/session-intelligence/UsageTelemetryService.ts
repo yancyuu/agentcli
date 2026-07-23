@@ -14,7 +14,7 @@ import type {
   UserUsageTelemetryRow,
 } from './usageTypes';
 import type { ConversationTelemetryRow } from '@shared/types/api';
-import type { TaskBusConfig } from '@shared/types/team';
+import type { TelemetryConfig } from '@shared/types/team';
 
 export type UsageTelemetryScanPhase = 'idle' | 'scanning' | 'done' | 'error';
 
@@ -174,7 +174,7 @@ function sanitizeScanError(error: unknown): string {
   return message.replace(/(token|secret|password|authorization)=([^\s]+)/gi, '$1=[hidden]');
 }
 
-async function doScan(cfg?: TaskBusConfig): Promise<UsageTelemetryStatus | null> {
+async function doScan(cfg?: TelemetryConfig): Promise<UsageTelemetryStatus | null> {
   const startedAt = new Date().toISOString();
   scanRuntime = {
     running: true,
@@ -229,7 +229,9 @@ async function doScan(cfg?: TaskBusConfig): Promise<UsageTelemetryStatus | null>
   }
 }
 
-export async function scanTelemetryOnce(cfg?: TaskBusConfig): Promise<UsageTelemetryStatus | null> {
+export async function scanTelemetryOnce(
+  cfg?: TelemetryConfig
+): Promise<UsageTelemetryStatus | null> {
   return doScan(cfg);
 }
 
@@ -242,7 +244,7 @@ export function configureUsageTelemetry(
   collector = new SessionUsageCollector();
 }
 
-export async function startTelemetry(cfg: TaskBusConfig): Promise<void> {
+export async function startTelemetry(cfg: TelemetryConfig): Promise<void> {
   await stopTelemetry();
   if (!cfg.telemetry?.enabled) return;
 
@@ -266,7 +268,7 @@ export async function stopTelemetry(): Promise<void> {
   }
 }
 
-export async function triggerScan(cfg: TaskBusConfig): Promise<UsageTelemetryStatus | null> {
+export async function triggerScan(cfg: TelemetryConfig): Promise<UsageTelemetryStatus | null> {
   if (!cfg.telemetry?.enabled) return null;
   return doScan(cfg);
 }

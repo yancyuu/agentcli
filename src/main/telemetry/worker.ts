@@ -13,7 +13,7 @@ import { type LarkCredentialsReportStatus, reportAllLarkCredentials } from './la
 import { reapOtherUsageWorkers } from './workerSingleton';
 
 import type { UsageTelemetryStatus } from '@main/services/session-intelligence/usageTypes';
-import type { TaskBusConfig } from '@shared/types/team';
+import type { TelemetryConfig } from '@shared/types/team';
 
 const STATUS_SCHEMA_VERSION = 1;
 const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1000;
@@ -66,7 +66,7 @@ interface SavedSettings {
     baseUrl?: unknown;
     host?: unknown;
   };
-  taskBus?: TaskBusConfig;
+  taskBus?: TelemetryConfig;
 }
 
 interface SavedAuthStore {
@@ -230,7 +230,9 @@ export async function readUsageTelemetryWorkerStatus(
   }
 }
 
-async function readTaskBusConfig(paths: UsageTelemetryWorkerPaths): Promise<TaskBusConfig | null> {
+async function readTelemetryConfig(
+  paths: UsageTelemetryWorkerPaths
+): Promise<TelemetryConfig | null> {
   try {
     const raw = await readFile(paths.settingsPath, 'utf-8');
     const settings = JSON.parse(raw) as SavedSettings;
@@ -284,7 +286,7 @@ async function resolveStatusTelemetry(
 async function writeStatus(
   paths: UsageTelemetryWorkerPaths,
   state: WorkerState,
-  cfg: TaskBusConfig | null,
+  cfg: TelemetryConfig | null,
   options: {
     running?: boolean;
     telemetry?: UsageTelemetryStatus;
@@ -323,7 +325,7 @@ function isUsageUploadDisabled(): boolean {
   );
 }
 
-function uploadDisabledTelemetryConfig(cfg: TaskBusConfig | null): TaskBusConfig | null {
+function uploadDisabledTelemetryConfig(cfg: TelemetryConfig | null): TelemetryConfig | null {
   if (!isUsageUploadDisabled() || !cfg?.telemetry) return cfg;
   return {
     ...cfg,
@@ -343,7 +345,7 @@ function shouldForceLocalScan(): boolean {
 }
 
 async function scanUsageTelemetryOnce(
-  cfg: TaskBusConfig | null
+  cfg: TelemetryConfig | null
 ): Promise<UsageTelemetryStatus | null | undefined> {
   const { scanTelemetryOnce } =
     await import('@main/services/session-intelligence/UsageTelemetryService');
@@ -361,7 +363,7 @@ export async function scanUsageTelemetryWorkerOnce(
   options: { keepWorkerRunning?: boolean } = {}
 ): Promise<{ status: UsageTelemetryWorkerStatus; shouldContinue: boolean }> {
   const paths = getUsageTelemetryWorkerPaths(hermitHome);
-  const cfg = uploadDisabledTelemetryConfig(await readTaskBusConfig(paths));
+  const cfg = uploadDisabledTelemetryConfig(await readTelemetryConfig(paths));
   if (!cfg?.telemetry?.enabled) {
     if (shouldForceLocalScan()) {
       await writeStatus(paths, 'scanning', cfg);
@@ -680,12 +682,12 @@ export async function runUsageTelemetryWorker(hermitHome = resolveHermitHome()):
   } catch {
     // Usage module failures must not prevent the independent Lark cycle from starting.
   }
-  await writeStatus(paths, 'starting', await readTaskBusConfig(paths));
+  await writeStatus(paths, 'starting', await readTelemetryConfig(paths));
 
   const stop = async () => {
     if (stopping) return;
     requestWorkerStop();
-    await writeStatus(paths, 'stopped', await readTaskBusConfig(paths), {
+    await writeStatus(paths, 'stopped', await readTelemetryConfig(paths), {
       running: false,
       startedAt,
     });

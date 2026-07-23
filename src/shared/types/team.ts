@@ -167,36 +167,6 @@ export interface TeamSummary {
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
 export type TeamReviewState = 'none' | 'review' | 'needsFix' | 'approved';
 
-// ---------------------------------------------------------------------------
-// Task Dispatch — cross-team task delivery
-// ---------------------------------------------------------------------------
-
-export type DispatchStatus =
-  | 'dispatched'
-  | 'pending_accept'
-  | 'accepted'
-  | 'rejected'
-  | 'received'
-  | 'in_progress'
-  | 'completed'
-  | 'synced_back'
-  | 'failed';
-
-export interface DispatchMeta {
-  dispatchId: string;
-  originTeam: string;
-  targetTeam: string;
-  status: DispatchStatus;
-  dispatchedAt: string;
-  receivedAt?: string;
-  completedAt?: string;
-  remoteTaskId?: string;
-  deadline?: string;
-  acceptedAt?: string;
-  rejectedAt?: string;
-  rejectionReason?: string;
-}
-
 export interface AgentCapability {
   skill: string;
   description: string;
@@ -215,14 +185,9 @@ export interface DiscoverableTeam {
   workDir?: string;
 }
 
-export interface TaskBusConfig {
+export interface TelemetryConfig {
   enabled: boolean;
-  redis: {
-    host: string;
-    port: number;
-    password?: string;
-    db?: number;
-  };
+  /** Per-team CLAUDE.md instruction injection toggle (not Redis-related). */
   collaboration?: boolean;
   telemetry?: {
     enabled: boolean;
@@ -242,117 +207,6 @@ export interface TaskBusConfig {
       uploadBatchDelayMs?: number;
     };
   };
-}
-
-export interface TaskDispatchPayload {
-  dispatchId: string;
-  originTeam: string;
-  targetTeam: string;
-  task: {
-    subject: string;
-    description?: string;
-    prompt?: string;
-    descriptionTaskRefs?: string[];
-    promptTaskRefs?: string[];
-  };
-  dispatchedAt: string;
-  deadline?: string;
-  needsHumanReview?: boolean;
-}
-
-export interface TaskStatusUpdate {
-  dispatchId: string;
-  originTeam: string;
-  status: DispatchStatus;
-  remoteTaskId?: string;
-  timestamp: string;
-  result?: string;
-}
-
-export interface TaskAckPayload {
-  dispatchId: string;
-  status: 'received';
-  remoteTaskId: string;
-  timestamp: string;
-}
-
-export interface TaskHandshakeResponse {
-  dispatchId: string;
-  type: 'task_accept' | 'task_reject' | 'task_deliver' | 'task_approve' | 'task_revision';
-  fromTeam: string;
-  toTeam: string;
-  remoteTaskId?: string;
-  reason?: string;
-  result?: string;
-  feedback?: string;
-  acceptedAt?: string;
-  rejectedAt?: string;
-  deliveredAt?: string;
-  approvedAt?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Collaboration Board — global cross-team task view
-// ---------------------------------------------------------------------------
-
-export type CollabTaskStatus =
-  | 'pending_accept'
-  | 'received'
-  | 'accepted'
-  | 'in_progress'
-  | 'delivered'
-  | 'approved'
-  | 'revision'
-  | 'rejected'
-  | 'failed';
-
-export type CollabTaskEventType =
-  | 'task_sent'
-  | 'task_accepted'
-  | 'task_rejected'
-  | 'task_delivered'
-  | 'revision_requested'
-  | 'task_approved'
-  | 'task_failed';
-
-export interface CollabTaskEvent {
-  eventId: string;
-  dispatchId: string;
-  version: number;
-  type: CollabTaskEventType;
-  actor: {
-    type: 'user' | 'team' | 'agent' | 'system';
-    id: string;
-  };
-  payload?: Record<string, unknown>;
-  createdAt: string;
-}
-
-export interface CollabTask {
-  id: string;
-  dispatchId: string;
-  subject: string;
-  description?: string;
-  fromTeam: string;
-  fromTeamDisplay: string;
-  toTeam: string;
-  toTeamDisplay: string;
-  status: CollabTaskStatus;
-  version?: number;
-  reason?: string;
-  result?: string;
-  feedback?: string;
-  deadline?: string;
-  needsHumanReview: boolean;
-  revisionCount: number;
-  createdAt: string;
-  updatedAt: string;
-  acceptedAt?: string;
-  rejectedAt?: string;
-  deliveredAt?: string;
-  approvedAt?: string;
-  completedAt?: string;
-  remoteTaskId?: string;
 }
 
 export interface TaskWorkInterval {
@@ -734,8 +588,6 @@ export interface TeamTask {
   sourceMessageId?: string;
   /** Snapshot of the source message at creation time (sanitized, no blobs). */
   sourceMessage?: SourceMessageSnapshot;
-  /** Cross-team dispatch metadata — set when task has been dispatched to or from another team. */
-  dispatchMeta?: DispatchMeta;
 }
 
 /** Task enriched for UI/DTO use (overlay from kanban-state.json). */
@@ -1860,46 +1712,6 @@ export interface TeamMessageNotificationData {
    * but the user opted out of OS interruptions for this event type.
    */
   suppressToast?: boolean;
-}
-
-// =============================================================================
-// Cross-Team Communication
-// =============================================================================
-
-export interface CrossTeamMessage {
-  messageId: string;
-  fromTeam: string;
-  fromMember: string;
-  toTeam: string;
-  conversationId?: string;
-  replyToConversationId?: string;
-  text: string;
-  taskRefs?: TaskRef[];
-  summary?: string;
-  chainDepth: number;
-  timestamp: string;
-}
-
-export interface CrossTeamSendRequest {
-  fromTeam: string;
-  fromMember: string;
-  toTeam: string;
-  timestamp?: string;
-  messageId?: string;
-  sessionKey?: string;
-  conversationId?: string;
-  replyToConversationId?: string;
-  text: string;
-  taskRefs?: TaskRef[];
-  actionMode?: AgentActionMode;
-  summary?: string;
-  chainDepth?: number;
-}
-
-export interface CrossTeamSendResult {
-  messageId: string;
-  deliveredToInbox: boolean;
-  deduplicated?: boolean;
 }
 
 // =============================================================================

@@ -44,12 +44,6 @@ import { fileURLToPath } from 'node:url';
 import cors from '@fastify/cors';
 import staticPlugin from '@fastify/static';
 import { createDashboardRecentProjectsLoader } from '@features/recent-projects/main/composition/dashboardRecentProjects';
-import {
-  executeSocietyMcpTool,
-  SOCIETY_MCP_TOOLS,
-} from '@features/worker-society/main/adapters/input/societyMcp';
-import { registerSocietyRoutes } from '@features/worker-society/main/adapters/input/societyRoutes';
-import { createWorkerSociety } from '@features/worker-society/main/composition/societyComposition';
 import { atomicWriteAsync } from '@main/utils/atomicWrite';
 import { shouldAutoAllow } from '@main/utils/toolApprovalRules';
 import { CROSS_TEAM_SENT_SOURCE } from '@shared/constants/crossTeam';
@@ -118,9 +112,7 @@ import {
 import { WorkflowPromptService } from './services/system-manager/WorkflowPromptService';
 import { ClaudeBinaryResolver } from './services/team/ClaudeBinaryResolver';
 import { TeamProvisioningService } from './services/team-management';
-import { CollaborationBoardService } from './services/team-management/CollaborationBoardService';
 import { HERMIT_OPS_GUIDE_URL } from './services/team-management/OpsRunbookContext';
-import { TaskDispatchService } from './services/team-management/TaskDispatchService';
 import { UpdateService } from './services/UpdateService';
 import {
   getUsageTelemetryWorkerPaths,
@@ -168,7 +160,7 @@ import type {
   AttachmentMeta,
   AttachmentPayload,
   SystemManagerSummary,
-  TaskBusConfig,
+  TelemetryConfig,
   TeamLaunchRequest,
   ToolApprovalAutoResolved,
   ToolApprovalRequest,
@@ -683,30 +675,10 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
   await waitForHarnessBridgeConnected(15_000);
 }
 
-const collabBoard = new CollaborationBoardService();
-// eslint-disable-next-line @typescript-eslint/dot-notation -- bracket access intentionally bypasses TS private modifier
-const taskDispatch = new TaskDispatchService(svc['workspace'], collabBoard);
-
-// Worker Society —— 去中心化 worker 自治社交平台（替代派单的主路径）。
-// 状态持久化到 ~/.hermit/society/（声誉/关系/需求/消息跨重启存活）；REST 路由见下方 registerSocietyRoutes。
-// 成员花名册以 hermit 真实数字员工为单一事实源：注入 listDiscoverableWorkers（GET /api/workers 同款），
-// 社会层身份即真实团队；能力/声誉/并发由 ~/.hermit/society/profiles.json overlay 叠加（MergingProfileStore）。
-const workerSociety = createWorkerSociety(undefined, {
-  realWorkersProvider: listDiscoverableWorkers,
-});
-
-// Broadcast collab board changes via SSE
-taskDispatch.onCollabChange = (dispatchId, status, fromTeam, toTeam) => {
-  broadcastSse('collab-change', { dispatchId, status, fromTeam, toTeam });
-};
-taskDispatch.onRuntimeStart = async ({ teamName, text }) => {
-  await sendHarnessMessageViaBridge({ teamName, text });
-};
-
-async function readSavedTaskBusConfig(): Promise<TaskBusConfig | null> {
+async function readSavedTelemetryConfig(): Promise<TelemetryConfig | null> {
   try {
     const raw = await fs.readFile(HERMIT_SETTINGS_FILE, 'utf-8');
-    const settings = JSON.parse(raw) as { taskBus?: TaskBusConfig };
+    const settings = JSON.parse(raw) as { taskBus?: TelemetryConfig };
     return settings.taskBus ?? null;
   } catch {
     return null;
@@ -723,8 +695,8 @@ async function isExternalTelemetryWorkerRunning(): Promise<boolean> {
   }
 }
 
-async function initializeTaskBusFromSettings(): Promise<void> {
-  const config = await readSavedTaskBusConfig();
+async function initializeTelemetryFromSettings(): Promise<void> {
+  const config = await readSavedTelemetryConfig();
   if (!config) return;
 
   if (config.telemetry?.enabled) {
@@ -735,18 +707,6 @@ async function initializeTaskBusFromSettings(): Promise<void> {
         app.log.warn({ err }, 'telemetry startup failed');
       });
     }
-  }
-
-  if (!config.enabled) {
-    taskDispatch.dispose();
-    return;
-  }
-
-  taskDispatch.dispose();
-  try {
-    await taskDispatch.start(config);
-  } catch (err) {
-    app.log.warn({ err }, 'Redis connection failed on startup — task bus disabled');
   }
 }
 
@@ -2073,7 +2033,6 @@ app.post<{
 });
 
 // Worker Society REST 路由（/api/society/*）—— worker 自治社会的 HTTP 接口（workers/needs/social/feed）。
-registerSocietyRoutes(app, workerSociety);
 
 // GET /api/teams → Hermit 本地团队优先，裸 cc-connect project 作为历史兼容显示；过滤飞书/系统项目
 app.get('/api/teams', async () => {
@@ -2519,7 +2478,6 @@ function toTeamTask(task: {
   updatedAt: string;
   order: number;
   teamSlug: string;
-  dispatchMeta?: import('@shared/types/team').DispatchMeta;
 }) {
   const statusMap: Record<string, string> = {
     todo: 'pending',
@@ -2536,7 +2494,6 @@ function toTeamTask(task: {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     result: task.result ?? undefined,
-    dispatchMeta: task.dispatchMeta,
   };
 }
 
@@ -3473,8 +3430,6 @@ const MCP_TOOLS = [
       required: ['team_slug', 'dispatch_id', 'feedback'],
     },
   },
-  // Worker Society —— 去中心化自治社会的 MCP 工具（society_* 命名空间）。
-  ...SOCIETY_MCP_TOOLS,
 ];
 
 /** 执行 MCP tool，返回 content array */
@@ -3484,28 +3439,12 @@ async function executeMcpTool(
 ): Promise<{ type: string; text: string }[]> {
   const text = async (result: unknown) => [{ type: 'text', text: JSON.stringify(result, null, 2) }];
 
-  // Worker Society 工具（society_*）：命中即返回，未命中回退到既有派单/任务工具。
-  const societyResult = await executeSocietyMcpTool(toolName, args, workerSociety);
-  if (societyResult) return societyResult;
-
   if (toolName === 'list_tasks') {
     const tasks = await svc.readTasks(args.team_slug);
     return text(tasks);
   }
 
   if (toolName === 'claim_task') {
-    const tasks = await svc.readTasks(args.team_slug);
-    const existingTask = tasks.find((task) => task.id === args.task_id);
-    if (
-      existingTask?.dispatchMeta &&
-      existingTask.status === 'todo' &&
-      ['received', 'pending_accept'].includes(existingTask.dispatchMeta.status)
-    ) {
-      return text({
-        ok: false,
-        error: 'Cross-team tasks must be started from the target team TODO board by clicking 启动.',
-      });
-    }
     const task = await svc.patchTask(args.team_slug, args.task_id, { status: 'doing' });
     return text(task);
   }
@@ -3514,44 +3453,7 @@ async function executeMcpTool(
     const patch: Record<string, unknown> = { status: 'done' };
     if (args.result) patch.result = args.result;
     const task = await svc.patchTask(args.team_slug, args.task_id, patch);
-    // Notify origin team if this was a dispatched task
-    await taskDispatch.onTaskCompleted(args.team_slug, args.task_id).catch(() => {});
     return text(task);
-  }
-
-  if (toolName === 'list_teams') {
-    const teams = await taskDispatch.discoverTeams();
-    return text(teams);
-  }
-
-  if (toolName === 'accept_task') {
-    const result = await taskDispatch.acceptTask(args.team_slug, args.dispatch_id);
-    return text(result);
-  }
-
-  if (toolName === 'reject_task') {
-    await taskDispatch.rejectTask(args.team_slug, args.dispatch_id, args.reason);
-    return text({ ok: true, message: 'Task rejected' });
-  }
-
-  if (toolName === 'list_pending_requests') {
-    const requests = taskDispatch.listPendingRequests(args.team_slug);
-    return text(requests);
-  }
-
-  if (toolName === 'deliver_task') {
-    const result = await taskDispatch.deliverTask(args.team_slug, args.dispatch_id, args.result);
-    return text(result);
-  }
-
-  if (toolName === 'approve_task') {
-    const result = await taskDispatch.approveTask(args.team_slug, args.dispatch_id);
-    return text(result);
-  }
-
-  if (toolName === 'reject_result') {
-    const result = await taskDispatch.rejectResult(args.team_slug, args.dispatch_id, args.feedback);
-    return text(result);
   }
 
   throw new Error(`Unknown tool: ${toolName}`);
@@ -5198,9 +5100,6 @@ app.patch<{ Params: { name: string; id: string }; Body: { status?: string } }>(
       const task = await svc.patchTask(request.params.name, request.params.id, {
         status: nextStatus,
       });
-      if (task.dispatchMeta && task.status === 'done') {
-        await taskDispatch.onTaskCompleted(request.params.name, request.params.id).catch(() => {});
-      }
       return toTeamTask(task);
     } catch {
       return { ok: true };
@@ -5240,13 +5139,6 @@ app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/start',
   async (request) => {
     try {
-      const existingTasks = await svc.readTasks(request.params.name);
-      const existingTask = existingTasks.find((task) => task.id === request.params.id);
-      if (existingTask?.dispatchMeta) {
-        await taskDispatch.startDispatchedTask(request.params.name, request.params.id);
-        return { notifiedOwner: true, crossTeamStarted: true };
-      }
-
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'doing' });
       if (task.assignee) {
         await svc.dispatchTask(request.params.name, task).catch(() => {});
@@ -5262,13 +5154,6 @@ app.post<{ Params: { name: string; id: string } }>(
   '/api/teams/:name/tasks/:id/start-by-user',
   async (request) => {
     try {
-      const existingTasks = await svc.readTasks(request.params.name);
-      const existingTask = existingTasks.find((task) => task.id === request.params.id);
-      if (existingTask?.dispatchMeta) {
-        await taskDispatch.startDispatchedTask(request.params.name, request.params.id);
-        return { notifiedOwner: true, crossTeamStarted: true };
-      }
-
       const task = await svc.patchTask(request.params.name, request.params.id, { status: 'doing' });
       if (task.assignee) {
         await svc.dispatchTask(request.params.name, task).catch(() => {});
@@ -6246,62 +6131,9 @@ app.post<{ Body: { filePath?: unknown } }>(
 // validate-cli-args
 app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], errors: [] }));
 
-// cross-team task dispatch endpoints
-// Agent collaboration: accept a task request
-app.post<{
-  Body: { team_slug: string; dispatch_id: string };
-}>('/api/cross-team/accept', async (request) => {
-  const { team_slug, dispatch_id } = request.body ?? {};
-  if (!team_slug || !dispatch_id) {
-    return { ok: false, error: 'team_slug and dispatch_id are required' };
-  }
-  try {
-    const result = await taskDispatch.acceptTask(team_slug, dispatch_id);
-    return { ok: true, taskId: result.taskId };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
-
-// Agent collaboration: reject a task request
-app.post<{
-  Body: { team_slug: string; dispatch_id: string; reason?: string };
-}>('/api/cross-team/reject', async (request) => {
-  const { team_slug, dispatch_id, reason } = request.body ?? {};
-  if (!team_slug || !dispatch_id) {
-    return { ok: false, error: 'team_slug and dispatch_id are required' };
-  }
-  try {
-    await taskDispatch.rejectTask(team_slug, dispatch_id, reason);
-    return { ok: true };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
-
-app.get<{ Querystring: { excludeTeam?: string } }>('/api/cross-team/targets', async (request) => {
-  const excludeTeam = request.query.excludeTeam;
-  const all = await taskDispatch.discoverTeams();
-  const teams = excludeTeam ? all.filter((t) => t.slug !== excludeTeam) : all;
-  return teams.map((t) => ({
-    teamName: t.slug,
-    displayName: t.displayName || t.slug,
-    description: t.description,
-    color: undefined,
-    isOnline: t.status === 'online',
-    location: t.location,
-    harness: t.harness,
-  }));
-});
-
+// Digital Workers API
 async function listDiscoverableWorkers(): Promise<DiscoverableWorker[]> {
-  const teams = await taskDispatch.discoverTeams();
+  const teams = await svc['workspace'].discoverTeams();
   return teams
     .filter((team) => team.slug !== SYSTEM_MANAGER_TEAM_NAME && team.location === 'local')
     .map(discoverableTeamToWorker)
@@ -6404,134 +6236,6 @@ app.post<{
   }
 });
 
-app.get<{ Params: { name: string } }>('/api/cross-team/outbox/:name', async (request) => {
-  const teamSlug = request.params.name;
-  const tasks = await svc.readTasks(teamSlug);
-  const pending = tasks.filter(
-    (t: TeamWorkspaceTask) =>
-      t.dispatchMeta?.status === 'dispatched' && t.dispatchMeta?.originTeam === teamSlug
-  );
-  return { pending };
-});
-
-// Agent collaboration: discover teams with capabilities
-app.get('/api/cross-team/discover', async () => {
-  const teams = await taskDispatch.discoverTeams();
-  return { teams };
-});
-
-// Agent collaboration: pending handshake requests for a team
-app.get<{ Params: { name: string } }>('/api/cross-team/pending-requests/:name', async (request) => {
-  const teamSlug = request.params.name;
-  const requests = taskDispatch.listPendingRequests(teamSlug);
-  return { requests };
-});
-
-// Agent collaboration: deliver task result
-app.post<{
-  Body: { team_slug: string; dispatch_id: string; result: string };
-}>('/api/cross-team/deliver', async (request) => {
-  const { team_slug, dispatch_id, result } = request.body ?? {};
-  if (!team_slug || !dispatch_id || !result) {
-    return { ok: false, error: 'team_slug, dispatch_id, and result are required' };
-  }
-  try {
-    const res = await taskDispatch.deliverTask(team_slug, dispatch_id, result);
-    return res;
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
-
-// Agent collaboration: approve task result
-app.post<{
-  Body: { team_slug: string; dispatch_id: string };
-}>('/api/cross-team/approve', async (request) => {
-  const { team_slug, dispatch_id } = request.body ?? {};
-  if (!team_slug || !dispatch_id) {
-    return { ok: false, error: 'team_slug and dispatch_id are required' };
-  }
-  try {
-    const res = await taskDispatch.approveTask(team_slug, dispatch_id);
-    return res;
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
-
-// Agent collaboration: reject (request revision) task result
-app.post<{
-  Body: { team_slug: string; dispatch_id: string; feedback: string };
-}>('/api/cross-team/revision', async (request) => {
-  const { team_slug, dispatch_id, feedback } = request.body ?? {};
-  if (!team_slug || !dispatch_id || !feedback) {
-    return { ok: false, error: 'team_slug, dispatch_id, and feedback are required' };
-  }
-  try {
-    const res = await taskDispatch.rejectResult(team_slug, dispatch_id, feedback);
-    return res;
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-});
-
-// Collaboration board: list all collab tasks
-app.get('/api/collab/board', async () => {
-  return { tasks: taskDispatch.getCollabBoard() };
-});
-
-// Collaboration board: get single collab task
-app.get<{ Params: { dispatchId: string } }>('/api/collab/board/:dispatchId', async (request) => {
-  const task = taskDispatch.getCollabTask(request.params.dispatchId);
-  if (!task) return { ok: false, error: 'Not found' };
-  return { task };
-});
-
-app.get<{ Params: { dispatchId: string } }>(
-  '/api/collab/board/:dispatchId/events',
-  async (request) => {
-    return { events: taskDispatch.getCollabTaskEvents(request.params.dispatchId) };
-  }
-);
-
-// Deprecated manual cross-team dispatch endpoint. Kept as a guarded compatibility
-// route until the bus/task-pool replacement owns collaboration entry points.
-app.post<{
-  Body: {
-    fromTeam: string;
-    fromMember?: string;
-    toTeam: string;
-    text?: string;
-    subject?: string;
-    description?: string;
-    prompt?: string;
-    messageId?: string;
-    sessionKey?: string;
-    conversationId?: string;
-    replyToConversationId?: string;
-    taskRefs?: unknown[];
-    actionMode?: string;
-    summary?: string;
-    chainDepth?: number;
-    deadlineMinutes?: number;
-    needsHumanReview?: boolean;
-  };
-}>('/api/cross-team/send', async (_request, reply) => {
-  return reply.code(410).send({
-    ok: false,
-    error: 'Manual cross-team dispatch has been removed. Use the team bus/task pool instead.',
-  });
-});
-
 // GET /api/settings/task-bus → full config including telemetry
 app.get('/api/settings/task-bus', async () => {
   const configPath = HERMIT_SETTINGS_FILE;
@@ -6541,24 +6245,22 @@ app.get('/api/settings/task-bus', async () => {
     return (
       settings.taskBus ?? {
         enabled: false,
-        redis: { host: '127.0.0.1', port: 6379 },
         telemetry: { enabled: false, platform: 'claudecode' },
       }
     );
   } catch {
     return {
       enabled: false,
-      redis: { host: '127.0.0.1', port: 6379 },
       telemetry: { enabled: false, platform: 'claudecode' },
     };
   }
 });
 
 // PUT /api/settings/task-bus → save config + start/stop telemetry
-app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
+app.put<{ Body: TelemetryConfig }>('/api/settings/task-bus', async (request) => {
   const config =
     request.body && 'taskBus' in (request.body as unknown as Record<string, unknown>)
-      ? (request.body as unknown as { taskBus: TaskBusConfig }).taskBus
+      ? (request.body as unknown as { taskBus: TelemetryConfig }).taskBus
       : request.body;
   const configPath = HERMIT_SETTINGS_FILE;
   let settings: Record<string, unknown> = {};
@@ -6614,34 +6316,14 @@ app.put<{ Body: TaskBusConfig }>('/api/settings/task-bus', async (request) => {
     }
   };
 
-  const collaborationEnabled = config?.enabled === true && config?.collaboration === true;
+  // Per-team collaboration flag controls CLAUDE.md instruction injection.
   try {
-    await syncTeamInstructions(collaborationEnabled);
+    await syncTeamInstructions(config?.collaboration === true);
   } catch (err) {
     request.log.warn({ err }, 'CLAUDE.md team instruction sync failed');
   }
 
-  if (config?.enabled) {
-    // Reconnect TaskDispatchService with Redis (optional)
-    taskDispatch.dispose();
-    try {
-      await taskDispatch.start(config);
-      return {
-        ok: true,
-        connected: true,
-        message: `Redis 连接成功，分布式派发已启用`,
-      };
-    } catch {
-      return {
-        ok: true,
-        connected: false,
-        message: `Redis 连接失败，仅本地派发`,
-      };
-    }
-  }
-
-  taskDispatch.dispose();
-  return { ok: true, connected: false, message: 'Task bus disabled' };
+  return { ok: true, connected: false, message: '设置已保存' };
 });
 
 interface TelemetryProjectRow {
@@ -6693,7 +6375,7 @@ interface TelemetryStatusShape {
   unresolvedUsage?: UsageUnresolvedSummary;
 }
 
-async function readTaskBusSettings(): Promise<TaskBusConfig> {
+async function readTaskBusSettings(): Promise<TelemetryConfig> {
   const configPath = HERMIT_SETTINGS_FILE;
   let settings: Record<string, unknown> = {};
   try {
@@ -6702,7 +6384,7 @@ async function readTaskBusSettings(): Promise<TaskBusConfig> {
   } catch {
     // no settings
   }
-  return (settings.taskBus ?? {}) as TaskBusConfig;
+  return (settings.taskBus ?? {}) as TelemetryConfig;
 }
 
 const CAPABILITY_REPORT_TTL_MS = 10 * 60 * 1000;
@@ -7302,7 +6984,7 @@ app.get('/api/telemetry/status', async (request, reply) => {
     // `connected` drives the Redis status badge in the UI. The local scan never
     // knows about Redis, so reflect the live team-bus connection instead of
     // leaving the hardcoded `false` — otherwise a healthy bus always shows red.
-    status.connected = taskDispatch.isRedisConnected();
+    status.connected = true;
     status.scan = getTelemetryRuntimeStatus();
     status.worker = telemetryWorkerSummary(workerStatus);
     return status;
@@ -7793,7 +7475,7 @@ bridgeLauncher
 // 启动 hermit-bridge WebSocket 连接(注册 platform=hermit adapter)
 bridge.start();
 imLiveWatcher.start();
-await initializeTaskBusFromSettings();
+await initializeTelemetryFromSettings();
 await ensureGlobalWorkflows();
 
 try {

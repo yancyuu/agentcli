@@ -25,15 +25,11 @@ import type {
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
   CliInstallerAPI,
-  CollabTask,
   ConfigAPI,
   ContextInfo,
   ConversationGroup,
   CreateScheduleInput,
   CreateTaskRequest,
-  CrossTeamAPI,
-  CrossTeamMessage,
-  CrossTeamSendResult,
   DiscoverableWorker,
   ElectronAPI,
   FileChangeEvent,
@@ -1679,29 +1675,6 @@ export class HttpAPIClient implements ElectronAPI {
     },
   };
 
-  // Cross-team communication API
-  crossTeam: CrossTeamAPI = {
-    send: (request) => this.post<CrossTeamSendResult>('/api/cross-team/send', request),
-    listTargets: (excludeTeam?: string) => {
-      const params = new URLSearchParams();
-      if (excludeTeam) params.set('excludeTeam', excludeTeam);
-      const qs = params.toString();
-      return this.get<
-        {
-          teamName: string;
-          displayName: string;
-          description?: string;
-          color?: string;
-          leadName?: string;
-          leadColor?: string;
-          isOnline?: boolean;
-        }[]
-      >(qs ? `/api/cross-team/targets?${qs}` : '/api/cross-team/targets');
-    },
-    getOutbox: (teamName: string) =>
-      this.get<CrossTeamMessage[]>(`/api/cross-team/outbox/${encodeURIComponent(teamName)}`),
-  };
-
   workers = {
     list: () => this.get<{ workers: DiscoverableWorker[] }>('/api/workers'),
     invoke: (
@@ -1722,72 +1695,6 @@ export class HttpAPIClient implements ElectronAPI {
         reused: boolean;
         messageSent: boolean;
       }>(`/api/workers/${encodeURIComponent(workerId)}/invoke`, request, 30_000),
-  };
-
-  // Collaboration board API
-  collab = {
-    getBoard: () => this.get<{ tasks: CollabTask[] }>('/api/collab/board'),
-    getTask: (dispatchId: string) =>
-      this.get<{ task: CollabTask }>(`/api/collab/board/${encodeURIComponent(dispatchId)}`),
-    getEvents: (dispatchId: string) =>
-      this.get<{ events: import('@shared/types/team').CollabTaskEvent[] }>(
-        `/api/collab/board/${encodeURIComponent(dispatchId)}/events`
-      ),
-    accept: (teamSlug: string, dispatchId: string) =>
-      this.post<{ ok: boolean; taskId: string }>('/api/cross-team/accept', {
-        team_slug: teamSlug,
-        dispatch_id: dispatchId,
-      }),
-    reject: (teamSlug: string, dispatchId: string, reason?: string) =>
-      this.post<{ ok: boolean }>('/api/cross-team/reject', {
-        team_slug: teamSlug,
-        dispatch_id: dispatchId,
-        reason,
-      }),
-    deliver: (teamSlug: string, dispatchId: string, result: string) =>
-      this.post<{ ok: boolean }>('/api/cross-team/deliver', {
-        team_slug: teamSlug,
-        dispatch_id: dispatchId,
-        result,
-      }),
-    approve: (teamSlug: string, dispatchId: string) =>
-      this.post<{ ok: boolean }>('/api/cross-team/approve', {
-        team_slug: teamSlug,
-        dispatch_id: dispatchId,
-      }),
-    revision: (teamSlug: string, dispatchId: string, feedback: string) =>
-      this.post<{ ok: boolean }>('/api/cross-team/revision', {
-        team_slug: teamSlug,
-        dispatch_id: dispatchId,
-        feedback,
-      }),
-    dispatch: (
-      fromTeam: string,
-      toTeam: string,
-      subject: string,
-      opts?: {
-        description?: string;
-        deadlineMinutes?: number;
-        needsHumanReview?: boolean;
-        messageId?: string;
-        sessionKey?: string;
-      }
-    ) =>
-      this.post<{
-        ok: boolean;
-        dispatchId: string;
-        status: string;
-        message: string;
-      }>('/api/cross-team/send', {
-        fromTeam,
-        toTeam,
-        subject,
-        description: opts?.description,
-        deadlineMinutes: opts?.deadlineMinutes,
-        needsHumanReview: opts?.needsHumanReview,
-        messageId: opts?.messageId,
-        sessionKey: opts?.sessionKey,
-      }),
   };
 
   // Review API

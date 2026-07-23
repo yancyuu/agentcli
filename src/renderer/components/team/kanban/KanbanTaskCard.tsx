@@ -20,12 +20,10 @@ import {
   HelpCircle,
   Loader2,
   Play,
-  Send,
   Trash2,
 } from 'lucide-react';
 
 import type { KanbanColumnId, KanbanTaskState, TeamTask, TeamTaskWithKanban } from '@shared/types';
-import type { DispatchMeta } from '@shared/types/team';
 
 interface KanbanTaskCardProps {
   task: TeamTaskWithKanban;
@@ -54,66 +52,6 @@ interface DependencyBadgeProps {
   taskMap: Map<string, TeamTask>;
   onScrollToTask?: (taskId: string) => void;
 }
-
-const DISPATCH_STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
-  dispatched: {
-    bg: 'bg-yellow-500/15',
-    text: 'text-yellow-600 dark:text-yellow-400',
-    label: '已派发',
-  },
-  pending_accept: {
-    bg: 'bg-yellow-500/15',
-    text: 'text-yellow-600 dark:text-yellow-400',
-    label: '待启动',
-  },
-  received: {
-    bg: 'bg-yellow-500/15',
-    text: 'text-yellow-600 dark:text-yellow-400',
-    label: '待启动',
-  },
-  accepted: {
-    bg: 'bg-indigo-500/15',
-    text: 'text-indigo-600 dark:text-indigo-400',
-    label: '已启动',
-  },
-  in_progress: {
-    bg: 'bg-indigo-500/15',
-    text: 'text-indigo-600 dark:text-indigo-400',
-    label: '执行中',
-  },
-  completed: {
-    bg: 'bg-emerald-500/15',
-    text: 'text-emerald-600 dark:text-emerald-400',
-    label: '已完成',
-  },
-  synced_back: {
-    bg: 'bg-emerald-500/15',
-    text: 'text-emerald-600 dark:text-emerald-400',
-    label: '已同步',
-  },
-  rejected: { bg: 'bg-red-500/15', text: 'text-red-600 dark:text-red-400', label: '已拒绝' },
-  failed: { bg: 'bg-red-500/15', text: 'text-red-600 dark:text-red-400', label: '失败' },
-};
-
-const DispatchBadge = ({
-  meta,
-  teamName,
-}: {
-  meta: DispatchMeta;
-  teamName: string;
-}): React.JSX.Element => {
-  const style = DISPATCH_STATUS_STYLE[meta.status] ?? DISPATCH_STATUS_STYLE.dispatched;
-  const direction =
-    meta.targetTeam === teamName ? `来自 ${meta.originTeam}` : `发往 ${meta.targetTeam}`;
-  return (
-    <span
-      className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${style.bg} ${style.text}`}
-    >
-      <Send size={10} />
-      {style.label} · {direction}
-    </span>
-  );
-};
 
 const DependencyBadge = ({
   taskId,
@@ -334,9 +272,6 @@ export const KanbanTaskCard = memo(
             >
               {REVIEW_STATE_DISPLAY.needsFix.label}
             </span>
-          ) : null}
-          {task.dispatchMeta ? (
-            <DispatchBadge meta={task.dispatchMeta} teamName={teamName} />
           ) : null}
           {compact && <TruncatedTitle text={task.subject} className="mt-1" />}
         </div>

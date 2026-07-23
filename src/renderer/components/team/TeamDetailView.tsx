@@ -941,17 +941,15 @@ export const TeamDetailView = ({
         try {
           const task = data?.tasks.find((t: { id: string }) => t.id === taskId);
           const result = await startTaskByUser(teamName, taskId);
-          if (data?.isAlive && !task?.dispatchMeta) {
-            try {
-              if (result.notifiedOwner && task?.owner) {
-                await api.teams.processSend(
-                  teamName,
-                  `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
-                );
-              }
-            } catch {
-              /* best-effort */
+          try {
+            if (result.notifiedOwner && task?.owner) {
+              await api.teams.processSend(
+                teamName,
+                `Task ${formatTaskDisplayLabel(task)} "${task.subject}" has started. Please begin working on it.`
+              );
             }
+          } catch {
+            /* best-effort */
           }
         } catch {
           /* error via store */

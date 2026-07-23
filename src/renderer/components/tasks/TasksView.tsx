@@ -322,8 +322,6 @@ const GlobalOverviewTaskCard = memo(function GlobalOverviewTaskCard({
   onOpenTask: (teamName: string, taskId: string) => void;
 }): React.JSX.Element {
   const ownerLabel = buildOptionLabel(task.owner, '未分配');
-  const dispatchFrom = task.dispatchMeta?.originTeam;
-  const dispatchTo = task.dispatchMeta?.targetTeam;
   const handleOpen = useCallback(() => {
     onOpenTask(task.teamName, task.id);
   }, [onOpenTask, task.id, task.teamName]);
@@ -348,11 +346,6 @@ const GlobalOverviewTaskCard = memo(function GlobalOverviewTaskCard({
           {task.subject}
         </h5>
       </div>
-      {task.dispatchMeta ? (
-        <span className="mt-1 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">
-          {dispatchFrom} → {dispatchTo}
-        </span>
-      ) : null}
       <div
         className="mt-1.5 flex items-center gap-1.5 text-[10px]"
         style={{ color: 'var(--color-text-muted)' }}

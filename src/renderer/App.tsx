@@ -50,8 +50,6 @@ function buildPathForTab(activeTab: Tab | null): string {
       return '/tasks';
     case 'dashboard':
       return '/dashboard';
-    case 'society':
-      return '/society';
     case 'session': {
       if (!activeTab.projectId || !activeTab.sessionId) return DEFAULT_APP_PATH;
       return `/session/${encodeURIComponent(activeTab.projectId)}/${encodeURIComponent(activeTab.sessionId)}`;

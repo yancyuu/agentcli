@@ -21,7 +21,6 @@ function mockState(): AppState {
     openSchedulesTab: vi.fn(),
     openTasksTab: vi.fn(),
     openDashboard: vi.fn(),
-    openSocietyTab: vi.fn(),
     navigateToSession: vi.fn(),
     openTab: vi.fn(),
   } as unknown as AppState;

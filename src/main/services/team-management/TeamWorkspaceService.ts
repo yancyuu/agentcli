@@ -13,6 +13,7 @@
  */
 
 import { resolveExternalPlatformSessionTeamSlug } from '@main/utils/externalPlatformSessionRouting';
+import type { AgentCapability, DiscoverableTeam } from '@shared/types/team';
 import { createLogger } from '@shared/utils/logger';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
@@ -129,8 +130,6 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   order: number;
-  /** Cross-team dispatch metadata */
-  dispatchMeta?: import('@shared/types/team').DispatchMeta;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +332,36 @@ export class TeamWorkspaceService {
       }
     }
     return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  /**
+   * Discover local teams for the /api/workers endpoint (Digital Workers).
+   * Migrated from TaskDispatchService when cross-team/Redis was removed.
+   */
+  async discoverTeams(): Promise<DiscoverableTeam[]> {
+    const localTeams = await this.listTeams();
+    return localTeams.map((team) => ({
+      slug: team.slug,
+      displayName: team.displayName ?? team.slug,
+      location: 'local' as const,
+      status: 'online' as const,
+      collaboration: team.collaboration !== false,
+      description: team.description,
+      harness: team.harness,
+      capabilities: this.inferCapabilities(team),
+      workDir: team.workDir,
+    }));
+  }
+
+  private inferCapabilities(team: TeamManifest): AgentCapability[] {
+    const caps: AgentCapability[] = [];
+    if (team.harness) {
+      caps.push({ skill: team.harness, description: `${team.harness} agent` });
+    }
+    if (team.description) {
+      caps.push({ skill: 'general', description: team.description });
+    }
+    return caps;
   }
 
   async updateTeam(
@@ -542,7 +571,6 @@ export class TeamWorkspaceService {
       description?: string;
       assignee?: string | null;
       status?: TaskStatus;
-      dispatchMeta?: import('@shared/types/team').DispatchMeta;
     }
   ): Promise<Task> {
     if (!payload?.title) throw new Error('title is required');
@@ -562,7 +590,6 @@ export class TeamWorkspaceService {
       createdAt: now,
       updatedAt: now,
       order,
-      dispatchMeta: payload.dispatchMeta,
     };
     board.tasks = [...(board.tasks || []), task];
     await this.writeBoard(teamSlug, board);

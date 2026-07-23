@@ -55,11 +55,7 @@ import type {
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
   BoardTaskLogStreamSummary,
-  CollabTask,
   CreateTaskRequest,
-  CrossTeamMessage,
-  CrossTeamSendRequest,
-  CrossTeamSendResult,
   GlobalTask,
   KanbanColumnId,
   LeadActivitySnapshot,
@@ -862,24 +858,6 @@ export interface TeamsAPI {
 // =============================================================================
 // Cross-Team Communication API
 // =============================================================================
-
-export interface CrossTeamAPI {
-  send: (request: CrossTeamSendRequest) => Promise<CrossTeamSendResult>;
-  listTargets: (excludeTeam?: string) => Promise<
-    {
-      teamName: string;
-      displayName: string;
-      description?: string;
-      color?: string;
-      leadName?: string;
-      leadColor?: string;
-      isOnline?: boolean;
-    }[]
-  >;
-  getOutbox: (teamName: string) => Promise<CrossTeamMessage[]>;
-}
-
-// =============================================================================
 // Digital Workers API
 // =============================================================================
 
@@ -907,33 +885,6 @@ export interface WorkerInvokeResponse {
 export interface WorkersAPI {
   list: () => Promise<WorkerListResponse>;
   invoke: (workerId: string, request: WorkerInvokeRequest) => Promise<WorkerInvokeResponse>;
-}
-
-// =============================================================================
-// Collaboration Board API
-// =============================================================================
-
-export interface CollabBoardAPI {
-  getBoard: () => Promise<{ tasks: CollabTask[] }>;
-  getTask: (dispatchId: string) => Promise<{ task: CollabTask }>;
-  getEvents: (dispatchId: string) => Promise<{ events: import('./team').CollabTaskEvent[] }>;
-  accept: (teamSlug: string, dispatchId: string) => Promise<{ ok: boolean; taskId: string }>;
-  reject: (teamSlug: string, dispatchId: string, reason?: string) => Promise<{ ok: boolean }>;
-  deliver: (teamSlug: string, dispatchId: string, result: string) => Promise<{ ok: boolean }>;
-  approve: (teamSlug: string, dispatchId: string) => Promise<{ ok: boolean }>;
-  revision: (teamSlug: string, dispatchId: string, feedback: string) => Promise<{ ok: boolean }>;
-  dispatch: (
-    fromTeam: string,
-    toTeam: string,
-    subject: string,
-    opts?: {
-      description?: string;
-      deadlineMinutes?: number;
-      needsHumanReview?: boolean;
-      messageId?: string;
-      sessionKey?: string;
-    }
-  ) => Promise<{ ok: boolean; dispatchId: string; status: string; message: string }>;
 }
 
 // =============================================================================
@@ -1271,13 +1222,8 @@ export interface ElectronAPI extends RecentProjectsElectronApi {
     ) => Promise<{ message: string; restart_required: boolean; restart_handled?: boolean }>;
   };
 
-  // Cross-Team Communication API
-  crossTeam: CrossTeamAPI;
-
   // Digital Workers API
   workers: WorkersAPI;
-
-  collab: CollabBoardAPI;
 
   // Review API
   review: ReviewAPI;

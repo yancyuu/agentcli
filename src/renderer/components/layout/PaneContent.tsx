@@ -4,7 +4,6 @@
  */
 
 import { TeamGraphTab } from '@features/agent-graph/renderer';
-import { SocietyView } from '@features/worker-society/renderer';
 import { TabUIProvider } from '@renderer/contexts/TabUIContext';
 import { SYSTEM_MANAGER_TEAM_NAME } from '@shared/types/team';
 
@@ -56,7 +55,6 @@ export const PaneContent = ({ pane, isPaneFocused }: PaneContentProps): React.JS
             style={{ display: isActive ? 'flex' : 'none' }}
           >
             {tab.type === 'dashboard' && <DashboardView />}
-            {tab.type === 'society' && <SocietyView />}
             {tab.type === 'chat' && <CommunityChatView />}
             {tab.type === 'notifications' && <NotificationsView />}
             {tab.type === 'settings' && <SettingsView />}

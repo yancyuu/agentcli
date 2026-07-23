@@ -38,10 +38,19 @@ export interface WorkerDispatchAck {
   status: 'received';
 }
 
-/** atomic worker 任务状态查询结果。status 复用 team.ts 的 DispatchStatus。 */
+/** atomic worker 任务状态查询结果。 */
 export interface WorkerTaskState {
   taskId: string;
-  status: import('./team').DispatchStatus;
+  status:
+    | 'dispatched'
+    | 'pending_accept'
+    | 'accepted'
+    | 'rejected'
+    | 'received'
+    | 'in_progress'
+    | 'completed'
+    | 'synced_back'
+    | 'failed';
   result?: unknown;
   error?: string;
 }
