@@ -39,7 +39,7 @@ export const IM_LIVE_WATCH_INTERVAL_MS = 5_000;
 export function defaultImSessionsDir(
   hermitHome: string = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit')
 ): string {
-  return path.join(hermitHome, 'hermit-bridge', 'data', 'sessions');
+  return path.join(hermitHome, 'cc-connect', 'data', 'sessions');
 }
 
 export interface ImLiveWatcherOptions {

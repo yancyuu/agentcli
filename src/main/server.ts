@@ -260,8 +260,11 @@ function shouldSendAttachmentsToAgent(settings: Record<string, unknown>): boolea
 const HERMIT_HOME = process.env.HERMIT_HOME ?? path.join(os.homedir(), '.hermit');
 const HERMIT_CONFIG_FILE = path.join(HERMIT_HOME, 'config.json');
 const HERMIT_APP_CONFIG_FILE = path.join(HERMIT_HOME, 'app-config.json');
-const HERMIT_BRIDGE_DIR = path.join(HERMIT_HOME, 'hermit-bridge');
-const LEGACY_CC_CONNECT_DIR = path.join(HERMIT_HOME, 'cc-connect');
+// cc-connect is the current canonical dir (matches bin/lib/env.mjs). hermit-bridge
+// is the pre-rename legacy dir; bin/lib/runtime.mjs migrates it forward on boot.
+// Keep this in sync with env.mjs / branding.mjs (runtimeBridgeName = 'cc-connect').
+const HERMIT_BRIDGE_DIR = path.join(HERMIT_HOME, 'cc-connect');
+const LEGACY_CC_CONNECT_DIR = path.join(HERMIT_HOME, 'hermit-bridge');
 const HERMIT_BRIDGE_CONFIG_FILE = path.join(HERMIT_BRIDGE_DIR, 'config.toml');
 const LEGACY_CC_CONNECT_CONFIG_FILE = path.join(LEGACY_CC_CONNECT_DIR, 'config.toml');
 const HERMIT_BRIDGE_DATA_DIR = path.join(HERMIT_BRIDGE_DIR, 'data');
@@ -279,8 +282,8 @@ function normalizeMigratedHermitBridgeConfig(raw: string): string {
   return raw
     .split(LEGACY_CC_CONNECT_DATA_DIR)
     .join(HERMIT_BRIDGE_DATA_DIR)
-    .split('~/.hermit/cc-connect/data')
-    .join('~/.hermit/hermit-bridge/data');
+    .split('~/.hermit/hermit-bridge/data')
+    .join('~/.hermit/cc-connect/data');
 }
 
 function migrateLegacyHermitBridgeDataIfNeeded(): boolean {
@@ -319,7 +322,7 @@ function migrateLegacyHermitBridgeConfigIfNeeded(): void {
   }
   const normalizedConfig = normalizeHermitBridgeConfigFileIfNeeded();
   if (migratedData || migratedConfig || normalizedConfig) {
-    console.info('[Hermit] migrated runtime files to ~/.hermit/hermit-bridge/');
+    console.info('[Hermit] migrated runtime files to ~/.hermit/cc-connect/');
   }
 }
 
@@ -328,7 +331,7 @@ function ensureWritableHermitBridgeConfigFile(): string {
   if (_existsSync2(HERMIT_BRIDGE_CONFIG_FILE)) {
     return HERMIT_BRIDGE_CONFIG_FILE;
   }
-  throw new Error('hermit-bridge 配置文件不存在: ~/.hermit/hermit-bridge/config.toml');
+  throw new Error('hermit-bridge 配置文件不存在: ~/.hermit/cc-connect/config.toml');
 }
 
 function readHermitBridgeConfigTomlRaw(): { path: string; content: string } {
@@ -1443,7 +1446,7 @@ app.post<{ Body: { content?: unknown } }>('/api/hermit-config/raw', async (reque
 });
 
 // ===========================================================================
-// hermit-bridge config (Hermit-managed: ~/.hermit/hermit-bridge/config.toml)
+// hermit-bridge config (Hermit-managed: ~/.hermit/cc-connect/config.toml)
 // ===========================================================================
 
 function readHermitBridgeConfigRaw(): { path: string; content: string } {
@@ -7453,7 +7456,7 @@ bridgeLauncher
     client: cc,
     configPath: HERMIT_BRIDGE_CONFIG_FILE,
     extraArgs: ['--force'],
-    logFile: path.join(HERMIT_HOME, 'hermit-bridge', 'hermit-bridge.log'),
+    logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
     timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
   })
   .then((r) => {
