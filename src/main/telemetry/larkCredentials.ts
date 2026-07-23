@@ -524,6 +524,64 @@ export interface LarkCliProfile {
   brand?: string;
 }
 
+/**
+ * Run a lark-cli subcommand and parse its stdout as JSON, hardened against the
+ * Windows mojibake that breaks reporting. Two failure modes we defend against:
+ *  1. lark-cli (Go) inherits the daemon child's console code page; on zh-CN
+ *     Windows that's GBK/CP936, so Chinese fields (userName) come back as
+ *     invalid UTF-8 bytes and JSON.parse throws — swallowed by the per-call
+ *     try/catch, leaving zero authorizations → spurious no-credentials.
+ *  2. The .cmd shim occasionally prints a BOM/non-JSON prefix line.
+ *
+ * Fix: force the child's environment to UTF-8 (LANG/LC_ALL + chcp-style flags
+ * Go respects), and when decoding the buffer, treat it strictly as UTF-8 and
+ * strip any leading non-JSON noise so JSON.parse survives real-world output.
+ */
+function runLarkCliJson(binary: string, args: string[], label: string): unknown[] {
+  try {
+    // Force UTF-8 on the child's side. Go programs honor LC_ALL/encoding envs
+    // for stdio; setting these makes lark-cli emit UTF-8 regardless of the
+    // inherited console code page. Also strip any env that might force GBK.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    env.LANG = 'en_US.UTF-8';
+    env.LC_ALL = 'en_US.UTF-8';
+    env.LC_CTYPE = 'en_US.UTF-8';
+    // Node-side: decode stdout as utf-8 explicitly (encoding:'utf-8' already
+    // does this for the string, but also pass through Buffer to scrub invalid
+    // bytes below).
+    const result = spawnSync(binary, args, {
+      encoding: 'utf-8',
+      shell: isWin,
+      windowsHide: true,
+      env,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (result.status !== 0) {
+      process.stderr.write(`[diag:${label}] status=${result.status}\n`);
+      return [];
+    }
+    let stdout = (result.stdout || '').trim();
+    // Scrub a leading UTF-8 BOM if present.
+    if (stdout.charCodeAt(0) === 0xfeff) stdout = stdout.slice(1);
+    // Find the first '[' or '{' (JSON start) to skip any prefix noise line
+    // (banner, warning) the shim might emit before the JSON payload.
+    const jsonStart = stdout.search(/[\[{]/);
+    if (jsonStart > 0) stdout = stdout.slice(jsonStart);
+    try {
+      const parsed = JSON.parse(stdout);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch (err) {
+      process.stderr.write(
+        `[diag:${label}] JSON.parse failed: ${(err as Error).message} | head=${stdout.slice(0, 200)}\n`
+      );
+      return [];
+    }
+  } catch (err) {
+    process.stderr.write(`[diag:${label}] spawn failed: ${(err as Error).message}\n`);
+    return [];
+  }
+}
+
 export interface LarkCliPersonalAuthorization {
   profileName: string;
   appId: string;
@@ -575,43 +633,24 @@ export function resolveBrandForProfile(
 
 function listLarkProfiles(): LarkCliProfile[] {
   const binary = findLarkBinary();
-  if (!binary) {
-    process.stderr.write('[diag:listLarkProfiles] findLarkBinary returned null\n');
-    return [];
-  }
-  try {
-    const result = spawnSync(binary, ['profile', 'list'], {
-      encoding: 'utf-8',
-      shell: isWin,
-      windowsHide: true,
-    });
-    process.stderr.write(
-      `[diag:listLarkProfiles] binary=${binary} status=${result.status} stdoutLen=${(result.stdout || '').length}\n`
-    );
-    process.stderr.write(
-      `[diag:listLarkProfiles] stdoutHead=${(result.stdout || '').slice(0, 200)}\n`
-    );
-    const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!item || typeof item !== 'object') return [];
-      const record = item as Record<string, unknown>;
-      return typeof record.name === 'string' &&
-        record.name &&
-        typeof record.appId === 'string' &&
-        record.appId
-        ? [
-            {
-              name: record.name,
-              appId: record.appId,
-              brand: normalizeLarkBrand(record.brand),
-            },
-          ]
-        : [];
-    });
-  } catch {
-    return [];
-  }
+  if (!binary) return [];
+  const parsed = runLarkCliJson(binary, ['profile', 'list'], 'listLarkProfiles');
+  return parsed.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    return typeof record.name === 'string' &&
+      record.name &&
+      typeof record.appId === 'string' &&
+      record.appId
+      ? [
+          {
+            name: record.name,
+            appId: record.appId,
+            brand: normalizeLarkBrand(record.brand),
+          },
+        ]
+      : [];
+  });
 }
 
 function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {

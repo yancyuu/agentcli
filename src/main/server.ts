@@ -654,26 +654,18 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
 }
 
 async function restartHermitBridgeAndReconnect(): Promise<void> {
-  // Stop + start (NOT cc.restart()). cc.restart() makes cc-connect re-exec
-  // itself, which (a) loses the windowsHide attribute on Windows and pops a
-  // black box, and (b) can fail to come back when spawned from a detached
-  // daemon. Killing the process ourselves and re-launching via the launcher
-  // is reliable PROVIDED the launcher's spawn passes cwd + env (the
-  // HERMIT_BRIDGE_* tokens) — a missing env was the 1.9.52 regression cause,
-  // now fixed in defaultSpawn (it defaults to process.cwd()/process.env).
-  bridgeLauncher.stop();
-  await stopRuntimeSidecarProcesses();
-  await waitForRuntimePortsFree(5_000);
+  // Use cc-connect's own restart endpoint. The stop+start approach (killing the
+  // process and re-launching via the launcher) repeatedly failed on Windows:
+  // timing races in ensureRunning's isRunning check, spawn env/cwd mismatches,
+  // and port-release delays all left cc-connect dead → ECONNREFUSED on the
+  // very next operation. After multiple regressions (1.9.48–1.9.61) trying to
+  // also avoid the console-window pop, reliability of the runtime MUST win over
+  // window cosmetics. cc.restart() is what cc-connect itself trusts to come
+  // back from. The black-box-on-restart issue will be handled separately
+  // WITHOUT touching this path.
+  await cc.restart();
 
-  await bridgeLauncher.ensureRunning({
-    client: cc,
-    configPath: HERMIT_BRIDGE_CONFIG_FILE,
-    extraArgs: ['--force'],
-    logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
-    timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
-  });
-
-  // Wait for hermit-bridge management API to come back.
+  // Wait for hermit-bridge management API to come back (restart only signals, process respawns async).
   let managementReady = false;
   for (let i = 0; i < 30; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -689,6 +681,8 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
     throw new Error('hermit-bridge did not come back within 30s');
   }
 
+  // After hermit-bridge restarts, force Hermit's Bridge adapter to reconnect and re-register.
+  // Otherwise Feishu/Lark may show connected in hermit-bridge but Hermit is not listening yet.
   bridge.reconnect();
   await waitForHarnessBridgeConnected(15_000);
 }
