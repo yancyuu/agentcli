@@ -476,7 +476,13 @@ if (commandArgs[0] === '__telemetry-worker') {
   // (KeepAlive / RestartOnFailure) restarts on a real crash, but stacking
   // parallel workers causes the orphan/pid-mismatch problem. --scan-once is a
   // one-shot and bypasses the guard.
-  const extraArgs = args.includes('--scan-once') ? ['--scan-once'] : [];
+  // Pass through the worker's own flags so diagnostic invocations work:
+  //   __telemetry-worker --scan-once
+  //   __telemetry-worker --report-lark-credentials-once --json
+  //   __telemetry-worker --startup-once
+  // Only --scan-once bypasses the single-instance guard above.
+  const PASSTHROUGH_FLAGS = ['--scan-once', '--startup-once', '--report-lark-credentials-once', '--json'];
+  const extraArgs = PASSTHROUGH_FLAGS.filter((flag) => args.includes(flag));
   const existingPid = readPidFile(telemetryWorkerPidPath);
   if (!extraArgs.includes('--scan-once') && existingPid && isPidRunning(existingPid)) {
     process.exit(0);

@@ -12,6 +12,13 @@ const require = createRequire(import.meta.url);
 export function telemetryWorkerChildArgs(extraArgs = []) {
   const tsxPath = pathToFileURL(require.resolve('tsx')).href;
   const aliasLoaderUrl = pathToFileURL(path.join(binDir, 'alias-loader.mjs')).href;
-  const aliasLoader = `data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register(${JSON.stringify(aliasLoaderUrl)}, pathToFileURL("./"));`;
+  // IMPORTANT: the parentURL passed to register() must be a fully-resolved file
+  // URL, NOT pathToFileURL("./"). On Windows the relative "./" resolves against
+  // an indeterminate base (cwd vs. main module URL) depending on Node version,
+  // and the custom resolver silently fails to engage — every module alias
+  // (@main/, @shared/, …) then ERR_MODULE_NOT_FOUND's at worker boot, which is
+  // the root cause of "all Windows users fail lark-credential upload".
+  // Passing the alias-loader's own URL anchors the registration reliably.
+  const aliasLoader = `data:text/javascript,import { register } from "node:module"; register(${JSON.stringify(aliasLoaderUrl)}, ${JSON.stringify(aliasLoaderUrl)});`;
   return ['--import', aliasLoader, '--import', tsxPath, 'src/main/telemetry/worker.ts', ...extraArgs];
 }
