@@ -1039,25 +1039,15 @@ async function runQuickCreateAssistantFlow() {
       },
       async afterPlatformBound({ binding }) {
         if (platform !== 'feishu' && platform !== 'lark') return null;
+        // No personal-auth step here. lark-cli personal auth is a separate menu
+        // item ("绑定飞书个人授权（数字员工）") the user runs independently.
+        // Creating a digital worker = create team + bind channel, full stop —
+        // it must NOT block on, or be interrupted by, the personal OAuth state.
+        // Previously this ran an interactive device-code flow (hung on admin
+        // approval) then a scope check; both are gone. The channel is bound and
+        // the worker is created regardless of personal auth readiness.
         const profile = personalLarkProfileName(binding.appId);
-        // DO NOT run the interactive OAuth device-code flow here. It blocks the
-        // create flow for up to 90s when the Feishu app needs admin approval,
-        // which used to look like a hang. Personal lark-cli auth is now a
-        // separate menu item ("绑定飞书个人授权（数字员工）"); the user runs it
-        // once beforehand. Here we only CHECK that a valid personal grant
-        // covering the digital-worker scopes exists, and fail fast with a clear
-        // instruction if not — no polling, no blocking.
-        const { checkLarkCliDigitalWorkerAuth } = await import('./larkCli.mjs');
-        const current = checkLarkCliDigitalWorkerAuth({ profile });
-        if (!current.ok) {
-          const missingScopes = Array.isArray(current.missingScopes) ? current.missingScopes : [];
-          throw new Error(
-            '飞书个人授权未就绪：' + (current.message || '缺少数字员工所需权限') +
-              '。请在主菜单 → 用户 → 绑定飞书个人授权（数字员工）完成授权后重试。' +
-              (missingScopes.length ? `\n缺少 scope: ${missingScopes.join(' ')}` : '')
-          );
-        }
-        return { ok: true, profile: current.profile || profile, auth: current };
+        return { ok: true, profile };
       },
     }
   );
