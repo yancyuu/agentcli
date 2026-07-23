@@ -73,14 +73,18 @@ export const telemetryWorkerLogPath = path.join(hermitHome, 'logs', 'telemetry-w
 export const telemetryWorkerErrorLogPath = path.join(hermitHome, 'logs', 'telemetry-worker.err.log');
 export const conversationUploadLogPath = path.join(hermitHome, 'logs', 'conversation-upload.log');
 
-export const legacyRuntimeBridgeDir = path.join(hermitHome, 'cc-connect');
-export const hermitBridgeDir = path.join(hermitHome, 'hermit-bridge');
+// cc-connect is the current canonical runtime dir name. hermit-bridge is the
+// pre-rename legacy name — configs/data there are migrated forward on boot.
+// (Earlier versions had these swapped; users on the old "hermit-bridge" dir get
+// auto-migrated to "cc-connect" by migrateLegacyHermitBridgeFiles in runtime.mjs.)
+export const legacyRuntimeBridgeDir = path.join(hermitHome, 'hermit-bridge');
+export const ccConnectDir = path.join(hermitHome, 'cc-connect');
 export const legacyRuntimeBridgeConfigPath = path.join(legacyRuntimeBridgeDir, 'config.toml');
-export const defaultHermitBridgeConfigPath = path.join(hermitBridgeDir, 'config.toml');
+export const defaultCcConnectConfigPath = path.join(ccConnectDir, 'config.toml');
 export const legacyRuntimeBridgeDataDir = path.join(legacyRuntimeBridgeDir, 'data');
-export const defaultHermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
+export const defaultCcConnectDataDir = path.join(ccConnectDir, 'data');
 export const hermitBridgeConfigPath =
-  process.env.HERMIT_BRIDGE_CONFIG || defaultHermitBridgeConfigPath;
+  process.env.HERMIT_BRIDGE_CONFIG || defaultCcConnectConfigPath;
 export const starterProjectName = 'my-project';
 export function findOptionValue(name) {
   const index = commandArgs.indexOf(name);

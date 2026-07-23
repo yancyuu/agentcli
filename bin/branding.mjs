@@ -15,7 +15,7 @@ export const DEFAULT_BRAND = Object.freeze({
   stylizedName: 'AgentCli',
   cliCommand: 'agentcli',
   npmPackage: '@yancyyu/agentcli',
-  runtimeBridgeName: 'hermit-bridge',
+  runtimeBridgeName: 'cc-connect',
   authAccountLabel: 'AgentCli 用户',
   authProviderName: 'AgentCli',
   defaultLocalHomeName: '.hermit',

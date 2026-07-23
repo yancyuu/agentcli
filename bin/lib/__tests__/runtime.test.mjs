@@ -47,8 +47,8 @@ describe('runtime.mjs hermit-bridge config ensure (fresh-install write path)', (
       expect(result.status, stderr).toBe(0);
       expect(result.stdout).toContain('OK');
 
-      // Fresh ensure must have created the bridge config with starter content.
-      const cfg = join(home, 'hermit-bridge', 'config.toml');
+      // Fresh ensure must have created the cc-connect config with starter content.
+      const cfg = join(home, 'cc-connect', 'config.toml');
       expect(existsSync(cfg)).toBe(true);
       const raw = readFileSync(cfg, 'utf-8');
       expect(raw).toContain('[management]');

@@ -37,12 +37,14 @@ try {
 
 const hermitHome = process.env.HERMIT_HOME || path.join(os.homedir(), '.hermit');
 
-const legacyRuntimeBridgeDir = path.join(hermitHome, 'cc-connect');
-const hermitBridgeDir = path.join(hermitHome, 'hermit-bridge');
+// cc-connect is the current canonical dir; hermit-bridge is the pre-rename
+// legacy name (configs/data migrated forward by migrateLegacyHermitBridgeFiles).
+const legacyRuntimeBridgeDir = path.join(hermitHome, 'hermit-bridge');
+const ccConnectDir = path.join(hermitHome, 'cc-connect');
 const legacyRuntimeBridgeConfigPath = path.join(legacyRuntimeBridgeDir, 'config.toml');
-const hermitBridgeConfigPath = path.join(hermitBridgeDir, 'config.toml');
+const ccConnectConfigPath = path.join(ccConnectDir, 'config.toml');
 const legacyRuntimeBridgeDataDir = path.join(legacyRuntimeBridgeDir, 'data');
-const hermitBridgeDataDir = path.join(hermitBridgeDir, 'data');
+const ccConnectDataDir = path.join(ccConnectDir, 'data');
 const bundledWorkflowsDir = path.join(packageRoot, 'src/main/services/system-manager/builtin-workflows');
 const hermitWorkflowDir = path.join(hermitHome, '.claude', 'workflow');
 const builtinWorkflowMarker = '<!-- hermit-builtin-workflow:v2-loop -->';
@@ -50,9 +52,9 @@ const builtinWorkflowMarker = '<!-- hermit-builtin-workflow:v2-loop -->';
 function normalizeHermitBridgeConfig(raw) {
   return raw
     .split(legacyRuntimeBridgeDataDir)
-    .join(hermitBridgeDataDir)
-    .split('~/.hermit/cc-connect/data')
-    .join(`~/${BRAND.defaultLocalHomeName}/${BRAND.runtimeBridgeName}/data`);
+    .join(ccConnectDataDir)
+    .split('~/.hermit/hermit-bridge/data')
+    .join(`~/.hermit/cc-connect/data`);
 }
 
 function seedBuiltinWorkflows() {
@@ -89,30 +91,38 @@ function seedBuiltinWorkflows() {
 }
 
 function migrateLegacyHermitBridgeFiles() {
-  mkdirSync(hermitBridgeDir, { recursive: true });
+  mkdirSync(ccConnectDir, { recursive: true });
   let changed = false;
-  if (!existsSync(hermitBridgeDataDir) && existsSync(legacyRuntimeBridgeDataDir)) {
+  if (!existsSync(ccConnectDataDir) && existsSync(legacyRuntimeBridgeDataDir)) {
     try {
-      renameSync(legacyRuntimeBridgeDataDir, hermitBridgeDataDir);
+      renameSync(legacyRuntimeBridgeDataDir, ccConnectDataDir);
     } catch {
-      cpSync(legacyRuntimeBridgeDataDir, hermitBridgeDataDir, { recursive: true });
+      cpSync(legacyRuntimeBridgeDataDir, ccConnectDataDir, { recursive: true });
       rmSync(legacyRuntimeBridgeDataDir, { recursive: true, force: true });
     }
     changed = true;
   }
 
-  if (!existsSync(hermitBridgeConfigPath) && existsSync(legacyRuntimeBridgeConfigPath)) {
-    copyFileSync(legacyRuntimeBridgeConfigPath, hermitBridgeConfigPath);
+  if (!existsSync(ccConnectConfigPath) && existsSync(legacyRuntimeBridgeConfigPath)) {
+    copyFileSync(legacyRuntimeBridgeConfigPath, ccConnectConfigPath);
     rmSync(legacyRuntimeBridgeConfigPath, { force: true });
     changed = true;
   }
-  if (existsSync(hermitBridgeConfigPath)) {
-    const raw = readFileSync(hermitBridgeConfigPath, 'utf-8');
+  if (existsSync(ccConnectConfigPath)) {
+    const raw = readFileSync(ccConnectConfigPath, 'utf-8');
     const migrated = normalizeHermitBridgeConfig(raw);
     if (migrated !== raw) {
-      writeFileSync(hermitBridgeConfigPath, migrated, 'utf-8');
+      writeFileSync(ccConnectConfigPath, migrated, 'utf-8');
       changed = true;
     }
+  }
+  // Best-effort: remove the now-empty legacy dir if everything was migrated.
+  try {
+    if (existsSync(legacyRuntimeBridgeDir) && !existsSync(legacyRuntimeBridgeConfigPath) && !existsSync(legacyRuntimeBridgeDataDir)) {
+      rmSync(legacyRuntimeBridgeDir, { recursive: true, force: true });
+    }
+  } catch {
+    /* non-fatal */
   }
   return changed;
 }

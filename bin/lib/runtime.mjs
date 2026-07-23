@@ -16,8 +16,8 @@ import {
   port,
   starterProjectName,
   hermitBridgeConfigPath,
-  defaultHermitBridgeConfigPath,
-  defaultHermitBridgeDataDir,
+  defaultCcConnectConfigPath,
+  defaultCcConnectDataDir,
   legacyRuntimeBridgeConfigPath,
   legacyRuntimeBridgeDataDir,
   conversationUploadLogPath,
@@ -381,7 +381,7 @@ function buildOpenHermitStarterConfig(managementToken, bridgeToken) {
   return `# cc-connect configuration
 # Runtime bridge packaged by Hermit (cc-connect).
 
-data_dir = "${escapeTomlPath(defaultHermitBridgeDataDir)}"
+data_dir = "${escapeTomlPath(defaultCcConnectDataDir)}"
 language = "zh"
 
 [management]
@@ -425,18 +425,18 @@ app_secret = "your-feishu-app-secret"
 function normalizeMigratedHermitBridgeConfig(raw) {
   return raw
     .split(escapeTomlPath(legacyRuntimeBridgeDataDir))
-    .join(escapeTomlPath(defaultHermitBridgeDataDir))
-    .split('~/.hermit/cc-connect/data')
-    .join('~/.hermit/hermit-bridge/data');
+    .join(escapeTomlPath(defaultCcConnectDataDir))
+    .split('~/.hermit/hermit-bridge/data')
+    .join('~/.hermit/cc-connect/data');
 }
 
 function migrateLegacyHermitBridgeDataIfNeeded() {
-  if (existsSync(defaultHermitBridgeDataDir) || !existsSync(legacyRuntimeBridgeDataDir)) return false;
-  mkdirSync(path.dirname(defaultHermitBridgeDataDir), { recursive: true });
+  if (existsSync(defaultCcConnectDataDir) || !existsSync(legacyRuntimeBridgeDataDir)) return false;
+  mkdirSync(path.dirname(defaultCcConnectDataDir), { recursive: true });
   try {
-    renameSync(legacyRuntimeBridgeDataDir, defaultHermitBridgeDataDir);
+    renameSync(legacyRuntimeBridgeDataDir, defaultCcConnectDataDir);
   } catch {
-    cpSync(legacyRuntimeBridgeDataDir, defaultHermitBridgeDataDir, { recursive: true });
+    cpSync(legacyRuntimeBridgeDataDir, defaultCcConnectDataDir, { recursive: true });
     rmSync(legacyRuntimeBridgeDataDir, { recursive: true, force: true });
   }
   return true;
@@ -452,7 +452,7 @@ function normalizeHermitBridgeConfigFileIfNeeded() {
 }
 
 function migrateLegacyHermitBridgeConfigIfNeeded() {
-  if (hermitBridgeConfigPath !== defaultHermitBridgeConfigPath) return;
+  if (hermitBridgeConfigPath !== defaultCcConnectConfigPath) return;
 
   const migratedData = migrateLegacyHermitBridgeDataIfNeeded();
   let migratedConfig = false;
