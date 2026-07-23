@@ -404,6 +404,67 @@ function discoverProfilesMac(): { appId: string; userOpenId: string }[] {
   return discoverProfilesMacCore({ dir: storageDirMac(), key: getMasterKeyMac() });
 }
 
+/**
+ * Windows profile discovery — the missing piece that caused every Windows
+ * user's credential report to fail with `no-credentials`. Mac has
+ * discoverProfilesMac (scans the .enc files), but the Windows path only
+ * implemented reading a SINGLE known secret (readRegistryDpapi) and never
+ * enumerated ALL stored profiles — so getLarkCredentials() on Windows always
+ * got `profiles = []`, never found an appId/userOpenId, and returned
+ * no-credentials even though the DPAPI-encrypted creds were right there in the
+ * registry. This mirrors the Mac scan via PowerShell registry enumeration.
+ */
+function discoverProfilesWin(): { appId: string; userOpenId: string }[] {
+  if (!isWin) return [];
+  // Enumerate every value under HKCU\Software\LarkCli\keychain\<service>,
+  // base64url-decode each value name back to its account, DPAPI-unprotect with
+  // the service+account entropy binding, and keep entries that parse as a
+  // stored user token (carry appId + userOpenId). appsecret entries decrypt to
+  // a bare secret string and are naturally excluded by parseStoredToken.
+  const script = [
+    '$ErrorActionPreference="Stop"',
+    `$path = 'HKCU:\\${regPathFor(SERVICE)}'`,
+    'if (-not (Test-Path $path)) { return "[]" }',
+    '$props = Get-ItemProperty -Path $path',
+    '$names = $props.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | Select-Object -ExpandProperty Name',
+    '$results = @()',
+    'foreach ($n in $names) {',
+    '  try {',
+    '    $b64 = $n.Replace("-", "+").Replace("_", "/")',
+    '    switch ($b64.Length % 4) { 2 { $b64 += "==" } 3 { $b64 += "=" } }',
+    '    $account = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))',
+    '    $b64val = (Get-ItemProperty -Path $path).$n',
+    '    $blob = [Convert]::FromBase64String($b64val)',
+    `    $entStr = '${SERVICE}' + [char]0 + $account`,
+    '    $ent = [Text.Encoding]::UTF8.GetBytes($entStr)',
+    '    $plain = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $ent, "CurrentUser")',
+    '    $txt = [Text.Encoding]::UTF8.GetString($plain)',
+    '    $results += @{ account = $account; text = $txt }',
+    '  } catch { continue }',
+    '}',
+    '$results | ConvertTo-Json -Compress',
+  ].join('\n');
+  const out = capture('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+  if (!out) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    return [];
+  }
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+  const profiles: { appId: string; userOpenId: string }[] = [];
+  for (const item of arr) {
+    const txt = (item as { text?: string }).text;
+    if (!txt) continue;
+    const token = parseStoredToken(txt);
+    if (token?.appId && token?.userOpenId) {
+      profiles.push({ appId: token.appId, userOpenId: token.userOpenId });
+    }
+  }
+  return profiles;
+}
+
 function activeAppId(): string | undefined {
   const env = process.env.LARK_CLI_ACTIVE_APP_ID || process.env.LARK_CLI_DEFAULT_APP_ID;
   if (env) return env;
@@ -851,7 +912,7 @@ export function getLarkCredentials(
 
   let { appId, userOpenId } = opts;
   if (!appId) {
-    const profiles = isMac ? discoverProfilesMac() : [];
+    const profiles = isMac ? discoverProfilesMac() : discoverProfilesWin();
     const want = activeAppId();
     const hit = want
       ? profiles.find((p) => p.appId === want && (!userOpenId || p.userOpenId === userOpenId))
@@ -940,7 +1001,7 @@ export function getLarkCredentialsAll(): GetLarkCredentialsAllResult {
     return { ok: false, message: `不支持的平台: ${process.platform} (仅 mac/windows)` };
   }
 
-  const profiles = isMac ? discoverProfilesMac() : [];
+  const profiles = isMac ? discoverProfilesMac() : discoverProfilesWin();
   const credentials: LarkCredentials[] = [];
   const skipped: LarkProfileSkip[] = [];
   for (const profile of profiles) {
