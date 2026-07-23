@@ -910,11 +910,17 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
       console.log(ui.dim(`等待 lark-cli 授权确认中... 当前状态：${status}`));
     };
   };
-  // force:true — the creator must re-authorize (refresh) their personal Feishu
-  // identity on every provisioning, not silently reuse a prior grant. Without it
-  // the last step short-circuits when any auth exists, skipping the authorization
-  // screen the user expects to see.
-  const result = await ensureLarkCliDigitalWorkerAuth(renderAuthQr, { ...options, force: true });
+  // Reuse an existing personal grant when it is still valid AND covers the
+  // digital-worker scopes. checkLarkCliDigitalWorkerAuth() is authoritative —
+  // it runs `auth status --verify` (token validity) AND `auth check --scope …`
+  // (per-scope coverage), so a stale/partial grant still falls through to the
+  // re-authorize path below. This deliberately does NOT force re-authorization:
+  // forcing it made every create flow block on the Feishu OAuth device loop, so
+  // when the tenant app needed admin approval (a slow, async, human process),
+  // the CLI appeared to hang for 5 min then time out — and the user had to
+  // cancel and retry, re-entering the same blocked loop. Valid+complete grants
+  // now skip straight to binding.
+  const result = await ensureLarkCliDigitalWorkerAuth(renderAuthQr, { ...options, force: false });
   if (!result.ok) {
     const missingScopes = Array.isArray(result.auth?.missingScopes) ? result.auth.missingScopes : [];
     printCliRows('飞书个人身份授权不完整', [
