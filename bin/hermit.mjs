@@ -511,6 +511,7 @@ if (commandArgs[0] === '__telemetry-worker') {
   }
   const child = spawn(process.execPath, telemetryWorkerChildArgs(extraArgs), {
     cwd: repoRoot,
+    windowsHide: true,
     env: { ...process.env, HERMIT_HOME: hermitHome },
     stdio: 'inherit',
   });
@@ -759,11 +760,20 @@ if (!skipHermitBridge) {
       // binary (preferred — avoids run.js popping a console window on Windows
       // that users might close, killing the runtime) and spawn it directly.
       const isJs = /\.(js|mjs)$/i.test(hermitBridgeRunner);
-      const cmd = isJs ? process.execPath : hermitBridgeRunner;
-      const cmdArgs = isJs
+      // WINDOWS HIDE: cc-connect.exe is a Go console-subsystem binary. Node's
+      // `windowsHide` only hides windows Node itself would create — it does NOT
+      // stop Windows from auto-allocating a console for the .exe, so a black
+      // box still pops up and users close it, killing the runtime. The only
+      // reliable fix is to launch via PowerShell `Start-Process -WindowStyle
+      // Hidden`, which creates the process with a hidden window at the OS
+      // level. We wrap the whole command line in a single PS argument list.
+      const realCmd = isJs ? process.execPath : hermitBridgeRunner;
+      const realArgs = isJs
         ? [hermitBridgeRunner, '-config', hermitBridgeConfigPath]
         : ['-config', hermitBridgeConfigPath];
-      hermitBridgeProcess = spawn(cmd, cmdArgs, {
+      let spawnCmd = realCmd;
+      let spawnArgs = realArgs;
+      let spawnOpts = {
         cwd: repoRoot,
         detached: true,
         windowsHide: true,
@@ -774,7 +784,30 @@ if (!skipHermitBridge) {
           HERMIT_BRIDGE_WS_TOKEN: bridgeTokens.bridgeToken,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      };
+      if (process.platform === 'win32' && !isJs) {
+        // PowerShell wraps the binary with -WindowStyle Hidden so NO console
+        // window is ever shown. Quote paths for the PS -ArgumentList.
+        const binQuoted = JSON.stringify(realCmd);
+        const argsQuoted = realArgs.map((a) => JSON.stringify(a)).join(' ');
+        spawnCmd = 'powershell.exe';
+        spawnArgs = [
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+          '-Command',
+          `Start-Process -FilePath ${binQuoted} -ArgumentList ${argsQuoted} -WindowStyle Hidden -PassThru`,
+        ];
+        // -PassThru returns the process object so we can read its pid; the
+        // child's stdout/stderr are NOT piped here (Start-Process owns them),
+        // but we keep the launcher's own log redirection for the ready-check.
+        spawnOpts = {
+          cwd: repoRoot,
+          detached: true,
+          windowsHide: true,
+          env: spawnOpts.env,
+          stdio: ['ignore', 'ignore', 'ignore'],
+        };
+      }
+      hermitBridgeProcess = spawn(spawnCmd, spawnArgs, spawnOpts);
 
       hermitBridgeProcess.stdout?.on('data', (chunk) => {
         process.stdout.write(chunk);
