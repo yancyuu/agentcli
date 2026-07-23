@@ -22,8 +22,23 @@ function findBinary() {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   try {
     const r = spawnLarkCli(cmd, [BINARY], { encoding: 'utf-8' });
-    const found = (r.stdout || '').split(/\r?\n/)[0]?.trim();
-    if (found) return found;
+    const lines = (r.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (lines.length) {
+      // On Windows `where lark-cli` can return multiple shims (lark-cli.ps1,
+      // lark-cli.cmd, lark-cli, …) in PATH order. A .ps1 shim invoked via
+      // spawnSync({shell:true}) from cmd.exe exits 0 with EMPTY stdout — so
+      // the worker reads no auth list and falsely reports "no-credentials",
+      // even though the user is logged in (credentials are in DPAPI storage).
+      // Prefer .cmd (the Node-written shim that pipes stdout correctly) and
+      // never pick .ps1. Bare name (no extension) is fine on unix.
+      if (process.platform === 'win32') {
+        const preferred =
+          lines.find((p) => p.toLowerCase().endsWith('\\lark-cli.cmd')) ||
+          lines.find((p) => !p.toLowerCase().endsWith('.ps1'));
+        return preferred || lines[0];
+      }
+      return lines[0];
+    }
   } catch {
     // which/where unavailable — treat as not found.
   }
