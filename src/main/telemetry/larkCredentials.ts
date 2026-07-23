@@ -492,8 +492,25 @@ function activeAppId(): string | undefined {
 }
 
 function findLarkBinary(): string | null {
-  const found = capture(process.platform === 'win32' ? 'where' : 'which', ['lark-cli']);
-  return found || null;
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const out = capture(cmd, ['lark-cli']);
+  if (!out) return null;
+  const lines = out
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  if (process.platform === 'win32') {
+    // Same fix as bin/lib/larkCli.mjs: `where lark-cli` can return lark-cli.ps1
+    // first, and a .ps1 invoked via spawnSync({shell:true}) from cmd.exe exits 0
+    // with EMPTY stdout — so every auth/profile query looks empty and reports
+    // fail with no-credentials even though creds are valid. Prefer .cmd.
+    const preferred =
+      lines.find((p) => p.toLowerCase().endsWith('\\lark-cli.cmd')) ||
+      lines.find((p) => !p.toLowerCase().endsWith('.ps1'));
+    return preferred || lines[0];
+  }
+  return lines[0];
 }
 
 /**
