@@ -654,35 +654,17 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
 }
 
 async function restartHermitBridgeAndReconnect(): Promise<void> {
-  // We do NOT call cc.restart() (POST /api/v1/restart). That makes cc-connect
-  // re-exec itself, and the respawned process loses the CREATE_NO_WINDOW /
-  // windowsHide attribute the launcher set — so a black console box pops up
-  // on Windows after creating a digital worker (users close it and kill the
-  // runtime). Instead we kill the process ourselves and re-launch via the
-  // launcher, which re-applies windowsHide. Functionally equivalent: new
-  // process, fresh config load, same as a self-restart.
-  //
-  // NOTE: bridgeLauncher.stop() only kills launcher's OWN child (this.child).
-  // On the daemon path cc-connect is first spawned by bin/hermit.mjs, so by
-  // the time server.ts runs, bridgeLauncher.ensureRunning() sees it already
-  // running and leaves this.child === null — stop() would be a no-op. We must
-  // kill by port (stopRuntimeSidecarProcesses) to handle both the
-  // launcher-spawned and the bin-spawned cc-connect.
-  bridgeLauncher.stop();
-  await stopRuntimeSidecarProcesses();
-  await waitForRuntimePortsFree(5_000);
+  // Use cc-connect's own restart endpoint. The earlier attempt to kill +
+  // re-launch ourselves (to avoid the Windows console window on self-reexec)
+  // caused regressions: on some Windows timings the re-launched process did
+  // not come back, leaving cc-connect dead and every subsequent operation
+  // failing with ECONNREFUSED. Reliability of the runtime trumps the window
+  // cosmetics — restore the proven cc.restart() path. The black-box-on-
+  // restart issue will be handled separately (e.g. a wscript wrapper) without
+  // risking the runtime availability.
+  await cc.restart();
 
-  // Re-launch via the launcher (applies windowsHide on Windows). this.child is
-  // now populated because nothing is listening on the ports anymore.
-  await bridgeLauncher.ensureRunning({
-    client: cc,
-    configPath: HERMIT_BRIDGE_CONFIG_FILE,
-    extraArgs: ['--force'],
-    logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
-    timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
-  });
-
-  // Wait for hermit-bridge management API to come back.
+  // Wait for hermit-bridge management API to come back (restart only signals, process respawns async).
   let managementReady = false;
   for (let i = 0; i < 30; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
