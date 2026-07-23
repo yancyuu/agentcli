@@ -654,6 +654,14 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
 }
 
 async function restartHermitBridgeAndReconnect(): Promise<void> {
+  // Brief settle delay: this is typically called right after a platform bind /
+  // QR save that just WROTE cc-connect's config. Restarting before the write
+  // fully lands makes the respawned process race the file. The web UI's manual
+  // restart button doesn't hit this (cc-connect is idle), which is why web
+  // restart is clean while create-digital-worker restart misbehaves. 1.5s is
+  // enough for the config write + fsync on Windows without being noticeable.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
   // Two-stage restart for cross-platform reliability + no black box on Mac:
   //   1. Try cc.restart() first. On macOS/Linux cc-connect re-execs cleanly AND
   //      the respawn inherits windowsHide — no black box, fast. On Windows the
