@@ -489,8 +489,12 @@ sudo chown -R $(whoami) ~/.npm-global</code></pre>
 
     <div class="faq-item">
       <div class="faq-q">Q：agentcli 命令找不到</div>
-      <p>npm 全局 bin 目录不在 PATH。添加到 <code>~/.zshrc</code> 或 <code>~/.bashrc</code>：</p>
+      <p><strong>macOS / Linux：</strong>npm 全局 bin 目录不在 PATH。添加到 <code>~/.zshrc</code> 或 <code>~/.bashrc</code>：</p>
       <pre><code>export PATH="$(npm config get prefix)/bin:$PATH"</code></pre>
+      <p><strong>Windows PowerShell：</strong>如果 cmd 能用但 PowerShell 报「无法将 agentcli 项识别为 cmdlet」，是 PowerShell 默认执行策略 <code>Restricted</code> 禁止了 npm 生成的 <code>agentcli.ps1</code> 脚本。只需改当前用户的执行策略（不需要管理员）：</p>
+      <pre><code>Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+# 问确认时输 Y，然后重开 PowerShell 窗口</code></pre>
+      <p><code>RemoteSigned</code> 是合理安全水平：本地脚本能跑，网上下载的脚本需要签名。<strong>装完 agentcli 后必须重开 PowerShell 窗口</strong>，当前会话不会自动刷新 PATH。</p>
     </div>
 
     <div class="faq-item">
