@@ -661,14 +661,19 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
   // runtime). Instead we kill the process ourselves and re-launch via the
   // launcher, which re-applies windowsHide. Functionally equivalent: new
   // process, fresh config load, same as a self-restart.
+  //
+  // NOTE: bridgeLauncher.stop() only kills launcher's OWN child (this.child).
+  // On the daemon path cc-connect is first spawned by bin/hermit.mjs, so by
+  // the time server.ts runs, bridgeLauncher.ensureRunning() sees it already
+  // running and leaves this.child === null — stop() would be a no-op. We must
+  // kill by port (stopRuntimeSidecarProcesses) to handle both the
+  // launcher-spawned and the bin-spawned cc-connect.
   bridgeLauncher.stop();
-  // Also reap any cc-connect not started by THIS launcher (e.g. an external
-  // one, or a self-restarted leftover) by killing listeners on 9820/9810.
   await stopRuntimeSidecarProcesses();
-  // Give the OS a moment to release the ports (9820 mgmt, 9810 bridge ws).
   await waitForRuntimePortsFree(5_000);
 
-  // Re-launch via the launcher (applies windowsHide on Windows).
+  // Re-launch via the launcher (applies windowsHide on Windows). this.child is
+  // now populated because nothing is listening on the ports anymore.
   await bridgeLauncher.ensureRunning({
     client: cc,
     configPath: HERMIT_BRIDGE_CONFIG_FILE,
