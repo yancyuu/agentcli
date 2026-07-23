@@ -327,6 +327,15 @@ async function stopDaemon({ exitOnDone = true, quiet = false } = {}) {
     signalDaemon(pid, 'SIGKILL');
   }
   removeDaemonPidFile();
+  // Clean up orphaned child processes (cc-connect on 9820, bridge on 9810,
+  // server on <port>). On Unix, the daemon's shutdown() handler kills these
+  // when it gets SIGTERM. On Windows, SIGTERM from an external process
+  // TerminateProcess'es the daemon WITHOUT running process.on('SIGTERM'), so
+  // shutdown() never runs and the children become orphans — which is exactly
+  // why users had to run `services stop web` twice on Windows (first call
+  // killed only the daemon, second call's fallback scan reaped the orphans).
+  // Running the fallback scan here unconditionally closes that gap in one shot.
+  await stopFallbackProcesses();
   if (!quiet) {
     printCliRows('后台服务', [
       ['状态', '已停止'],
