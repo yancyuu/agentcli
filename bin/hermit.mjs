@@ -309,6 +309,28 @@ import {
   printTasksList,
 } from './lib/teams.mjs';
 
+// Windows console UTF-8: PowerShell/cmd default to the system ANSI code page
+// (often GBK/CP936 on zh-CN), so agentcli's UTF-8 box-drawing + Chinese output
+// arrives as mojibake. Force the console code page to 65001 AND rebind Node's
+// stdout/stderr encodings to UTF-8 so bytes are decoded correctly. Best-effort:
+// failures (e.g. non-interactive pipe) are silently ignored.
+if (process.platform === 'win32') {
+  try {
+    execSync('chcp 65001', { stdio: 'ignore', shell: true });
+  } catch {
+    /* non-interactive or chcp unavailable */
+  }
+  try {
+    process.stdout?.write?.('');
+    if (typeof process.stdout?.setDefaultEncoding === 'function') {
+      process.stdout.setDefaultEncoding('utf-8');
+      process.stderr?.setDefaultEncoding?.('utf-8');
+    }
+  } catch {
+    /* stream may be unavailable */
+  }
+}
+
 process.once('SIGINT', cancelCli);
 
 const versionIndex = args.indexOf('--version');
