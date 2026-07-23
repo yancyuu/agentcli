@@ -733,7 +733,15 @@ if (!skipHermitBridge) {
     } else {
       console.log(`${brandLogPrefix()} Starting bundled runtime service...`);
       console.log(`${brandLogPrefix()} Runtime config: ${hermitBridgeConfigPath}`);
-      hermitBridgeProcess = spawn(process.execPath, [hermitBridgeRunner, '-config', hermitBridgeConfigPath], {
+      // If the runner is run.js, spawn under node; otherwise it's the native
+      // binary (preferred — avoids run.js popping a console window on Windows
+      // that users might close, killing the runtime) and spawn it directly.
+      const isJs = /\.(js|mjs)$/i.test(hermitBridgeRunner);
+      const cmd = isJs ? process.execPath : hermitBridgeRunner;
+      const cmdArgs = isJs
+        ? [hermitBridgeRunner, '-config', hermitBridgeConfigPath]
+        : ['-config', hermitBridgeConfigPath];
+      hermitBridgeProcess = spawn(cmd, cmdArgs, {
         cwd: repoRoot,
         detached: true,
         windowsHide: true,

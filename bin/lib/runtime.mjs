@@ -623,17 +623,24 @@ function resolveHermitBridgeRunner() {
   // installs (no such dependency anymore) and surface as the misleading
   // "runtime is not installed for this platform" warning — the real cause of
   // Windows users never getting cc-connect auto-started.
+  //
+  // PREFERRED: return the Go binary path directly (not run.js). cc-connect's
+  // run.js calls execFileSync(binary, {stdio:'inherit'}) WITHOUT windowsHide,
+  // so on Windows the cc-connect.exe pops a console window — users see a black
+  // box and close it, killing the runtime and breaking the workbench. Spawning
+  // the binary ourselves (with windowsHide:true, see hermit.mjs) avoids that.
+  // run.js also re-checks the binary version, but ensureCcConnectBinary()
+  // already validated it before we get here, so the wrapper adds no value.
   try {
     const pkgPath = require.resolve('cc-connect/package.json');
     const pkgDir = path.dirname(pkgPath);
-    const runner = path.join(pkgDir, 'run.js');
-    if (!existsSync(runner)) return null;
-    // Binary must also be present; ensureCcConnectBinary() places it from
-    // the vendored package. Without this check we'd hand off to run.js,
-    // which would loop back into the failing GitHub download.
     const binaryName = process.platform === 'win32' ? 'cc-connect.exe' : 'cc-connect';
     const binaryPath = path.join(pkgDir, 'bin', binaryName);
-    return existsSync(binaryPath) ? runner : null;
+    if (existsSync(binaryPath)) return binaryPath;
+    // Fallback: hand off to run.js if the binary somehow isn't placed yet
+    // (run.js will then re-trigger its install path).
+    const runner = path.join(pkgDir, 'run.js');
+    return existsSync(runner) ? runner : null;
   } catch {
     return null;
   }
