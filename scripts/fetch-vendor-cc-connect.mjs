@@ -27,8 +27,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -106,7 +109,7 @@ function extract(buffer, target, outDir) {
   const tmp = path.join(outDir, `_a${target.ext}`);
   try {
     rmSync(tmp, { force: true });
-    require('node:fs').writeFileSync(tmp, buffer);
+    writeFileSync(tmp, buffer);
     if (target.ext === '.tar.gz') {
       execFileSync('tar', ['xzf', tmp, '-C', outDir], { stdio: 'pipe' });
     } else {
@@ -119,12 +122,11 @@ function extract(buffer, target, outDir) {
 function locateBinary(dir, target) {
   const direct = path.join(dir, target.binary);
   if (existsSync(direct)) return direct;
-  const fs = require('node:fs');
-  for (const entry of fs.readdirSync(dir)) {
+  for (const entry of readdirSync(dir)) {
     if (entry.startsWith('_') || /\.(zip|tar\.gz|tgz)$/i.test(entry)) continue;
     if (entry.startsWith(target.binary.replace(/\.exe$/, ''))) {
       const full = path.join(dir, entry);
-      if (fs.statSync(full).isFile()) return full;
+      if (statSync(full).isFile()) return full;
     }
   }
   return null;
