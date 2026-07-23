@@ -618,10 +618,22 @@ async function waitForRuntimeReady(baseUrl, token, child, timeoutMs = 30_000) {
 }
 
 function resolveHermitBridgeRunner() {
+  // The upstream npm package was renamed `hermit-bridge` → `cc-connect`. The
+  // old require.resolve('hermit-bridge/...') would always throw on fresh
+  // installs (no such dependency anymore) and surface as the misleading
+  // "runtime is not installed for this platform" warning — the real cause of
+  // Windows users never getting cc-connect auto-started.
   try {
-    const pkgPath = require.resolve('hermit-bridge/package.json');
-    const runner = path.join(path.dirname(pkgPath), 'run.js');
-    return existsSync(runner) ? runner : null;
+    const pkgPath = require.resolve('cc-connect/package.json');
+    const pkgDir = path.dirname(pkgPath);
+    const runner = path.join(pkgDir, 'run.js');
+    if (!existsSync(runner)) return null;
+    // Binary must also be present; ensureCcConnectBinary() places it from
+    // the vendored package. Without this check we'd hand off to run.js,
+    // which would loop back into the failing GitHub download.
+    const binaryName = process.platform === 'win32' ? 'cc-connect.exe' : 'cc-connect';
+    const binaryPath = path.join(pkgDir, 'bin', binaryName);
+    return existsSync(binaryPath) ? runner : null;
   } catch {
     return null;
   }
