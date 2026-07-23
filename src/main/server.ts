@@ -654,9 +654,30 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
 }
 
 async function restartHermitBridgeAndReconnect(): Promise<void> {
-  await cc.restart();
+  // We do NOT call cc.restart() (POST /api/v1/restart). That makes cc-connect
+  // re-exec itself, and the respawned process loses the CREATE_NO_WINDOW /
+  // windowsHide attribute the launcher set — so a black console box pops up
+  // on Windows after creating a digital worker (users close it and kill the
+  // runtime). Instead we kill the process ourselves and re-launch via the
+  // launcher, which re-applies windowsHide. Functionally equivalent: new
+  // process, fresh config load, same as a self-restart.
+  bridgeLauncher.stop();
+  // Also reap any cc-connect not started by THIS launcher (e.g. an external
+  // one, or a self-restarted leftover) by killing listeners on 9820/9810.
+  await stopRuntimeSidecarProcesses();
+  // Give the OS a moment to release the ports (9820 mgmt, 9810 bridge ws).
+  await waitForRuntimePortsFree(5_000);
 
-  // Wait for hermit-bridge management API to come back (restart only signals, process respawns async).
+  // Re-launch via the launcher (applies windowsHide on Windows).
+  await bridgeLauncher.ensureRunning({
+    client: cc,
+    configPath: HERMIT_BRIDGE_CONFIG_FILE,
+    extraArgs: ['--force'],
+    logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
+    timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
+  });
+
+  // Wait for hermit-bridge management API to come back.
   let managementReady = false;
   for (let i = 0; i < 30; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -676,6 +697,91 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
   // Otherwise Feishu/Lark may show connected in hermit-bridge but Hermit is not listening yet.
   bridge.reconnect();
   await waitForHarnessBridgeConnected(15_000);
+}
+
+/**
+ * Kill any process listening on the cc-connect management (9820) and bridge
+ * ws (9810) ports. Used when re-launching cc-connect ourselves: after stopping
+ * the launcher's own child, there may still be a self-restarted cc-connect or
+ * an externally-managed one holding the ports. Cross-platform: lsof on unix,
+ * netstat+taskkill on Windows.
+ */
+async function stopRuntimeSidecarProcesses(): Promise<void> {
+  const ports = [9820, 9810];
+  for (const p of ports) {
+    try {
+      if (process.platform === 'win32') {
+        const { execSync } = await import('node:child_process');
+        const out = execSync(`netstat -ano -p TCP`, { encoding: 'utf-8', windowsHide: true });
+        for (const line of out.split(/\r?\n/)) {
+          const cols = line.trim().split(/\s+/);
+          if (!cols.includes('LISTENING')) continue;
+          const localPort = Number(cols[1]?.split(':').pop());
+          const pid = Number(cols[cols.length - 1]);
+          if (localPort === p && Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+            try {
+              execSync(`taskkill /PID ${pid} /F`, { windowsHide: true, stdio: 'ignore' });
+            } catch {
+              /* best effort */
+            }
+          }
+        }
+      } else {
+        const { execSync } = await import('node:child_process');
+        try {
+          const pids = execSync(`lsof -tiTCP:${p} -sTCP:LISTEN`, { encoding: 'utf-8' })
+            .split(/\s+/)
+            .filter(Boolean);
+          for (const pid of pids) {
+            if (Number(pid) !== process.pid) {
+              try {
+                process.kill(Number(pid), 'SIGTERM');
+              } catch {
+                /* best effort */
+              }
+            }
+          }
+        } catch {
+          /* no listener */
+        }
+      }
+    } catch {
+      /* platform tool unavailable — best effort */
+    }
+  }
+}
+
+/**
+ * Wait until both runtime ports (9820, 9810) are free, up to timeoutMs.
+ * Polls every 200ms.
+ */
+async function waitForRuntimePortsFree(timeoutMs = 5_000): Promise<void> {
+  const ports = [9820, 9810];
+  const deadline = Date.now() + timeoutMs;
+  const isFree = (port: number): boolean => {
+    const { execSync } = require('node:child_process') as typeof import('node:child_process');
+    try {
+      if (process.platform === 'win32') {
+        const out = execSync(`netstat -ano -p TCP`, { encoding: 'utf-8', windowsHide: true });
+        return !out.split(/\r?\n/).some((line) => {
+          const cols = line.trim().split(/\s+/);
+          return cols.includes('LISTENING') && Number(cols[1]?.split(':').pop()) === port;
+        });
+      }
+      execSync(`lsof -tiTCP:${port} -sTCP:LISTEN`, {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  while (Date.now() < deadline) {
+    if (ports.every(isFree)) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  /* timeout — proceed anyway; ensureRunning will surface a bind failure */
 }
 
 async function readSavedTelemetryConfig(): Promise<TelemetryConfig | null> {
