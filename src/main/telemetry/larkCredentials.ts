@@ -423,6 +423,11 @@ function discoverProfilesWin(): { appId: string; userOpenId: string }[] {
   // a bare secret string and are naturally excluded by parseStoredToken.
   const script = [
     '$ErrorActionPreference="Stop"',
+    // Load the DPAPI assembly explicitly — on default Windows PowerShell it is
+    // not always preloaded, and `[System.Security.Cryptography.ProtectedData]`
+    // then throws, gets caught by the per-item try/catch below, and every
+    // profile is silently skipped → empty results → spurious no-credentials.
+    'Add-Type -AssemblyName "System.Security"',
     `$path = 'HKCU:\\${regPathFor(SERVICE)}'`,
     'if (-not (Test-Path $path)) { return "[]" }',
     '$props = Get-ItemProperty -Path $path',
