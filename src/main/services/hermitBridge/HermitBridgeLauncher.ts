@@ -155,15 +155,33 @@ export function resolveBridgeCommand(
 }
 
 /** Spawn the bridge detached, redirecting stdio to a log file (or ignoring it). */
-function defaultSpawn(cmd: string, args: string[], opts: { logFile?: string }): SpawnedBridge {
+function defaultSpawn(
+  cmd: string,
+  args: string[],
+  opts: { logFile?: string; cwd?: string; env?: NodeJS.ProcessEnv }
+): SpawnedBridge {
   const fs = require('node:fs') as typeof import('node:fs');
   let child: ChildProcess;
+  // Match bin/hermit.mjs spawn options: cwd (repoRoot) + env (HERMIT_BRIDGE_*
+  // tokens) are REQUIRED for cc-connect to start correctly. Without them the
+  // re-launched process comes up misconfigured or fails silently — the root
+  // cause of the 1.9.52 "restart kills the runtime" regression.
+  const spawnOpts: import('node:child_process').SpawnOptions = {
+    detached: true,
+    windowsHide: true,
+    // Default to the current process cwd + env (which, in the daemon child,
+    // is repoRoot + the HERMIT_BRIDGE_* tokens set by bin/hermit.mjs). This
+    // matches the proven hermit.mjs spawn path. Callers can still override.
+    cwd: opts.cwd ?? process.cwd(),
+    env: opts.env ?? process.env,
+  };
   if (opts.logFile) {
     const fd = fs.openSync(opts.logFile, 'a');
-    child = spawn(cmd, args, { detached: true, windowsHide: true, stdio: ['ignore', fd, fd] });
+    spawnOpts.stdio = ['ignore', fd, fd];
   } else {
-    child = spawn(cmd, args, { detached: true, windowsHide: true, stdio: 'ignore' });
+    spawnOpts.stdio = 'ignore';
   }
+  child = spawn(cmd, args, spawnOpts);
   child.on('error', (err) => log.error({ err, cmd }, 'cc-connect spawn failed'));
   child.unref();
   return child;
