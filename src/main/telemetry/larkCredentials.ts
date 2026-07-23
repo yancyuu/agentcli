@@ -575,13 +575,22 @@ export function resolveBrandForProfile(
 
 function listLarkProfiles(): LarkCliProfile[] {
   const binary = findLarkBinary();
-  if (!binary) return [];
+  if (!binary) {
+    process.stderr.write('[diag:listLarkProfiles] findLarkBinary returned null\n');
+    return [];
+  }
   try {
     const result = spawnSync(binary, ['profile', 'list'], {
       encoding: 'utf-8',
       shell: isWin,
       windowsHide: true,
     });
+    process.stderr.write(
+      `[diag:listLarkProfiles] binary=${binary} status=${result.status} stdoutLen=${(result.stdout || '').length}\n`
+    );
+    process.stderr.write(
+      `[diag:listLarkProfiles] stdoutHead=${(result.stdout || '').slice(0, 200)}\n`
+    );
     const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item) => {
@@ -607,15 +616,23 @@ function listLarkProfiles(): LarkCliProfile[] {
 
 function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
   const binary = findLarkBinary();
-  if (!binary) return [];
+  if (!binary) {
+    process.stderr.write('[diag:listAuth] findLarkBinary null\n');
+    return [];
+  }
+  const profiles = listLarkProfiles();
+  process.stderr.write(`[diag:listAuth] binary=${binary} profiles=${profiles.length}\n`);
   const authorizations = new Map<string, LarkCliPersonalAuthorization>();
-  for (const profile of listLarkProfiles()) {
+  for (const profile of profiles) {
     try {
       const result = spawnSync(binary, ['auth', 'list', '--json', '--profile', profile.name], {
         encoding: 'utf-8',
         shell: isWin,
         windowsHide: true,
       });
+      process.stderr.write(
+        `[diag:listAuth] profile=${profile.name} status=${result.status} stdoutLen=${(result.stdout || '').length}\n`
+      );
       const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
       for (const authorization of parseLarkCliPersonalAuthorizations(profile, parsed)) {
         authorizations.set(`${authorization.appId}:${authorization.userOpenId}`, authorization);
