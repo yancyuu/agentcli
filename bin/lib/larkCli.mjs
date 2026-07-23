@@ -264,12 +264,20 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   }
 
   // Step 2: poll until user completes authorization in browser.
+  // Two timeouts: a SHORT one (90s) that treats continued pending as "waiting
+  // for admin approval" — common when the tenant app needs approval and the
+  // admin is slow. We throw (not return) so the digital-worker provisioning
+  // catch block rolls back the half-created team instead of leaving a zombie.
+  // The long AUTH_POLL_TIMEOUT_MS only guards against a genuinely stuck scan.
+  const APPROVAL_WAIT_MS = 90_000;
   const startedAt = Date.now();
+  let pendingLogged = false;
   while (Date.now() - startedAt < AUTH_POLL_TIMEOUT_MS) {
     await new Promise((resolve) => setTimeout(resolve, 3000));
     const poll = await runLarkCliAsync(['auth', 'login', '--device-code', initResult.device_code, '--json'], runOpts);
     const pollResult = parseJsonOutput(poll);
-    renderStatus?.(pollResult?.status || pollResult?.error?.subtype || (poll?.status === 0 ? 'completed' : 'pending'));
+    const currentStatus = pollResult?.status || pollResult?.error?.subtype || (poll?.status === 0 ? 'completed' : 'pending');
+    renderStatus?.(currentStatus);
     if (poll?.status === 0 && (!pollResult?.error)) break;
     if (pollResult?.ok === true) break;
 
@@ -284,6 +292,21 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
     }
     if (pollResult?.error?.subtype === 'expired') {
       return { ok: false, authReady: false, installed, profile, message: '飞书授权已过期，请重新开通数字员工', scopes: DIGITAL_WORKER_LARK_SCOPES };
+    }
+    // Still pending past the short window → almost certainly waiting on a slow
+    // admin approval (the app/tenant scopes need manager sign-off). Throw so
+    // the provisioning flow rolls back the half-created team cleanly; the user
+    // re-runs create after approval lands.
+    if (currentStatus === 'pending' || currentStatus === 'authorization_pending') {
+      if (Date.now() - startedAt > APPROVAL_WAIT_MS) {
+        throw new Error(
+          '飞书个人授权仍在等待中（90 秒未完成）。如果应用需要管理员审批，请等审批通过后重新创建数字员工；已创建的团队将自动清理。'
+        );
+      }
+      if (!pendingLogged) {
+        pendingLogged = true;
+        renderStatus?.('waiting-approval');
+      }
     }
   }
 
