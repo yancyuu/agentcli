@@ -1040,15 +1040,24 @@ async function runQuickCreateAssistantFlow() {
       async afterPlatformBound({ binding }) {
         if (platform !== 'feishu' && platform !== 'lark') return null;
         const profile = personalLarkProfileName(binding.appId);
-        const auth = await ensureFeishuDigitalWorkerPrerequisites({
-          profile,
-          appId: binding.appId,
-          appSecret: binding.appSecret,
-          brand: binding.platformType === 'lark' ? 'lark' : 'feishu',
-        });
-        return auth
-          ? { ok: true, profile: auth.profile || profile, auth }
-          : { ok: false, message: '飞书个人身份授权未完成' };
+        // DO NOT run the interactive OAuth device-code flow here. It blocks the
+        // create flow for up to 90s when the Feishu app needs admin approval,
+        // which used to look like a hang. Personal lark-cli auth is now a
+        // separate menu item ("绑定飞书个人授权（数字员工）"); the user runs it
+        // once beforehand. Here we only CHECK that a valid personal grant
+        // covering the digital-worker scopes exists, and fail fast with a clear
+        // instruction if not — no polling, no blocking.
+        const { checkLarkCliDigitalWorkerAuth } = await import('./larkCli.mjs');
+        const current = checkLarkCliDigitalWorkerAuth({ profile });
+        if (!current.ok) {
+          const missingScopes = Array.isArray(current.missingScopes) ? current.missingScopes : [];
+          throw new Error(
+            '飞书个人授权未就绪：' + (current.message || '缺少数字员工所需权限') +
+              '。请在主菜单 → 用户 → 绑定飞书个人授权（数字员工）完成授权后重试。' +
+              (missingScopes.length ? `\n缺少 scope: ${missingScopes.join(' ')}` : '')
+          );
+        }
+        return { ok: true, profile: current.profile || profile, auth: current };
       },
     }
   );
@@ -1430,6 +1439,14 @@ export async function runNavigationAction(action) {
     return waitForContinue(ACTION_DONE_MSG);
   }
   if (action.id === 'status') { await printAuthStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
+  if (action.id === 'lark-personal-auth') {
+    renderBusyScreen('绑定飞书个人授权', '正在调起 lark-cli 个人授权（申请数字员工所需的完整权限）...');
+    const scope = 'contact:contact.base:readonly contact:user.base:readonly contact:user.basic_profile:readonly docs:document.content:read docx:document:readonly docx:document:write_only drive:drive:readonly im:chat:read im:message:readonly im:message.send_as_user offline_access';
+    const child = spawn('lark-cli', ['auth', 'login', '--scope', scope], { stdio: 'inherit', shell: process.platform === 'win32' });
+    await new Promise((resolve) => child.on('close', resolve));
+    console.log('');
+    return waitForContinue(ACTION_DONE_MSG);
+  }
   if (action.id === 'quick-create-assistant') { await runQuickCreateAssistantFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-claim') { await runTokenClaimFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-status') { await runAikeyStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
