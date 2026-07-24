@@ -10,6 +10,8 @@
 // setup, documented in scripts/build-pages.mjs, and intentionally out of scope.
 import { spawn, spawnSync } from 'node:child_process';
 
+import { logDwEvent } from './dwDiagnostics.mjs';
+
 const PACKAGE = '@larksuite/cli';
 const BINARY = 'lark-cli';
 
@@ -272,7 +274,9 @@ function runLarkCliAsync(args, { profile } = {}) {
 }
 
 export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
+  const authStartedAt = Date.now();
   const installed = await installLarkCli();
+  logDwEvent('dw.lark.install', { ok: installed.ok, message: installed.message, alreadyInstalled: installed.alreadyInstalled });
   if (!installed.ok) return { ...installed, authReady: false };
 
   let profile = options.profile;
@@ -283,6 +287,7 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
       appSecret: options.appSecret,
       brand: options.brand,
     });
+    logDwEvent('dw.lark.profile', { ok: profileResult.ok, reused: profileResult.reused, message: profileResult.message });
     if (!profileResult.ok) return { ...profileResult, installed, authReady: false };
     profile = profileResult.profile || profile;
   }
@@ -294,8 +299,10 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   // personal Feishu identity instead of silently reusing a prior grant — a stale
   // or partial grant would otherwise let the last provisioning step skip auth.
   if (current.ok && !options.force) {
+    logDwEvent('dw.lark.reuse', { message: current.message });
     return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
   }
+  logDwEvent('dw.lark.preauth', { ok: current.ok, message: current.message, missingScopes: current.missingScopes });
 
   // Request the digital-worker scopes plus the commonly-used lark-* skill
   // scopes. Broad `--domain all` is avoided: it has compatibility issues across
@@ -309,6 +316,7 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   const initResult = parseJsonOutput(typeof init === 'object' && init !== null && 'then' in init ? await init : init);
   if (!initResult?.verification_url || !initResult?.device_code) {
     const raw = typeof init === 'object' && init !== null && 'then' in init ? await init : init;
+    logDwEvent('dw.lark.init.fail', { detail: (raw?.stderr || raw?.stdout || '').slice(0, 300) });
     return {
       ok: false,
       authReady: false,
@@ -319,6 +327,7 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
       scopes: DIGITAL_WORKER_LARK_SCOPES,
     };
   }
+  logDwEvent('dw.lark.init.ok', { interval: initResult.interval });
 
   // Display verification URL / QR to the user.
   let renderStatus = null;
@@ -384,6 +393,11 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   }
 
   const verified = checkLarkCliDigitalWorkerAuth(runOpts);
+  logDwEvent(verified.ok ? 'dw.lark.ok' : 'dw.lark.fail', {
+    durationMs: Date.now() - authStartedAt,
+    message: verified.message,
+    missingScopes: verified.missingScopes,
+  });
   return verified.ok
     ? { ok: true, authReady: true, installed, auth: verified, profile, message: verified.message }
     : { ok: false, authReady: false, installed, auth: verified, profile, message: verified.message, detail: verified.detail };

@@ -19,6 +19,7 @@ import {
   waitForQrAssistantBinding,
 } from './assistantBinding.mjs';
 import { ensureCcConnectRuntime } from './feishuAssistant.mjs';
+import { logDwEvent, measureDwStage } from './dwDiagnostics.mjs';
 
 function parsePlatformOptions(value) {
   if (!value) return {};
@@ -136,44 +137,56 @@ export function buildDigitalWorkerCommandOptions(args, findArg) {
 export async function provisionDigitalWorker(port, options, hooks = {}, dependencies = defaultDependencies) {
   const request = normalizedRequest(options);
   if (!request.ok) return { ...request, rollback: { attempted: false } };
+  const dwContext = {
+    bindProject: request.bindProject,
+    platform: request.platform,
+    agentType: request.agentType,
+    existingTeam: request.existingTeam,
+  };
+  const provisionStartedAt = Date.now();
+  logDwEvent('dw.provision.start', { ...dwContext, workDir: request.workDir });
 
   let failedStage = '启动本地工作台 API';
   let team = null;
   try {
     hooks.onStage?.('server', request);
-    await dependencies.ensureLocalServer(port);
+    await measureDwStage('dw.server', () => dependencies.ensureLocalServer(port), dwContext);
 
     failedStage = '创建数字员工团队';
     hooks.onStage?.('team', request);
     if (request.existingTeam) {
       team = { ok: true, teamSlug: request.bindProject, message: '使用已有数字员工', existing: true };
     } else {
-      team = await dependencies.createTeam(port, request);
+      team = await measureDwStage('dw.team', () => dependencies.createTeam(port, request), dwContext);
     }
 
     failedStage = '启动渠道连接服务';
     hooks.onStage?.('runtime', request);
-    const runtime = await dependencies.ensureRuntime(port);
+    const runtime = await measureDwStage('dw.runtime', () => dependencies.ensureRuntime(port), dwContext);
     if (!runtime?.ok) throw new Error(runtime?.message || '渠道连接服务不可用');
 
     failedStage = '绑定渠道';
     hooks.onStage?.('binding', request);
     let binding;
     if (isAssistantQrPlatform(request.platform)) {
-      const begin = await dependencies.beginQr(port, request.platform);
+      const begin = await measureDwStage('dw.qr.begin', () => dependencies.beginQr(port, request.platform), dwContext);
       await hooks.onQrCode?.({ platform: request.platform, qrUrl: begin.qr_url, beginResult: begin });
-      const pollResult = await dependencies.waitForQr(
-        port,
-        request.platform,
-        begin,
-        hooks.onQrStatus
+      const pollResult = await measureDwStage(
+        'dw.qr.poll',
+        () => dependencies.waitForQr(port, request.platform, begin, hooks.onQrStatus),
+        dwContext
       );
-      const saved = await dependencies.saveQr(port, request.platform, {
-        project: request.bindProject,
-        workDir: request.workDir,
-        agentType: request.agentType,
-        pollResult,
-      });
+      const saved = await measureDwStage(
+        'dw.qr.save',
+        () =>
+          dependencies.saveQr(port, request.platform, {
+            project: request.bindProject,
+            workDir: request.workDir,
+            agentType: request.agentType,
+            pollResult,
+          }),
+        dwContext
+      );
       binding = {
         ...saved,
         appId: pollResult.app_id,
@@ -182,14 +195,25 @@ export async function provisionDigitalWorker(port, options, hooks = {}, dependen
         restartRequired: saved?.restart_required === true,
         restartHandled: saved?.restart_handled === true,
       };
-    } else {
-      const saved = await dependencies.bindManual(port, {
-        project: request.bindProject,
-        platform: request.platformMeta.submitType || request.platform,
-        options: request.platformOptions,
-        workDir: request.workDir,
-        agentType: request.agentType,
+      logDwEvent('dw.qr.bound', {
+        ...dwContext,
+        platformType: binding.platformType,
+        restartRequired: binding.restartRequired,
+        restartHandled: binding.restartHandled,
       });
+    } else {
+      const saved = await measureDwStage(
+        'dw.bind.manual',
+        () =>
+          dependencies.bindManual(port, {
+            project: request.bindProject,
+            platform: request.platformMeta.submitType || request.platform,
+            options: request.platformOptions,
+            workDir: request.workDir,
+            agentType: request.agentType,
+          }),
+        dwContext
+      );
       binding = {
         ...saved,
         restartRequired: saved?.restart_required === true,
@@ -201,6 +225,7 @@ export async function provisionDigitalWorker(port, options, hooks = {}, dependen
     const postBinding = await hooks.afterPlatformBound?.({ ...request, team, binding });
     if (postBinding?.ok === false) throw new Error(postBinding.message || '渠道授权未完成');
 
+    logDwEvent('dw.provision.ok', { ...dwContext, durationMs: Date.now() - provisionStartedAt });
     return {
       ok: true,
       status: 'bound',
@@ -219,6 +244,14 @@ export async function provisionDigitalWorker(port, options, hooks = {}, dependen
       team && !request.existingTeam
         ? await rollbackProvisionedTeam(dependencies, port, request.bindProject)
         : { attempted: false };
+    logDwEvent('dw.provision.fail', {
+      ...dwContext,
+      failedStage,
+      durationMs: Date.now() - provisionStartedAt,
+      message: error instanceof Error ? error.message : String(error),
+      rollbackAttempted: rollback.attempted,
+      rollbackOk: rollback.ok,
+    });
     return {
       ...request,
       ok: false,

@@ -661,12 +661,8 @@ function listLarkProfiles(): LarkCliProfile[] {
 
 function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
   const binary = findLarkBinary();
-  if (!binary) {
-    process.stderr.write('[diag:listAuth] findLarkBinary null\n');
-    return [];
-  }
+  if (!binary) return [];
   const profiles = listLarkProfiles();
-  process.stderr.write(`[diag:listAuth] binary=${binary} profiles=${profiles.length}\n`);
   const authorizations = new Map<string, LarkCliPersonalAuthorization>();
   for (const profile of profiles) {
     try {
@@ -675,9 +671,6 @@ function listLarkCliPersonalAuthorizations(): LarkCliPersonalAuthorization[] {
         shell: isWin,
         windowsHide: true,
       });
-      process.stderr.write(
-        `[diag:listAuth] profile=${profile.name} status=${result.status} stdoutLen=${(result.stdout || '').length}\n`
-      );
       const parsed: unknown = result.status === 0 ? JSON.parse((result.stdout || '').trim()) : [];
       for (const authorization of parseLarkCliPersonalAuthorizations(profile, parsed)) {
         authorizations.set(`${authorization.appId}:${authorization.userOpenId}`, authorization);
