@@ -25,6 +25,7 @@
   "files": [
     "bin/",
     "scripts/report-lark-credentials-once.mjs",
+    "scripts/diagnose-lark-report.ps1",
     "src/",
     "dist-renderer/",
     "vendor/cc-connect/",
