@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { currentVersion as defaultCurrentVersion, repoRoot as defaultRepoRoot } from './env.mjs';
 import { BRAND, brandCommand, brandLogPrefix } from '../branding.mjs';
 import { migrateLegacyHermitBridgeConfigIfNeeded as defaultMigrate } from './runtime.mjs';
+import { rethrowIfExitSentinel } from './exitGuard.mjs';
 
 /**
  * Resolve the latest published version from npm's official registry. This is the
@@ -195,6 +196,7 @@ async function runAddPlugin(pluginName, port) {
     console.error(`${brandLogPrefix()} Install failed (HTTP ${res.status}): ${(errMsg || text).slice(0, 200)}`);
     process.exit(1);
   } catch (err) {
+    rethrowIfExitSentinel(err);
     console.error(`${brandLogPrefix()} Could not reach ${BRAND.stylizedName} at ${base}.`);
     console.error(`${brandLogPrefix()} ${err instanceof Error ? err.message : String(err)}`);
     console.error(`${brandLogPrefix()} Start it first with: ${brandCommand()}`);

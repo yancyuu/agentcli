@@ -2,6 +2,7 @@
 // Node print DEP0190 into the worker's stderr logs. Not actionable — suppress.
 process.noDeprecation = true;
 
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -774,7 +775,33 @@ export async function runStartupOnce(
   };
 }
 
+/**
+ * The usage scan re-parses every session JSONL under ~/.claude + ~/.codex every
+ * interval — on a heavy dev machine that is ~1GB of parsing per tick (~10s of
+ * one full core), which users feel as periodic stutter ("一卡一卡"). Run the
+ * worker at BelowNormal priority on Windows so the scan yields to interactive
+ * work. Best-effort: priority change failure must never affect the worker.
+ */
+function lowerProcessPriorityOnWindows(): void {
+  if (process.platform !== 'win32') return;
+  try {
+    spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-Process -Id ${process.pid}).PriorityClass = 'BelowNormal'`,
+      ],
+      { stdio: 'ignore', windowsHide: true }
+    );
+  } catch {
+    /* priority tweak is best-effort */
+  }
+}
+
 async function runCli(): Promise<void> {
+  lowerProcessPriorityOnWindows();
   if (process.argv.includes('--startup-once')) {
     const result = await runStartupOnce();
     process.stdout.write(`${JSON.stringify(result)}\n`);

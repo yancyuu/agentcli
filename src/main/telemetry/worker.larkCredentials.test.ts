@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   appendLarkCredentialsAuditLog,
@@ -15,8 +15,20 @@ import {
 
 describe('Lark credential loop', () => {
   let hermitHome: string | undefined;
+  let previousPath: string | undefined;
+
+  beforeEach(() => {
+    // Credential discovery shells out to the REAL lark-cli binary; on a dev
+    // machine that has one (plus real granted profiles) scans would refresh
+    // live tokens against the production Feishu API and blow test timeouts.
+    // Scrub PATH so discovery finds no binary and takes the fast path.
+    previousPath = process.env.PATH;
+    process.env.PATH = '';
+  });
 
   afterEach(async () => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
     if (hermitHome) await rm(hermitHome, { recursive: true, force: true });
     hermitHome = undefined;
   });

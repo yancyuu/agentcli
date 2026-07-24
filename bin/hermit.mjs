@@ -21,6 +21,12 @@
 // them are actionable for end users — suppress them at the entry point.
 process.noDeprecation = true;
 
+import { installProcessExitGuard } from './lib/exitGuard.mjs';
+
+// Node 24 Windows libuv abort on process.exit with idle undici keep-alive
+// connections — see lib/exitGuard.mjs. Must run before any command dispatch.
+installProcessExitGuard();
+
 import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import {

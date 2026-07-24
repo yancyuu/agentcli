@@ -658,6 +658,31 @@ function addProviderMetrics(
   metrics.tokensTotal += parsed.tokens.total;
 }
 
+// Per-file parse cache. The telemetry worker re-runs scanSessions every
+// interval (5min default) and session JSONLs are effectively append-only, so
+// re-parsing ~1GB of unchanged files every tick is pure waste — it was the
+// source of the periodic ~10s full-core spikes ("一卡一卡"). Keyed by
+// path+size+mtime; a grown/touched file is re-parsed, a deleted one simply
+// never appears in the walk. In-memory only: the long-lived worker keeps it
+// warm across ticks, one-shot scans are unaffected.
+const parseJsonlCache = new Map<
+  string,
+  { size: number; mtimeMs: number; parsed: ParsedSession | null }
+>();
+
+async function parseJsonlCached(
+  filePath: string,
+  fileStat: { size: number; mtimeMs: number }
+): Promise<ParsedSession | null> {
+  const hit = parseJsonlCache.get(filePath);
+  if (hit && hit.size === fileStat.size && hit.mtimeMs === fileStat.mtimeMs) return hit.parsed;
+  const parsed = await parseJsonl(filePath);
+  // Bound memory: dev machines accumulate thousands of session files over time.
+  if (parseJsonlCache.size >= 10_000) parseJsonlCache.clear();
+  parseJsonlCache.set(filePath, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, parsed });
+  return parsed;
+}
+
 export async function scanSessions(referenceMs = Date.now()): Promise<ParseResult> {
   const sessions: SessionEntry[] = [];
   const aggregate: UsageAggregate = {
@@ -693,7 +718,7 @@ export async function scanSessions(referenceMs = Date.now()): Promise<ParseResul
       continue;
     }
 
-    const parsed = await parseJsonl(filePath);
+    const parsed = await parseJsonlCached(filePath, fileStat);
     if (!parsed) continue;
 
     const relPath = path.relative(projectsRoot, filePath);

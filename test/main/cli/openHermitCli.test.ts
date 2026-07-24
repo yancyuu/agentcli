@@ -15,7 +15,17 @@ const cliPath = path.join(repoRoot, 'bin/hermit.mjs');
 async function runCli(hermitHome: string, args: string[], env: Record<string, string> = {}) {
   return execFileAsync(process.execPath, [cliPath, ...args], {
     cwd: repoRoot,
-    env: { ...process.env, HERMIT_HOME: hermitHome, ...env },
+    // Isolate the MACHINE home, not just HERMIT_HOME: on Windows os.homedir()
+    // reads USERPROFILE (HOME is usually unset), so HOME-only isolation still
+    // lets Codex/upload scans find the developer's real sessions — making
+    // token assertions machine-dependent and empty-dir scans take minutes.
+    env: {
+      ...process.env,
+      HERMIT_HOME: hermitHome,
+      HOME: hermitHome,
+      USERPROFILE: hermitHome,
+      ...env,
+    },
   });
 }
 
@@ -254,7 +264,10 @@ async function startFakeDeviceAuthServer() {
   };
 }
 
-describe('openHermit CLI read-only workspace commands', () => {
+// These tests spawn the real CLI as child processes; under a full-suite
+// parallel run on a loaded Windows machine the default 15s testTimeout is not
+// enough (they pass standalone with seconds to spare).
+describe('openHermit CLI read-only workspace commands', { timeout: 30_000 }, () => {
   it('prints parseable JSON for an empty teams list without starting the web UI', async () => {
     await withHermitHome(async (hermitHome) => {
       const { stdout, stderr } = await runCli(hermitHome, ['teams', 'list', '--json']);
@@ -1072,7 +1085,8 @@ describe('openHermit CLI read-only workspace commands', () => {
         expect(`${stdout}${stderr}`).not.toContain('device-refresh-token-should-not-print');
         expect(oauth.requests.some((request) => request.path === '/api/v1/auth/start')).toBe(true);
         expect(oauth.requests.some((request) => request.path === '/api/v1/auth/poll')).toBe(true);
-        expect(authStat.mode & 0o777).toBe(0o600);
+        // Windows has no POSIX permission bits; Node reports 0o666 for normal files there.
+        expect(authStat.mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
         expect(existsSync(path.join(hermitHome, 'hermit-bridge'))).toBe(false);
       } finally {
         await oauth.close();
@@ -1185,7 +1199,8 @@ describe('openHermit CLI read-only workspace commands', () => {
         const redirectUri = authorize?.query?.get('redirect_uri') ?? '';
         expect(redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth\/openhermit\/callback$/);
         expect(redirectUri).not.toContain('0.0.0.0');
-        expect(authStat.mode & 0o777).toBe(0o600);
+        // Windows has no POSIX permission bits; Node reports 0o666 for normal files there.
+        expect(authStat.mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
         expect(existsSync(path.join(hermitHome, 'hermit-bridge'))).toBe(false);
       } finally {
         await oauth.close();

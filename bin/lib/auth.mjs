@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { rethrowIfExitSentinel } from './exitGuard.mjs';
 
 import {
   repoRoot,
@@ -1236,6 +1237,7 @@ async function runAuthLogin({ exitOnDone = true, interactiveMenu = false, quiet 
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     const message = err instanceof Error ? err.message : String(err);
     const result = { ok: false, command: 'auth login', hermitHome, error: message };
     if (jsonRequested) printJson(result, 1);

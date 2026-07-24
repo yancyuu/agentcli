@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { rethrowIfExitSentinel } from './exitGuard.mjs';
 
 import {
   hermitHome,
@@ -327,6 +328,7 @@ async function printTeamsCreate({ exitOnDone = true } = {}) {
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     if (!exitOnDone) throw err;
     failTeamCreate(err instanceof Error ? err.message : String(err));
   }

@@ -126,7 +126,14 @@ describe('usage telemetry worker status snapshots', () => {
   it('writes Lark reporting status independently of usage telemetry status', async () => {
     const larkPaths = getLarkCredentialsWorkerPaths(home);
     const previous = process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
+    const previousPath = process.env.PATH;
     process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = 'http://127.0.0.1:1';
+    // Credential discovery shells out to the REAL lark-cli binary; on a dev
+    // machine that has one (plus real granted profiles) the scan would refresh
+    // live tokens against the production Feishu API and blow the test timeout.
+    // Scrub PATH so discovery finds no binary and takes the fast no-credentials
+    // path — this test only cares about status persistence, not the network.
+    process.env.PATH = '';
     try {
       const result = await scanLarkCredentialsOnce(home);
       expect(result.ok).toBe(false);
@@ -135,6 +142,8 @@ describe('usage telemetry worker status snapshots', () => {
     } finally {
       if (previous === undefined) delete process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL;
       else process.env.OPENHERMIT_CLOUD_UPLOAD_BASE_URL = previous;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
     }
   });
 

@@ -57,6 +57,7 @@ import {
   readOpenHermitAuthStatus,
 } from './auth.mjs';
 import { BRAND, brandLogPrefix } from '../branding.mjs';
+import { rethrowIfExitSentinel } from './exitGuard.mjs';
 import {
   checkExistingOpenHermitServer,
 } from './runtime.mjs';
@@ -1000,6 +1001,7 @@ export async function printUsageStatus({ exitOnDone = true } = {}) {
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     const result = { ok: false, command: 'usage status', hermitHome, error: err instanceof Error ? err.message : String(err) };
     if (jsonRequested) printJson(result, 1);
     console.error(`${brandLogPrefix()} usage status 失败：${result.error}`);
@@ -1044,6 +1046,7 @@ export async function printUsageToday({ exitOnDone = true } = {}) {
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     const result = { ok: false, command: 'usage today', hermitHome, error: err instanceof Error ? err.message : String(err) };
     if (jsonRequested) printJson(result, 1);
     console.error(`${brandLogPrefix()} usage today 失败：${result.error}`);
@@ -1102,6 +1105,7 @@ export async function printUsageReport({ exitOnDone = true } = {}) {
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     const result = { ok: false, command: 'usage report', hermitHome, error: err instanceof Error ? err.message : String(err) };
     if (jsonRequested) printJson(result, 1);
     console.error(`${brandLogPrefix()} usage report 失败：${result.error}`);
@@ -1187,6 +1191,7 @@ export async function printScanOnceResult({ exitOnDone = true, fullRescan = fals
     if (exitOnDone) process.exit(0);
     return result;
   } catch (err) {
+    rethrowIfExitSentinel(err);
     const result = {
       ok: false,
       command: 'scan-once',
