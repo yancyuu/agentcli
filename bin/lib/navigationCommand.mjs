@@ -38,6 +38,7 @@ import {
   normalizeUploadProviders,
 } from './usageRemote.mjs';
 import { BRAND, brandLogPrefix } from '../branding.mjs';
+import { rethrowIfExitSentinel } from './exitGuard.mjs';
 import {
   askMenuAction,
   askMenuMultiSelect,
@@ -1645,6 +1646,9 @@ export async function printNavigation() {
       try {
         await runNavigationAction(action);
       } catch (err) {
+        // process.exit sentinels (exitGuard) must reach the exit scheduler,
+        // not be rendered as a menu error — e.g. the 退出 action's exit(130).
+        rethrowIfExitSentinel(err);
         console.error(`${ui.danger('ERR')} ${err instanceof Error ? err.message : String(err)}`);
         await waitForContinue();
       }
