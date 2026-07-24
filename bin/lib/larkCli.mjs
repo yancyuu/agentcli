@@ -126,6 +126,9 @@ const COMMON_LARK_SKILL_SCOPES = [
   'drive:file:upload',
   'docs:document.comment:read',
   'docs:document.comment:create',
+  'im:message',
+  'im:message.group_msg:get_as_user',
+  'im:message.p2p_msg:get_as_user',
   'im:chat.members:read',
   'contact:user:search',
 ];
