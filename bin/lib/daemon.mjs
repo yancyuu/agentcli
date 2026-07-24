@@ -143,7 +143,12 @@ function collectFallbackPidsWin() {
     // netstat unavailable — fall through to command match.
   }
   try {
-    const pattern = /openhermit|hermit\.mjs|server\.ts|hermit-bridge|cc-connect/u;
+    // Covers: both package eras (@yancyyu/openhermit, @yancyyu/agentcli), the
+    // CLI daemon entry (hermit.mjs), the fastify server, the telemetry worker
+    // (src/main/telemetry/worker.ts — NOT matched by server.ts, which is why it
+    // used to survive `agentcli stop`), and the cc-connect runtime. Anything
+    // matching one of these is product infrastructure, never user code.
+    const pattern = /openhermit|agentcli|hermit\.mjs|server\.ts|telemetry[\\/]worker\.ts|hermit-bridge|cc-connect/u;
     for (const p of listProcessesWin()) {
       if (p.pid !== process.pid && pattern.test(p.command)) pids.add(p.pid);
     }
@@ -160,7 +165,7 @@ function collectFallbackPids() {
     `lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true`,
     'lsof -tiTCP:9810 -sTCP:LISTEN 2>/dev/null || true',
     'lsof -tiTCP:9820 -sTCP:LISTEN 2>/dev/null || true',
-    "pgrep -f '@yancyyu/openhermit|openhermit/bin/hermit\\.mjs|src/main/server\\.ts|hermit-bridge|cc-connect' 2>/dev/null || true",
+    "pgrep -f '@yancyyu/openhermit|@yancyyu/agentcli|openhermit/bin/hermit\\.mjs|agentcli/bin/hermit\\.mjs|src/main/server\\.ts|src/main/telemetry/worker\\.ts|hermit-bridge|cc-connect' 2>/dev/null || true",
   ];
 
   for (const command of commands) {
@@ -195,7 +200,7 @@ function collectOrphanedDaemonChildPids() {
       return procs
         .filter((p) => p.pid !== process.pid && !live.has(p.ppid)
           && !p.command.includes('--scan-once')
-          && (p.command.includes('src/main/server.ts') || p.command.includes('hermit-bridge') || p.command.includes('cc-connect')))
+          && (p.command.includes('src/main/server.ts') || p.command.includes('src/main/telemetry/worker.ts') || p.command.includes('hermit-bridge') || p.command.includes('cc-connect')))
         .map((p) => p.pid);
     } catch {
       return [];
@@ -217,7 +222,7 @@ function collectOrphanedDaemonChildPids() {
     if (pid === process.pid) continue;
     if (ppid !== 1) continue; // only true orphans — never a live daemon's child
     if (command.includes('--scan-once')) continue; // transient foreground scan
-    if (command.includes('src/main/server.ts') || command.includes('hermit-bridge') || command.includes('cc-connect')) {
+    if (command.includes('src/main/server.ts') || command.includes('src/main/telemetry/worker.ts') || command.includes('hermit-bridge') || command.includes('cc-connect')) {
       pids.push(pid);
     }
   }
