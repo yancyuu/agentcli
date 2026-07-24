@@ -22,7 +22,11 @@ export interface SpawnedBridge {
   kill(signal?: NodeJS.Signals | number): void;
 }
 
-export type SpawnFn = (cmd: string, args: string[], opts: { logFile?: string }) => SpawnedBridge;
+export type SpawnFn = (
+  cmd: string,
+  args: string[],
+  opts: { logFile?: string; env?: NodeJS.ProcessEnv; cwd?: string }
+) => SpawnedBridge;
 export type ResolveBinaryFn = () => string | null;
 
 export interface BridgeLaunchOptions {
@@ -31,6 +35,14 @@ export interface BridgeLaunchOptions {
   extraArgs?: string[];
   /** File path to redirect the child's combined stdout/stderr. */
   logFile?: string;
+  /**
+   * Environment for the child. Defaults to process.env. Callers restarting the
+   * bridge should pass FRESH HERMIT_BRIDGE_* tokens read from the current
+   * config.toml (like the boot path does) — the parent process's own env may
+   * carry stale tokens from ITS boot, and cc-connect then comes up
+   * misconfigured or fails silently.
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface EnsureRunningOptions extends BridgeLaunchOptions {
@@ -167,7 +179,13 @@ function defaultSpawn(
   // re-launched process comes up misconfigured or fails silently — the root
   // cause of the 1.9.52 "restart kills the runtime" regression.
   const spawnOpts: import('node:child_process').SpawnOptions = {
-    detached: true,
+    // Windows: NEVER combine detached:true with windowsHide — CREATE_NO_WINDOW
+    // is ignored alongside DETACHED_PROCESS (MSDN), so the child console window
+    // pops anyway (Node issue #21825). The user then closes that "black box",
+    // which KILLS the cc-connect runtime and every subsequent API call fails.
+    // Non-detached + stdio-to-file + unref keeps the child alive after the
+    // parent exits on Windows (no process-group/job kill), without a console.
+    detached: process.platform !== 'win32',
     windowsHide: true,
     // Default to the current process cwd + env (which, in the daemon child,
     // is repoRoot + the HERMIT_BRIDGE_* tokens set by bin/hermit.mjs). This
@@ -269,7 +287,7 @@ export class HermitBridgeLauncher {
 
     log.info({ cmd, args }, 'launching cc-connect');
     const spawnFn = this.deps.spawn ?? defaultSpawn;
-    this.child = spawnFn(cmd, args, { logFile: opts.logFile });
+    this.child = spawnFn(cmd, args, { logFile: opts.logFile, env: opts.env });
     const pid = this.child.pid;
     await this.waitForReady(opts);
     return { launched: true, alreadyRunning: false, pid };

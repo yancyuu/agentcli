@@ -130,7 +130,6 @@ import {
   safeReadJson,
 } from './settings.mjs';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, openSync, closeSync, statSync, readSync } from 'node:fs';
-import { spawn, execSync } from 'node:child_process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -838,13 +837,11 @@ function assistantStageRow(label, result, successText) {
 }
 
 async function confirmAssistantWizardStart() {
-  printCliRows('快速创建数字员工', [
-    ['1', '填写数字员工名称和描述', 'info'],
-    ['2', '绑定渠道', 'info'],
-    ['3', '配置 lark-cli 全量个人授权（飞书/Lark）', 'info'],
-    ['4', '返回团队 ID、绑定状态和下一步', 'info'],
-  ], '本向导只做最小化快速开通；复杂配置（成员、权限、高级参数等）建议在 Web 工作台修改。');
-  return (await waitForContinue('按 Enter 开始快速创建数字员工 | ←/Esc 取消')) === 'continue';
+  printCliRows('数字员工向导', [
+    ['创建', '填写名称和描述 → 绑定渠道 → 可选完成飞书个人授权', 'info'],
+    ['重新授权', '选择已有数字员工 → 重新扫码绑定渠道 → 可选完成个人授权；不改动团队与会话数据', 'info'],
+  ], '本向导只做最小化快速开通与重新授权；复杂配置（成员、权限、高级参数等）建议在 Web 工作台修改。');
+  return (await waitForContinue('按 Enter 开始 | ←/Esc 取消')) === 'continue';
 }
 
 async function pickAssistantAgentType() {
@@ -881,9 +878,10 @@ async function pickAssistantPlatform() {
   return wecomMode === 'back' ? null : wecomMode;
 }
 
-async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
-  renderBusyScreen('开通数字员工', '正在用已绑定飞书应用准备 lark-cli 个人身份授权...');
-  const renderAuthQr = async (url, authState, authInit) => {
+// Shared device-authorization QR renderer, used by both the creation wizard's
+// prerequisite step and the standalone 绑定飞书个人授权 action.
+function createLarkAuthQrRenderer() {
+  return async (url, authState, authInit) => {
     clearTerminalScrollback();
     const hasUser = Boolean(authState?.user);
     const title = hasUser ? '补充 lark-cli 个人权限' : '授权 lark-cli 使用本次飞书应用';
@@ -910,6 +908,11 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
       console.log(ui.dim(`等待 lark-cli 授权确认中... 当前状态：${status}`));
     };
   };
+}
+
+async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
+  renderBusyScreen('开通数字员工', '正在用已绑定飞书应用准备 lark-cli 个人身份授权...');
+  const renderAuthQr = createLarkAuthQrRenderer();
   // Reuse an existing personal grant when it is still valid AND covers the
   // digital-worker scopes. checkLarkCliDigitalWorkerAuth() is authoritative —
   // it runs `auth status --verify` (token validity) AND `auth check --scope …`
@@ -943,6 +946,46 @@ async function ensureFeishuDigitalWorkerPrerequisites(options = {}) {
   return result;
 }
 
+/**
+ * Personal lark-cli authorization for a bound Feishu/Lark app. Runs as the
+ * OPTIONAL final step of the creation wizard: the wizard passes the app
+ * credentials it just received from channel binding, we provision the lark-cli
+ * profile first (ensureLarkCliDigitalWorkerAuth → ensureLarkCliProfile —
+ * skipping this is what made bare `lark-cli auth login` fail with
+ * not_configured on fresh machines), then start the device-authorization flow.
+ * Never throws: a failure here must not affect the already-created worker.
+ */
+async function runLarkPersonalAuthWithApp({ appId, appSecret, brand }) {
+  renderBusyScreen('绑定飞书个人授权', '正在准备 lark-cli 个人授权（申请数字员工所需的完整权限）...');
+  const result = await ensureLarkCliDigitalWorkerAuth(createLarkAuthQrRenderer(), {
+    profile: personalLarkProfileName(appId),
+    appId,
+    appSecret,
+    brand,
+    force: false,
+  });
+  if (!result.ok) {
+    const missingScopes = Array.isArray(result.auth?.missingScopes) ? result.auth.missingScopes : [];
+    printCliRows('飞书个人身份授权不完整', [
+      ['lark-cli', result.installed?.message || result.message || '未就绪', result.installed?.ok ? 'ok' : 'error'],
+      ['原因', result.message || '授权失败', 'error'],
+      ...(missingScopes.length > 0 ? [['缺少权限', missingScopes.join('\n'), 'warn']] : []),
+      ...(result.detail ? [['详情', result.detail, 'warn']] : []),
+    ], '数字员工已创建成功，授权可稍后重试；请确认飞书应用已启用上述权限并完成租户审批。');
+    return result;
+  }
+  // Deliberately detached: credential synchronization is silent and must never
+  // delay or change a successful authorization.
+  void reportAllLarkCredentials().catch(() => {});
+  printCliRows('飞书个人身份已绑定', [
+    ['lark-cli', result.installed?.message || '已安装', 'ok'],
+    ['lark-cli profile', result.profile || personalLarkProfileName(appId), 'ok'],
+    ['个人身份', result.message || '已完成', 'ok'],
+    ['能力', '飞书文档读写、消息读取/发送、通讯录和用户信息', 'ok'],
+  ], '个人授权凭证已可用于数字员工和用量上报。');
+  return result;
+}
+
 async function collectAssistantManualOptions(meta) {
   const options = { ...(meta.defaultOptions || {}) };
   for (const field of meta.fields || []) {
@@ -972,25 +1015,90 @@ async function runQuickCreateAssistantFlow() {
     return;
   }
 
-  const name = await promptText('数字员工名称');
-  if (!name) {
+  const mode = await askMenuAction({
+    title: '数字员工 · 选择模式',
+    subtitle: '新建数字员工，或对已有数字员工重新进行渠道授权和个人授权',
+    actions: [
+      { id: 'create', label: '创建新数字员工', description: '填写名称、工作目录、运行时，绑定渠道后可选择性完成个人授权' },
+      { id: 'reauth', label: '重新授权已有数字员工', description: '选择已有数字员工，重新扫码绑定渠道并可选完成个人授权；不改动团队与会话数据' },
+    ],
+    escapeAction: 'back',
+    statusItems: currentMenuStatusItems(),
+    hasDeveloperModeEnabled,
+  });
+  if (mode === 'back') {
     printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
     return;
   }
-  const description = await promptText('描述（可选）');
-  const workDir = await promptText('工作目录', process.cwd());
-  const agentType = await pickAssistantAgentType();
-  if (!agentType) {
-    printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
-    return;
+
+  let name;
+  let description = '';
+  let workDir;
+  let agentType;
+  let existingBindProject = null;
+
+  if (mode === 'reauth') {
+    let teams;
+    try {
+      teams = await fetchLocalJson('/api/teams');
+    } catch {
+      printCliRows('重新授权数字员工', [
+        ['原因', '无法获取数字员工列表：AgentCli 工作台未启动或尚未就绪', 'error'],
+      ], '请先运行 agentcli web 或在菜单中开启 AgentCli 工作台后重试。');
+      return;
+    }
+    const candidates = (Array.isArray(teams) ? teams : []).filter(
+      (team) => team && team.bindProject && !team.deletedAt && !team.pendingDelete
+    );
+    if (candidates.length === 0) {
+      printCliRows('重新授权数字员工', [
+        ['状态', '没有可重新授权的数字员工', 'warn'],
+      ], '请先使用"创建新数字员工"完成创建。');
+      return;
+    }
+    const picked = await askMenuAction({
+      title: '重新授权 · 选择数字员工',
+      subtitle: '仅重新绑定渠道和个人授权，不改动该员工的团队与会话数据',
+      actions: candidates.map((team) => ({
+        id: team.bindProject,
+        label: team.displayName || team.teamName || team.bindProject,
+        description: `项目 ${team.bindProject}${team.workDir ? ` · ${team.workDir}` : ''}`,
+      })),
+      escapeAction: 'back',
+      statusItems: currentMenuStatusItems(),
+      hasDeveloperModeEnabled,
+    });
+    if (picked === 'back') {
+      printCliRows('重新授权数字员工', [['状态', '已取消', 'warn']], '未做任何改动。');
+      return;
+    }
+    const selected = candidates.find((team) => team.bindProject === picked);
+    name = selected.displayName || selected.teamName || selected.bindProject;
+    workDir = selected.workDir || process.cwd();
+    agentType = selected.harness || 'claudecode';
+    existingBindProject = selected.bindProject;
+  } else {
+    name = await promptText('数字员工名称');
+    if (!name) {
+      printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+      return;
+    }
+    description = await promptText('描述（可选）');
+    workDir = await promptText('工作目录', process.cwd());
+    agentType = await pickAssistantAgentType();
+    if (!agentType) {
+      printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
+      return;
+    }
   }
+
   const platform = await pickAssistantPlatform();
   if (!platform) {
     printCliRows('开通数字员工', [['状态', '已取消', 'warn']], '未创建任何团队。');
     return;
   }
 
-  const bindProject = normalizeAssistantBindProject(name);
+  const bindProject = existingBindProject || normalizeAssistantBindProject(name);
   let platformOptions = {};
   if (!isAssistantQrPlatform(platform)) {
     const meta = assistantPlatformMeta(platform);
@@ -1008,12 +1116,12 @@ async function runQuickCreateAssistantFlow() {
   let lastQrStatus = null;
   const result = await provisionDigitalWorker(
     port,
-    { name, bindProject, description, workDir, agentType, platform, platformOptions },
+    { name, bindProject, description, workDir, agentType, platform, platformOptions, existingTeam: Boolean(existingBindProject) },
     {
       onStage(stage) {
         const messages = {
           server: '阶段 1/5：正在启动本地工作台 API...',
-          team: '阶段 2/5：正在创建数字员工团队元数据...',
+          team: existingBindProject ? '阶段 2/5：正在确认已有数字员工...' : '阶段 2/5：正在创建数字员工团队元数据...',
           runtime: '阶段 3/5：正在准备渠道连接...',
           binding: '阶段 4/5：正在绑定渠道...',
         };
@@ -1039,13 +1147,10 @@ async function runQuickCreateAssistantFlow() {
       },
       async afterPlatformBound({ binding }) {
         if (platform !== 'feishu' && platform !== 'lark') return null;
-        // No personal-auth step here. lark-cli personal auth is a separate menu
-        // item ("绑定飞书个人授权（数字员工）") the user runs independently.
-        // Creating a digital worker = create team + bind channel, full stop —
-        // it must NOT block on, or be interrupted by, the personal OAuth state.
-        // Previously this ran an interactive device-code flow (hung on admin
-        // approval) then a scope check; both are gone. The channel is bound and
-        // the worker is created regardless of personal auth readiness.
+        // No personal-auth step here: it runs AFTER the creation summary as an
+        // optional, skippable prompt (runLarkPersonalAuthWithApp), so the OAuth
+        // device loop can never block or roll back the worker — the reason the
+        // old inline device-code flow (hung on admin approval) was removed.
         const profile = personalLarkProfileName(binding.appId);
         return { ok: true, profile };
       },
@@ -1073,12 +1178,14 @@ async function runQuickCreateAssistantFlow() {
 
   const postBinding = result.binding?.postBinding;
   renderBusyScreen('开通数字员工', '阶段 5/5：正在汇总创建结果...');
-  printCliRows('数字员工已创建', [
+  printCliRows(existingBindProject ? '数字员工已重新授权' : '数字员工已创建', [
     ['数字员工名称', name, 'ok'],
     ['项目标识', bindProject, 'ok'],
     ['运行时', labelForAssistantAgentType(agentType), 'ok'],
     ['渠道', labelForAssistantPlatform(platform), 'ok'],
-    assistantStageRow('创建团队', result.team, result.team?.message),
+    ...(existingBindProject
+      ? [['团队数据', result.team?.message || '使用已有数字员工，未做改动', 'ok']]
+      : [assistantStageRow('创建团队', result.team, result.team?.message)]),
     ['绑定渠道', result.binding?.message || '已绑定', 'ok'],
     ...(postBinding?.profile ? [['lark-cli profile', postBinding.profile, 'ok']] : []),
     ['连接服务',
@@ -1089,6 +1196,30 @@ async function runQuickCreateAssistantFlow() {
           : '连接状态未确认',
       result.binding?.restartHandled || result.binding?.restartRequired === false ? 'ok' : 'warn'],
   ], '下一步：在已绑定的外部渠道里给这个数字员工发消息。');
+
+  // Optional personal-auth step (feishu/lark only). Runs AFTER creation has
+  // fully succeeded, so it can never block, roll back, or fail the worker —
+  // skipping or failing here leaves the created worker intact. The app
+  // credentials come straight from the binding we just completed (QR poll
+  // result, or the manually entered platform options).
+  if (platform === 'feishu' || platform === 'lark') {
+    const boundAppId = result.binding?.appId || String(platformOptions.app_id || '');
+    const boundAppSecret = result.binding?.appSecret || String(platformOptions.app_secret || '');
+    if (boundAppId && boundAppSecret) {
+      const wantAuth = await promptBoolean('现在完成飞书个人授权（扫码，数字员工以你的身份读写文档/发消息需要）');
+      if (wantAuth) {
+        await runLarkPersonalAuthWithApp({
+          appId: boundAppId,
+          appSecret: boundAppSecret,
+          brand: platform === 'lark' ? 'lark' : 'feishu',
+        });
+      } else {
+        printCliRows('已跳过个人授权', [
+          ['影响', '数字员工无法以你的个人身份读写飞书文档/发消息，凭证上报也没有可上报的授权', 'warn'],
+        ], '可重新运行创建向导，或在终端手动执行 lark-cli auth login 完成授权。');
+      }
+    }
+  }
 }
 
 async function runAccountAction() {
@@ -1429,14 +1560,6 @@ export async function runNavigationAction(action) {
     return waitForContinue(ACTION_DONE_MSG);
   }
   if (action.id === 'status') { await printAuthStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
-  if (action.id === 'lark-personal-auth') {
-    renderBusyScreen('绑定飞书个人授权', '正在调起 lark-cli 个人授权（申请数字员工所需的完整权限）...');
-    const scope = 'contact:contact.base:readonly contact:user.base:readonly contact:user.basic_profile:readonly docs:document.content:read docx:document:readonly docx:document:write_only drive:drive:readonly im:chat:read im:message:readonly im:message.send_as_user offline_access';
-    const child = spawn('lark-cli', ['auth', 'login', '--scope', scope], { stdio: 'inherit', shell: process.platform === 'win32' });
-    await new Promise((resolve) => child.on('close', resolve));
-    console.log('');
-    return waitForContinue(ACTION_DONE_MSG);
-  }
   if (action.id === 'quick-create-assistant') { await runQuickCreateAssistantFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-claim') { await runTokenClaimFlow(); console.log(''); return waitForContinue(ACTION_DONE_MSG); }
   if (action.id === 'aikey-status') { await runAikeyStatus({ exitOnDone: false }); console.log(''); return waitForContinue(ACTION_DONE_MSG); }

@@ -255,6 +255,7 @@ function binaryReportsVersion(binaryPath: string, expected: string): boolean {
       encoding: 'utf8',
       timeout: 5_000,
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true, // 否则 Windows 上每次校验版本都会闪一下 cc-connect.exe 黑框
     });
     return out.includes(expected);
   } catch {

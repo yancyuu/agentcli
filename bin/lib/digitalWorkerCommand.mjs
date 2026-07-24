@@ -97,6 +97,9 @@ function normalizedRequest(options) {
     platform,
     platformMeta,
     platformOptions,
+    // Re-auth mode: operate on an already-provisioned team/project — skip team
+    // creation and never roll the existing team back on failure.
+    existingTeam: options.existingTeam === true,
   };
 }
 
@@ -142,7 +145,11 @@ export async function provisionDigitalWorker(port, options, hooks = {}, dependen
 
     failedStage = '创建数字员工团队';
     hooks.onStage?.('team', request);
-    team = await dependencies.createTeam(port, request);
+    if (request.existingTeam) {
+      team = { ok: true, teamSlug: request.bindProject, message: '使用已有数字员工', existing: true };
+    } else {
+      team = await dependencies.createTeam(port, request);
+    }
 
     failedStage = '启动渠道连接服务';
     hooks.onStage?.('runtime', request);
@@ -207,9 +214,11 @@ export async function provisionDigitalWorker(port, options, hooks = {}, dependen
       rollback: { attempted: false },
     };
   } catch (error) {
-    const rollback = team
-      ? await rollbackProvisionedTeam(dependencies, port, request.bindProject)
-      : { attempted: false };
+    // Re-auth mode must NEVER roll back: the team existed before this run.
+    const rollback =
+      team && !request.existingTeam
+        ? await rollbackProvisionedTeam(dependencies, port, request.bindProject)
+        : { attempted: false };
     return {
       ...request,
       ok: false,

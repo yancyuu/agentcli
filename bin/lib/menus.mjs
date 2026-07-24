@@ -39,7 +39,6 @@ export const NAV_ACTIONS = [
     description: '回车展开；登录、查看登录状态、退出登录',
     children: [
       { id: 'login', label: '飞书登录' },
-      { id: 'lark-personal-auth', label: '绑定飞书个人授权（数字员工）', description: '用 lark-cli 登录个人飞书身份并申请数字员工所需的完整权限；创建数字员工前需要先完成此步' },
       { id: 'logout', label: '退出登录' },
       { id: 'status', label: '查看登录状态' },
     ],

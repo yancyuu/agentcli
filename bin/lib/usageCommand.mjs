@@ -580,7 +580,9 @@ export async function startTelemetryWorker({
   const childArgs = await telemetryWorkerChildArgs();
   const child = spawn(process.execPath, childArgs, {
     cwd: repoRoot,
-    detached: true,
+    // See daemon.mjs: detached:true defeats windowsHide on Windows and the
+    // telemetry worker would pop a console window.
+    detached: process.platform !== 'win32',
     windowsHide: true,
     env: {
       ...process.env,

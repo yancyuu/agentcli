@@ -194,4 +194,31 @@ describe('provisionDigitalWorker', () => {
     expect(result).toMatchObject({ ok: false, failedStage: '完成渠道授权' });
     expect(deps.rollback).toHaveBeenCalledTimes(1);
   });
+
+  it('existingTeam mode skips team creation and still binds the channel', async () => {
+    const deps = dependencies();
+
+    const result = await provisionDigitalWorker(5680, { ...base, existingTeam: true }, {}, deps);
+
+    expect(result).toMatchObject({ ok: true, status: 'bound', teamSlug: 'support-worker' });
+    expect(deps.createTeam).not.toHaveBeenCalled();
+    expect(result.team).toMatchObject({ existing: true, teamSlug: 'support-worker' });
+    expect(deps.saveQr).toHaveBeenCalledTimes(1);
+  });
+
+  it('existingTeam mode never rolls back the pre-existing team on failure', async () => {
+    const deps = dependencies({
+      waitForQr: vi.fn(async () => { throw new Error('二维码已过期'); }),
+    });
+
+    const result = await provisionDigitalWorker(5680, { ...base, existingTeam: true }, {}, deps);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failedStage: '绑定渠道',
+      message: '二维码已过期',
+      rollback: { attempted: false },
+    });
+    expect(deps.rollback).not.toHaveBeenCalled();
+  });
 });

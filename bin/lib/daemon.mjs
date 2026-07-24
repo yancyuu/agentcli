@@ -407,7 +407,11 @@ function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {
   );
   const child = spawn(process.execPath, [hermitEntry, ...daemonChildArgs], {
     cwd: repoRoot,
-    detached: true,
+    // Windows: detached:true makes windowsHide a no-op (CREATE_NO_WINDOW is
+    // ignored with DETACHED_PROCESS) and the daemon child pops a console
+    // window. Non-detached + stdio-to-file + unref survives parent exit on
+    // Windows without a console.
+    detached: process.platform !== 'win32',
     windowsHide: true,
     env: {
       ...process.env,

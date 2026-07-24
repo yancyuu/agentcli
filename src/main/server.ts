@@ -653,6 +653,31 @@ async function resolveRouteCcProjectName(teamName: string): Promise<string> {
   return resolveCcProjectName(teamName, (name) => svc.readTeamManifestByProject(name));
 }
 
+/**
+ * Read the current management/bridge tokens from cc-connect's config.toml.
+ * The rescue relaunch must inject THESE (like the boot path does) rather than
+ * the server process's boot-time env: if the config was rewritten after the
+ * server started, the env tokens are stale and cc-connect comes up
+ * misconfigured or fails silently.
+ */
+async function readCcConnectConfigTokens(): Promise<{
+  managementToken: string;
+  bridgeToken: string;
+}> {
+  try {
+    const raw = await fs.readFile(HERMIT_BRIDGE_CONFIG_FILE, 'utf-8');
+    const section = (name: string): string =>
+      new RegExp(`\\[${name}\\]([\\s\\S]*?)(?=\\n\\[|$)`).exec(raw)?.[1] ?? '';
+    const tokenOf = (body: string): string => /token\s*=\s*"([^"]+)"/.exec(body)?.[1] ?? '';
+    return {
+      managementToken: tokenOf(section('management')),
+      bridgeToken: tokenOf(section('bridge')),
+    };
+  } catch {
+    return { managementToken: '', bridgeToken: '' };
+  }
+}
+
 async function restartHermitBridgeAndReconnect(): Promise<void> {
   // Brief settle delay: this is typically called right after a platform bind /
   // QR save that just WROTE cc-connect's config. Restarting before the write
@@ -662,56 +687,116 @@ async function restartHermitBridgeAndReconnect(): Promise<void> {
   // enough for the config write + fsync on Windows without being noticeable.
   await new Promise((resolve) => setTimeout(resolve, 1500));
 
-  // Two-stage restart for cross-platform reliability + no black box on Mac:
-  //   1. Try cc.restart() first. On macOS/Linux cc-connect re-execs cleanly AND
-  //      the respawn inherits windowsHide — no black box, fast. On Windows the
-  //      respawn loses windowsHide (black box) AND may fail to come back from
-  //      a detached daemon.
-  //   2. If the management API does NOT come back within ~15s, fall back to
-  //      killing by port + re-launching via the launcher (which applies
-  //      windowsHide). Mac never hits the fallback; Windows gets rescued when
-  //      cc.restart() leaves the runtime dead.
+  // Two-stage restart for cross-platform reliability + no black box:
+  //   1. On macOS/Linux, try cc.restart() first — cc-connect re-execs cleanly
+  //      and the respawn pops no window. Fast path.
+  //   2. On Windows, cc.restart()'s self-respawn loses windowsHide, so the
+  //      respawned cc-connect.exe pops a console window (the "black box" users
+  //      see after creating a digital worker) that stays open for the runtime's
+  //      lifetime — closing it kills the runtime. Skip cc.restart() there and
+  //      go straight to killing by port + re-launching via the launcher (whose
+  //      defaultSpawn sets windowsHide). The same rescue path also runs on
+  //      macOS/Linux if cc.restart() doesn't bring the API back within ~15s.
   let managementReady = false;
-  try {
-    await cc.restart();
-    for (let i = 0; i < 15; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      try {
-        await cc.listProjects();
-        managementReady = true;
-        break;
-      } catch {
-        /* not back yet */
+  if (process.platform !== 'win32') {
+    try {
+      await cc.restart();
+      for (let i = 0; i < 15; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        try {
+          await cc.listProjects();
+          managementReady = true;
+          break;
+        } catch {
+          /* not back yet */
+        }
       }
+    } catch {
+      /* cc.restart() threw — fall through to launcher rescue */
     }
-  } catch {
-    /* cc.restart() threw — fall through to launcher rescue */
   }
 
   if (!managementReady) {
-    app.log.warn('cc.restart() did not bring runtime back; trying launcher rescue');
+    app.log.warn('restarting runtime via launcher rescue (kill by port + re-launch)');
+    const ccLogFile = path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log');
+    // Back up cc-connect's config BEFORE force-killing: taskkill /F can land
+    // mid-write (the QR save that triggered this restart just wrote the file),
+    // and a truncated config.toml makes every relaunch exit on parse — the
+    // runtime then never comes back, on this or any later boot.
+    const configBackup = `${HERMIT_BRIDGE_CONFIG_FILE}.agentcli-bak`;
+    try {
+      await fs.copyFile(HERMIT_BRIDGE_CONFIG_FILE, configBackup);
+    } catch {
+      /* best effort */
+    }
     bridgeLauncher.stop();
     await stopRuntimeSidecarProcesses();
     await waitForRuntimePortsFree(5_000);
-    try {
-      await bridgeLauncher.ensureRunning({
-        client: cc,
-        configPath: HERMIT_BRIDGE_CONFIG_FILE,
-        extraArgs: ['--force'],
-        logFile: path.join(HERMIT_HOME, 'cc-connect', 'cc-connect.log'),
-        timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
-      });
-    } catch (err) {
-      app.log.error({ err }, 'launcher rescue also failed');
-    }
-    for (let i = 0; i < 15; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    const tryRelaunch = async (): Promise<boolean> => {
       try {
-        await cc.listProjects();
-        managementReady = true;
-        break;
+        // Mirror the boot path: inject the CURRENT config tokens, not the
+        // server process's possibly-stale boot-time env.
+        const tokens = await readCcConnectConfigTokens();
+        const env: NodeJS.ProcessEnv = { ...process.env };
+        if (tokens.managementToken) {
+          env.HERMIT_BRIDGE_TOKEN = tokens.managementToken;
+          env.HERMIT_BRIDGE_MANAGEMENT_TOKEN = tokens.managementToken;
+        }
+        if (tokens.bridgeToken) {
+          env.HERMIT_BRIDGE_WS_TOKEN = tokens.bridgeToken;
+        }
+        await bridgeLauncher.ensureRunning({
+          client: cc,
+          configPath: HERMIT_BRIDGE_CONFIG_FILE,
+          extraArgs: ['--force'],
+          logFile: ccLogFile,
+          timeoutMs: HERMIT_BRIDGE_AUTO_LAUNCH_TIMEOUT_MS,
+          env,
+        });
+      } catch (err) {
+        app.log.error({ err }, 'launcher rescue also failed');
+      }
+      for (let i = 0; i < 15; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        try {
+          await cc.listProjects();
+          return true;
+        } catch {
+          /* not back yet */
+        }
+      }
+      return false;
+    };
+    managementReady = await tryRelaunch();
+
+    if (!managementReady) {
+      // The relaunched cc-connect's stdout/stderr goes to cc-connect.log — its
+      // own startup error (config parse, port bind, …) is the decisive
+      // evidence, so surface it in OUR log instead of dying silently.
+      try {
+        const raw = await fs.readFile(ccLogFile, 'utf-8');
+        const tail = raw.trimEnd().split(/\r?\n/).slice(-30).join('\n');
+        if (tail)
+          app.log.error({ ccConnectLogTail: tail }, 'runtime rescue failed; cc-connect.log tail');
       } catch {
-        /* not back yet */
+        /* no log file */
+      }
+      // If the config got truncated by the force-kill, restore the pre-restart
+      // backup and retry once. Sanity check: a valid config must declare the
+      // [management] section we boot with.
+      try {
+        const current = await fs.readFile(HERMIT_BRIDGE_CONFIG_FILE, 'utf-8');
+        if (!current.includes('[management]')) {
+          app.log.warn(
+            'cc-connect config looks truncated after force-kill; restoring backup and retrying'
+          );
+          await fs.copyFile(configBackup, HERMIT_BRIDGE_CONFIG_FILE);
+          await stopRuntimeSidecarProcesses();
+          await waitForRuntimePortsFree(5_000);
+          managementReady = await tryRelaunch();
+        }
+      } catch (err) {
+        app.log.warn({ err }, 'config backup restore check failed');
       }
     }
   }
@@ -738,20 +823,40 @@ async function stopRuntimeSidecarProcesses(): Promise<void> {
     try {
       if (process.platform === 'win32') {
         const { execSync } = await import('node:child_process');
-        const out = execSync(`netstat -ano -p TCP`, { encoding: 'utf-8', windowsHide: true });
-        for (const line of out.split(/\r?\n/)) {
-          const cols = line.trim().split(/\s+/);
-          if (!cols.includes('LISTENING')) continue;
-          const localPort = Number(cols[1]?.split(':').pop());
-          const pid = Number(cols[cols.length - 1]);
-          if (localPort === p && Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
-            try {
-              execSync(`taskkill /PID ${pid} /F`, { windowsHide: true, stdio: 'ignore' });
-            } catch {
-              /* best effort */
+        const listenersOn = (port: number): number[] => {
+          const out = execSync(`netstat -ano -p TCP`, { encoding: 'utf-8', windowsHide: true });
+          const pids: number[] = [];
+          for (const line of out.split(/\r?\n/)) {
+            const cols = line.trim().split(/\s+/);
+            if (!cols.includes('LISTENING')) continue;
+            const localPort = Number(cols[1]?.split(':').pop());
+            const pid = Number(cols[cols.length - 1]);
+            if (localPort === port && Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+              pids.push(pid);
             }
           }
+          return pids;
+        };
+        const taskkill = (pid: number, force: boolean) => {
+          try {
+            execSync(`taskkill /PID ${pid}${force ? ' /F' : ''}`, {
+              windowsHide: true,
+              stdio: 'ignore',
+            });
+          } catch {
+            /* best effort */
+          }
+        };
+        // Graceful first: plain taskkill (CTRL_CLOSE) lets cc-connect flush its
+        // config; /F mid-write can truncate config.toml and then every relaunch
+        // exits on parse. Force-kill only whatever still listens after a grace
+        // period.
+        for (const pid of listenersOn(p)) taskkill(pid, false);
+        const graceDeadline = Date.now() + 3_000;
+        while (Date.now() < graceDeadline && listenersOn(p).length > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
+        for (const pid of listenersOn(p)) taskkill(pid, true);
       } else {
         const { execSync } = await import('node:child_process');
         try {
@@ -5478,6 +5583,7 @@ async function applyTeamConfigUpdate(
       execFileSync(process.platform === 'win32' ? 'where' : 'which', [agentType], {
         stdio: 'pipe',
         timeout: 5000,
+        windowsHide: true,
       });
     } catch {
       throw new Error(

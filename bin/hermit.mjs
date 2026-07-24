@@ -766,7 +766,9 @@ if (!skipHermitBridge) {
         : ['-config', hermitBridgeConfigPath];
       hermitBridgeProcess = spawn(cmd, cmdArgs, {
         cwd: repoRoot,
-        detached: true,
+        // See daemon.mjs: detached:true defeats windowsHide on Windows and
+        // pops a console window the user may close (killing the runtime).
+        detached: process.platform !== 'win32',
         windowsHide: true,
         env: {
           ...process.env,
@@ -865,7 +867,8 @@ if (orphanedDaemonChildPids.length) {
 
 const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/server.ts'], {
   cwd: repoRoot,
-  detached: true,
+  // See daemon.mjs: detached:true defeats windowsHide on Windows.
+  detached: process.platform !== 'win32',
   windowsHide: true,
   env: {
     ...process.env,
