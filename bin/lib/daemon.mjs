@@ -412,11 +412,15 @@ function startDaemon({ exitOnDone = true, quiet = false, childArgs } = {}) {
   );
   const child = spawn(process.execPath, [hermitEntry, ...daemonChildArgs], {
     cwd: repoRoot,
-    // Windows: detached:true makes windowsHide a no-op (CREATE_NO_WINDOW is
-    // ignored with DETACHED_PROCESS) and the daemon child pops a console
-    // window. Non-detached + stdio-to-file + unref survives parent exit on
-    // Windows without a console.
-    detached: process.platform !== 'win32',
+    // Windows: run the daemon DETACHED from the launching console. A
+    // non-detached child shares the console's process list, so closing the
+    // terminal sends CTRL_CLOSE_EVENT to it and kills the whole workbench
+    // (server.ts + cc-connect go down with it) — the reported "关终端进程全灭".
+    // DETACHED_PROCESS removes the child from that group. Historically this
+    // was avoided because "detached defeats windowsHide"; on current Windows
+    // + Node, detached + windowsHide + stdio-to-file spawns NO console window
+    // (verified: no new conhost process), so there is no black-box tradeoff.
+    detached: true,
     windowsHide: true,
     env: {
       ...process.env,

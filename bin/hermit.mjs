@@ -873,7 +873,10 @@ if (orphanedDaemonChildPids.length) {
 
 const serverProcess = spawn(process.execPath, ['--import', resolveAliasLoaderRegister(), '--import', resolveTsxLoader(), 'src/main/server.ts'], {
   cwd: repoRoot,
-  // See daemon.mjs: detached:true defeats windowsHide on Windows.
+  // Windows: the DAEMON child is spawned detached (see daemon.mjs — that is
+  // what survives terminal close); the server inherits that console-less
+  // context with windowsHide, so it neither pops a window nor dies with the
+  // launching terminal. Foreground (non-daemon) runs stay console-attached.
   detached: process.platform !== 'win32',
   windowsHide: true,
   env: {
