@@ -580,9 +580,12 @@ export async function startTelemetryWorker({
   const childArgs = await telemetryWorkerChildArgs();
   const child = spawn(process.execPath, childArgs, {
     cwd: repoRoot,
-    // See daemon.mjs: detached:true defeats windowsHide on Windows and the
-    // telemetry worker would pop a console window.
-    detached: process.platform !== 'win32',
+    // Same fix as daemon.mjs: the upload worker is a BACKGROUND service and
+    // must outlive the launching terminal. Non-detached on Windows tied it to
+    // the console's CTRL_CLOSE group, so closing the CLI terminal killed the
+    // worker and the 消息上报 toggle looked "退出去就没了". detached +
+    // windowsHide + stdio-to-file spawns no visible console (verified).
+    detached: true,
     windowsHide: true,
     env: {
       ...process.env,
