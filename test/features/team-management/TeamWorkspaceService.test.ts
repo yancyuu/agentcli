@@ -349,7 +349,9 @@ describe('messages', () => {
     await expect(svc.readMessages('feishu:chat_A:ou_user')).resolves.toEqual([]);
   });
 
-  it('includes legacy feishu:* message directories that now map to a Hermit team', async () => {
+  // Legacy `feishu:*` directory names contain ':' — they cannot exist on
+  // Windows filesystems at all, so this migration scenario is POSIX-only.
+  it.skipIf(process.platform === 'win32')('includes legacy feishu:* message directories that now map to a Hermit team', async () => {
     const { slug } = await svc.createTeam({
       displayName: 'hermit开发',
       bindProject: 'hermit-dev',

@@ -6385,7 +6385,7 @@ app.post('/api/teams/validate-cli-args', async () => ({ valid: true, args: [], e
 
 // Digital Workers API
 async function listDiscoverableWorkers(): Promise<DiscoverableWorker[]> {
-  const teams = await svc.workspace.discoverTeams();
+  const teams = await svc.discoverTeams();
   return teams
     .filter((team) => team.slug !== SYSTEM_MANAGER_TEAM_NAME && team.location === 'local')
     .map(discoverableTeamToWorker)

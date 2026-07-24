@@ -40,7 +40,7 @@ describe('NAV_ACTIONS — token 池 menu wiring', () => {
     expect(childIds).toEqual(['aikey-claim', 'aikey-manual', 'aikey-restore', 'aikey-status']);
     expect(pool.children[0].label).toBe('认领');
     expect(pool.children[1].label).toBe('说明书');
-    expect(pool.children[2].label).toBe('一键恢复原始配置');
+    expect(pool.children[2].label).toBe('恢复配置快照');
     expect(pool.children[3].label).toBe('状态');
     expect(pool.label).toBe('token 池（Beta）');
     expect(pool.children[0].description).toMatch(/运行时|Claude\/Codex/);

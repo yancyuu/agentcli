@@ -19,6 +19,7 @@ import {
   type TeamManifest,
   TeamWorkspaceService,
 } from './TeamWorkspaceService';
+import type { DiscoverableTeam } from '@shared/types/team';
 
 import type { HermitBridgeClient } from '../hermitBridge/HermitBridgeClient';
 import type { HermitBridgeConnection } from '../hermitBridge/HermitBridgeConnection';
@@ -141,6 +142,10 @@ export class TeamProvisioningService {
 
   async listTeams(): Promise<TeamManifest[]> {
     return this.workspace.listTeams();
+  }
+
+  async discoverTeams(): Promise<DiscoverableTeam[]> {
+    return this.workspace.discoverTeams();
   }
 
   async readTeamManifest(teamSlug: string): Promise<TeamManifest> {

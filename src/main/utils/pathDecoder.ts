@@ -225,12 +225,6 @@ export function extractBaseDir(projectId: string): string {
   return projectId;
 }
 
-function addUniqueCandidate(candidates: string[], candidate: string): void {
-  if (candidate && !candidates.includes(candidate)) {
-    candidates.push(candidate);
-  }
-}
-
 /**
  * Returns possible ~/.claude/projects directory names for a project id.
  * The first candidate is always the id's own base dir. Additional entries cover
@@ -238,6 +232,20 @@ function addUniqueCandidate(candidates: string[], candidate: string): void {
  * underscores/non-ASCII characters to dashes.
  */
 export function getProjectDirNameCandidates(projectId: string): string[] {
+  // Windows file systems are case-insensitive: encodePath ("C--Users-…") and
+  // encodePathPortable ("c--users-…") produce string-different candidates that
+  // resolve to the SAME physical directory. Exact-string dedup then lets
+  // scanners walk the same dir twice and double-count every session/token.
+  // Fold case when deduping on win32 (Linux/macOS keep exact-string semantics).
+  const seen = new Set<string>();
+  const addUniqueCandidate = (candidates: string[], candidate: string): void => {
+    if (!candidate) return;
+    const key = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
   const baseDir = extractBaseDir(projectId);
   const candidates: string[] = [];
   addUniqueCandidate(candidates, baseDir);

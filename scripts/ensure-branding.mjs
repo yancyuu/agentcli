@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * ensure-branding.mjs — seed repo-root branding.json when it is missing.
  *
