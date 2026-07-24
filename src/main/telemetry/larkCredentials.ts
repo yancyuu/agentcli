@@ -241,6 +241,8 @@ async function writeRegistryDpapi(service: string, account: string, plain: strin
   if (!isWin) throw new Error('Windows credential storage unavailable');
   const ps = [
     '$ErrorActionPreference="Stop"',
+    // See discoverProfilesWin: the DPAPI assembly is not always preloaded.
+    'Add-Type -AssemblyName "System.Security"',
     '$plain = [Console]::In.ReadToEnd()',
     `$ent = [Convert]::FromBase64String('${dpapiEntropy(service, account).toString('base64')}')`,
     '$blob = [System.Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($plain), $ent, "CurrentUser")',
@@ -315,6 +317,10 @@ function readRegistryDpapi(service: string, account: string): string | null {
   if (!isWin) return null;
   const ps = [
     '$ErrorActionPreference="Stop"',
+    // See discoverProfilesWin: the DPAPI assembly is not always preloaded, and
+    // without it [ProtectedData]::Unprotect throws TypeNotFound → empty stdout →
+    // every credential read silently fails with spurious no-credentials.
+    'Add-Type -AssemblyName "System.Security"',
     `try { $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('${regPathFor(service)}') } catch { return "" }`,
     'if (-not $k) { return "" }',
     `$b64 = $k.GetValue('${regValueName(account)}')`,

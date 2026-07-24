@@ -1,3 +1,7 @@
+// Windows spawn sites pass { shell: true } to execute .cmd shims, which makes
+// Node print DEP0190 into the worker's stderr logs. Not actionable — suppress.
+process.noDeprecation = true;
+
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';

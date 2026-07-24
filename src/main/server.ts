@@ -24,6 +24,10 @@
  *   STATIC_DIR                 静态资源目录,默认 dist-renderer/(若不存在,/ 返回 503 提示)
  */
 
+// Windows spawn sites pass { shell: true } to execute .cmd shims, which makes
+// Node print DEP0190 into the server logs. Not actionable — suppress.
+process.noDeprecation = true;
+
 import {
   copyFileSync,
   cpSync,
@@ -889,8 +893,9 @@ async function stopRuntimeSidecarProcesses(): Promise<void> {
 async function waitForRuntimePortsFree(timeoutMs = 5_000): Promise<void> {
   const ports = [9820, 9810];
   const deadline = Date.now() + timeoutMs;
+  // ESM module — no require(); dynamic import matches the surrounding helpers.
+  const { execSync } = await import('node:child_process');
   const isFree = (port: number): boolean => {
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
     try {
       if (process.platform === 'win32') {
         const out = execSync(`netstat -ano -p TCP`, { encoding: 'utf-8', windowsHide: true });
@@ -3387,7 +3392,10 @@ app.post('/api/setup/feishu/save', async (request, reply) => {
         requestBody
       );
     }
-    return handleSetupSaveRestart(result);
+    // await is required: a bare `return promise` lets a restart rejection bypass
+    // the surrounding try/catch and surface as fastify's default 500
+    // ("Internal Server Error") even though the platform save itself succeeded.
+    return await handleSetupSaveRestart(result);
   } catch (err) {
     return reply500(err);
   }
@@ -3453,7 +3461,10 @@ app.post('/api/setup/weixin/save', async (request, reply) => {
         requestBody
       );
     }
-    return handleSetupSaveRestart(result);
+    // await is required: a bare `return promise` lets a restart rejection bypass
+    // the surrounding try/catch and surface as fastify's default 500
+    // ("Internal Server Error") even though the platform save itself succeeded.
+    return await handleSetupSaveRestart(result);
   } catch (err) {
     return reply500(err);
   }

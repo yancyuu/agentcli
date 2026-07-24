@@ -15,6 +15,12 @@
  *   npx @yancyyu/agentcli --port 8080
  */
 
+// Windows spawn sites historically pass { shell: true } to execute .cmd shims,
+// which makes Node print DEP0190 ("args with shell:true") plus other runtime
+// deprecation noise (e.g. fastify FSTDEP023) into the interactive CLI. None of
+// them are actionable for end users — suppress them at the entry point.
+process.noDeprecation = true;
+
 import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import {

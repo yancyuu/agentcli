@@ -69,6 +69,67 @@ const DIGITAL_WORKER_LARK_SCOPES = [
   'im:message.send_as_user',
 ];
 
+// Commonly-used scopes backing the everyday lark-* skills (calendar, mail,
+// task, wiki, sheets, base, minutes, vc, approval, attendance, okr, slides,
+// extra drive/im/contact). Best-effort: scopes the app has not enabled or the
+// tenant has not approved are simply not granted, and the post-login check
+// still only requires DIGITAL_WORKER_LARK_SCOPES, so a partial grant never
+// fails the flow. NOTE: do NOT switch this to `--domain`/`--domain all` —
+// --domain has compatibility issues across lark-cli versions and `all` also
+// pulls in app-administration scopes that need tenant-admin approval and
+// stall the device flow on the 90s waiting-approval path.
+const COMMON_LARK_SKILL_SCOPES = [
+  'calendar:calendar:readonly',
+  'calendar:calendar.event:read',
+  'calendar:calendar.event:create',
+  'calendar:calendar.event:update',
+  'calendar:calendar.event:delete',
+  'calendar:calendar.free_busy:read',
+  'task:task:read',
+  'task:task:write',
+  'task:tasklist:read',
+  'task:tasklist:write',
+  'mail:user_mailbox:readonly',
+  'mail:user_mailbox.message:readonly',
+  'mail:user_mailbox.message:send',
+  'wiki:space:read',
+  'wiki:space:retrieve',
+  'wiki:node:read',
+  'wiki:node:retrieve',
+  'wiki:node:create',
+  'sheets:spreadsheet.meta:read',
+  'sheets:spreadsheet:read',
+  'sheets:spreadsheet:write_only',
+  'sheets:spreadsheet:create',
+  'base:readonly',
+  'base:workflow:read',
+  'base:workflow:update',
+  'minutes:minutes:readonly',
+  'minutes:minutes.search:read',
+  'minutes:minutes.artifacts:read',
+  'vc:meeting.search:read',
+  'vc:note:read',
+  'vc:record:readonly',
+  'approval:instance:read',
+  'approval:instance:write',
+  'approval:task:read',
+  'approval:task:write',
+  'attendance:task:readonly',
+  'okr:okr.period:readonly',
+  'okr:okr.content:readonly',
+  'okr:okr.progress:readonly',
+  'slides:presentation:read',
+  'slides:presentation:create',
+  'slides:presentation:update',
+  'drive:drive.metadata:readonly',
+  'drive:file:download',
+  'drive:file:upload',
+  'docs:document.comment:read',
+  'docs:document.comment:create',
+  'im:chat.members:read',
+  'contact:user:search',
+];
+
 export function personalLarkProfileName(appId) {
   const normalizedAppId = String(appId || '').trim();
   return normalizedAppId ? `agentcli-user-${normalizedAppId}` : '';
@@ -233,12 +294,14 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
     return { ok: true, authReady: true, installed, auth: current, profile, message: current.message };
   }
 
-  // Request only the capabilities this digital worker needs. Broad `--domain all`
-  // can surface application scopes that the tenant has not enabled, then make a
-  // valid personal authorization look incomplete during the post-login check.
+  // Request the digital-worker scopes plus the commonly-used lark-* skill
+  // scopes. Broad `--domain all` is avoided: it has compatibility issues across
+  // lark-cli versions and can surface application scopes that the tenant has
+  // not enabled, then make a valid personal authorization look incomplete
+  // during the post-login check.
   const init = runLarkCli([
     'auth', 'login', '--no-wait', '--json',
-    '--scope', DIGITAL_WORKER_LARK_SCOPES.join(' '),
+    '--scope', [...DIGITAL_WORKER_LARK_SCOPES, ...COMMON_LARK_SKILL_SCOPES].join(' '),
   ], runOpts);
   const initResult = parseJsonOutput(typeof init === 'object' && init !== null && 'then' in init ? await init : init);
   if (!initResult?.verification_url || !initResult?.device_code) {
@@ -272,8 +335,10 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
   const APPROVAL_WAIT_MS = 90_000;
   const startedAt = Date.now();
   let pendingLogged = false;
+  let iteration = 0;
   while (Date.now() - startedAt < AUTH_POLL_TIMEOUT_MS) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    iteration += 1;
     const poll = await runLarkCliAsync(['auth', 'login', '--device-code', initResult.device_code, '--json'], runOpts);
     const pollResult = parseJsonOutput(poll);
     const currentStatus = pollResult?.status || pollResult?.error?.subtype || (poll?.status === 0 ? 'completed' : 'pending');
@@ -284,11 +349,16 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
     // lark-cli 1.0.53 can keep returning authorization_pending (or report an
     // already-consumed device code) after the browser has completed authorization.
     // The persisted profile token is authoritative, so verify its identity/scopes
-    // on every poll before treating the device-code response as expired.
-    const interim = checkLarkCliDigitalWorkerAuth(runOpts);
-    if (interim.ok) {
-      renderStatus?.('completed');
-      break;
+    // before treating the device-code response as expired. Each verification
+    // spawns 2+ lark-cli processes with network calls, so it is throttled to
+    // the 1st iteration (fast path when the grant landed during QR display) and
+    // every 3rd after that — the device-code poll remains the primary signal.
+    if (iteration % 3 === 1) {
+      const interim = checkLarkCliDigitalWorkerAuth(runOpts);
+      if (interim.ok) {
+        renderStatus?.('completed');
+        break;
+      }
     }
     if (pollResult?.error?.subtype === 'expired') {
       return { ok: false, authReady: false, installed, profile, message: '飞书授权已过期，请重新开通数字员工', scopes: DIGITAL_WORKER_LARK_SCOPES };
@@ -318,19 +388,58 @@ export async function ensureLarkCliDigitalWorkerAuth(renderQr, options = {}) {
 
 /**
  * Ensures the `lark-cli` binary is available. Installs `@larksuite/cli` globally
- * via npm when missing. Resolves to a structured result (never throws) so the
- * menu can always render an outcome.
+ * via npm when missing or older than MIN_LARK_CLI_VERSION. Resolves to a
+ * structured result (never throws) so the menu can always render an outcome.
  */
+const MIN_LARK_CLI_VERSION = '1.0.53';
+
+function parseVersion(text) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text || '');
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function isVersionAtLeast(version, minimum) {
+  for (let i = 0; i < 3; i++) {
+    if (version[i] !== minimum[i]) return version[i] > minimum[i];
+  }
+  return true;
+}
+
+function installedLarkCliVersion(binary) {
+  try {
+    const r = spawnLarkCli(binary, ['--version'], { encoding: 'utf-8', shell: process.platform === 'win32' });
+    if (r.status !== 0) return null;
+    return parseVersion(`${r.stdout || ''}\n${r.stderr || ''}`);
+  } catch {
+    return null;
+  }
+}
+
 export async function installLarkCli() {
   const existing = findBinary();
+  // Skip the global npm install when a new-enough binary is already present —
+  // `npm install -g` costs seconds-to-minutes on a slow network even when it
+  // would be a no-op, and this runs on every digital-worker authorization.
+  if (existing) {
+    const version = installedLarkCliVersion(existing);
+    const minimum = parseVersion(MIN_LARK_CLI_VERSION);
+    if (version && minimum && isVersionAtLeast(version, minimum)) {
+      return {
+        ok: true,
+        alreadyInstalled: true,
+        binPath: existing,
+        message: `lark-cli 已安装（v${version.join('.')}）`,
+      };
+    }
+  }
   const npmCheck = spawnLarkCli('npm --version', [], { encoding: 'utf-8', shell: true });
   if (npmCheck.status !== 0 || !(npmCheck.stdout || '').trim()) {
     return { ok: false, alreadyInstalled: false, message: '未检测到 npm，请先安装 Node.js / npm' };
   }
 
-  // Always install the current official release. This upgrades an existing
-  // lark-cli too, so AgentCli can rely on the CLI flags used by the digital
-  // worker authorization flow instead of carrying compatibility fallbacks.
+  // Only reached when lark-cli is missing or older than MIN_LARK_CLI_VERSION —
+  // install/upgrade to the current official release so AgentCli can rely on the
+  // CLI flags used by the digital worker authorization flow.
   const install = spawnLarkCli(`npm install -g ${PACKAGE}`, [], { encoding: 'utf-8', shell: true });
   if (install.status !== 0) {
     return {
